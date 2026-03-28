@@ -255,67 +255,67 @@ func (r *Repository) SaveInTx(ctx context.Context, party *domain.Party, tx *gorm
 
 // saveEntityInTx performs the actual upsert logic within the provided GORM transaction.
 func (r *Repository) saveEntityInTx(ctx context.Context, entity *PartyEntity, tx *gorm.DB) error {
-	// Set organization scope if in multi-org mode
 	scopedTx, err := r.withTenantScope(ctx, tx)
 	if err != nil {
 		return err
 	}
 
-	// Check if exists by ID
 	var existing PartyEntity
 	result := scopedTx.Where("id = ? AND deleted_at IS NULL", entity.ID).First(&existing)
 
 	if result.Error == nil {
-		// Update existing with optimistic locking
-		entity.CreatedAt = existing.CreatedAt
-		entity.CreatedBy = existing.CreatedBy
-
-		// The domain model auto-increments version on mutation, so entity.Version
-		// is already the target version. We check that DB still has the previous version.
-		// Example: loaded party with version=1, mutated (now version=2), we check DB has version=1.
-		expectedDBVersion := entity.Version - 1
-
-		// Optimistic locking: only update if version matches expected
-		updateResult := scopedTx.Model(&PartyEntity{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, expectedDBVersion).
-			Updates(map[string]interface{}{
-				"party_type":              entity.PartyType,
-				"legal_name":              entity.LegalName,
-				"display_name":            entity.DisplayName,
-				"status":                  entity.Status,
-				"external_reference":      entity.ExternalReference,
-				"external_reference_type": entity.ExternalReferenceType,
-				"attributes":              entity.Attributes,
-				"version":                 entity.Version,
-				"updated_at":              entity.UpdatedAt,
-				"updated_by":              entity.UpdatedBy,
-			})
-
-		if updateResult.Error != nil {
-			return updateResult.Error
-		}
-
-		// If no rows were affected, the version didn't match (concurrent modification)
-		if updateResult.RowsAffected == 0 {
-			return ErrVersionConflict
-		}
-
-		return nil
+		return r.updateExistingParty(scopedTx, entity, &existing)
 	}
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		// Create new - version starts at 1 (set by toEntity)
-		if err := scopedTx.Create(&entity).Error; err != nil {
-			// Handle race condition: another transaction created the same external reference
-			if isDuplicateKeyError(err) {
-				return ErrPartyExists
-			}
-			return err
-		}
-		return nil
+		return r.createNewParty(scopedTx, entity)
 	}
 
 	return result.Error
+}
+
+// updateExistingParty updates an existing party entity with optimistic locking.
+func (r *Repository) updateExistingParty(scopedTx *gorm.DB, entity, existing *PartyEntity) error {
+	entity.CreatedAt = existing.CreatedAt
+	entity.CreatedBy = existing.CreatedBy
+
+	// The domain model auto-increments version on mutation, so entity.Version
+	// is already the target version. We check that DB still has the previous version.
+	expectedDBVersion := entity.Version - 1
+
+	updateResult := scopedTx.Model(&PartyEntity{}).
+		Where("id = ? AND version = ? AND deleted_at IS NULL", entity.ID, expectedDBVersion).
+		Updates(map[string]interface{}{
+			"party_type":              entity.PartyType,
+			"legal_name":              entity.LegalName,
+			"display_name":            entity.DisplayName,
+			"status":                  entity.Status,
+			"external_reference":      entity.ExternalReference,
+			"external_reference_type": entity.ExternalReferenceType,
+			"attributes":              entity.Attributes,
+			"version":                 entity.Version,
+			"updated_at":              entity.UpdatedAt,
+			"updated_by":              entity.UpdatedBy,
+		})
+
+	if updateResult.Error != nil {
+		return updateResult.Error
+	}
+	if updateResult.RowsAffected == 0 {
+		return ErrVersionConflict
+	}
+	return nil
+}
+
+// createNewParty inserts a new party entity, handling duplicate key race conditions.
+func (r *Repository) createNewParty(scopedTx *gorm.DB, entity *PartyEntity) error {
+	if err := scopedTx.Create(&entity).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return ErrPartyExists
+		}
+		return err
+	}
+	return nil
 }
 
 // FindByID retrieves a party by its UUID.
@@ -535,22 +535,8 @@ func isDuplicateKeyError(err error) bool {
 func (r *Repository) ListParties(ctx context.Context, params ListPartiesParams) (*ListPartiesResult, error) {
 	var result *ListPartiesResult
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// Base query: exclude soft-deleted parties
-		baseQuery := tx.Model(&PartyEntity{}).Where("deleted_at IS NULL")
+		baseQuery := buildListPartiesBaseQuery(tx, params)
 
-		// Apply filters
-		if params.PartyType != "" {
-			baseQuery = baseQuery.Where("party_type = ?", params.PartyType)
-		}
-		if params.Status != "" {
-			baseQuery = baseQuery.Where("status = ?", params.Status)
-		}
-		if params.SearchQuery != "" {
-			searchPattern := "%" + strings.ToLower(params.SearchQuery) + "%"
-			baseQuery = baseQuery.Where("LOWER(legal_name) LIKE ? OR LOWER(display_name) LIKE ?", searchPattern, searchPattern)
-		}
-
-		// Get total count matching filters
 		var totalCount int64
 		if err := baseQuery.Count(&totalCount).Error; err != nil {
 			return err
@@ -565,27 +551,9 @@ func (r *Repository) ListParties(ctx context.Context, params ListPartiesParams) 
 			return nil
 		}
 
-		// Apply cursor for pagination
-		pageQuery := baseQuery
-		if !params.Cursor.CreatedAt.IsZero() {
-			// Composite cursor: items before cursor position in DESC order
-			pageQuery = pageQuery.Where(
-				"(created_at < ?) OR (created_at = ? AND id < ?)",
-				params.Cursor.CreatedAt, params.Cursor.CreatedAt, params.Cursor.ID,
-			)
-		}
-
-		var entities []PartyEntity
-		if err := pageQuery.
-			Order("created_at DESC, id DESC").
-			Limit(params.Limit + 1). // fetch one extra to detect next page
-			Find(&entities).Error; err != nil {
+		entities, hasMore, err := fetchPartiesPage(baseQuery, params)
+		if err != nil {
 			return err
-		}
-
-		hasMore := len(entities) > params.Limit
-		if hasMore {
-			entities = entities[:params.Limit]
 		}
 
 		parties := make([]*domain.Party, len(entities))
@@ -613,4 +581,46 @@ func (r *Repository) ListParties(ctx context.Context, params ListPartiesParams) 
 		return nil, err
 	}
 	return result, nil
+}
+
+// buildListPartiesBaseQuery builds the filtered base query for listing parties.
+func buildListPartiesBaseQuery(tx *gorm.DB, params ListPartiesParams) *gorm.DB {
+	query := tx.Model(&PartyEntity{}).Where("deleted_at IS NULL")
+	if params.PartyType != "" {
+		query = query.Where("party_type = ?", params.PartyType)
+	}
+	if params.Status != "" {
+		query = query.Where("status = ?", params.Status)
+	}
+	if params.SearchQuery != "" {
+		searchPattern := "%" + strings.ToLower(params.SearchQuery) + "%"
+		query = query.Where("LOWER(legal_name) LIKE ? OR LOWER(display_name) LIKE ?", searchPattern, searchPattern)
+	}
+	return query
+}
+
+// fetchPartiesPage applies cursor pagination and fetches one page of party entities.
+// Returns the entities (trimmed to limit), and whether more pages exist.
+func fetchPartiesPage(baseQuery *gorm.DB, params ListPartiesParams) ([]PartyEntity, bool, error) {
+	pageQuery := baseQuery
+	if !params.Cursor.CreatedAt.IsZero() {
+		pageQuery = pageQuery.Where(
+			"(created_at < ?) OR (created_at = ? AND id < ?)",
+			params.Cursor.CreatedAt, params.Cursor.CreatedAt, params.Cursor.ID,
+		)
+	}
+
+	var entities []PartyEntity
+	if err := pageQuery.
+		Order("created_at DESC, id DESC").
+		Limit(params.Limit + 1).
+		Find(&entities).Error; err != nil {
+		return nil, false, err
+	}
+
+	hasMore := len(entities) > params.Limit
+	if hasMore {
+		entities = entities[:params.Limit]
+	}
+	return entities, hasMore, nil
 }

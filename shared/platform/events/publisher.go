@@ -91,6 +91,30 @@ func (p *OutboxPublisher) Publish(
 	event proto.Message,
 	config PublishConfig,
 ) error {
+	if err := validatePublishInputs(tx, event, config); err != nil {
+		return err
+	}
+
+	if err := p.validator.Validate(event); err != nil {
+		return fmt.Errorf("event payload validation failed: %w", err)
+	}
+
+	payload, err := proto.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to serialize event: %w", err)
+	}
+
+	entry := buildOutboxEntry(ctx, config, payload, p.serviceName)
+
+	if err := tx.WithContext(ctx).Create(entry).Error; err != nil {
+		return fmt.Errorf("failed to insert outbox entry: %w", err)
+	}
+
+	return nil
+}
+
+// validatePublishInputs checks required publish parameters.
+func validatePublishInputs(tx *gorm.DB, event proto.Message, config PublishConfig) error {
 	if tx == nil {
 		return ErrNilTransaction
 	}
@@ -109,52 +133,35 @@ func (p *OutboxPublisher) Publish(
 	if config.AggregateType == "" {
 		return ErrEmptyAggregateType
 	}
+	return nil
+}
 
-	// Validate the protobuf event against its buf/validate constraints.
-	// This enforces schema correctness before the event enters the outbox.
-	// Once in the outbox, events are considered proven valid.
-	if err := p.validator.Validate(event); err != nil {
-		return fmt.Errorf("event payload validation failed: %w", err)
-	}
-
-	// Serialize the protobuf event
-	payload, err := proto.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to serialize event: %w", err)
-	}
-
-	// Use AggregateID as partition key if not specified
+// buildOutboxEntry creates an EventOutbox from a publish config and serialized payload.
+func buildOutboxEntry(ctx context.Context, config PublishConfig, payload []byte, serviceName string) *EventOutbox {
 	partitionKey := config.PartitionKey
 	if partitionKey == "" {
 		partitionKey = config.AggregateID
 	}
 
-	// Extract tenant ID from context
 	var tenantID string
 	if tid, ok := tenant.FromContext(ctx); ok {
 		tenantID = string(tid)
 	}
 
-	// Create outbox entry
 	entry := NewEventOutbox(
 		config.EventType,
 		config.AggregateID,
 		config.AggregateType,
 		payload,
 		config.Topic,
-		p.serviceName,
+		serviceName,
 		config.CorrelationID,
 		tenantID,
 	)
 	entry.CausationID = config.CausationID
 	entry.PartitionKey = partitionKey
 
-	// Insert into outbox (uses the same transaction)
-	if err := tx.WithContext(ctx).Create(entry).Error; err != nil {
-		return fmt.Errorf("failed to insert outbox entry: %w", err)
-	}
-
-	return nil
+	return entry
 }
 
 // PublishControlEvent is a convenience method for publishing control operation events

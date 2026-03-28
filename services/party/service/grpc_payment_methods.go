@@ -35,59 +35,30 @@ func (s *Service) AddPaymentMethod(ctx context.Context, req *pb.AddPaymentMethod
 		return nil, status.Error(codes.Unimplemented, "payment method operations not configured")
 	}
 
-	// Verify party exists
-	partyID, err := uuid.Parse(req.PartyId)
+	partyID, provider, methodType, err := s.validatePaymentMethodInput(ctx, req)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
+		return nil, err
 	}
 
-	if _, err := s.repo.FindByID(ctx, partyID); err != nil {
-		if errors.Is(err, persistence.ErrPartyNotFound) {
-			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
-		}
-		return nil, status.Errorf(codes.Internal, "failed to verify party: %v", err)
-	}
-
-	// Map proto provider to domain
-	provider, err := protoToPaymentProvider(req.Provider)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid provider: %v", err)
-	}
-
-	// Map proto method type to domain
-	methodType, err := protoToPaymentMethodType(req.MethodType)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid method type: %v", err)
-	}
-
-	// Convert metadata map to domain metadata
 	var metadata *domain.PaymentMethodMetadata
 	if len(req.Metadata) > 0 {
 		metadata = protoMetadataToDomain(req.Metadata)
 	}
 
-	// Create domain entity
 	pm, err := domain.NewPaymentMethod(
-		partyID,
-		provider,
-		req.ProviderCustomerId,
-		req.ProviderMethodId,
-		methodType,
-		req.IsDefault,
-		metadata,
+		partyID, provider, req.ProviderCustomerId, req.ProviderMethodId,
+		methodType, req.IsDefault, metadata,
 	)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid payment method: %v", err)
 	}
 
-	// Persist
 	if err := s.pmRepo.Create(ctx, pm); err != nil {
 		if errors.Is(err, persistence.ErrPaymentMethodExists) {
 			return nil, status.Errorf(codes.AlreadyExists, "payment method already exists for provider method ID")
 		}
 		s.logger.Error("failed to create payment method",
-			"party_id", req.PartyId,
-			"error", err)
+			"party_id", req.PartyId, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to create payment method: %v", err)
 	}
 
@@ -101,6 +72,33 @@ func (s *Service) AddPaymentMethod(ctx context.Context, req *pb.AddPaymentMethod
 	return &pb.AddPaymentMethodResponse{
 		PaymentMethod: paymentMethodToProto(pm),
 	}, nil
+}
+
+// validatePaymentMethodInput parses and validates the party ID, provider, and method type from the request.
+func (s *Service) validatePaymentMethodInput(ctx context.Context, req *pb.AddPaymentMethodRequest) (uuid.UUID, domain.PaymentProvider, domain.PaymentMethodType, error) {
+	partyID, err := uuid.Parse(req.PartyId)
+	if err != nil {
+		return uuid.Nil, "", "", status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
+	}
+
+	if _, err := s.repo.FindByID(ctx, partyID); err != nil {
+		if errors.Is(err, persistence.ErrPartyNotFound) {
+			return uuid.Nil, "", "", status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
+		}
+		return uuid.Nil, "", "", status.Errorf(codes.Internal, "failed to verify party: %v", err)
+	}
+
+	provider, err := protoToPaymentProvider(req.Provider)
+	if err != nil {
+		return uuid.Nil, "", "", status.Errorf(codes.InvalidArgument, "invalid provider: %v", err)
+	}
+
+	methodType, err := protoToPaymentMethodType(req.MethodType)
+	if err != nil {
+		return uuid.Nil, "", "", status.Errorf(codes.InvalidArgument, "invalid method type: %v", err)
+	}
+
+	return partyID, provider, methodType, nil
 }
 
 // RemovePaymentMethod soft-deletes a payment method.

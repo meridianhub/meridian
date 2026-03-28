@@ -111,56 +111,13 @@ var (
 // - handler is nil
 // - underlying Kafka consumer fails to initialize
 func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, handler MessageHandler) (*ProtoConsumer, error) {
-	if config.BootstrapServers == "" {
-		return nil, ErrEmptyBootstrapServers
-	}
-	if config.GroupID == "" {
-		return nil, ErrEmptyGroupID
-	}
-	if msgFactory == nil {
-		return nil, ErrNilMsgFactory
-	}
-	if handler == nil {
-		return nil, ErrNilHandler
+	if err := validateConsumerConfig(config, msgFactory, handler); err != nil {
+		return nil, err
 	}
 
-	// Set defaults
-	if config.AutoOffsetReset == "" {
-		config.AutoOffsetReset = "earliest"
-	}
-	if config.PollTimeout == 0 {
-		config.PollTimeout = defaults.DefaultRetryDelay
-	}
-	if config.HandlerTimeout == 0 {
-		config.HandlerTimeout = defaults.DefaultRPCTimeout
-	}
+	applyConsumerDefaults(&config)
 
-	// Build franz-go options
-	opts := []kgo.Opt{
-		kgo.SeedBrokers(splitBrokers(config.BootstrapServers)...),
-		kgo.ConsumerGroup(config.GroupID),
-		kgo.BlockRebalanceOnPoll(), // Predictable rebalance behavior
-	}
-
-	// Set client ID if provided
-	if config.ClientID != "" {
-		opts = append(opts, kgo.ClientID(config.ClientID))
-	}
-
-	// Set auto offset reset
-	switch config.AutoOffsetReset {
-	case "earliest":
-		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
-	case "latest":
-		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()))
-	default:
-		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
-	}
-
-	// Disable auto commit for manual control
-	if !config.EnableAutoCommit {
-		opts = append(opts, kgo.DisableAutoCommit())
-	}
+	opts := buildConsumerOpts(config)
 
 	client, err := kgo.NewClient(opts...)
 	if err != nil {
@@ -180,6 +137,64 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 		ctx:            ctx,
 		cancel:         cancel,
 	}, nil
+}
+
+// validateConsumerConfig checks required consumer configuration parameters.
+func validateConsumerConfig(config ConsumerConfig, msgFactory func() proto.Message, handler MessageHandler) error {
+	if config.BootstrapServers == "" {
+		return ErrEmptyBootstrapServers
+	}
+	if config.GroupID == "" {
+		return ErrEmptyGroupID
+	}
+	if msgFactory == nil {
+		return ErrNilMsgFactory
+	}
+	if handler == nil {
+		return ErrNilHandler
+	}
+	return nil
+}
+
+// applyConsumerDefaults fills zero-valued fields with sensible defaults.
+func applyConsumerDefaults(config *ConsumerConfig) {
+	if config.AutoOffsetReset == "" {
+		config.AutoOffsetReset = "earliest"
+	}
+	if config.PollTimeout == 0 {
+		config.PollTimeout = defaults.DefaultRetryDelay
+	}
+	if config.HandlerTimeout == 0 {
+		config.HandlerTimeout = defaults.DefaultRPCTimeout
+	}
+}
+
+// buildConsumerOpts constructs franz-go client options from consumer config.
+func buildConsumerOpts(config ConsumerConfig) []kgo.Opt {
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(splitBrokers(config.BootstrapServers)...),
+		kgo.ConsumerGroup(config.GroupID),
+		kgo.BlockRebalanceOnPoll(),
+	}
+
+	if config.ClientID != "" {
+		opts = append(opts, kgo.ClientID(config.ClientID))
+	}
+
+	switch config.AutoOffsetReset {
+	case "earliest":
+		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+	case "latest":
+		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()))
+	default:
+		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+	}
+
+	if !config.EnableAutoCommit {
+		opts = append(opts, kgo.DisableAutoCommit())
+	}
+
+	return opts
 }
 
 // splitBrokers splits comma-separated broker addresses into a slice.
@@ -375,86 +390,69 @@ func (c *ProtoConsumer) processMessage(record *kgo.Record) error {
 // - DLQ is not configured and processing fails
 // - DLQ publishing fails (rare - indicates infrastructure issue)
 func (c *ProtoConsumer) processMessageWithRetry(record *kgo.Record) error {
-	// If DLQ is not configured, use simple processing with no retry
 	if c.dlqProducer == nil || c.dlqConfig == nil {
 		return c.processMessage(record)
 	}
 
-	var lastErr error
 	firstFailureTime := time.Now()
 	maxRetries := c.dlqConfig.MaxRetries
 	if maxRetries == 0 {
-		maxRetries = 3 // Default to 3 retries
+		maxRetries = 3
 	}
 
-	// Attempt processing with retries
+	lastErr := c.retryProcessing(record, maxRetries)
+	if lastErr == nil {
+		return nil
+	}
+
+	return c.sendToDLQ(record, lastErr, maxRetries, firstFailureTime)
+}
+
+// retryProcessing attempts to process a message up to maxRetries times with exponential backoff.
+// Returns nil on success, or the last error after all retries are exhausted.
+func (c *ProtoConsumer) retryProcessing(record *kgo.Record, maxRetries int32) error {
+	var lastErr error
 	for attempt := int32(1); attempt <= maxRetries; attempt++ {
-		err := c.processMessage(record)
-		if err == nil {
-			// Success! Message processed
+		if err := c.processMessage(record); err == nil {
 			return nil
+		} else {
+			lastErr = err
 		}
 
-		lastErr = err
 		log.Printf("WARN: Message processing attempt %d/%d failed for topic=%s partition=%d offset=%d: %v",
-			attempt, maxRetries,
-			record.Topic,
-			record.Partition,
-			record.Offset,
-			err)
+			attempt, maxRetries, record.Topic, record.Partition, record.Offset, lastErr)
 
-		// If this wasn't the last attempt, wait before retrying
 		if attempt < maxRetries {
 			backoff := c.dlqConfig.CalculateBackoff(attempt)
 			log.Printf("INFO: Retrying after %v backoff", backoff)
 
-			// Use select to respect shutdown signal during backoff
 			select {
 			case <-time.After(backoff):
-				// Continue to next retry
 			case <-c.ctx.Done():
-				// Consumer is shutting down, don't retry
 				return fmt.Errorf("retry cancelled due to shutdown: %w", lastErr)
 			}
 		}
 	}
+	return lastErr
+}
 
-	// All retries exhausted, send to DLQ
+// sendToDLQ publishes a failed record to the dead letter queue after retries are exhausted.
+func (c *ProtoConsumer) sendToDLQ(record *kgo.Record, lastErr error, maxRetries int32, firstFailureTime time.Time) error {
 	log.Printf("ERROR: All %d retry attempts exhausted for topic=%s partition=%d offset=%d, sending to DLQ",
-		maxRetries,
-		record.Topic,
-		record.Partition,
-		record.Offset)
+		maxRetries, record.Topic, record.Partition, record.Offset)
 
-	// Create context with timeout for DLQ publishing
-	// Derive from consumer context to respect shutdown signals
 	dlqCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
 	defer cancel()
 
-	// Send to DLQ with full metadata
-	if err := c.dlqProducer.PublishFailedRecord(
-		dlqCtx,
-		record,
-		lastErr,
-		maxRetries,
-		firstFailureTime,
-	); err != nil {
-		// DLQ publishing failed - this is a critical error
-		// Log and return error to prevent offset commit
+	if err := c.dlqProducer.PublishFailedRecord(dlqCtx, record, lastErr, maxRetries, firstFailureTime); err != nil {
 		log.Printf("CRITICAL: Failed to publish message to DLQ for topic=%s partition=%d offset=%d: %v",
-			record.Topic,
-			record.Partition,
-			record.Offset,
-			err)
+			record.Topic, record.Partition, record.Offset, err)
 		return fmt.Errorf("DLQ publishing failed: %w", err)
 	}
 
 	log.Printf("INFO: Message successfully sent to DLQ for topic=%s partition=%d offset=%d",
-		record.Topic,
-		record.Partition,
-		record.Offset)
+		record.Topic, record.Partition, record.Offset)
 
-	// Message handled (sent to DLQ), return nil to allow offset commit
 	return nil
 }
 

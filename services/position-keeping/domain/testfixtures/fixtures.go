@@ -105,7 +105,26 @@ func WithReference(reference string) FinancialPositionLogOption {
 func NewFinancialPositionLog(t *testing.T, opts ...FinancialPositionLogOption) *domain.FinancialPositionLog {
 	t.Helper()
 
-	// Defaults
+	cfg := buildDefaultConfig(opts)
+
+	transactionID := uuid.New()
+	if cfg.transactionID != nil {
+		transactionID = *cfg.transactionID
+	}
+
+	entry := buildTestEntry(t, cfg, transactionID)
+	lineage := buildTestLineage(t, transactionID)
+
+	log, err := domain.NewFinancialPositionLog(cfg.accountID, entry, lineage)
+	if err != nil {
+		t.Fatalf("Failed to create financial position log: %v", err)
+	}
+
+	return log
+}
+
+// buildDefaultConfig creates a default config and applies options.
+func buildDefaultConfig(opts []FinancialPositionLogOption) *financialPositionLogConfig {
 	cfg := &financialPositionLogConfig{
 		accountID:   "TEST-ACC-001",
 		amount:      decimal.NewFromInt(100),
@@ -115,58 +134,40 @@ func NewFinancialPositionLog(t *testing.T, opts ...FinancialPositionLogOption) *
 		description: "Test transaction",
 		reference:   "TEST-REF-001",
 	}
-
-	// Apply options
 	for _, opt := range opts {
 		opt(cfg)
 	}
+	return cfg
+}
 
-	// Generate IDs if not provided
-	transactionID := uuid.New()
-	if cfg.transactionID != nil {
-		transactionID = *cfg.transactionID
-	}
+// buildTestEntry creates a transaction log entry from test config.
+func buildTestEntry(t *testing.T, cfg *financialPositionLogConfig, transactionID uuid.UUID) *domain.TransactionLogEntry {
+	t.Helper()
 
-	// Create money
 	money, err := domain.NewMoney(cfg.amount, cfg.currency)
 	if err != nil {
 		t.Fatalf("Failed to create money: %v", err)
 	}
 
-	// Create transaction log entry
 	entry, err := domain.NewTransactionLogEntry(
-		transactionID,
-		cfg.accountID,
-		money,
-		cfg.direction,
-		time.Now().UTC(),
-		cfg.description,
-		cfg.reference,
-		cfg.source,
+		transactionID, cfg.accountID, money, cfg.direction,
+		time.Now().UTC(), cfg.description, cfg.reference, cfg.source,
 	)
 	if err != nil {
 		t.Fatalf("Failed to create transaction log entry: %v", err)
 	}
+	return entry
+}
 
-	// Create lineage
-	lineage, err := domain.NewTransactionLineage(
-		transactionID,
-		"test-transaction",
-		nil,
-		nil,
-		nil,
-	)
+// buildTestLineage creates a transaction lineage from a transaction ID.
+func buildTestLineage(t *testing.T, transactionID uuid.UUID) *domain.TransactionLineage {
+	t.Helper()
+
+	lineage, err := domain.NewTransactionLineage(transactionID, "test-transaction", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create transaction lineage: %v", err)
 	}
-
-	// Create financial position log
-	log, err := domain.NewFinancialPositionLog(cfg.accountID, entry, lineage)
-	if err != nil {
-		t.Fatalf("Failed to create financial position log: %v", err)
-	}
-
-	return log
+	return lineage
 }
 
 // NewMoney creates a Money instance with sensible defaults for testing.

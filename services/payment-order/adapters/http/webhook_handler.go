@@ -110,18 +110,13 @@ func NewWebhookHandler(cfg WebhookHandlerConfig) (*WebhookHandler, error) {
 // HandleWebhook processes incoming payment gateway webhooks.
 // It validates the HMAC signature, parses the request, and calls UpdatePaymentOrder.
 func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	// Only accept POST requests
 	if r.Method != http.MethodPost {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	// Ensure body is closed when we're done
 	defer func() { _ = r.Body.Close() }()
 
-	// Read request body
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
 	if err != nil {
 		h.logger.Error("failed to read request body", "error", err)
@@ -129,60 +124,19 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate HMAC signature
-	signature := r.Header.Get(WebhookSignatureHeader)
-	if signature == "" {
-		h.logger.Warn("missing webhook signature")
-		h.writeErrorResponse(w, http.StatusUnauthorized, ErrMissingSignature.Error())
+	if err := h.validateWebhookSignature(w, r, body); err != nil {
 		return
 	}
 
-	if !h.validateSignature(body, signature) {
-		h.logger.Warn("invalid webhook signature")
-		h.writeErrorResponse(w, http.StatusUnauthorized, ErrInvalidSignature.Error())
+	webhookReq, err := h.parseAndValidateWebhookRequest(w, body)
+	if err != nil {
 		return
 	}
 
-	// Parse webhook request
-	var webhookReq WebhookRequest
-	if err := json.Unmarshal(body, &webhookReq); err != nil {
-		h.logger.Error("failed to parse webhook request", "error", err)
-		h.writeErrorResponse(w, http.StatusBadRequest, ErrInvalidRequestBody.Error())
+	if err := h.validateWebhookTimestamp(w, webhookReq.Timestamp); err != nil {
 		return
 	}
 
-	// Validate required fields
-	if webhookReq.GatewayReferenceID == "" && webhookReq.PaymentOrderID == "" {
-		h.logger.Warn("missing reference ID in webhook")
-		h.writeErrorResponse(w, http.StatusBadRequest, ErrMissingReferenceID.Error())
-		return
-	}
-
-	// Validate timestamp freshness to prevent replay attacks
-	if !webhookReq.Timestamp.IsZero() {
-		now := time.Now()
-		age := now.Sub(webhookReq.Timestamp)
-
-		// Reject timestamps too far in the past
-		if age > DefaultWebhookMaxAge {
-			h.logger.Warn("webhook timestamp too old",
-				"timestamp", webhookReq.Timestamp,
-				"age", age)
-			h.writeErrorResponse(w, http.StatusBadRequest, ErrTimestampExpired.Error())
-			return
-		}
-
-		// Reject timestamps too far in the future (with small tolerance for clock drift)
-		if age < -DefaultClockDriftTolerance {
-			h.logger.Warn("webhook timestamp too far in the future",
-				"timestamp", webhookReq.Timestamp,
-				"offset", -age)
-			h.writeErrorResponse(w, http.StatusBadRequest, ErrTimestampFuture.Error())
-			return
-		}
-	}
-
-	// Map gateway status to proto enum
 	gatewayStatus, err := mapGatewayStatus(webhookReq.Status)
 	if err != nil {
 		h.logger.Warn("invalid gateway status", "status", webhookReq.Status)
@@ -190,13 +144,67 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use gateway-provided idempotency key if available, otherwise generate one
 	idempotencyKey := r.Header.Get(IdempotencyKeyHeader)
 	if idempotencyKey == "" {
 		idempotencyKey = h.generateIdempotencyKey(webhookReq)
 	}
 
-	h.processWebhookRequest(ctx, w, webhookReq, gatewayStatus, idempotencyKey)
+	h.processWebhookRequest(r.Context(), w, webhookReq, gatewayStatus, idempotencyKey)
+}
+
+// validateWebhookSignature validates the HMAC signature header and writes error responses if invalid.
+func (h *WebhookHandler) validateWebhookSignature(w http.ResponseWriter, r *http.Request, body []byte) error {
+	signature := r.Header.Get(WebhookSignatureHeader)
+	if signature == "" {
+		h.logger.Warn("missing webhook signature")
+		h.writeErrorResponse(w, http.StatusUnauthorized, ErrMissingSignature.Error())
+		return ErrMissingSignature
+	}
+	if !h.validateSignature(body, signature) {
+		h.logger.Warn("invalid webhook signature")
+		h.writeErrorResponse(w, http.StatusUnauthorized, ErrInvalidSignature.Error())
+		return ErrInvalidSignature
+	}
+	return nil
+}
+
+// parseAndValidateWebhookRequest parses the JSON body and validates required fields.
+func (h *WebhookHandler) parseAndValidateWebhookRequest(w http.ResponseWriter, body []byte) (WebhookRequest, error) {
+	var webhookReq WebhookRequest
+	if err := json.Unmarshal(body, &webhookReq); err != nil {
+		h.logger.Error("failed to parse webhook request", "error", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrInvalidRequestBody.Error())
+		return WebhookRequest{}, err
+	}
+	if webhookReq.GatewayReferenceID == "" && webhookReq.PaymentOrderID == "" {
+		h.logger.Warn("missing reference ID in webhook")
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrMissingReferenceID.Error())
+		return WebhookRequest{}, ErrMissingReferenceID
+	}
+	return webhookReq, nil
+}
+
+// validateWebhookTimestamp validates timestamp freshness to prevent replay attacks.
+func (h *WebhookHandler) validateWebhookTimestamp(w http.ResponseWriter, timestamp time.Time) error {
+	if timestamp.IsZero() {
+		return nil
+	}
+	age := time.Since(timestamp)
+	if age > DefaultWebhookMaxAge {
+		h.logger.Warn("webhook timestamp too old",
+			"timestamp", timestamp,
+			"age", age)
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrTimestampExpired.Error())
+		return ErrTimestampExpired
+	}
+	if age < -DefaultClockDriftTolerance {
+		h.logger.Warn("webhook timestamp too far in the future",
+			"timestamp", timestamp,
+			"offset", -age)
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrTimestampFuture.Error())
+		return ErrTimestampFuture
+	}
+	return nil
 }
 
 // processWebhookRequest builds and sends the UpdatePaymentOrder request.

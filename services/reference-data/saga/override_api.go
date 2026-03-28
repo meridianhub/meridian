@@ -127,41 +127,15 @@ func (s *OverrideService) CreateTenantOverride(ctx context.Context, req Override
 		return nil, fmt.Errorf("look up active saga %q: %w", req.SagaName, err)
 	}
 
-	// Verify the saga uses a platform reference
-	if existingDef.PlatformRef == nil {
-		return nil, fmt.Errorf("%w: saga %q (id=%s)", ErrNotPlatformReferenced, req.SagaName, existingDef.ID)
-	}
-
-	// Check if there's already a non-system override for this saga
-	if !existingDef.IsSystem && existingDef.Script != "" {
-		return nil, fmt.Errorf("%w: saga %q already has custom script", ErrAlreadyOverridden, req.SagaName)
-	}
-
-	// Load the platform script for similarity comparison
-	platformDef, err := s.registry.GetPlatformSagaByID(ctx, *existingDef.PlatformRef)
+	// Validate override eligibility and check script similarity
+	platformDef, simResult, err := s.validateOverrideEligibility(ctx, existingDef, req)
 	if err != nil {
-		return nil, fmt.Errorf("load platform saga for comparison: %w", err)
-	}
-
-	// Check similarity
-	threshold := req.SimilarityThreshold
-	if threshold == 0 {
-		threshold = DefaultSimilarityThreshold
-	}
-
-	simResult := ComputeSimilarityWithThreshold(req.Script, platformDef.Script, threshold)
-	if simResult.TooSimilar {
-		return nil, fmt.Errorf(
-			"%w: override is %.1f%% similar to platform default (threshold: %.1f%%)",
-			ErrScriptTooSimilar,
-			simResult.Ratio*100,
-			threshold*100,
-		)
+		return nil, err
 	}
 
 	logger.Info("similarity check passed",
 		"similarity_ratio", simResult.Ratio,
-		"threshold", threshold)
+		"threshold", req.SimilarityThreshold)
 
 	// Create the override as a new version
 	newVersion := existingDef.Version + 1
@@ -191,6 +165,39 @@ func (s *OverrideService) CreateTenantOverride(ctx context.Context, req Override
 		PlatformVersion:    platformDef.Version,
 		SimilarityRatio:    simResult.Ratio,
 	}, nil
+}
+
+// validateOverrideEligibility checks that the saga is platform-referenced, not already overridden,
+// and that the override script is sufficiently different from the platform default.
+func (s *OverrideService) validateOverrideEligibility(ctx context.Context, existingDef *Definition, req OverrideRequest) (*PlatformSagaDefinition, *SimilarityResult, error) {
+	if existingDef.PlatformRef == nil {
+		return nil, nil, fmt.Errorf("%w: saga %q (id=%s)", ErrNotPlatformReferenced, req.SagaName, existingDef.ID)
+	}
+	if !existingDef.IsSystem && existingDef.Script != "" {
+		return nil, nil, fmt.Errorf("%w: saga %q already has custom script", ErrAlreadyOverridden, req.SagaName)
+	}
+
+	platformDef, err := s.registry.GetPlatformSagaByID(ctx, *existingDef.PlatformRef)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load platform saga for comparison: %w", err)
+	}
+
+	threshold := req.SimilarityThreshold
+	if threshold == 0 {
+		threshold = DefaultSimilarityThreshold
+	}
+
+	simResult := ComputeSimilarityWithThreshold(req.Script, platformDef.Script, threshold)
+	if simResult.TooSimilar {
+		return nil, nil, fmt.Errorf(
+			"%w: override is %.1f%% similar to platform default (threshold: %.1f%%)",
+			ErrScriptTooSimilar,
+			simResult.Ratio*100,
+			threshold*100,
+		)
+	}
+
+	return platformDef, &simResult, nil
 }
 
 // validateRequest checks the override request for required fields.

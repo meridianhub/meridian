@@ -41,35 +41,9 @@ func (h *RegistryHandler) CreateSagaDraft(
 
 	// Mandatory dry-run validation: reject invalid scripts before persistence
 	if h.dryRunValidator != nil && req.Script != "" {
-		dryRunResult, err := h.dryRunValidator.Validate(ctx, req.Script)
-		if err != nil {
-			h.logger.Error("dry-run validation error during draft creation",
-				"saga_name", req.Name,
-				"error", err)
-			return nil, status.Errorf(codes.Internal, "validation error: %v", err)
+		if err := h.validateAndAnnotateDraft(ctx, def, req.Name, version); err != nil {
+			return nil, err
 		}
-
-		if !dryRunResult.Success {
-			formatter := &validation.HumanReadableFormatter{}
-			errMsg := formatter.Format(dryRunResult)
-
-			h.logger.Warn("saga script validation failed",
-				"saga_name", req.Name,
-				"version", version,
-				"error_count", len(dryRunResult.Errors))
-
-			return nil, status.Errorf(codes.InvalidArgument,
-				"saga script validation failed:\n%s", errMsg)
-		}
-
-		// Store validation metadata on the definition
-		now := time.Now()
-		complexityScore := calculateComplexityScore(dryRunResult.Metrics.HandlerCallCount)
-		handlerCallCount := dryRunResult.Metrics.HandlerCallCount
-		def.ValidationStatus = "PASSED"
-		def.ComplexityScore = &complexityScore
-		def.HandlerCallCount = &handlerCallCount
-		def.ValidatedAt = &now
 	}
 
 	if err := h.registry.CreateDraft(ctx, def); err != nil {
@@ -104,6 +78,39 @@ func (h *RegistryHandler) CreateSagaDraft(
 		Saga:       h.definitionToProto(created),
 		Validation: validationResult,
 	}, nil
+}
+
+// validateAndAnnotateDraft runs dry-run validation on a saga script and annotates the definition with results.
+func (h *RegistryHandler) validateAndAnnotateDraft(ctx context.Context, def *Definition, sagaName string, version int) error {
+	dryRunResult, err := h.dryRunValidator.Validate(ctx, def.Script)
+	if err != nil {
+		h.logger.Error("dry-run validation error during draft creation",
+			"saga_name", sagaName,
+			"error", err)
+		return status.Errorf(codes.Internal, "validation error: %v", err)
+	}
+
+	if !dryRunResult.Success {
+		formatter := &validation.HumanReadableFormatter{}
+		errMsg := formatter.Format(dryRunResult)
+
+		h.logger.Warn("saga script validation failed",
+			"saga_name", sagaName,
+			"version", version,
+			"error_count", len(dryRunResult.Errors))
+
+		return status.Errorf(codes.InvalidArgument,
+			"saga script validation failed:\n%s", errMsg)
+	}
+
+	now := time.Now()
+	complexityScore := calculateComplexityScore(dryRunResult.Metrics.HandlerCallCount)
+	handlerCallCount := dryRunResult.Metrics.HandlerCallCount
+	def.ValidationStatus = "PASSED"
+	def.ComplexityScore = &complexityScore
+	def.HandlerCallCount = &handlerCallCount
+	def.ValidatedAt = &now
+	return nil
 }
 
 // UpdateSagaDefinition modifies a DRAFT saga definition.

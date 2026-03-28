@@ -17,77 +17,21 @@ import (
 
 // RegisterAssociations creates a party association
 func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAssociationsRequest) (*pb.RegisterAssociationsResponse, error) {
-	partyID, err := uuid.Parse(req.PartyId)
+	partyID, relatedPartyID, err := s.validateAssociationParties(ctx, req)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
+		return nil, err
 	}
 
-	relatedPartyID, err := uuid.Parse(req.RelatedPartyId)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid related party ID format: %v", err)
-	}
-
-	// Verify both parties exist with FOR UPDATE locks to prevent race condition
-	// where a party could be deleted between verification and association creation
-	if _, err := s.repo.FindByIDForUpdate(ctx, partyID); err != nil {
-		s.logger.Error("failed to find party for association", "party_id", req.PartyId, "error", err)
-		if errors.Is(err, persistence.ErrPartyNotFound) {
-			return nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
-		}
-		return nil, status.Errorf(codes.Internal, "failed to verify party: %v", err)
-	}
-	if _, err := s.repo.FindByIDForUpdate(ctx, relatedPartyID); err != nil {
-		s.logger.Error("failed to find related party for association", "related_party_id", req.RelatedPartyId, "error", err)
-		if errors.Is(err, persistence.ErrPartyNotFound) {
-			return nil, status.Errorf(codes.NotFound, "related party not found: %s", req.RelatedPartyId)
-		}
-		return nil, status.Errorf(codes.Internal, "failed to verify related party: %v", err)
-	}
-
-	// Check for circular association
-	isCircular, err := s.repo.CheckCircularAssociation(ctx, partyID, relatedPartyID)
-	if err != nil {
-		s.logger.Error("failed to check circular association", "error", err)
-		return nil, status.Errorf(codes.Internal, "failed to check circular association: %v", err)
-	}
-	if isCircular {
-		return nil, status.Errorf(codes.InvalidArgument, "circular association detected")
-	}
-
-	// Build association input with optional fields
 	relationshipType, err := protoToRelationshipType(req.RelationshipType)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid relationship type: %v", err)
 	}
-	var input *persistence.AssociationInput
-	if req.Metadata != nil || req.Status != pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED || req.EffectiveFrom != nil || req.EffectiveTo != nil {
-		input = &persistence.AssociationInput{}
-		if req.Metadata != nil {
-			metadataBytes, marshalErr := json.Marshal(req.Metadata.AsMap())
-			if marshalErr != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid metadata: %v", marshalErr)
-			}
-			metadataStr := string(metadataBytes)
-			input.Metadata = &metadataStr
-		}
-		if req.Status != pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED {
-			assocStatus, statusErr := protoAssociationStatusToString(req.Status)
-			if statusErr != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid association status: %v", statusErr)
-			}
-			input.Status = assocStatus
-		}
-		if req.EffectiveFrom != nil {
-			ef := req.EffectiveFrom.AsTime()
-			input.EffectiveFrom = &ef
-		}
-		if req.EffectiveTo != nil {
-			et := req.EffectiveTo.AsTime()
-			input.EffectiveTo = &et
-		}
+
+	input, err := buildAssociationInput(req)
+	if err != nil {
+		return nil, err
 	}
 
-	// Save association
 	associationID, err := s.repo.SaveAssociationWithInput(ctx, partyID, relatedPartyID, relationshipType, input)
 	if err != nil {
 		s.logger.Error("failed to save association", "party_id", req.PartyId, "error", err)
@@ -115,6 +59,76 @@ func (s *Service) RegisterAssociations(ctx context.Context, req *pb.RegisterAsso
 	}
 
 	return resp, nil
+}
+
+// validateAssociationParties parses party IDs, verifies both parties exist, and checks for circular associations.
+func (s *Service) validateAssociationParties(ctx context.Context, req *pb.RegisterAssociationsRequest) (uuid.UUID, uuid.UUID, error) {
+	partyID, err := uuid.Parse(req.PartyId)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid party ID format: %v", err)
+	}
+
+	relatedPartyID, err := uuid.Parse(req.RelatedPartyId)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid related party ID format: %v", err)
+	}
+
+	if _, err := s.repo.FindByIDForUpdate(ctx, partyID); err != nil {
+		if errors.Is(err, persistence.ErrPartyNotFound) {
+			return uuid.Nil, uuid.Nil, status.Errorf(codes.NotFound, "party not found: %s", req.PartyId)
+		}
+		return uuid.Nil, uuid.Nil, status.Errorf(codes.Internal, "failed to verify party: %v", err)
+	}
+	if _, err := s.repo.FindByIDForUpdate(ctx, relatedPartyID); err != nil {
+		if errors.Is(err, persistence.ErrPartyNotFound) {
+			return uuid.Nil, uuid.Nil, status.Errorf(codes.NotFound, "related party not found: %s", req.RelatedPartyId)
+		}
+		return uuid.Nil, uuid.Nil, status.Errorf(codes.Internal, "failed to verify related party: %v", err)
+	}
+
+	isCircular, err := s.repo.CheckCircularAssociation(ctx, partyID, relatedPartyID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, status.Errorf(codes.Internal, "failed to check circular association: %v", err)
+	}
+	if isCircular {
+		return uuid.Nil, uuid.Nil, status.Errorf(codes.InvalidArgument, "circular association detected")
+	}
+
+	return partyID, relatedPartyID, nil
+}
+
+// buildAssociationInput constructs the optional AssociationInput from the request fields.
+func buildAssociationInput(req *pb.RegisterAssociationsRequest) (*persistence.AssociationInput, error) {
+	if req.Metadata == nil && req.Status == pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED && req.EffectiveFrom == nil && req.EffectiveTo == nil {
+		return nil, nil
+	}
+
+	input := &persistence.AssociationInput{}
+	if req.Metadata != nil {
+		metadataBytes, marshalErr := json.Marshal(req.Metadata.AsMap())
+		if marshalErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid metadata: %v", marshalErr)
+		}
+		metadataStr := string(metadataBytes)
+		input.Metadata = &metadataStr
+	}
+	if req.Status != pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED {
+		assocStatus, statusErr := protoAssociationStatusToString(req.Status)
+		if statusErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid association status: %v", statusErr)
+		}
+		input.Status = assocStatus
+	}
+	if req.EffectiveFrom != nil {
+		ef := req.EffectiveFrom.AsTime()
+		input.EffectiveFrom = &ef
+	}
+	if req.EffectiveTo != nil {
+		et := req.EffectiveTo.AsTime()
+		input.EffectiveTo = &et
+	}
+
+	return input, nil
 }
 
 // UpdateAssociations updates a party association

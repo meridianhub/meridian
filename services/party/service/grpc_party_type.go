@@ -142,7 +142,27 @@ func (s *Service) UpdatePartyType(ctx context.Context, req *pb.UpdatePartyTypeRe
 		return nil, status.Errorf(codes.InvalidArgument, "invalid party type definition ID format: %v", err)
 	}
 
-	// Build the update input, applying field mask if provided
+	input, err := buildPartyTypeUpdateInput(req)
+	if err != nil {
+		return nil, err
+	}
+
+	entity, err := s.partyTypeService.Update(ctx, id, input)
+	if err != nil {
+		return nil, mapPartyTypeUpdateError(s, req.Id, err)
+	}
+
+	s.logger.Info("party type definition updated",
+		"id", req.Id,
+		"version", entity.Version)
+
+	return &pb.UpdatePartyTypeResponse{
+		PartyTypeDefinition: partyTypeDefinitionToProto(entity),
+	}, nil
+}
+
+// buildPartyTypeUpdateInput constructs the UpdatePartyTypeInput from the request, applying field mask if provided.
+func buildPartyTypeUpdateInput(req *pb.UpdatePartyTypeRequest) (UpdatePartyTypeInput, error) {
 	input := UpdatePartyTypeInput{
 		// #nosec G115 - Version is bounded by database constraints
 		Version: int64(req.Version),
@@ -160,46 +180,38 @@ func (s *Service) UpdatePartyType(ctx context.Context, req *pb.UpdatePartyTypeRe
 			case "error_message_cel":
 				input.ErrorMessageCEL = &req.ErrorMessageCel
 			default:
-				return nil, status.Errorf(codes.InvalidArgument, "unsupported update mask path: %q", path)
+				return UpdatePartyTypeInput{}, status.Errorf(codes.InvalidArgument, "unsupported update mask path: %q", path)
 			}
 		}
 	} else {
-		// No field mask - update all fields
 		input.AttributeSchema = &req.AttributeSchema
 		input.ValidationCEL = &req.ValidationCel
 		input.EligibilityCEL = &req.EligibilityCel
 		input.ErrorMessageCEL = &req.ErrorMessageCel
 	}
 
-	entity, err := s.partyTypeService.Update(ctx, id, input)
-	if err != nil {
-		if errors.Is(err, persistence.ErrPartyTypeDefinitionNotFound) {
-			return nil, status.Errorf(codes.NotFound, "party type definition not found: %s", req.Id)
-		}
-		if errors.Is(err, persistence.ErrPartyTypeVersionConflict) {
-			return nil, status.Errorf(codes.Aborted, "version conflict: party type definition was modified by another transaction")
-		}
-		if errors.Is(err, ErrAttributeSchemaEmpty) ||
-			errors.Is(err, ErrAttributeSchemaTooBig) ||
-			errors.Is(err, ErrAttributeSchemaInvalidJSON) ||
-			errors.Is(err, ErrValidationCELInvalid) ||
-			errors.Is(err, ErrEligibilityCELInvalid) ||
-			errors.Is(err, ErrErrorMessageCELInvalid) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid update: %v", err)
-		}
-		s.logger.Error("failed to update party type definition",
-			"id", req.Id,
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to update party type definition: %v", err)
+	return input, nil
+}
+
+// mapPartyTypeUpdateError maps domain/persistence errors from party type updates to gRPC status errors.
+func mapPartyTypeUpdateError(s *Service, reqID string, err error) error {
+	if errors.Is(err, persistence.ErrPartyTypeDefinitionNotFound) {
+		return status.Errorf(codes.NotFound, "party type definition not found: %s", reqID)
 	}
-
-	s.logger.Info("party type definition updated",
-		"id", req.Id,
-		"version", entity.Version)
-
-	return &pb.UpdatePartyTypeResponse{
-		PartyTypeDefinition: partyTypeDefinitionToProto(entity),
-	}, nil
+	if errors.Is(err, persistence.ErrPartyTypeVersionConflict) {
+		return status.Errorf(codes.Aborted, "version conflict: party type definition was modified by another transaction")
+	}
+	if errors.Is(err, ErrAttributeSchemaEmpty) ||
+		errors.Is(err, ErrAttributeSchemaTooBig) ||
+		errors.Is(err, ErrAttributeSchemaInvalidJSON) ||
+		errors.Is(err, ErrValidationCELInvalid) ||
+		errors.Is(err, ErrEligibilityCELInvalid) ||
+		errors.Is(err, ErrErrorMessageCELInvalid) {
+		return status.Errorf(codes.InvalidArgument, "invalid update: %v", err)
+	}
+	s.logger.Error("failed to update party type definition",
+		"id", reqID, "error", err)
+	return status.Errorf(codes.Internal, "failed to update party type definition: %v", err)
 }
 
 // partyTypeDefinitionToProto converts a persistence entity to a proto PartyTypeDefinition.

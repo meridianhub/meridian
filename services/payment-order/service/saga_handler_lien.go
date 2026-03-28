@@ -287,44 +287,16 @@ func evaluateBucketIDForHandler(
 ) (string, error) {
 	start := time.Now()
 
-	// Skip if no instrument code
 	if instrumentCode == "" {
 		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSkipped)
 		return "", nil
 	}
 
-	// Skip if reference data client not configured
-	if deps.ReferenceDataClient == nil {
-		logger.Debug("bucket evaluation skipped - reference data client not configured",
-			"payment_order_id", paymentOrderID)
-		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrNoClient)
-		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
+	expression, ok := fetchFungibilityExpression(ctx, deps, instrumentCode, paymentOrderID, logger)
+	if !ok {
 		return "", nil
 	}
 
-	// Fetch instrument definition
-	instrument, err := deps.ReferenceDataClient.RetrieveInstrument(ctx, instrumentCode)
-	if err != nil {
-		// Gracefully degrade if instrument not found or lookup fails
-		logger.Debug("failed to retrieve instrument, using default bucket",
-			"payment_order_id", paymentOrderID,
-			"instrument_code", instrumentCode,
-			"error", err)
-		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrInstrumentFetch)
-		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
-		return "", nil
-	}
-
-	// Check if instrument has fungibility expression
-	if instrument.FungibilityKeyExpression == "" {
-		logger.Debug("instrument has no fungibility expression, using default bucket",
-			"payment_order_id", paymentOrderID,
-			"instrument_code", instrumentCode)
-		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSkipped)
-		return "", nil
-	}
-
-	// Skip if bucket evaluator not configured
 	if deps.BucketEvaluator == nil {
 		logger.Debug("bucket evaluation skipped - bucket evaluator not configured",
 			"payment_order_id", paymentOrderID)
@@ -333,18 +305,14 @@ func evaluateBucketIDForHandler(
 		return "", nil
 	}
 
-	// Evaluate the bucket ID
-	bucketID, err := deps.BucketEvaluator.Evaluate(ctx, instrument.FungibilityKeyExpression, BucketEvalContext{
+	bucketID, err := deps.BucketEvaluator.Evaluate(ctx, expression, BucketEvalContext{
 		InstrumentCode: instrumentCode,
 		Attributes:     paymentAttributes,
 	})
 
-	// Record duration for successful or failed evaluations (not skipped)
 	poobservability.RecordBucketEvaluationDuration(time.Since(start))
 
 	if err != nil {
-		// Gracefully degrade to default bucket on CEL evaluation failures
-		// (e.g., missing required attributes, invalid expressions)
 		logger.Warn("bucket evaluation failed, using default bucket",
 			"payment_order_id", paymentOrderID,
 			"instrument_code", instrumentCode,
@@ -361,4 +329,37 @@ func evaluateBucketIDForHandler(
 	poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSuccess)
 
 	return bucketID, nil
+}
+
+// fetchFungibilityExpression retrieves the CEL expression for bucket evaluation from the instrument definition.
+// Returns the expression and true if evaluation should proceed, or empty string and false if it should be skipped.
+func fetchFungibilityExpression(ctx context.Context, deps *PaymentOrderHandlerDeps, instrumentCode, paymentOrderID string, logger *slog.Logger) (string, bool) {
+	if deps.ReferenceDataClient == nil {
+		logger.Debug("bucket evaluation skipped - reference data client not configured",
+			"payment_order_id", paymentOrderID)
+		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrNoClient)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
+		return "", false
+	}
+
+	instrument, err := deps.ReferenceDataClient.RetrieveInstrument(ctx, instrumentCode)
+	if err != nil {
+		logger.Debug("failed to retrieve instrument, using default bucket",
+			"payment_order_id", paymentOrderID,
+			"instrument_code", instrumentCode,
+			"error", err)
+		poobservability.RecordBucketEvaluationFailure(poobservability.BucketEvalErrInstrumentFetch)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusFallback)
+		return "", false
+	}
+
+	if instrument.FungibilityKeyExpression == "" {
+		logger.Debug("instrument has no fungibility expression, using default bucket",
+			"payment_order_id", paymentOrderID,
+			"instrument_code", instrumentCode)
+		poobservability.RecordBucketEvaluation(poobservability.BucketEvalStatusSkipped)
+		return "", false
+	}
+
+	return instrument.FungibilityKeyExpression, true
 }

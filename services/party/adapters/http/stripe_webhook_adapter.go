@@ -104,41 +104,17 @@ func NewStripeWebhookAdapter(cfg StripeWebhookAdapterConfig) (*StripeWebhookAdap
 // ServeHTTP implements http.Handler. It validates the Stripe signature, translates
 // the event to the generic VerificationWebhookRequest, and delegates to the inner handler.
 func (a *StripeWebhookAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Only accept POST requests
 	if r.Method != http.MethodPost {
 		writeStripeErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	// Read raw body — needed for signature validation
-	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
+	body, err := a.readAndValidateStripeRequest(r)
 	if err != nil {
-		a.logger.Error("failed to read Stripe webhook body", "error", err)
-		writeStripeErrorResponse(w, http.StatusBadRequest, ErrInvalidRequestBody.Error())
+		a.writeStripeValidationError(w, err)
 		return
 	}
 
-	// Validate Stripe signature
-	sigHeader := r.Header.Get(stripeSignatureHeader)
-	if sigHeader == "" {
-		a.logger.Warn("missing Stripe-Signature header")
-		writeStripeErrorResponse(w, http.StatusUnauthorized, ErrStripeSignatureMissing.Error())
-		return
-	}
-
-	if err := validateStripeSignature(body, sigHeader, a.stripeSecret, stripeTimestampTolerance); err != nil {
-		if errors.Is(err, ErrStripeTimestampExpired) {
-			a.logger.Warn("Stripe webhook timestamp expired")
-			writeStripeErrorResponse(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		a.logger.Warn("invalid Stripe webhook signature", "error", err)
-		writeStripeErrorResponse(w, http.StatusUnauthorized, ErrStripeSignatureInvalid.Error())
-		return
-	}
-
-	// Parse Stripe event
 	var event stripeEvent
 	if err := json.Unmarshal(body, &event); err != nil {
 		a.logger.Error("failed to parse Stripe event", "error", err)
@@ -146,25 +122,64 @@ func (a *StripeWebhookAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Map Stripe event type to verification status
-	status, ok := mapStripeEventToStatus(event.Type)
+	vStatus, ok := mapStripeEventToStatus(event.Type)
 	if !ok {
 		a.logger.Info("ignoring irrelevant Stripe event type", "event_type", event.Type)
-		// Acknowledge gracefully — Stripe expects 2xx for events we don't care about
 		writeStripeSuccessResponse(w, "event type not relevant")
 		return
 	}
 
-	// Build the generic VerificationWebhookRequest
+	a.delegateToInnerHandler(w, r, event, vStatus)
+}
+
+// readAndValidateStripeRequest reads the request body and validates the Stripe signature.
+func (a *StripeWebhookAdapter) readAndValidateStripeRequest(r *http.Request) ([]byte, error) {
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		a.logger.Error("failed to read Stripe webhook body", "error", err)
+		return nil, ErrInvalidRequestBody
+	}
+
+	sigHeader := r.Header.Get(stripeSignatureHeader)
+	if sigHeader == "" {
+		a.logger.Warn("missing Stripe-Signature header")
+		return nil, ErrStripeSignatureMissing
+	}
+
+	if err := validateStripeSignature(body, sigHeader, a.stripeSecret, stripeTimestampTolerance); err != nil {
+		return nil, err
+	}
+
+	return body, nil
+}
+
+// writeStripeValidationError writes the appropriate HTTP error response for a validation error.
+func (a *StripeWebhookAdapter) writeStripeValidationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrInvalidRequestBody):
+		writeStripeErrorResponse(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ErrStripeSignatureMissing):
+		writeStripeErrorResponse(w, http.StatusUnauthorized, err.Error())
+	case errors.Is(err, ErrStripeTimestampExpired):
+		a.logger.Warn("Stripe webhook timestamp expired")
+		writeStripeErrorResponse(w, http.StatusBadRequest, err.Error())
+	default:
+		a.logger.Warn("invalid Stripe webhook signature", "error", err)
+		writeStripeErrorResponse(w, http.StatusUnauthorized, ErrStripeSignatureInvalid.Error())
+	}
+}
+
+// delegateToInnerHandler builds a synthetic request and forwards it to the inner webhook handler.
+func (a *StripeWebhookAdapter) delegateToInnerHandler(w http.ResponseWriter, r *http.Request, event stripeEvent, vStatus verification.Status) {
 	now := time.Now().UTC()
 	webhookReq := VerificationWebhookRequest{
 		VerificationID: event.Data.Object.ID,
-		Status:         string(status),
+		Status:         string(vStatus),
 		Timestamp:      now,
 		Metadata:       event.Data.Object.Metadata,
 	}
 
-	// Marshal to JSON for the synthetic request
 	syntheticBody, err := json.Marshal(webhookReq)
 	if err != nil {
 		a.logger.Error("failed to marshal synthetic webhook request", "error", err)
@@ -172,13 +187,10 @@ func (a *StripeWebhookAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Sign the synthetic body with the inner handler's HMAC secret
 	sig := GenerateWebhookSignature(syntheticBody, a.innerHMACSecret)
 
-	// Build a synthetic http.Request targeting the inner handler
 	syntheticReq, err := http.NewRequestWithContext(
-		r.Context(),
-		http.MethodPost,
+		r.Context(), http.MethodPost,
 		"/webhooks/verification/stripe",
 		bytes.NewReader(syntheticBody),
 	)
@@ -190,11 +202,9 @@ func (a *StripeWebhookAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	syntheticReq.Header.Set("Content-Type", "application/json")
 	syntheticReq.Header.Set(WebhookSignatureHeader, sig)
 
-	// Delegate to the inner handler, capturing its response
 	rr := httptest.NewRecorder()
 	a.inner.HandleWebhook(rr, syntheticReq)
 
-	// Relay the inner handler's response back to the Stripe caller
 	for k, vs := range rr.Header() {
 		for _, v := range vs {
 			w.Header().Add(k, v)

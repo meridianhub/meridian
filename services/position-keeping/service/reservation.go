@@ -124,57 +124,25 @@ func (s *PositionKeepingService) GetProjectedBalance(
 	ctx context.Context,
 	req *positionkeepingv1.GetProjectedBalanceRequest,
 ) (*positionkeepingv1.GetProjectedBalanceResponse, error) {
-	if s.reservationRepo == nil {
-		return nil, status.Error(codes.FailedPrecondition, "reservation repository not configured")
-	}
-	if s.positionRepo == nil {
-		return nil, status.Error(codes.FailedPrecondition, "position repository not configured")
-	}
-
-	// Validate required fields
-	if req.GetAccountId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "account_id is required")
-	}
-	if req.GetInstrumentCode() == "" {
-		return nil, status.Error(codes.InvalidArgument, "instrument_code is required")
+	if err := validateProjectedBalanceRequest(req, s.reservationRepo, s.positionRepo); err != nil {
+		return nil, err
 	}
 
 	accountID := req.GetAccountId()
 	instrumentCode := req.GetInstrumentCode()
 	bucketID := req.GetBucketId()
 
-	// Get current balance from position entries
-	var currentBalance decimal.Decimal
-	if bucketID != "" {
-		// Query specific bucket
-		agg, err := s.positionRepo.GetAggregatedPosition(ctx, accountID, instrumentCode, bucketID)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to query position balance: %v", err)
-		}
-		if agg != nil {
-			currentBalance = agg.TotalAmount
-		}
-	} else {
-		// Query all buckets for this account/instrument
-		aggs, err := s.positionRepo.GetAggregatedPositions(ctx, accountID, instrumentCode)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to query position balances: %v", err)
-		}
-		for _, agg := range aggs {
-			currentBalance = currentBalance.Add(agg.TotalAmount)
-		}
+	currentBalance, err := s.queryCurrentBalance(ctx, accountID, instrumentCode, bucketID)
+	if err != nil {
+		return nil, err
 	}
 
-	// Get sum of active reservations
 	activeReservationsTotal, err := s.reservationRepo.SumActiveReservations(ctx, accountID, instrumentCode, bucketID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to sum active reservations: %v", err)
 	}
 
-	// Calculate projected balance = current - active_reservations
 	projectedBalance := currentBalance.Sub(activeReservationsTotal)
-
-	asOf := time.Now().UTC()
 
 	return &positionkeepingv1.GetProjectedBalanceResponse{
 		CurrentBalance:          currentBalance.String(),
@@ -182,6 +150,47 @@ func (s *PositionKeepingService) GetProjectedBalance(
 		ProjectedBalance:        projectedBalance.String(),
 		BucketId:                bucketID,
 		InstrumentCode:          instrumentCode,
-		AsOf:                    timestamppb.New(asOf),
+		AsOf:                    timestamppb.New(time.Now().UTC()),
 	}, nil
+}
+
+// validateProjectedBalanceRequest validates the GetProjectedBalance request preconditions.
+func validateProjectedBalanceRequest(req *positionkeepingv1.GetProjectedBalanceRequest, reservationRepo interface{}, positionRepo interface{}) error {
+	if reservationRepo == nil {
+		return status.Error(codes.FailedPrecondition, "reservation repository not configured")
+	}
+	if positionRepo == nil {
+		return status.Error(codes.FailedPrecondition, "position repository not configured")
+	}
+	if req.GetAccountId() == "" {
+		return status.Error(codes.InvalidArgument, "account_id is required")
+	}
+	if req.GetInstrumentCode() == "" {
+		return status.Error(codes.InvalidArgument, "instrument_code is required")
+	}
+	return nil
+}
+
+// queryCurrentBalance retrieves the current balance from position entries.
+func (s *PositionKeepingService) queryCurrentBalance(ctx context.Context, accountID, instrumentCode, bucketID string) (decimal.Decimal, error) {
+	if bucketID != "" {
+		agg, err := s.positionRepo.GetAggregatedPosition(ctx, accountID, instrumentCode, bucketID)
+		if err != nil {
+			return decimal.Decimal{}, status.Errorf(codes.Internal, "failed to query position balance: %v", err)
+		}
+		if agg != nil {
+			return agg.TotalAmount, nil
+		}
+		return decimal.Decimal{}, nil
+	}
+
+	aggs, err := s.positionRepo.GetAggregatedPositions(ctx, accountID, instrumentCode)
+	if err != nil {
+		return decimal.Decimal{}, status.Errorf(codes.Internal, "failed to query position balances: %v", err)
+	}
+	var total decimal.Decimal
+	for _, agg := range aggs {
+		total = total.Add(agg.TotalAmount)
+	}
+	return total, nil
 }
