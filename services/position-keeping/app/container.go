@@ -78,6 +78,18 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 		Logger: logger,
 	}
 
+	// If initialization fails partway, close already-initialized resources.
+	succeeded := false
+	defer func() { //nolint:contextcheck // Close manages its own shutdown contexts
+		if !succeeded {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), config.Server.GracefulShutdownTimeout)
+			defer cancel()
+			if err := container.Close(shutdownCtx); err != nil {
+				logger.Error("failed to close container during init cleanup", "error", err)
+			}
+		}
+	}()
+
 	// Initialize dependencies in order
 	if err := container.initializeTracer(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize tracer: %w", err)
@@ -118,6 +130,7 @@ func NewContainer(ctx context.Context, config *Config, logger *slog.Logger) (*Co
 
 	container.initializeCompactionWorker()
 
+	succeeded = true
 	logger.Info("dependency container initialized successfully")
 
 	return container, nil
