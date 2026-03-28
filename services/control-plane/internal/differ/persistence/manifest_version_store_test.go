@@ -98,6 +98,49 @@ func TestSave_IncrementsVersion(t *testing.T) {
 	assert.Equal(t, "Updated Manifest", result.Manifest.Metadata.Name)
 }
 
+func TestMultiTenantIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	pool := testdb.NewTestPool(t, testdb.WithMigrations("control-plane"))
+
+	// Set up two independent tenant schemas
+	ctxA, cleanupA := testdb.SetupTenantSchemaForPgx(t, pool, "tenant-alpha", "control-plane")
+	t.Cleanup(cleanupA)
+	ctxB, cleanupB := testdb.SetupTenantSchemaForPgx(t, pool, "tenant-beta", "control-plane")
+	t.Cleanup(cleanupB)
+
+	store := NewPostgresManifestVersionStore(pool)
+
+	// Save a manifest for tenant A
+	manifestA := testManifest()
+	manifestA.Metadata.Name = "Alpha Manifest"
+	err := store.Save(ctxA, manifestA, "admin-a")
+	require.NoError(t, err)
+
+	// Save a manifest for tenant B
+	manifestB := testManifest()
+	manifestB.Metadata.Name = "Beta Manifest"
+	err = store.Save(ctxB, manifestB, "admin-b")
+	require.NoError(t, err)
+
+	// Both tenants should see version 1 (independent counters)
+	resultA, err := store.GetLatestApplied(ctxA)
+	require.NoError(t, err)
+	require.NotNil(t, resultA)
+	assert.Equal(t, 1, resultA.Version)
+	assert.Equal(t, "admin-a", resultA.AppliedBy)
+	assert.Equal(t, "Alpha Manifest", resultA.Manifest.Metadata.Name)
+
+	resultB, err := store.GetLatestApplied(ctxB)
+	require.NoError(t, err)
+	require.NotNil(t, resultB)
+	assert.Equal(t, 1, resultB.Version)
+	assert.Equal(t, "admin-b", resultB.AppliedBy)
+	assert.Equal(t, "Beta Manifest", resultB.Manifest.Metadata.Name)
+}
+
 func TestGetLatestApplied_WithoutTenant(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")

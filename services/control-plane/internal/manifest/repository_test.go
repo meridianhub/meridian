@@ -13,7 +13,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const manifestVersionsDDL = `CREATE TABLE IF NOT EXISTS %s.manifest_versions (
+const manifestVersionsDDL = `CREATE TABLE IF NOT EXISTS %s.manifest_version (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	version VARCHAR(50) NOT NULL,
 	manifest_json JSONB NOT NULL,
