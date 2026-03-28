@@ -37,12 +37,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
-	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 )
 
@@ -99,7 +97,7 @@ type Config struct {
 }
 
 // ErrTargetRequired is returned when neither Target nor ServiceName is provided.
-var ErrTargetRequired = errors.New("either Target or ServiceName must be provided")
+var ErrTargetRequired = clients.ErrConnTargetRequired
 
 // ErrObservationNotFound is returned when no observation matches the query criteria.
 var ErrObservationNotFound = errors.New("observation not found")
@@ -139,12 +137,17 @@ func (cfg *Config) applyDefaults() {
 func New(ctx context.Context, cfg Config) (*Client, func() error, error) {
 	cfg.applyDefaults()
 
-	conn, err := createGRPCConnection(ctx, cfg)
+	conn, _, err := clients.NewConn(ctx, clients.ConnConfig{
+		Target:      cfg.Target,
+		ServiceName: cfg.ServiceName,
+		Namespace:   cfg.Namespace,
+		Port:        cfg.Port,
+		Tracer:      cfg.Tracer,
+		DialOptions: cfg.DialOptions,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-
-	grpcClient := marketinformationv1.NewMarketInformationServiceClient(conn)
 
 	var resilient *clients.ResilientClient
 	if cfg.Resilience != nil {
@@ -153,72 +156,13 @@ func New(ctx context.Context, cfg Config) (*Client, func() error, error) {
 
 	client := &Client{
 		conn:       conn,
-		grpcClient: grpcClient,
+		grpcClient: marketinformationv1.NewMarketInformationServiceClient(conn),
 		tracer:     cfg.Tracer,
 		resilient:  resilient,
 		timeout:    cfg.Timeout,
 	}
 
 	return client, client.Close, nil
-}
-
-// createGRPCConnection creates the gRPC connection based on configuration.
-func createGRPCConnection(ctx context.Context, cfg Config) (*grpc.ClientConn, error) {
-	// Use platform gRPC factory when ServiceName is provided (preferred)
-	if cfg.ServiceName != "" {
-		// Copy dial options to avoid mutating caller's slice
-		dialOpts := make([]grpc.DialOption, len(cfg.DialOptions))
-		copy(dialOpts, cfg.DialOptions)
-
-		// Add tracing interceptors if tracer is provided
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithChainUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithChainStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		conn, err := platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
-			ServiceName: cfg.ServiceName,
-			Namespace:   cfg.Namespace,
-			Port:        cfg.Port,
-			DialOptions: dialOpts,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create grpc connection via platform factory: %w", err)
-		}
-		return conn, nil
-	}
-
-	if cfg.Target != "" {
-		// Fallback to legacy direct connection
-		// Copy dial options to avoid mutating caller's slice
-		var dialOpts []grpc.DialOption
-		if cfg.DialOptions != nil {
-			dialOpts = make([]grpc.DialOption, len(cfg.DialOptions))
-			copy(dialOpts, cfg.DialOptions)
-		} else {
-			dialOpts = []grpc.DialOption{
-				grpc.WithTransportCredentials(insecure.NewCredentials()),
-			}
-		}
-
-		// Add tracing interceptors if tracer is provided
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithChainUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithChainStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		conn, err := grpc.NewClient(cfg.Target, dialOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("create grpc connection to %s: %w", cfg.Target, err)
-		}
-		return conn, nil
-	}
-
-	return nil, ErrTargetRequired
 }
 
 // GetRate retrieves a market rate observation for a specific dataset and resolution key

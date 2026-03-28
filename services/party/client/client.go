@@ -27,16 +27,13 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
-	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -54,7 +51,7 @@ const (
 )
 
 // ErrTargetRequired is returned when neither Target nor ServiceName is provided.
-var ErrTargetRequired = errors.New("either Target or ServiceName must be provided")
+var ErrTargetRequired = clients.ErrConnTargetRequired
 
 // Config holds configuration for the Party client.
 type Config struct {
@@ -118,7 +115,6 @@ type Client struct {
 //	}
 //	defer cleanup()
 func New(ctx context.Context, cfg Config) (*Client, func(), error) {
-	// Apply defaults
 	if cfg.Timeout == 0 {
 		cfg.Timeout = DefaultTimeout
 	}
@@ -129,81 +125,30 @@ func New(ctx context.Context, cfg Config) (*Client, func(), error) {
 		cfg.Namespace = DefaultNamespace
 	}
 
-	var conn *grpc.ClientConn
-	var err error
-
-	// Use platform gRPC factory when ServiceName is provided (preferred)
-	if cfg.ServiceName != "" {
-		dialOpts := cfg.DialOptions
-
-		// Add tracing interceptors if tracer is provided
-		// Use WithChainUnaryInterceptor/WithChainStreamInterceptor to properly chain
-		// multiple interceptors instead of overwriting them
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithChainUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithChainStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		// Use platform factory for DNS-based load balancing
-		conn, err = platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
-			ServiceName: cfg.ServiceName,
-			Namespace:   cfg.Namespace,
-			Port:        cfg.Port,
-			DialOptions: dialOpts,
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create party gRPC connection via platform factory: %w", err)
-		}
-	} else if cfg.Target != "" {
-		// Fallback to legacy direct connection for backward compatibility
-		dialOpts := cfg.DialOptions
-		if dialOpts == nil {
-			dialOpts = []grpc.DialOption{
-				grpc.WithTransportCredentials(insecure.NewCredentials()),
-			}
-		}
-
-		// Add tracing interceptors if tracer is provided
-		// Use WithChainUnaryInterceptor/WithChainStreamInterceptor to properly chain
-		// multiple interceptors instead of overwriting them
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithChainUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithChainStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		conn, err = grpc.NewClient(cfg.Target, dialOpts...)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create party gRPC connection to %s: %w", cfg.Target, err)
-		}
-	} else {
-		return nil, nil, ErrTargetRequired
+	conn, cleanup, err := clients.NewConn(ctx, clients.ConnConfig{
+		Target:      cfg.Target,
+		ServiceName: cfg.ServiceName,
+		Namespace:   cfg.Namespace,
+		Port:        cfg.Port,
+		Tracer:      cfg.Tracer,
+		DialOptions: cfg.DialOptions,
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 
-	// Create resilient client if configuration is provided
 	var resilient *clients.ResilientClient
 	if cfg.Resilience != nil {
 		resilient = clients.NewResilientClient(*cfg.Resilience)
 	}
 
-	client := &Client{
+	return &Client{
 		conn:      conn,
 		party:     partyv1.NewPartyServiceClient(conn),
 		tracer:    cfg.Tracer,
 		resilient: resilient,
 		timeout:   cfg.Timeout,
-	}
-
-	cleanup := func() {
-		if client.conn != nil {
-			_ = client.conn.Close()
-		}
-	}
-
-	return client, cleanup, nil
+	}, cleanup, nil
 }
 
 // RegisterParty creates a new party in the reference data directory.
