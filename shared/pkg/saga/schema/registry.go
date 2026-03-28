@@ -43,10 +43,11 @@ func (r *Registry) LoadFromYAML(data []byte) error {
 		return err
 	}
 
-	// Proto resolution is deferred to callers that need it (e.g. ValidateHandlerParams
-	// calls ResolveProtoTypes explicitly). Resolving eagerly here fails when proto
-	// descriptors aren't registered in the global registry (e.g. tools/saga-doc-gen
-	// which generates documentation from YAML without importing proto packages).
+	// Proto resolution is deferred to callers that need it. Callers requiring
+	// proto-backed param validation must call ResolveProtoTypes on the schema
+	// after loading. Resolving eagerly here fails when proto descriptors aren't
+	// registered in the global registry (e.g. tools/saga-doc-gen which generates
+	// documentation from YAML without importing proto packages).
 
 	// Build temporary maps for the new schema's handlers and deprecated aliases.
 	tempHandlers := make(map[string]*HandlerDef, len(schema.Handlers))
