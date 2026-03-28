@@ -9,8 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // PgxOutboxRepository implements OutboxRepository using PostgreSQL via pgx.
@@ -354,6 +352,22 @@ func (p *PgxOutboxPublisher) Publish(
 	event proto.Message,
 	config PublishConfig,
 ) error {
+	if err := validatePgxPublishInputs(tx, event, config); err != nil {
+		return err
+	}
+
+	payload, err := proto.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to serialize event: %w", err)
+	}
+
+	entry := buildOutboxEntry(ctx, config, payload, p.serviceName)
+
+	return insertOutboxEntryPgx(ctx, tx, entry)
+}
+
+// validatePgxPublishInputs checks required publish parameters for pgx transactions.
+func validatePgxPublishInputs(tx pgx.Tx, event proto.Message, config PublishConfig) error {
 	if tx == nil {
 		return ErrNilTransaction
 	}
@@ -372,40 +386,11 @@ func (p *PgxOutboxPublisher) Publish(
 	if config.AggregateType == "" {
 		return ErrEmptyAggregateType
 	}
+	return nil
+}
 
-	// Serialize the protobuf event
-	payload, err := proto.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to serialize event: %w", err)
-	}
-
-	// Use AggregateID as partition key if not specified
-	partitionKey := config.PartitionKey
-	if partitionKey == "" {
-		partitionKey = config.AggregateID
-	}
-
-	// Extract tenant ID from context
-	var tenantID string
-	if tid, ok := tenant.FromContext(ctx); ok {
-		tenantID = string(tid)
-	}
-
-	// Create outbox entry
-	entry := NewEventOutbox(
-		config.EventType,
-		config.AggregateID,
-		config.AggregateType,
-		payload,
-		config.Topic,
-		p.serviceName,
-		config.CorrelationID,
-		tenantID,
-	)
-	entry.CausationID = config.CausationID
-	entry.PartitionKey = partitionKey
-
-	// Insert using raw SQL with the pgx transaction
+// insertOutboxEntryPgx inserts an outbox entry using a pgx transaction.
+func insertOutboxEntryPgx(ctx context.Context, tx pgx.Tx, entry *EventOutbox) error {
 	query := `
 		INSERT INTO event_outbox (
 			id, event_type, aggregate_id, aggregate_type, event_payload,
@@ -417,7 +402,7 @@ func (p *PgxOutboxPublisher) Publish(
 			$11, $12, $13, $14
 		)`
 
-	_, err = tx.Exec(ctx, query,
+	_, err := tx.Exec(ctx, query,
 		entry.ID, entry.EventType, entry.AggregateID, entry.AggregateType, entry.EventPayload,
 		nullableString(entry.CorrelationID), nullableString(entry.CausationID),
 		entry.Status, entry.Topic, nullableString(entry.PartitionKey),

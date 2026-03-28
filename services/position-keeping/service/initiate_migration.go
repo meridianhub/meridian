@@ -160,7 +160,6 @@ func (s *PositionKeepingService) checkMigrationIdempotencyAndAcquireLock(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateWithOpeningBalanceRequest,
 ) (*idempotency.Key, *positionkeepingv1.InitiateWithOpeningBalanceResponse, error) {
-	// No idempotency key provided or idempotency service not configured
 	if req.IdempotencyKey == nil || req.IdempotencyKey.Key == "" || s.idempotency == nil {
 		return nil, nil, nil
 	}
@@ -172,53 +171,60 @@ func (s *PositionKeepingService) checkMigrationIdempotencyAndAcquireLock(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check if operation was already completed or in progress
 	result, err := s.idempotency.Check(ctx, key)
 	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-		// Transient store error (Redis timeout, connection failure) - don't bypass idempotency
 		return nil, nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
 	}
 	if err == nil {
-		switch result.Status {
-		case idempotency.StatusCompleted:
-			// Return cached result
-			var cachedData struct {
-				LogID string `json:"log_id"`
-			}
-			if err := json.Unmarshal(result.Data, &cachedData); err != nil {
-				return nil, nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
-			}
-
-			logID, err := parseUUID(cachedData.LogID)
-			if err != nil {
-				return nil, nil, status.Errorf(codes.Internal, "cached idempotency response contains invalid log_id: %v", err)
-			}
-
-			log, err := s.repository.FindByID(ctx, logID)
-			if err != nil {
-				return nil, nil, status.Errorf(codes.Internal, "failed to load cached financial position log: %v", err)
-			}
-
-			return &key, &positionkeepingv1.InitiateWithOpeningBalanceResponse{
-				Log: toProtoFinancialPositionLog(log),
-			}, nil
-
-		case idempotency.StatusPending:
-			// Another request is currently processing this operation
-			return nil, nil, status.Errorf(codes.Aborted, "operation already in progress, please retry")
-
-		case idempotency.StatusFailed:
-			// Previous attempt failed - allow retry by proceeding to MarkPending
+		resp, retErr := s.handleMigrationIdempotencyResult(ctx, key, result)
+		if resp != nil || retErr != nil {
+			return &key, resp, retErr
 		}
+		// StatusFailed falls through to MarkPending
 	}
-	// ErrResultNotFound means key doesn't exist - continue to mark pending
 
-	// Mark operation as pending to prevent concurrent execution
 	if err := s.idempotency.MarkPending(ctx, key, 5*time.Minute); err != nil {
 		return nil, nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
 	}
 
 	return &key, nil, nil
+}
+
+// handleMigrationIdempotencyResult handles an existing idempotency result for the migration operation.
+// Returns (response, nil) for completed, (nil, error) for pending, (nil, nil) for failed (retry allowed).
+func (s *PositionKeepingService) handleMigrationIdempotencyResult(
+	ctx context.Context,
+	key idempotency.Key,
+	result *idempotency.Result,
+) (*positionkeepingv1.InitiateWithOpeningBalanceResponse, error) {
+	switch result.Status {
+	case idempotency.StatusCompleted:
+		var cachedData struct {
+			LogID string `json:"log_id"`
+		}
+		if err := json.Unmarshal(result.Data, &cachedData); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to decode cached idempotency response: %v", err)
+		}
+		logID, err := parseUUID(cachedData.LogID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "cached idempotency response contains invalid log_id: %v", err)
+		}
+		log, err := s.repository.FindByID(ctx, logID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to load cached financial position log: %v", err)
+		}
+		return &positionkeepingv1.InitiateWithOpeningBalanceResponse{
+			Log: toProtoFinancialPositionLog(log),
+		}, nil
+
+	case idempotency.StatusPending:
+		return nil, status.Errorf(codes.Aborted, "operation already in progress, please retry")
+
+	default:
+		// StatusFailed - allow retry
+		_ = key // suppress unused warning
+		return nil, nil
+	}
 }
 
 // validateOpeningBalanceWithCEL validates opening balance attributes against the instrument definition.

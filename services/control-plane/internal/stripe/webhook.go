@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,6 +32,8 @@ var (
 	ErrPayloadTooLarge    = errors.New("request body exceeds maximum size")
 	ErrPublishFailed      = errors.New("failed to publish payment event")
 	ErrMissingChargeID    = errors.New("missing charge ID on succeeded payment intent")
+	errMissingTenantID    = errors.New("missing tenant_id in metadata")
+	errMissingPartyID     = errors.New("missing party_id in metadata")
 )
 
 // StripeSignatureHeader is the HTTP header containing the Stripe webhook signature.
@@ -189,7 +190,7 @@ func (h *WebhookHandler) handlePaymentIntentSucceeded(ctx context.Context, w htt
 		return
 	}
 
-	tenantID, partyID, chargeID, err := validatePaymentIntentMetadata(&pi, event)
+	tenantID, partyID, chargeID, err := validatePaymentIntentMetadata(&pi)
 	if err != nil {
 		h.logger.Error(err.Error(), "payment_intent_id", pi.ID, "event_id", event.ID)
 		statusCode := http.StatusBadRequest
@@ -237,15 +238,15 @@ func (h *WebhookHandler) handlePaymentIntentSucceeded(ctx context.Context, w htt
 
 // validatePaymentIntentMetadata extracts and validates required metadata fields
 // from a succeeded payment intent.
-func validatePaymentIntentMetadata(pi *stripe.PaymentIntent, event *stripe.Event) (tenantID, partyID, chargeID string, err error) {
+func validatePaymentIntentMetadata(pi *stripe.PaymentIntent) (tenantID, partyID, chargeID string, err error) {
 	tenantID = pi.Metadata["tenant_id"]
 	if tenantID == "" {
-		return "", "", "", fmt.Errorf("missing tenant_id in metadata")
+		return "", "", "", errMissingTenantID
 	}
 
 	partyID = pi.Metadata["party_id"]
 	if partyID == "" {
-		return "", "", "", fmt.Errorf("missing party_id in metadata")
+		return "", "", "", errMissingPartyID
 	}
 
 	chargeID = extractChargeID(pi)

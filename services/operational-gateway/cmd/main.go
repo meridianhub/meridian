@@ -25,9 +25,12 @@ import (
 	"github.com/meridianhub/meridian/services/operational-gateway/worker"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/events"
+	"github.com/meridianhub/meridian/shared/platform/observability"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"gorm.io/gorm"
 )
 
 // ErrMissingDatabaseURL is returned when the DATABASE_URL environment variable is not set.
@@ -105,80 +108,14 @@ func run(logger *slog.Logger) error {
 	outboxPublisher := events.NewOutboxPublisher("operational-gateway")
 	eventPublisher := messaging.NewInstructionEventPublisher(outboxPublisher)
 
-	// Initialize auth interceptor.
-	authConfig := bootstrap.DefaultAuthConfig(logger)
-	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
+	// Build and configure gRPC server with registered services.
+	grpcServer, err := buildGRPCServer(ctx, tracer, db, instructionRepo, connectionRepo, routeRepo, eventPublisher, logger)
 	if err != nil {
-		return fmt.Errorf("failed to initialize auth: %w", err)
+		return err
 	}
 
-	// Create gRPC server.
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
-		WithAuthInterceptor(authInterceptor).
-		Build()
-	if err != nil {
-		return fmt.Errorf("failed to build grpc server: %w", err)
-	}
-
-	// Initialize and register OperationalGatewayService.
-	gatewaySvc, err := service.NewOperationalGatewayService(instructionRepo, connectionRepo, logger)
-	if err != nil {
-		return fmt.Errorf("failed to create gateway service: %w", err)
-	}
-	gatewaySvc.WithEventPublishing(db, instructionRepo, eventPublisher)
-	opgatewayv1.RegisterOperationalGatewayServiceServer(grpcServer, gatewaySvc)
-
-	// Initialize and register ProviderConnectionService.
-	connectionSvc, err := service.NewProviderConnectionService(connectionRepo, instructionRepo, logger)
-	if err != nil {
-		return fmt.Errorf("failed to create connection service: %w", err)
-	}
-	opgatewayv1.RegisterProviderConnectionServiceServer(grpcServer, connectionSvc)
-
-	// Initialize and register InstructionRouteService.
-	routeSvc, err := service.NewInstructionRouteService(routeRepo, connectionRepo, logger)
-	if err != nil {
-		return fmt.Errorf("failed to create route service: %w", err)
-	}
-	opgatewayv1.RegisterInstructionRouteServiceServer(grpcServer, routeSvc)
-
-	// Register health check.
-	healthServer := health.NewServer()
-	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-
-	// Register reflection for debugging.
-	reflection.Register(grpcServer)
-
-	logger.Info("gRPC services registered")
-
-	// Initialize dispatch worker dependencies.
-	routeResolver := persistence.NewDBRouteResolver(routeRepo)
-	secretStore := secrets.NewEnvSecretStore(&identitySlugResolver{})
-	transformer := passthrough.NewTransformer()
-	dispatcher := httpadapter.NewHTTPDispatcher(secretStore, transformer, logger)
-
-	dispatchWorker := worker.NewDispatchWorker(
-		instructionRepo,
-		connectionRepo,
-		routeResolver,
-		dispatcher,
-		worker.DispatchWorkerConfig{
-			BatchSize:    cfg.DispatchWorker.BatchSize,
-			PollInterval: cfg.DispatchWorker.PollInterval,
-		},
-		logger,
-	)
-
-	// Initialize expiry worker.
-	expiryWorker := worker.NewExpiryWorker(
-		instructionRepo,
-		worker.ExpiryWorkerConfig{
-			ScanInterval: cfg.ExpiryWorker.ScanInterval,
-			BatchSize:    cfg.ExpiryWorker.BatchSize,
-		},
-		logger,
-	)
+	// Initialize background workers.
+	dispatchWorker, expiryWorker := buildWorkers(&cfg, instructionRepo, connectionRepo, routeRepo, logger)
 
 	// Create listener before starting workers to fail fast if the port is unavailable.
 	address := fmt.Sprintf(":%s", cfg.GRPCPort)
@@ -200,7 +137,108 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Wait for shutdown signal.
+	return awaitShutdown(grpcServer, dispatchWorker, expiryWorker, runCancel, logger, serverErrors)
+}
+
+// buildGRPCServer creates and configures the gRPC server with all registered services.
+func buildGRPCServer(
+	ctx context.Context,
+	tracer *observability.Tracer,
+	db *gorm.DB,
+	instructionRepo *persistence.InstructionRepository,
+	connectionRepo *persistence.ConnectionRepository,
+	routeRepo *persistence.RouteRepository,
+	eventPublisher *messaging.InstructionEventPublisher,
+	logger *slog.Logger,
+) (*grpc.Server, error) {
+	authConfig := bootstrap.DefaultAuthConfig(logger)
+	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize auth: %w", err)
+	}
+
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
+		WithAuthInterceptor(authInterceptor).
+		Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build grpc server: %w", err)
+	}
+
+	gatewaySvc, err := service.NewOperationalGatewayService(instructionRepo, connectionRepo, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gateway service: %w", err)
+	}
+	gatewaySvc.WithEventPublishing(db, instructionRepo, eventPublisher)
+	opgatewayv1.RegisterOperationalGatewayServiceServer(grpcServer, gatewaySvc)
+
+	connectionSvc, err := service.NewProviderConnectionService(connectionRepo, instructionRepo, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection service: %w", err)
+	}
+	opgatewayv1.RegisterProviderConnectionServiceServer(grpcServer, connectionSvc)
+
+	routeSvc, err := service.NewInstructionRouteService(routeRepo, connectionRepo, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create route service: %w", err)
+	}
+	opgatewayv1.RegisterInstructionRouteServiceServer(grpcServer, routeSvc)
+
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+
+	reflection.Register(grpcServer)
+
+	logger.Info("gRPC services registered")
+	return grpcServer, nil
+}
+
+// buildWorkers initializes the dispatch and expiry background workers.
+func buildWorkers(
+	cfg *config.Config,
+	instructionRepo *persistence.InstructionRepository,
+	connectionRepo *persistence.ConnectionRepository,
+	routeRepo *persistence.RouteRepository,
+	logger *slog.Logger,
+) (*worker.DispatchWorker, *worker.ExpiryWorker) {
+	routeResolver := persistence.NewDBRouteResolver(routeRepo)
+	secretStore := secrets.NewEnvSecretStore(&identitySlugResolver{})
+	transformer := passthrough.NewTransformer()
+	dispatcher := httpadapter.NewHTTPDispatcher(secretStore, transformer, logger)
+
+	dispatchWorker := worker.NewDispatchWorker(
+		instructionRepo,
+		connectionRepo,
+		routeResolver,
+		dispatcher,
+		worker.DispatchWorkerConfig{
+			BatchSize:    cfg.DispatchWorker.BatchSize,
+			PollInterval: cfg.DispatchWorker.PollInterval,
+		},
+		logger,
+	)
+
+	expiryWorker := worker.NewExpiryWorker(
+		instructionRepo,
+		worker.ExpiryWorkerConfig{
+			ScanInterval: cfg.ExpiryWorker.ScanInterval,
+			BatchSize:    cfg.ExpiryWorker.BatchSize,
+		},
+		logger,
+	)
+
+	return dispatchWorker, expiryWorker
+}
+
+// awaitShutdown sets up shutdown orchestration and waits for completion.
+func awaitShutdown(
+	grpcServer *grpc.Server,
+	dispatchWorker *worker.DispatchWorker,
+	expiryWorker *worker.ExpiryWorker,
+	runCancel context.CancelFunc,
+	logger *slog.Logger,
+	serverErrors chan error,
+) error {
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
 	orchestrator.AddCleanup(func() error {

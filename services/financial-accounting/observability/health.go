@@ -93,74 +93,17 @@ func NewHealthChecker(config HealthCheckerConfig) (*HealthChecker, error) {
 //   - Empty service name or "financial-accounting": Check overall service health
 //   - Named component (e.g., "database"): Check specific component
 func (h *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
-	// Apply timeout to health check context
 	checkCtx, cancel := context.WithTimeout(ctx, h.checkTimeout)
 	defer cancel()
 
 	// Empty service name or matching service name: check all components
 	if req.Service == "" || req.Service == h.serviceName {
-		// Perform health check on all components
-		report := h.aggregator.CheckAll(checkCtx)
-		overallStatus := report.OverallStatus()
-
-		// Map health status to gRPC health check status
-		grpcStatus := h.mapStatusToGRPC(overallStatus)
-
-		// Log health check result
-		h.logHealthCheck(report, overallStatus, grpcStatus)
-
-		// Record health check metrics
-		for _, comp := range report.Components {
-			var status string
-			switch comp.Status {
-			case health.StatusHealthy:
-				status = "healthy"
-			case health.StatusUnhealthy:
-				status = "unhealthy"
-			case health.StatusDegraded:
-				status = "degraded"
-			case health.StatusUnknown:
-				status = "unknown"
-			}
-			RecordHealthCheck(comp.Name, status)
-		}
-
-		return &grpc_health_v1.HealthCheckResponse{
-			Status: grpcStatus,
-		}, nil
+		return h.checkAllComponents(checkCtx)
 	}
 
 	// Check if request is for a specific component
-	componentResult, found := h.aggregator.CheckByName(checkCtx, req.Service)
-	if found {
-		// Component found - return its specific health status
-		grpcStatus := h.mapStatusToGRPC(componentResult.Status)
-
-		// Log component health check
-		h.logger.Info("component health check completed",
-			"component", componentResult.Name,
-			"status", componentResult.Status.String(),
-			"grpc_status", grpcStatus.String(),
-			"response_time_ms", componentResult.ResponseTime.Milliseconds(),
-			"message", componentResult.Message)
-
-		// Record metric (use same exhaustive switch as all-components check)
-		var status string
-		switch componentResult.Status {
-		case health.StatusHealthy:
-			status = "healthy"
-		case health.StatusUnhealthy:
-			status = "unhealthy"
-		case health.StatusDegraded:
-			status = "degraded"
-		case health.StatusUnknown:
-			status = "unknown"
-		}
-		RecordHealthCheck(componentResult.Name, status)
-
-		return &grpc_health_v1.HealthCheckResponse{
-			Status: grpcStatus,
-		}, nil
+	if resp, found := h.checkSingleComponent(checkCtx, req.Service); found {
+		return resp, nil
 	}
 
 	// Service name doesn't match and component not found - return UNKNOWN
@@ -170,6 +113,63 @@ func (h *HealthChecker) Check(ctx context.Context, req *grpc_health_v1.HealthChe
 	return &grpc_health_v1.HealthCheckResponse{
 		Status: grpc_health_v1.HealthCheckResponse_UNKNOWN,
 	}, nil
+}
+
+// checkAllComponents performs health checks on all registered components.
+func (h *HealthChecker) checkAllComponents(ctx context.Context) (*grpc_health_v1.HealthCheckResponse, error) {
+	report := h.aggregator.CheckAll(ctx)
+	overallStatus := report.OverallStatus()
+	grpcStatus := h.mapStatusToGRPC(overallStatus)
+
+	h.logHealthCheck(report, overallStatus, grpcStatus)
+
+	for _, comp := range report.Components {
+		RecordHealthCheck(comp.Name, healthStatusString(comp.Status))
+	}
+
+	return &grpc_health_v1.HealthCheckResponse{
+		Status: grpcStatus,
+	}, nil
+}
+
+// checkSingleComponent checks a specific named component.
+// Returns (response, true) if the component exists, or (nil, false) if not found.
+func (h *HealthChecker) checkSingleComponent(ctx context.Context, name string) (*grpc_health_v1.HealthCheckResponse, bool) {
+	componentResult, found := h.aggregator.CheckByName(ctx, name)
+	if !found {
+		return nil, false
+	}
+
+	grpcStatus := h.mapStatusToGRPC(componentResult.Status)
+
+	h.logger.Info("component health check completed",
+		"component", componentResult.Name,
+		"status", componentResult.Status.String(),
+		"grpc_status", grpcStatus.String(),
+		"response_time_ms", componentResult.ResponseTime.Milliseconds(),
+		"message", componentResult.Message)
+
+	RecordHealthCheck(componentResult.Name, healthStatusString(componentResult.Status))
+
+	return &grpc_health_v1.HealthCheckResponse{
+		Status: grpcStatus,
+	}, true
+}
+
+// healthStatusString converts a health.Status to its string representation for metrics.
+func healthStatusString(s health.Status) string {
+	switch s {
+	case health.StatusHealthy:
+		return "healthy"
+	case health.StatusUnhealthy:
+		return "unhealthy"
+	case health.StatusDegraded:
+		return "degraded"
+	case health.StatusUnknown:
+		return "unknown"
+	default:
+		return "unknown"
+	}
 }
 
 // Watch implements streaming health checks.

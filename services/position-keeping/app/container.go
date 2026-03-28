@@ -628,8 +628,8 @@ func (c *Container) Close(ctx context.Context) error {
 
 	var errs []error
 
-	c.closeAuditPublisher(&errs)
-	c.closeKafkaProducer()
+	c.closeAuditPublisher(&errs) //nolint:contextcheck // publisher manages its own timeout
+	c.closeKafkaProducer()       //nolint:contextcheck // producer flush uses millisecond timeout
 	c.closeGRPCConnections(&errs)
 	c.closeDBPool()
 	c.closeRedis(&errs)
@@ -648,7 +648,6 @@ func (c *Container) closeAuditPublisher(errs *[]error) {
 	if c.auditPublisher == nil {
 		return
 	}
-	//nolint:contextcheck // Publisher.Close uses FlushWithTimeout which manages its own timeout
 	if err := c.auditPublisher.Close(); err != nil {
 		c.Logger.Error("failed to close audit publisher", "error", err)
 		*errs = append(*errs, fmt.Errorf("audit publisher close: %w", err))
@@ -663,7 +662,6 @@ func (c *Container) closeKafkaProducer() {
 	if c.kafkaProducer == nil {
 		return
 	}
-	//nolint:contextcheck // FlushWithTimeout creates its own timeout context from milliseconds
 	remaining := c.kafkaProducer.FlushWithTimeout(5000)
 	if remaining > 0 {
 		c.Logger.Warn("kafka producer flush incomplete", "remaining_messages", remaining)

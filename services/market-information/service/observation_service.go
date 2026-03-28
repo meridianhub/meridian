@@ -19,79 +19,70 @@ import (
 
 // mapObservationDomainError converts domain errors to appropriate gRPC status codes.
 func (s *Server) mapObservationDomainError(err error, operation, identifier string) error {
-	switch {
-	case errors.Is(err, domain.ErrObservationNotFound):
-		s.logger.Warn("observation not found",
-			"operation", operation,
-			"identifier", identifier)
-		return status.Errorf(codes.NotFound, "observation not found: %s", identifier)
-
-	case errors.Is(err, domain.ErrDataSetNotFound):
-		s.logger.Warn("dataset not found",
-			"operation", operation,
-			"identifier", identifier)
-		return status.Errorf(codes.NotFound, "dataset not found: %s", identifier)
-
-	case errors.Is(err, domain.ErrDataSourceNotFound):
-		s.logger.Warn("data source not found",
-			"operation", operation,
-			"identifier", identifier)
-		return status.Errorf(codes.NotFound, "data source not found: %s", identifier)
-
-	case errors.Is(err, domain.ErrDataSetDeprecated):
-		s.logger.Warn("dataset is deprecated",
-			"operation", operation,
-			"identifier", identifier)
-		return status.Errorf(codes.FailedPrecondition, "dataset is deprecated: %s", identifier)
-
-	case errors.Is(err, domain.ErrInvalidTemporalBounds):
-		s.logger.Warn("invalid temporal bounds",
-			"operation", operation,
-			"identifier", identifier)
-		return status.Errorf(codes.InvalidArgument, "invalid temporal bounds: valid_from must be before valid_to")
-
-	case errors.Is(err, domain.ErrInvalidQualityLevel):
-		s.logger.Warn("invalid quality level",
-			"operation", operation,
-			"identifier", identifier)
-		return status.Errorf(codes.InvalidArgument, "invalid quality level")
-
-	case errors.Is(err, domain.ErrDataSetCodeRequired):
-		s.logger.Warn("dataset code required",
-			"operation", operation)
-		return status.Errorf(codes.InvalidArgument, "dataset code is required")
-
-	case errors.Is(err, domain.ErrSourceIDRequired):
-		s.logger.Warn("source ID required",
-			"operation", operation)
-		return status.Errorf(codes.InvalidArgument, "source ID is required")
-
-	case errors.Is(err, domain.ErrResolutionKeyRequired):
-		s.logger.Warn("resolution key required",
-			"operation", operation)
-		return status.Errorf(codes.InvalidArgument, "resolution key is required")
-
-	case errors.Is(err, domain.ErrUnitRequired):
-		s.logger.Warn("unit required",
-			"operation", operation)
-		return status.Errorf(codes.InvalidArgument, "unit is required")
-
-	case errors.Is(err, domain.ErrCausationIDRequired):
-		s.logger.Warn("causation ID required",
-			"operation", operation)
-		return status.Errorf(codes.InvalidArgument, "causation ID is required")
-
-	case errors.Is(err, domain.ErrInvalidTrustLevel):
-		s.logger.Warn("invalid trust level",
-			"operation", operation)
-		return status.Errorf(codes.InvalidArgument, "trust level must be between 0 and 100")
-
-	default:
-		s.logger.Error("internal error",
+	// Check lookup errors (NotFound, FailedPrecondition)
+	if grpcErr := mapObservationLookupError(err, identifier); grpcErr != nil {
+		s.logger.Warn("observation domain error",
 			"operation", operation,
 			"identifier", identifier,
 			"error", err)
-		return status.Errorf(codes.Internal, "internal error: %v", err)
+		return grpcErr
+	}
+
+	// Check validation errors (InvalidArgument)
+	if grpcErr := mapObservationValidationError(err); grpcErr != nil {
+		s.logger.Warn("observation validation error",
+			"operation", operation,
+			"identifier", identifier,
+			"error", err)
+		return grpcErr
+	}
+
+	s.logger.Error("internal error",
+		"operation", operation,
+		"identifier", identifier,
+		"error", err)
+	return status.Errorf(codes.Internal, "internal error: %v", err)
+}
+
+// mapObservationLookupError maps observation lookup/state errors to gRPC status codes.
+// Returns nil if the error does not match any known lookup error.
+func mapObservationLookupError(err error, identifier string) error {
+	switch {
+	case errors.Is(err, domain.ErrObservationNotFound):
+		return status.Errorf(codes.NotFound, "observation not found: %s", identifier)
+	case errors.Is(err, domain.ErrDataSetNotFound):
+		return status.Errorf(codes.NotFound, "dataset not found: %s", identifier)
+	case errors.Is(err, domain.ErrDataSourceNotFound):
+		return status.Errorf(codes.NotFound, "data source not found: %s", identifier)
+	case errors.Is(err, domain.ErrDataSetDeprecated):
+		return status.Errorf(codes.FailedPrecondition, "dataset is deprecated: %s", identifier)
+	case errors.Is(err, domain.ErrInvalidTemporalBounds):
+		return status.Errorf(codes.InvalidArgument, "invalid temporal bounds: valid_from must be before valid_to")
+	case errors.Is(err, domain.ErrInvalidQualityLevel):
+		return status.Errorf(codes.InvalidArgument, "invalid quality level")
+	default:
+		return nil
+	}
+}
+
+// mapObservationValidationError maps observation field validation errors to gRPC status codes.
+// Returns nil if the error does not match any known validation error.
+func mapObservationValidationError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrDataSetCodeRequired):
+		return status.Errorf(codes.InvalidArgument, "dataset code is required")
+	case errors.Is(err, domain.ErrSourceIDRequired):
+		return status.Errorf(codes.InvalidArgument, "source ID is required")
+	case errors.Is(err, domain.ErrResolutionKeyRequired):
+		return status.Errorf(codes.InvalidArgument, "resolution key is required")
+	case errors.Is(err, domain.ErrUnitRequired):
+		return status.Errorf(codes.InvalidArgument, "unit is required")
+	case errors.Is(err, domain.ErrCausationIDRequired):
+		return status.Errorf(codes.InvalidArgument, "causation ID is required")
+	case errors.Is(err, domain.ErrInvalidTrustLevel):
+		return status.Errorf(codes.InvalidArgument, "trust level must be between 0 and 100")
+	default:
+		return nil
 	}
 }
 

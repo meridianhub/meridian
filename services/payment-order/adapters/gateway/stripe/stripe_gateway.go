@@ -112,6 +112,32 @@ func (a *GatewayAdapter) SendPayment(ctx context.Context, req gateway.PaymentReq
 		tenantID = tid.String()
 	}
 
+	params, platformFeeAmount, err := a.buildPaymentIntentParams(req, accountID, tenantID)
+	if err != nil {
+		return gateway.PaymentResponse{}, err
+	}
+
+	a.logger.Debug("creating stripe payment intent",
+		"payment_order_id", req.PaymentOrderID.String(),
+		"tenant_id", tenantID,
+		"amount", domain.ToMinorUnits(req.Amount),
+		"currency", strings.ToLower(domain.CurrencyCode(req.Amount)),
+		"connected_account", accountID,
+	)
+
+	start := time.Now()
+	pi, err := a.creator.Create(ctx, params)
+	duration := time.Since(start)
+
+	if err != nil {
+		return a.handleError(err, strings.ToLower(domain.CurrencyCode(req.Amount)), duration)
+	}
+
+	return a.buildSuccessResponse(pi, req.PaymentOrderID.String(), platformFeeAmount, duration), nil
+}
+
+// buildPaymentIntentParams constructs the Stripe PaymentIntent creation parameters.
+func (a *GatewayAdapter) buildPaymentIntentParams(req gateway.PaymentRequest, accountID, tenantID string) (*stripego.PaymentIntentCreateParams, int64, error) {
 	amountMinor := domain.ToMinorUnits(req.Amount)
 	currencyLower := strings.ToLower(domain.CurrencyCode(req.Amount))
 
@@ -128,49 +154,34 @@ func (a *GatewayAdapter) SendPayment(ctx context.Context, req gateway.PaymentReq
 		},
 	}
 
-	// Calculate and set platform fee if configured
 	var platformFeeAmount int64
 	if a.config.PlatformFee != nil && !a.config.PlatformFee.IsZero() {
 		var err error
 		platformFeeAmount, err = a.config.PlatformFee.CalculateFee(amountMinor)
 		if err != nil {
-			return gateway.PaymentResponse{}, fmt.Errorf("platform fee calculation failed: %w", err)
+			return nil, 0, fmt.Errorf("platform fee calculation failed: %w", err)
 		}
 		if platformFeeAmount > 0 {
 			params.ApplicationFeeAmount = stripego.Int64(platformFeeAmount)
 		}
 	}
 
-	// Set idempotency key
-	idempotencyKey := IdempotencyKey(req.PaymentOrderID, "payment_intent")
-	params.IdempotencyKey = stripego.String(idempotencyKey)
-
-	// Set Connected Account header
+	params.IdempotencyKey = stripego.String(IdempotencyKey(req.PaymentOrderID, "payment_intent"))
 	params.SetStripeAccount(accountID)
 
-	a.logger.Debug("creating stripe payment intent",
-		"payment_order_id", req.PaymentOrderID.String(),
-		"tenant_id", tenantID,
-		"amount", amountMinor,
-		"currency", currencyLower,
-		"connected_account", accountID,
-	)
+	return params, platformFeeAmount, nil
+}
 
-	start := time.Now()
-	pi, err := a.creator.Create(ctx, params)
-	duration := time.Since(start)
-
-	if err != nil {
-		return a.handleError(err, currencyLower, duration)
-	}
-
+// buildSuccessResponse constructs the gateway response from a successful PaymentIntent creation.
+func (a *GatewayAdapter) buildSuccessResponse(pi *stripego.PaymentIntent, paymentOrderID string, platformFeeAmount int64, duration time.Duration) gateway.PaymentResponse {
 	status := mapPaymentIntentStatus(pi.Status)
+	currencyLower := strings.ToLower(string(pi.Currency))
 
 	stripePaymentTotal.WithLabelValues(string(status), currencyLower).Inc()
 	stripePaymentDuration.WithLabelValues(string(status)).Observe(duration.Seconds())
 
 	a.logger.Info("stripe payment intent created",
-		"payment_order_id", req.PaymentOrderID.String(),
+		"payment_order_id", paymentOrderID,
 		"payment_intent_id", pi.ID,
 		"status", string(pi.Status),
 		"mapped_status", string(status),
@@ -182,7 +193,7 @@ func (a *GatewayAdapter) SendPayment(ctx context.Context, req gateway.PaymentReq
 		Status:             status,
 		Message:            string(pi.Status),
 		PlatformFeeAmount:  platformFeeAmount,
-	}, nil
+	}
 }
 
 // handleError processes Stripe API errors and maps them to appropriate responses.

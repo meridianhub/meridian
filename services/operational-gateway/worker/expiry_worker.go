@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/meridianhub/meridian/services/operational-gateway/domain"
 	"github.com/meridianhub/meridian/services/operational-gateway/ports"
 )
 
@@ -142,38 +143,15 @@ func (w *ExpiryWorker) scanAndExpire(ctx context.Context) {
 			return
 		}
 
-		if instr.IsTerminal() {
-			// The instruction reached a terminal state between the query and now.
+		outcome := w.expireInstruction(ctx, instr)
+		switch outcome {
+		case expiryExpired:
+			expired++
+		case expirySkipped:
 			skipped++
-			continue
-		}
-
-		if err := instr.MarkExpired(); err != nil {
-			w.logger.ErrorContext(ctx, "failed to mark instruction expired",
-				"instruction_id", instr.ID,
-				"status", instr.Status,
-				"error", err,
-			)
+		case expiryFailed:
 			failed++
-			continue
 		}
-
-		if err := w.instructionRepo.Save(ctx, instr, ""); err != nil {
-			w.logger.ErrorContext(ctx, "failed to save expired instruction",
-				"instruction_id", instr.ID,
-				"error", err,
-			)
-			failed++
-			continue
-		}
-
-		w.logger.InfoContext(ctx, "instruction expired",
-			"instruction_id", instr.ID,
-			"tenant_id", instr.TenantID,
-			"instruction_type", instr.InstructionType,
-			"expires_at", instr.ExpiresAt,
-		)
-		expired++
 	}
 
 	w.logger.InfoContext(ctx, "expiry batch completed",
@@ -182,4 +160,45 @@ func (w *ExpiryWorker) scanAndExpire(ctx context.Context) {
 		"failed", failed,
 		"total", len(instructions),
 	)
+}
+
+// expiryOutcome represents the result of attempting to expire a single instruction.
+type expiryOutcome int
+
+const (
+	expiryExpired expiryOutcome = iota
+	expirySkipped
+	expiryFailed
+)
+
+// expireInstruction attempts to transition a single instruction to EXPIRED status.
+func (w *ExpiryWorker) expireInstruction(ctx context.Context, instr *domain.Instruction) expiryOutcome {
+	if instr.IsTerminal() {
+		return expirySkipped
+	}
+
+	if err := instr.MarkExpired(); err != nil {
+		w.logger.ErrorContext(ctx, "failed to mark instruction expired",
+			"instruction_id", instr.ID,
+			"status", instr.Status,
+			"error", err,
+		)
+		return expiryFailed
+	}
+
+	if err := w.instructionRepo.Save(ctx, instr, ""); err != nil {
+		w.logger.ErrorContext(ctx, "failed to save expired instruction",
+			"instruction_id", instr.ID,
+			"error", err,
+		)
+		return expiryFailed
+	}
+
+	w.logger.InfoContext(ctx, "instruction expired",
+		"instruction_id", instr.ID,
+		"tenant_id", instr.TenantID,
+		"instruction_type", instr.InstructionType,
+		"expires_at", instr.ExpiresAt,
+	)
+	return expiryExpired
 }

@@ -139,7 +139,7 @@ func updateExistingAccount(tx *gorm.DB, entity *InternalAccountEntity, existing 
 			"attributes":                entity.Attributes,
 			"version":                   entity.Version,
 			"updated_at":                entity.UpdatedAt,
-			"updated_by":               entity.UpdatedBy,
+			"updated_by":                entity.UpdatedBy,
 		})
 
 	if updateResult.Error != nil {

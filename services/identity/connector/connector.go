@@ -146,7 +146,7 @@ func (c *Connector) Login(ctx context.Context, _ []string, username, password st
 
 	if err := credentials.ValidatePassword(password, identity.PasswordHash()); err != nil {
 		c.handleFailedLogin(ctx, identity, tenantID)
-		return Identity{}, false, nil
+		return Identity{}, false, nil //nolint:nilerr // wrong password returns (false, nil) per contract - not an infrastructure error
 	}
 
 	// Record successful login; best-effort.

@@ -181,65 +181,12 @@ func createInternalAccountClient(namespace string, logger *slog.Logger, tracer *
 // Provider selection and API key validation are handled by ServiceConfig.Validate,
 // so this function assumes the config is already validated.
 func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gateway.PaymentGateway, func(), error) {
-	var baseGateway gateway.PaymentGateway
-	cleanup := func() {}
-
-	switch svcConfig.PaymentGatewayProvider {
-	case gateway.ProviderStripe:
-		client := stripego.NewClient(svcConfig.StripeAPIKey)
-		baseGateway = stripegateway.NewGatewayAdapter(
-			client.V1PaymentIntents,
-			stripegateway.GatewayAdapterConfig{},
-			logger,
-		)
-		logger.Info("using stripe payment gateway")
-
-	case gateway.ProviderFinancialGateway:
-		fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{
-			Target: svcConfig.FinancialGatewayAddr,
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create financial-gateway gRPC client: %w", err)
-		}
-		cleanup = fgCleanup
-		baseGateway = gateway.NewFinancialGatewayClient(fgClient, logger)
-		logger.Info("using financial-gateway payment gateway", "addr", svcConfig.FinancialGatewayAddr)
-
-	case gateway.ProviderMock:
-		logger.Warn("using mock payment gateway")
-		baseGateway = gateway.New(gateway.Config{
-			UseMock: true,
-			MockConfig: gateway.MockGatewayConfig{
-				DeterministicFailures: true,
-			},
-		})
-
-	default:
-		return nil, nil, fmt.Errorf("%w: %q (valid: %q, %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderFinancialGateway, gateway.ProviderMock)
+	baseGateway, cleanup, err := createBaseGateway(svcConfig, logger)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	// Configure resilience settings from environment
-	resilientConfig := gateway.ResilientGatewayConfig{
-		// Circuit breaker settings
-		CircuitBreakerName:     "payment-gateway",
-		CircuitBreakerTimeout:  env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultCircuitBreakerOpenTimeout),
-		CircuitBreakerInterval: env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerInterval),
-		MaxRequests:            env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
-		FailureThreshold:       env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
-
-		// Rate limiting settings
-		RateLimit:      env.GetEnvAsFloat("GATEWAY_RATE_LIMIT", 100.0),
-		RateLimitBurst: env.GetEnvAsInt("GATEWAY_RATE_LIMIT_BURST", 10),
-
-		// Retry settings
-		MaxRetries:          env.GetEnvAsInt("GATEWAY_MAX_RETRIES", 3),
-		InitialInterval:     env.GetEnvAsDuration("GATEWAY_RETRY_INITIAL_INTERVAL", defaults.DefaultRetryDelay),
-		MaxInterval:         env.GetEnvAsDuration("GATEWAY_RETRY_MAX_INTERVAL", defaults.DefaultMaxRetryInterval),
-		Multiplier:          env.GetEnvAsFloat("GATEWAY_RETRY_MULTIPLIER", 2.0),
-		RandomizationFactor: env.GetEnvAsFloat("GATEWAY_RETRY_RANDOMIZATION", 0.5),
-
-		Logger: logger,
-	}
+	resilientConfig := buildGatewayResilienceConfig(logger)
 
 	logger.Info("payment gateway configured with resilience patterns",
 		"circuit_breaker_timeout", resilientConfig.CircuitBreakerTimeout,
@@ -250,6 +197,66 @@ func createPaymentGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (
 	)
 
 	return gateway.NewResilientPaymentGateway(baseGateway, resilientConfig), cleanup, nil
+}
+
+// createBaseGateway creates the provider-specific base gateway implementation.
+func createBaseGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gateway.PaymentGateway, func(), error) {
+	cleanup := func() {}
+
+	switch svcConfig.PaymentGatewayProvider {
+	case gateway.ProviderStripe:
+		client := stripego.NewClient(svcConfig.StripeAPIKey)
+		gw := stripegateway.NewGatewayAdapter(
+			client.V1PaymentIntents,
+			stripegateway.GatewayAdapterConfig{},
+			logger,
+		)
+		logger.Info("using stripe payment gateway")
+		return gw, cleanup, nil
+
+	case gateway.ProviderFinancialGateway:
+		fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{
+			Target: svcConfig.FinancialGatewayAddr,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create financial-gateway gRPC client: %w", err)
+		}
+		gw := gateway.NewFinancialGatewayClient(fgClient, logger)
+		logger.Info("using financial-gateway payment gateway", "addr", svcConfig.FinancialGatewayAddr)
+		return gw, fgCleanup, nil
+
+	case gateway.ProviderMock:
+		logger.Warn("using mock payment gateway")
+		gw := gateway.New(gateway.Config{
+			UseMock: true,
+			MockConfig: gateway.MockGatewayConfig{
+				DeterministicFailures: true,
+			},
+		})
+		return gw, cleanup, nil
+
+	default:
+		return nil, nil, fmt.Errorf("%w: %q (valid: %q, %q, %q)", config.ErrInvalidGatewayProvider, svcConfig.PaymentGatewayProvider, gateway.ProviderStripe, gateway.ProviderFinancialGateway, gateway.ProviderMock)
+	}
+}
+
+// buildGatewayResilienceConfig creates the resilience configuration from environment variables.
+func buildGatewayResilienceConfig(logger *slog.Logger) gateway.ResilientGatewayConfig {
+	return gateway.ResilientGatewayConfig{
+		CircuitBreakerName:     "payment-gateway",
+		CircuitBreakerTimeout:  env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_TIMEOUT", defaults.DefaultCircuitBreakerOpenTimeout),
+		CircuitBreakerInterval: env.GetEnvAsDuration("GATEWAY_CIRCUIT_BREAKER_INTERVAL", defaults.DefaultCircuitBreakerInterval),
+		MaxRequests:            env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_MAX_REQUESTS", 1),
+		FailureThreshold:       env.GetEnvAsUint32("GATEWAY_CIRCUIT_BREAKER_FAILURE_THRESHOLD", 5),
+		RateLimit:              env.GetEnvAsFloat("GATEWAY_RATE_LIMIT", 100.0),
+		RateLimitBurst:         env.GetEnvAsInt("GATEWAY_RATE_LIMIT_BURST", 10),
+		MaxRetries:             env.GetEnvAsInt("GATEWAY_MAX_RETRIES", 3),
+		InitialInterval:        env.GetEnvAsDuration("GATEWAY_RETRY_INITIAL_INTERVAL", defaults.DefaultRetryDelay),
+		MaxInterval:            env.GetEnvAsDuration("GATEWAY_RETRY_MAX_INTERVAL", defaults.DefaultMaxRetryInterval),
+		Multiplier:             env.GetEnvAsFloat("GATEWAY_RETRY_MULTIPLIER", 2.0),
+		RandomizationFactor:    env.GetEnvAsFloat("GATEWAY_RETRY_RANDOMIZATION", 0.5),
+		Logger:                 logger,
+	}
 }
 
 // createRedisClient creates and validates a Redis client connection.

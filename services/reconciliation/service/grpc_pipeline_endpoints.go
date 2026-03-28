@@ -235,7 +235,7 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 
 	slog.Info("reconciliation pipeline started", "run_id", runID)
 
-	startIndex, err := s.resolveStartPhase(runID)
+	startIndex, err := s.resolveStartPhase(runID) //nolint:contextcheck // uses persist context internally
 	if err != nil {
 		s.failRun(ctx, runID, err.Error())
 		return
@@ -245,14 +245,14 @@ func (s *AccountReconciliationService) executePipeline(ctx context.Context, runI
 		return
 	}
 
-	s.completePipeline(runID)
+	s.completePipeline(runID) //nolint:contextcheck // uses completion context internally
 }
 
 // resolveStartPhase determines which pipeline phase to start from based on the run's checkpoint.
 func (s *AccountReconciliationService) resolveStartPhase(runID uuid.UUID) (int, error) {
 	persistCtx, persistCancel := context.WithTimeout(context.Background(), persistTimeout)
 	defer persistCancel()
-	run, err := s.runRepo.FindByID(persistCtx, runID) //nolint:contextcheck // uses persist context created above
+	run, err := s.runRepo.FindByID(persistCtx, runID)
 	if err != nil {
 		slog.Error("failed to retrieve run for pipeline start", "run_id", runID, "error", err)
 		return 0, fmt.Errorf("failed to retrieve run for pipeline start: %w", err)
@@ -319,7 +319,7 @@ func (s *AccountReconciliationService) runPipelinePhases(ctx context.Context, ru
 func (s *AccountReconciliationService) completePipeline(runID uuid.UUID) {
 	completeCtx, completeCancel := context.WithTimeout(context.Background(), persistTimeout)
 	defer completeCancel()
-	run, err := s.runRepo.FindByID(completeCtx, runID) //nolint:contextcheck // uses completion context created above
+	run, err := s.runRepo.FindByID(completeCtx, runID)
 	if err != nil {
 		slog.Error("failed to retrieve run for completion", "run_id", runID, "error", err)
 		return
@@ -328,7 +328,7 @@ func (s *AccountReconciliationService) completePipeline(runID uuid.UUID) {
 		slog.Error("failed to transition run to COMPLETED", "run_id", runID, "error", err)
 		return
 	}
-	if err := s.runRepo.Update(completeCtx, run); err != nil { //nolint:contextcheck // uses completion context created above
+	if err := s.runRepo.Update(completeCtx, run); err != nil {
 		slog.Error("failed to persist COMPLETED state", "run_id", runID, "error", err)
 		return
 	}

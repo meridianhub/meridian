@@ -432,13 +432,13 @@ func (c *Container) initScheduler(ctx context.Context) {
 
 	executionStore, err := c.buildExecutionStore(ctx)
 	if err != nil {
-		c.Logger.Warn("scheduler disabled: "+err.Error())
+		c.Logger.Warn("scheduler disabled: " + err.Error())
 		return
 	}
 
 	provider, executor, err := c.buildSchedulerWorkers()
 	if err != nil {
-		c.Logger.Warn("scheduler disabled: "+err.Error())
+		c.Logger.Warn("scheduler disabled: " + err.Error())
 		return
 	}
 

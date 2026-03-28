@@ -164,7 +164,7 @@ func (r *Runtime) ExecuteSagaWithInput(ctx context.Context, name string, script 
 	}
 
 	// Create and configure thread
-	thread := r.buildThread(name, ctx, &execInput)
+	thread := r.buildThread(ctx, name, &execInput)
 
 	// Execute script and wait for completion or cancellation
 	globals, execErr := r.executeAndWait(ctx, thread, name, script, predeclared)
@@ -227,7 +227,7 @@ func (r *Runtime) resolvePartyScope(ctx context.Context, name string, execInput 
 }
 
 // buildThread creates and configures a Starlark thread with cancellation, sandbox, and caller setup.
-func (r *Runtime) buildThread(name string, ctx context.Context, execInput *ExecutionInput) *starlark.Thread {
+func (r *Runtime) buildThread(ctx context.Context, name string, execInput *ExecutionInput) *starlark.Thread {
 	thread := &starlark.Thread{
 		Name: name,
 		Print: func(_ *starlark.Thread, msg string) {

@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
+	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/services/financial-accounting/observability"
@@ -239,6 +240,81 @@ func (s *FinancialAccountingService) storeIdempotencyResult(
 			"idempotency_key", key.RequestID,
 			"operation", operation)
 	}
+}
+
+// idempotencyTTLFromKey returns the TTL from an idempotency key, falling back to the default.
+func idempotencyTTLFromKey(ttlSeconds int32) time.Duration {
+	if ttlSeconds > 0 {
+		return time.Duration(ttlSeconds) * time.Second
+	}
+	return defaultIdempotencyTTL
+}
+
+// marshalForCache serializes a proto message for idempotency caching (best-effort).
+// Returns nil on marshal failure rather than propagating the error.
+func marshalForCache(msg proto.Message, idempotencyKey, operation string) []byte {
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		slog.Error("failed to serialize response for idempotency cache",
+			"error", err,
+			"idempotency_key", idempotencyKey,
+			"operation", operation)
+		return nil
+	}
+	return data
+}
+
+// mapIdempotencyExecutorError maps errors from the idempotency executor to gRPC status errors.
+func mapIdempotencyExecutorError(err error) error {
+	if errors.Is(err, idempotency.ErrOperationInProgress) {
+		return status.Error(codes.Aborted, "operation already in progress")
+	}
+	var execErr *idempotency.ExecutorError
+	if errors.As(err, &execErr) {
+		return status.Errorf(codes.Internal, "idempotency error: %v", err)
+	}
+	// Business logic errors pass through directly (already gRPC status errors)
+	return err
+}
+
+// handleCachedUpdateBookingLogResponse deserializes a cached UpdateFinancialBookingLogResponse.
+func handleCachedUpdateBookingLogResponse(data []byte, idempotencyKey, entityID string) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+	if len(data) > 0 {
+		var cached financialaccountingv1.UpdateFinancialBookingLogResponse
+		if err := proto.Unmarshal(data, &cached); err != nil {
+			slog.Error("failed to deserialize cached idempotency response",
+				"error", err,
+				"idempotency_key", idempotencyKey,
+				"operation", "update-booking-log")
+			return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+		}
+		slog.Info("returning cached idempotent response",
+			"idempotency_key", idempotencyKey,
+			"operation", "update-booking-log",
+			"booking_log_id", entityID)
+		return &cached, nil
+	}
+	return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+}
+
+// handleCachedUpdatePostingResponse deserializes a cached UpdateLedgerPostingResponse.
+func handleCachedUpdatePostingResponse(data []byte, idempotencyKey, entityID string) (*financialaccountingv1.UpdateLedgerPostingResponse, error) {
+	if len(data) > 0 {
+		var cached financialaccountingv1.UpdateLedgerPostingResponse
+		if err := proto.Unmarshal(data, &cached); err != nil {
+			slog.Error("failed to deserialize cached idempotency response",
+				"error", err,
+				"idempotency_key", idempotencyKey,
+				"operation", "update-posting")
+			return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+		}
+		slog.Info("returning cached idempotent response",
+			"idempotency_key", idempotencyKey,
+			"operation", "update-posting",
+			"posting_id", entityID)
+		return &cached, nil
+	}
+	return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
 }
 
 // publishControlEventsInTx writes control events to the outbox within a transaction.

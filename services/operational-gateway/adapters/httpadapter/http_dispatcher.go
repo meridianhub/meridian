@@ -153,79 +153,88 @@ func (d *HTTPDispatcher) Dispatch(
 ) ports.DispatchResult {
 	start := time.Now()
 
-	if instruction == nil {
-		return ports.DispatchResult{
-			Duration: time.Since(start),
-			Error:    ErrNilInstruction,
-		}
-	}
-	if conn == nil {
-		return ports.DispatchResult{
-			Duration: time.Since(start),
-			Error:    ErrNilConnection,
-		}
-	}
-	if route == nil {
-		return ports.DispatchResult{
-			Duration: time.Since(start),
-			Error:    ErrNilRoute,
-		}
+	if err := validateDispatchInputs(instruction, conn, route); err != nil {
+		return ports.DispatchResult{Duration: time.Since(start), Error: err}
 	}
 
+	req, body, err := d.buildDispatchRequest(ctx, instruction, conn, route)
+	if err != nil {
+		return ports.DispatchResult{Duration: time.Since(start), Error: err}
+	}
+
+	if err := d.applyDispatchAuth(ctx, req, body, instruction.TenantID.String(), conn); err != nil {
+		return ports.DispatchResult{Duration: time.Since(start), Error: err}
+	}
+
+	return d.executeAndTransform(ctx, req, instruction, route, start)
+}
+
+// validateDispatchInputs checks that the required dispatch inputs are non-nil.
+func validateDispatchInputs(instruction *domain.Instruction, conn *domain.ProviderConnection, route *ports.InstructionRoute) error {
+	if instruction == nil {
+		return ErrNilInstruction
+	}
+	if conn == nil {
+		return ErrNilConnection
+	}
+	if route == nil {
+		return ErrNilRoute
+	}
+	return nil
+}
+
+// buildDispatchRequest transforms the outbound payload and builds the HTTP request with headers.
+func (d *HTTPDispatcher) buildDispatchRequest(
+	ctx context.Context,
+	instruction *domain.Instruction,
+	conn *domain.ProviderConnection,
+	route *ports.InstructionRoute,
+) (*http.Request, []byte, error) {
 	body, transformHeaders, err := d.transformer.TransformOutbound(ctx, instruction, route)
 	if err != nil {
-		return ports.DispatchResult{
-			Duration: time.Since(start),
-			Error:    fmt.Errorf("outbound transform: %w", err),
-		}
+		return nil, nil, fmt.Errorf("outbound transform: %w", err)
 	}
 
 	targetURL := buildURL(conn.BaseURL, route.PathTemplate)
-
 	req, err := http.NewRequestWithContext(ctx, route.HTTPMethod, targetURL, bytes.NewReader(body))
 	if err != nil {
-		return ports.DispatchResult{
-			Duration: time.Since(start),
-			Error:    fmt.Errorf("building request: %w", err),
-		}
+		return nil, nil, fmt.Errorf("building request: %w", err)
 	}
 
-	// Set standard headers first so that auth headers applied below take precedence
-	// and cannot be overwritten by route or transform headers.
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", uuid.New().String())
-
-	// Route-level static headers (from mapping definition).
 	for k, v := range transformHeaders {
 		req.Header.Set(k, v)
 	}
-
-	// Route-level static headers defined on the InstructionRoute.
 	for k, v := range route.Headers {
 		req.Header.Set(k, v)
 	}
 
-	// Apply transport-level authentication last so that auth headers cannot be
-	// overridden by route or transform headers set above.
-	// For mTLS dispatchers, authentication is handled by the TLS handshake; fail fast
-	// if the connection is misconfigured with a non-mTLS auth type to avoid sending
-	// unauthenticated requests.
+	return req, body, nil
+}
+
+// applyDispatchAuth applies authentication to the request, handling both mTLS and app-level auth.
+func (d *HTTPDispatcher) applyDispatchAuth(ctx context.Context, req *http.Request, body []byte, tenantID string, conn *domain.ProviderConnection) error {
 	if d.skipAppLevelAuth {
 		if _, ok := conn.AuthConfig.(*domain.MTLSAuth); !ok {
-			return ports.DispatchResult{
-				Duration: time.Since(start),
-				Error:    fmt.Errorf("%w: got %T", ErrMTLSAuthRequired, conn.AuthConfig),
-			}
+			return fmt.Errorf("%w: got %T", ErrMTLSAuthRequired, conn.AuthConfig)
 		}
-	} else {
-		if err := d.applyAuth(ctx, req, body, instruction.TenantID.String(), conn.AuthConfig); err != nil {
-			return ports.DispatchResult{
-				Duration: time.Since(start),
-				Error:    fmt.Errorf("applying auth: %w", err),
-			}
-		}
+		return nil
 	}
+	if err := d.applyAuth(ctx, req, body, tenantID, conn.AuthConfig); err != nil {
+		return fmt.Errorf("applying auth: %w", err)
+	}
+	return nil
+}
 
+// executeAndTransform executes the HTTP request and transforms the response.
+func (d *HTTPDispatcher) executeAndTransform(
+	ctx context.Context,
+	req *http.Request,
+	instruction *domain.Instruction,
+	route *ports.InstructionRoute,
+	start time.Time,
+) ports.DispatchResult {
 	resp, err := d.client.Do(req)
 	if err != nil {
 		return ports.DispatchResult{

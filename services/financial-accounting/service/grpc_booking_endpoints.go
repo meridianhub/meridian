@@ -13,7 +13,6 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
 // InitiateFinancialBookingLog creates a new financial booking log.
@@ -45,22 +44,9 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Check idempotency (skip if service not configured - e.g., Redis unavailable in dev)
-	if s.idempotency != nil {
-		result, err := s.idempotency.Check(ctx, idempotencyKey)
-		if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				if result != nil && result.Status == idempotency.StatusCompleted {
-					return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-				}
-			}
-			return nil, status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
-		}
-
-		// Mark as pending to prevent concurrent processing
-		if err := s.idempotency.MarkPending(ctx, idempotencyKey, defaultIdempotencyTTL); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
-		}
+	// Check idempotency and mark pending (skip if service not configured)
+	if err := s.checkAndMarkPendingSimple(ctx, idempotencyKey); err != nil {
+		return nil, err
 	}
 
 	// Validate request fields
@@ -86,8 +72,7 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to save booking log: %v", err)
 	}
 
-	// Publish FinancialBookingLogInitiatedEvent for inter-service coordination
-	// Event publishing is best-effort - errors are logged but don't fail the operation
+	// Publish FinancialBookingLogInitiatedEvent (best-effort)
 	correlationID := ""
 	if req.IdempotencyKey != nil {
 		correlationID = req.IdempotencyKey.Key
@@ -100,25 +85,55 @@ func (s *FinancialAccountingService) InitiateFinancialBookingLog(
 	}
 
 	// Store idempotency result (only if service configured)
-	if s.idempotency != nil {
-		ttl := defaultIdempotencyTTL
-		if req.IdempotencyKey.TtlSeconds > 0 {
-			ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
-		}
-		idempResult := idempotency.Result{
-			Key:         idempotencyKey,
-			Status:      idempotency.StatusCompleted,
-			Data:        nil,
-			CompletedAt: time.Now(),
-			TTL:         ttl,
-		}
-		_ = s.idempotency.StoreResult(ctx, idempResult)
-	}
+	s.storeInitiateIdempotencyResult(ctx, idempotencyKey, req.IdempotencyKey)
 
-	// Convert to proto response
 	return &financialaccountingv1.InitiateFinancialBookingLogResponse{
 		FinancialBookingLog: toProtoFinancialBookingLog(bookingLog),
 	}, nil
+}
+
+// checkAndMarkPendingSimple checks idempotency and marks the operation as pending.
+// Used by create operations where no cached response data is returned (just AlreadyExists).
+// Returns nil if idempotency service is not configured.
+func (s *FinancialAccountingService) checkAndMarkPendingSimple(ctx context.Context, key idempotency.Key) error {
+	if s.idempotency == nil {
+		return nil
+	}
+
+	result, err := s.idempotency.Check(ctx, key)
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			if result != nil && result.Status == idempotency.StatusCompleted {
+				return status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+			}
+		}
+		return status.Errorf(codes.Internal, "failed to check idempotency: %v", err)
+	}
+
+	if err := s.idempotency.MarkPending(ctx, key, defaultIdempotencyTTL); err != nil {
+		return status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
+	}
+	return nil
+}
+
+// storeInitiateIdempotencyResult stores a completed idempotency result for create operations.
+// Uses the TTL from the idempotency key if provided, otherwise defaults.
+func (s *FinancialAccountingService) storeInitiateIdempotencyResult(ctx context.Context, key idempotency.Key, idempKey *commonv1.IdempotencyKey) {
+	if s.idempotency == nil {
+		return
+	}
+	ttl := defaultIdempotencyTTL
+	if idempKey.TtlSeconds > 0 {
+		ttl = time.Duration(idempKey.TtlSeconds) * time.Second
+	}
+	idempResult := idempotency.Result{
+		Key:         key,
+		Status:      idempotency.StatusCompleted,
+		Data:        nil,
+		CompletedAt: time.Now(),
+		TTL:         ttl,
+	}
+	_ = s.idempotency.StoreResult(ctx, idempResult)
 }
 
 // RetrieveFinancialBookingLog retrieves a specific booking log by ID.
@@ -202,70 +217,25 @@ func (s *FinancialAccountingService) UpdateFinancialBookingLog(
 		RequestID: req.IdempotencyKey.Key,
 	}
 
-	// Determine TTL for idempotency key
-	ttl := defaultIdempotencyTTL
-	if req.IdempotencyKey.TtlSeconds > 0 {
-		ttl = time.Duration(req.IdempotencyKey.TtlSeconds) * time.Second
-	}
+	ttl := idempotencyTTLFromKey(req.IdempotencyKey.TtlSeconds)
 
 	// Use idempotency executor to wrap business logic with atomic PENDING cleanup.
-	// This ensures orphaned PENDING keys are cleaned up if the operation fails.
 	var response *financialaccountingv1.UpdateFinancialBookingLogResponse
 
 	execResult, err := s.idempotencyExecutor.Execute(ctx, idempotencyKey, ttl, func(ctx context.Context) ([]byte, error) {
-		// Execute business logic
 		resp, execErr := s.executeUpdateFinancialBookingLog(ctx, req)
 		if execErr != nil {
 			return nil, execErr
 		}
-
-		// Serialize response for idempotency cache
-		responseData, marshalErr := proto.Marshal(resp)
-		if marshalErr != nil {
-			slog.Error("failed to serialize response for idempotency cache",
-				"error", marshalErr,
-				"idempotency_key", req.IdempotencyKey.Key,
-				"operation", "update-booking-log")
-			// Still return success - the operation completed, just caching failed
-			responseData = nil
-		}
-
 		response = resp
-		return responseData, nil
+		return marshalForCache(resp, req.IdempotencyKey.Key, "update-booking-log"), nil
 	})
 	if err != nil {
-		// Handle specific idempotency errors
-		if errors.Is(err, idempotency.ErrOperationInProgress) {
-			return nil, status.Error(codes.Aborted, "operation already in progress")
-		}
-		// ExecutorErrors wrap idempotency layer errors - return as Internal
-		var execErr *idempotency.ExecutorError
-		if errors.As(err, &execErr) {
-			return nil, status.Errorf(codes.Internal, "idempotency error: %v", err)
-		}
-		// Business logic errors from the fn() callback pass through directly
-		// These are already gRPC status errors, so return as-is
-		return nil, err
+		return nil, mapIdempotencyExecutorError(err)
 	}
 
-	// Handle cached result
 	if execResult.FromCache {
-		if len(execResult.Data) > 0 {
-			var cachedResponse financialaccountingv1.UpdateFinancialBookingLogResponse
-			if unmarshalErr := proto.Unmarshal(execResult.Data, &cachedResponse); unmarshalErr != nil {
-				slog.Error("failed to deserialize cached idempotency response",
-					"error", unmarshalErr,
-					"idempotency_key", req.IdempotencyKey.Key,
-					"operation", "update-booking-log")
-				return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
-			}
-			slog.Info("returning cached idempotent response",
-				"idempotency_key", req.IdempotencyKey.Key,
-				"operation", "update-booking-log",
-				"booking_log_id", req.GetId())
-			return &cachedResponse, nil
-		}
-		return nil, status.Error(codes.AlreadyExists, "request with this idempotency key already processed")
+		return handleCachedUpdateBookingLogResponse(execResult.Data, req.IdempotencyKey.Key, req.GetId())
 	}
 
 	return response, nil
@@ -277,19 +247,47 @@ func (s *FinancialAccountingService) executeUpdateFinancialBookingLog(
 	ctx context.Context,
 	req *financialaccountingv1.UpdateFinancialBookingLogRequest,
 ) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
-	// Parse booking log ID
 	bookingLogID, err := parseUUID(req.GetId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid id: %v", err)
 	}
 
-	// Validate status
 	if req.Status == commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED {
 		return nil, status.Error(codes.InvalidArgument, "status must be specified")
 	}
 	newStatus := fromProtoTransactionStatus(req.Status)
 
-	// Retrieve existing booking log
+	// Retrieve and validate transition
+	bookingLog, err := s.retrieveAndValidateBookingLogTransition(ctx, bookingLogID, newStatus)
+	if err != nil {
+		return nil, err
+	}
+
+	previousStatus := bookingLog.Status
+
+	// Apply updates
+	updated := bookingLog.WithStatus(newStatus)
+	if req.ChartOfAccountsRules != "" {
+		updated = updated.WithChartOfAccountsRules(req.ChartOfAccountsRules)
+	}
+
+	// Persist and publish event
+	if err := s.persistAndPublishBookingLogUpdate(ctx, bookingLogID, &updated, previousStatus, newStatus, req.IdempotencyKey); err != nil {
+		return nil, err
+	}
+
+	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
+		FinancialBookingLog: toProtoFinancialBookingLog(&updated),
+	}, nil
+}
+
+// retrieveAndValidateBookingLogTransition retrieves a booking log and validates the requested
+// status transition, including double-entry balance checks for POSTED transitions.
+func (s *FinancialAccountingService) retrieveAndValidateBookingLogTransition(
+	ctx context.Context,
+	bookingLogID [16]byte,
+	newStatus domain.TransactionStatus,
+) (*domain.FinancialBookingLog, error) {
 	bookingLog, err := s.repository.GetBookingLog(ctx, bookingLogID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrBookingLogNotFound) {
@@ -298,59 +296,48 @@ func (s *FinancialAccountingService) executeUpdateFinancialBookingLog(
 		return nil, status.Errorf(codes.Internal, "failed to retrieve booking log: %v", err)
 	}
 
-	// Capture previous status BEFORE update for event publishing
-	previousStatus := bookingLog.Status
-
-	// Validate state transition using the state machine
-	// This handles all valid transitions including POSTED -> REVERSED for reversals
 	if !isValidBookingLogTransition(bookingLog.Status, newStatus) {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"invalid status transition from %s to %s", bookingLog.Status, newStatus)
 	}
 
-	// Enforce double-entry bookkeeping constraint when transitioning to POSTED
 	if newStatus == domain.TransactionStatusPosted {
 		if err := s.validateDoubleEntryBalance(ctx, bookingLogID); err != nil {
 			return nil, err
 		}
 	}
+	return bookingLog, nil
+}
 
-	// Apply status update
-	updated := bookingLog.WithStatus(newStatus)
-
-	// Apply chart of accounts rules update if provided
-	if req.ChartOfAccountsRules != "" {
-		updated = updated.WithChartOfAccountsRules(req.ChartOfAccountsRules)
-	}
-
-	// Persist updated booking log
-	if err := s.repository.UpdateBookingLog(ctx, &updated); err != nil {
+// persistAndPublishBookingLogUpdate persists a booking log update and publishes
+// the FinancialBookingLogUpdatedEvent (best-effort).
+func (s *FinancialAccountingService) persistAndPublishBookingLogUpdate(
+	ctx context.Context,
+	bookingLogID [16]byte,
+	updated *domain.FinancialBookingLog,
+	previousStatus, newStatus domain.TransactionStatus,
+	idempKey *commonv1.IdempotencyKey,
+) error {
+	if err := s.repository.UpdateBookingLog(ctx, updated); err != nil {
 		if errors.Is(err, persistence.ErrBookingLogNotFound) {
-			return nil, status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
+			return status.Errorf(codes.NotFound, "financial booking log not found: %s", bookingLogID)
 		}
-		return nil, status.Errorf(codes.Internal, "failed to update booking log: %v", err)
+		return status.Errorf(codes.Internal, "failed to update booking log: %v", err)
 	}
 
-	// Publish FinancialBookingLogUpdatedEvent for inter-service coordination
-	// Event publishing is best-effort - errors are logged but don't fail the operation
 	correlationID := ""
-	if req.IdempotencyKey != nil {
-		correlationID = req.IdempotencyKey.Key
+	if idempKey != nil {
+		correlationID = idempKey.Key
 	}
-	event := buildBookingLogUpdatedEvent(bookingLogID, &updated, previousStatus, newStatus, correlationID, extractUserFromContext(ctx))
-
+	event := buildBookingLogUpdatedEvent(bookingLogID, updated, previousStatus, newStatus, correlationID, extractUserFromContext(ctx))
 	if err := s.eventPublisher.Publish(ctx, event); err != nil {
 		slog.Error("failed to publish FinancialBookingLogUpdatedEvent",
 			"error", err,
-			"booking_log_id", bookingLogID.String(),
+			"booking_log_id", bookingLogID,
 			"previous_status", previousStatus,
 			"new_status", newStatus)
 	}
-
-	// Convert to proto response
-	return &financialaccountingv1.UpdateFinancialBookingLogResponse{
-		FinancialBookingLog: toProtoFinancialBookingLog(&updated),
-	}, nil
+	return nil
 }
 
 // isValidBookingLogTransition validates that a status transition is allowed.

@@ -123,7 +123,7 @@ func buildGRPCServer(ctx context.Context, tracer *observability.Tracer, logger *
 		return nil, fmt.Errorf("failed to initialize auth: %w", err)
 	}
 
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger). //nolint:contextcheck // builder pattern; context passed via auth interceptor
 		WithAuthInterceptor(authInterceptor).
 		WithUnaryInterceptor(server.ManifestRBACUnaryInterceptor()).
 		WithStreamInterceptor(server.ManifestRBACStreamInterceptor()).

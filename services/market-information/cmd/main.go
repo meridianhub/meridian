@@ -23,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -69,45 +70,21 @@ func run(logger *slog.Logger) error {
 	}
 	defer container.Close()
 
-	// Create gRPC server with interceptor chain
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(container.Tracer, logger).
-		WithAuthInterceptor(container.AuthInterceptor).
-		Build()
+	// Create and register gRPC services
+	grpcServer, healthChecker, err := buildGRPCServer(container, logger)
 	if err != nil {
-		return fmt.Errorf("failed to build grpc server: %w", err)
+		return err
 	}
 
-	// Register Market Information service
-	marketinformationv1.RegisterMarketInformationServiceServer(grpcServer, container.MarketInformationServer)
-
-	// Register health check service
-	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
-		Logger:        logger,
-		ServiceName:   "market-information",
-		CheckTimeout:  defaults.DefaultHealthCheckTimeout,
-		ServiceConfig: container.Config,
-	})
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
-
-	// Register reflection service for debugging
-	reflection.Register(grpcServer)
-
-	logger.Info("gRPC services registered")
-
-	// Get ports from environment
+	// Start gRPC listener
 	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.MarketInformation))
 	address := fmt.Sprintf(":%s", port)
-	metricsPort := env.GetEnvOrDefault("METRICS_PORT", "8082")
-
-	// Create listener
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", address, err)
 	}
 
 	// Start gRPC server in background
-	// Buffer size must match number of goroutines writing to this channel
-	// to prevent deadlock on simultaneous failures (gRPC + HTTP = 2)
 	serverErrors := make(chan error, 2)
 	go func() {
 		logger.Info("starting gRPC server", "address", address)
@@ -116,58 +93,9 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Start HTTP server for metrics and health endpoints
-	httpMux := http.NewServeMux()
-	httpMux.Handle("/metrics", promhttp.Handler())
-	httpMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		// Simple health endpoint for HTTP probes
-		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{})
-		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if _, err := w.Write([]byte("NOT_SERVING")); err != nil {
-				logger.Warn("failed to write health response",
-					"error", err,
-					"endpoint", r.URL.Path,
-					"remote_addr", r.RemoteAddr)
-			}
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte("SERVING")); err != nil {
-			logger.Warn("failed to write health response",
-				"error", err,
-				"endpoint", r.URL.Path,
-				"remote_addr", r.RemoteAddr)
-		}
-	})
-	httpMux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
-		// Readiness endpoint - checks all dependencies
-		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{})
-		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if _, err := w.Write([]byte("NOT_READY")); err != nil {
-				logger.Warn("failed to write readiness response",
-					"error", err,
-					"endpoint", r.URL.Path,
-					"remote_addr", r.RemoteAddr)
-			}
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte("READY")); err != nil {
-			logger.Warn("failed to write readiness response",
-				"error", err,
-				"endpoint", r.URL.Path,
-				"remote_addr", r.RemoteAddr)
-		}
-	})
-
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%s", metricsPort),
-		Handler:           httpMux,
-		ReadHeaderTimeout: defaults.DefaultHTTPReadHeaderTimeout,
-		WriteTimeout:      defaults.DefaultHTTPWriteTimeout,
-	}
+	// Start HTTP server for metrics and health
+	metricsPort := env.GetEnvOrDefault("METRICS_PORT", "8082")
+	httpServer := buildHTTPServer(healthChecker, metricsPort, logger)
 
 	go func() {
 		logger.Info("starting HTTP server for metrics", "address", httpServer.Addr)
@@ -177,45 +105,117 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Wait for shutdown signal and orchestrate graceful shutdown
+	// Orchestrate shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
+	initECBWorker(ctx, container, orchestrator, logger)
+	registerHTTPShutdown(orchestrator, httpServer, logger)
 
-	// Initialize ECB adapter worker (if enabled)
-	// Note: The ECB worker calls RecordObservation on the Server to ingest FX rates.
-	cfg := container.Config
-	if cfg.ECB.Enabled {
-		ecbClient := ecb.NewClient(ecb.Config{
-			Endpoint: cfg.ECB.Endpoint,
-			Timeout:  cfg.ECB.Timeout,
-		}, ecb.WithLogger(logger))
+	return orchestrator.Wait(serverErrors)
+}
 
-		ecbWorker := ecb.NewWorker(
-			ecbClient,
-			container.MarketInformationServer, // Server implements MarketInformationClient interface
-			ecb.WorkerConfig{
-				DatasetCode:   cfg.ECB.DatasetCode,
-				SourceCode:    cfg.ECB.SourceCode,
-				FetchInterval: cfg.ECB.Interval,
-				MaxRetries:    cfg.ECB.MaxRetries,
-			},
-			logger,
-		)
-
-		ecbWorker.Start(ctx)
-
-		// Register cleanup to stop ECB worker before other services
-		orchestrator.AddCleanup(func() error {
-			ecbWorker.Stop()
-			return nil
-		})
-
-		logger.Info("ECB adapter initialized",
-			"interval", cfg.ECB.Interval,
-			"source_code", cfg.ECB.SourceCode,
-			"dataset_code", cfg.ECB.DatasetCode)
+// buildGRPCServer creates the gRPC server and registers all services (market information, health, reflection).
+func buildGRPCServer(container *app.Container, logger *slog.Logger) (*grpc.Server, *service.HealthChecker, error) {
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(container.Tracer, logger).
+		WithAuthInterceptor(container.AuthInterceptor).
+		Build()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
 
-	// Register cleanup functions (LIFO order - HTTP server first, then database)
+	marketinformationv1.RegisterMarketInformationServiceServer(grpcServer, container.MarketInformationServer)
+
+	healthChecker := service.NewHealthChecker(service.HealthCheckerConfig{
+		Logger:        logger,
+		ServiceName:   "market-information",
+		CheckTimeout:  defaults.DefaultHealthCheckTimeout,
+		ServiceConfig: container.Config,
+	})
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthChecker)
+
+	reflection.Register(grpcServer)
+
+	logger.Info("gRPC services registered")
+	return grpcServer, healthChecker, nil
+}
+
+// buildHTTPServer creates the HTTP server with metrics, health, and readiness endpoints.
+func buildHTTPServer(healthChecker *service.HealthChecker, metricsPort string, logger *slog.Logger) *http.Server {
+	httpMux := http.NewServeMux()
+	httpMux.Handle("/metrics", promhttp.Handler())
+	httpMux.HandleFunc("/health", buildHealthHandler(healthChecker, logger, "SERVING", "NOT_SERVING"))
+	httpMux.HandleFunc("/ready", buildHealthHandler(healthChecker, logger, "READY", "NOT_READY"))
+
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%s", metricsPort),
+		Handler:           httpMux,
+		ReadHeaderTimeout: defaults.DefaultHTTPReadHeaderTimeout,
+		WriteTimeout:      defaults.DefaultHTTPWriteTimeout,
+	}
+}
+
+// buildHealthHandler returns an HTTP handler that checks gRPC health and writes the appropriate response.
+func buildHealthHandler(healthChecker *service.HealthChecker, logger *slog.Logger, servingMsg, notServingMsg string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := healthChecker.Check(r.Context(), &grpc_health_v1.HealthCheckRequest{})
+		if err != nil || resp.Status != grpc_health_v1.HealthCheckResponse_SERVING {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if _, writeErr := w.Write([]byte(notServingMsg)); writeErr != nil {
+				logger.Warn("failed to write health response",
+					"error", writeErr,
+					"endpoint", r.URL.Path,
+					"remote_addr", r.RemoteAddr)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if _, writeErr := w.Write([]byte(servingMsg)); writeErr != nil {
+			logger.Warn("failed to write health response",
+				"error", writeErr,
+				"endpoint", r.URL.Path,
+				"remote_addr", r.RemoteAddr)
+		}
+	}
+}
+
+// initECBWorker initializes and starts the ECB ingestion worker if enabled in config.
+func initECBWorker(ctx context.Context, container *app.Container, orchestrator *bootstrap.ShutdownOrchestrator, logger *slog.Logger) {
+	cfg := container.Config
+	if !cfg.ECB.Enabled {
+		return
+	}
+
+	ecbClient := ecb.NewClient(ecb.Config{
+		Endpoint: cfg.ECB.Endpoint,
+		Timeout:  cfg.ECB.Timeout,
+	}, ecb.WithLogger(logger))
+
+	ecbWorker := ecb.NewWorker(
+		ecbClient,
+		container.MarketInformationServer,
+		ecb.WorkerConfig{
+			DatasetCode:   cfg.ECB.DatasetCode,
+			SourceCode:    cfg.ECB.SourceCode,
+			FetchInterval: cfg.ECB.Interval,
+			MaxRetries:    cfg.ECB.MaxRetries,
+		},
+		logger,
+	)
+
+	ecbWorker.Start(ctx)
+
+	orchestrator.AddCleanup(func() error {
+		ecbWorker.Stop()
+		return nil
+	})
+
+	logger.Info("ECB adapter initialized",
+		"interval", cfg.ECB.Interval,
+		"source_code", cfg.ECB.SourceCode,
+		"dataset_code", cfg.ECB.DatasetCode)
+}
+
+// registerHTTPShutdown registers the HTTP server shutdown as a cleanup function.
+func registerHTTPShutdown(orchestrator *bootstrap.ShutdownOrchestrator, httpServer *http.Server, logger *slog.Logger) {
 	orchestrator.AddCleanup(func() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
 		defer cancel()
@@ -226,10 +226,6 @@ func run(logger *slog.Logger) error {
 		logger.Info("HTTP server stopped")
 		return nil
 	})
-
-	// Note: Database pool and infrastructure cleanup is handled via container.Close() defer
-
-	return orchestrator.Wait(serverErrors)
 }
 
 // parseLogLevel converts a string log level to slog.Level.

@@ -68,15 +68,51 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	// Load configuration (permanent error if invalid)
-	config, err := gateway.LoadConfig()
+	config, err := loadAndValidateConfig(logger)
 	if err != nil {
-		return bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
+		return err
 	}
 
-	// Production safety check: LOCAL_DEV_MODE must not be enabled in production namespaces
+	// Initialize database pool for tenant resolution and health checks
+	dbPool, err := db.NewPostgresPool(context.Background(), db.DefaultConfig(config.DatabaseURL))
+	if err != nil {
+		return fmt.Errorf("failed to create database pool: %w", err)
+	}
+	defer func() { _ = dbPool.Close() }()
+	logger.Info("database pool initialized")
+
+	// Initialize Redis and health checkers
+	redisClient, healthChecker, redisCleanup := initRedisAndHealth(config, dbPool, logger)
+	if redisCleanup != nil {
+		defer redisCleanup()
+	}
+
+	// Build server options
+	serverOpts, eventRouter, optCleanups, err := buildServerOptions(config, logger, healthChecker, redisClient)
+	if err != nil {
+		return err
+	}
+	for _, cleanup := range optCleanups {
+		defer cleanup()
+	}
+
+	// Create server
+	server := gateway.NewServer(config, logger, nil, serverOpts...)
+
+	// Start event router and server, then await shutdown
+	return startAndServe(logger, server, eventRouter)
+}
+
+// loadAndValidateConfig loads gateway configuration and validates it for the current namespace.
+func loadAndValidateConfig(logger *slog.Logger) (*gateway.Config, error) {
+	config, err := gateway.LoadConfig()
+	if err != nil {
+		return nil, bootstrap.Permanent(fmt.Errorf("failed to load configuration: %w", err))
+	}
+
 	namespace := os.Getenv("POD_NAMESPACE")
 	if err := config.ValidateForNamespace(namespace); err != nil {
-		return bootstrap.Permanent(err)
+		return nil, bootstrap.Permanent(err)
 	}
 
 	logger.Info("configuration loaded",
@@ -90,29 +126,24 @@ func run(logger *slog.Logger) error {
 		"event_stream_kafka", config.EventStream.KafkaEnabled,
 		"event_stream_redis", config.EventStream.RedisEnabled)
 
-	// Initialize database pool for tenant resolution and health checks
-	dbPool, err := db.NewPostgresPool(context.Background(), db.DefaultConfig(config.DatabaseURL))
-	if err != nil {
-		return fmt.Errorf("failed to create database pool: %w", err)
-	}
-	defer func() { _ = dbPool.Close() }()
+	return config, nil
+}
 
-	logger.Info("database pool initialized")
-
-	// Build health checkers list
+// initRedisAndHealth initializes the Redis client (if configured) and builds health checkers.
+// Returns a nil redisClient if Redis is not configured. The cleanup function closes the Redis client.
+func initRedisAndHealth(config *gateway.Config, dbPool *db.PostgresPool, logger *slog.Logger) (*redis.Client, *gwhealth.GatewayHealthChecker, func()) {
 	checkers := []health.Checker{
-		health.NewDatabaseChecker(dbPool), // Critical dependency
+		health.NewDatabaseChecker(dbPool),
 	}
 
-	// Initialize Redis client if configured (optional dependency)
 	var redisClient *redis.Client
+	var cleanup func()
 	if config.RedisURL != "" {
 		redisClient = redis.NewClient(&redis.Options{
 			Addr: config.RedisURL,
 		})
-		defer func() { _ = redisClient.Close() }()
+		cleanup = func() { _ = redisClient.Close() }
 
-		// Verify Redis connection (log warning on failure, don't fail startup)
 		if err := redisClient.Ping(context.Background()).Err(); err != nil {
 			logger.Warn("redis connection failed (will operate in degraded mode)", "error", err)
 		} else {
@@ -121,49 +152,56 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
-	// Create health checker with all components
 	healthChecker := gwhealth.NewGatewayHealthChecker(gwhealth.Config{
 		Checkers:     checkers,
 		CheckTimeout: 5 * time.Second,
 	})
 
-	// Build server options
+	return redisClient, healthChecker, cleanup
+}
+
+// buildServerOptions assembles server options for auth, SSO, and event streaming.
+// Returns the options, event router (if any), cleanup functions, and any error.
+func buildServerOptions(
+	config *gateway.Config,
+	logger *slog.Logger,
+	healthChecker *gwhealth.GatewayHealthChecker,
+	redisClient *redis.Client,
+) ([]gateway.ServerOption, *eventstream.Router, []func(), error) {
 	serverOpts := []gateway.ServerOption{
 		gateway.WithHealthChecker(healthChecker),
 	}
+	var cleanups []func()
+	var eventRouter *eventstream.Router
 
-	// Wire auth middleware if enabled
 	if config.Auth.Enabled {
 		authMiddleware, err := gateway.BuildAuthMiddleware(config.Auth, logger)
 		if err != nil {
-			return bootstrap.Permanent(fmt.Errorf("failed to build auth middleware: %w", err))
+			return nil, nil, nil, bootstrap.Permanent(fmt.Errorf("failed to build auth middleware: %w", err))
 		}
 		if authMiddleware != nil {
 			serverOpts = append(serverOpts, gateway.WithAuthMiddleware(authMiddleware))
 		}
 	}
 
-	// Wire BFF SSO if configured
 	ssoOpt, ssoCleanup, err := wireBFFSSO(config, logger)
 	if err != nil {
-		return bootstrap.Permanent(fmt.Errorf("failed to wire BFF SSO: %w", err))
+		return nil, nil, nil, bootstrap.Permanent(fmt.Errorf("failed to wire BFF SSO: %w", err))
 	}
 	if ssoCleanup != nil {
-		defer ssoCleanup()
+		cleanups = append(cleanups, ssoCleanup)
 	}
 	if ssoOpt != nil {
 		serverOpts = append(serverOpts, ssoOpt)
 	}
 
-	// Wire event streaming if enabled
-	var eventRouter *eventstream.Router
 	if config.EventStream.Enabled {
-		router, wsHandler, cleanup, err := buildEventStreamComponents(config, logger, redisClient)
+		router, wsHandler, esCleanup, err := buildEventStreamComponents(config, logger, redisClient)
 		if err != nil {
-			return fmt.Errorf("failed to initialize event streaming: %w", err)
+			return nil, nil, cleanups, fmt.Errorf("failed to initialize event streaming: %w", err)
 		}
-		if cleanup != nil {
-			defer cleanup()
+		if esCleanup != nil {
+			cleanups = append(cleanups, esCleanup)
 		}
 		eventRouter = router
 		serverOpts = append(serverOpts, gateway.WithEventStreamHandler(wsHandler))
@@ -172,17 +210,18 @@ func run(logger *slog.Logger) error {
 			"redis_fanout", config.EventStream.RedisEnabled)
 	}
 
-	// Create server with health checker
-	// Note: Tenant resolver will be initialized in a future task when database connection is available.
-	// For now, pass nil to allow the server to start without tenant resolution.
-	// Health endpoints will work regardless of tenant resolver configuration.
-	server := gateway.NewServer(config, logger, nil, serverOpts...)
+	return serverOpts, eventRouter, cleanups, nil
+}
 
-	// Shared error channel for both the HTTP server and event router.
-	// Buffered with capacity 2 so neither goroutine blocks on send.
+// startAndServe starts the event router and HTTP server, waits for shutdown, and
+// performs graceful cleanup.
+func startAndServe(
+	logger *slog.Logger,
+	server *gateway.Server,
+	eventRouter *eventstream.Router,
+) error {
 	serverErrors := make(chan error, 2)
 
-	// Start event router in background (consumes from EventSource and publishes to FanOut)
 	routerCtx, routerCancel := context.WithCancel(context.Background())
 	defer routerCancel()
 
@@ -196,14 +235,12 @@ func run(logger *slog.Logger) error {
 		logger.Info("event router started")
 	}
 
-	// Start server in background
 	go func() {
 		if err := server.Start(context.Background()); err != nil {
 			serverErrors <- err
 		}
 	}()
 
-	// Wait for interrupt signal or server error
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
@@ -216,7 +253,6 @@ func run(logger *slog.Logger) error {
 		runErr = fmt.Errorf("server error: %w", err)
 	}
 
-	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("initiating graceful shutdown...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

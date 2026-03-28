@@ -77,64 +77,74 @@ func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog
 		return nil, tenant.ErrMissingTenantContext
 	}
 
+	if err := validateTenantTransaction(tx); err != nil {
+		return nil, err
+	}
+
 	schema := tenantID.SchemaName()
-
-	// Reject if called outside a transaction — SET LOCAL has no effect without one.
-	// Without this check, the guard flag would be set but the database scope would not
-	// actually be enforced, creating a false sense of tenant isolation.
-	if tx.Statement == nil || tx.Statement.ConnPool == nil {
-		return nil, ErrTenantScopeRequiresTransaction
-	}
-	if _, isTx := tx.Statement.ConnPool.(gorm.TxCommitter); !isTx {
-		return nil, ErrTenantScopeRequiresTransaction
-	}
-
-	// Quote the schema name to prevent SQL injection
-	// pq.QuoteIdentifier handles special characters safely
 	quotedSchema := pq.QuoteIdentifier(schema)
 
-	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback.
-	// fmt.Sprintf is safe here because quotedSchema is already quoted by pq.QuoteIdentifier above,
-	// which properly escapes any special characters including quotes and null bytes.
-	// Bypass the TenantGuard for this SET LOCAL exec — this IS the operation that
-	// establishes tenant scope, so it must execute before the guard flag is set.
 	bypassCtx := WithTenantGuardBypass(ctx)
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", quotedSchema)
-	if err := tx.WithContext(bypassCtx).Exec(query).Error; err != nil {
-		logger.ErrorContext(ctx, "tenant scope: failed to set search_path",
-			"tenant_hash", hashTenantID(tenantID),
-			"error", err)
-		return nil, fmt.Errorf("failed to set tenant schema scope: %w", err)
+	if err := setLocalSearchPath(tx, bypassCtx, quotedSchema, tenantID, logger); err != nil {
+		return nil, err
 	}
 
-	// Verify the tenant schema actually exists - PostgreSQL allows SET LOCAL to non-existent schemas,
-	// which would silently fall through to public schema and leak cross-tenant data.
-	var schemaExists bool
-	if err := tx.WithContext(bypassCtx).Raw("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = ?)", schema).Scan(&schemaExists).Error; err != nil {
-		logger.ErrorContext(ctx, "tenant scope: failed to verify schema existence",
-			"tenant_hash", hashTenantID(tenantID),
-			"schema", schema,
-			"error", err)
-		return nil, fmt.Errorf("failed to verify tenant schema existence: %w", err)
-	}
-	if !schemaExists {
-		logger.ErrorContext(ctx, "tenant scope: schema not provisioned",
-			"tenant_hash", hashTenantID(tenantID),
-			"schema", schema)
-		return nil, fmt.Errorf("%w: %s", ErrTenantSchemaNotProvisioned, schema)
+	if err := verifySchemaExists(tx, bypassCtx, schema, tenantID, logger); err != nil {
+		return nil, err
 	}
 
-	// Audit log: emitted on every successful schema access for forensic traceability.
-	// Uses hashed tenant ID for privacy-preserving correlation (consistent with error-path logging).
-	// Service-level attributes (e.g., "service") should be pre-set on the logger at startup.
 	logger.InfoContext(ctx, "tenant.schema.access",
 		"tenant_hash", hashTenantID(tenantID),
 		"schema", schema,
 	)
 
-	// Mark context so TenantGuard knows scope was applied
 	scopedCtx := withTenantScopeSet(ctx)
 	return tx.WithContext(scopedCtx), nil
+}
+
+// validateTenantTransaction checks that the GORM DB is an active transaction.
+// SET LOCAL has no effect outside a transaction, so this prevents silent misuse.
+func validateTenantTransaction(tx *gorm.DB) error {
+	if tx.Statement == nil || tx.Statement.ConnPool == nil {
+		return ErrTenantScopeRequiresTransaction
+	}
+	if _, isTx := tx.Statement.ConnPool.(gorm.TxCommitter); !isTx {
+		return ErrTenantScopeRequiresTransaction
+	}
+	return nil
+}
+
+// setLocalSearchPath executes SET LOCAL search_path for tenant isolation.
+func setLocalSearchPath(tx *gorm.DB, ctx context.Context, quotedSchema string, tenantID tenant.TenantID, logger *slog.Logger) error {
+	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", quotedSchema)
+	if err := tx.WithContext(ctx).Exec(query).Error; err != nil {
+		logger.ErrorContext(ctx, "tenant scope: failed to set search_path",
+			"tenant_hash", hashTenantID(tenantID),
+			"error", err)
+		return fmt.Errorf("failed to set tenant schema scope: %w", err)
+	}
+	return nil
+}
+
+// verifySchemaExists checks that the tenant schema exists in pg_namespace.
+// PostgreSQL silently accepts non-existent schemas in search_path, which would
+// cause queries to fall through to public schema and expose cross-tenant data.
+func verifySchemaExists(tx *gorm.DB, ctx context.Context, schema string, tenantID tenant.TenantID, logger *slog.Logger) error {
+	var schemaExists bool
+	if err := tx.WithContext(ctx).Raw("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = ?)", schema).Scan(&schemaExists).Error; err != nil {
+		logger.ErrorContext(ctx, "tenant scope: failed to verify schema existence",
+			"tenant_hash", hashTenantID(tenantID),
+			"schema", schema,
+			"error", err)
+		return fmt.Errorf("failed to verify tenant schema existence: %w", err)
+	}
+	if !schemaExists {
+		logger.ErrorContext(ctx, "tenant scope: schema not provisioned",
+			"tenant_hash", hashTenantID(tenantID),
+			"schema", schema)
+		return fmt.Errorf("%w: %s", ErrTenantSchemaNotProvisioned, schema)
+	}
+	return nil
 }
 
 // MustWithGormTenantScope is like WithGormTenantScope but panics on error.

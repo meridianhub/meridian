@@ -131,7 +131,7 @@ func (h *WebhookHandler) HandleStripeWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	tenantID, ctx, err := h.extractTenantFromPath(r, ctx)
+	tenantID, ctx, err := h.extractTenantFromPath(ctx, r)
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, ErrMissingTenantContext.Error())
 		return
@@ -177,7 +177,7 @@ func readWebhookBody(r *http.Request) ([]byte, error) {
 }
 
 // extractTenantFromPath extracts the tenant ID from the URL path and injects it into context.
-func (h *WebhookHandler) extractTenantFromPath(r *http.Request, ctx context.Context) (tenant.TenantID, context.Context, error) {
+func (h *WebhookHandler) extractTenantFromPath(ctx context.Context, r *http.Request) (tenant.TenantID, context.Context, error) {
 	rawTenantID := r.PathValue("tenantID")
 	if rawTenantID == "" {
 		h.logger.Warn("missing tenant ID in stripe webhook URL path")

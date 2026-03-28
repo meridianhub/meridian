@@ -182,59 +182,80 @@ func (w *DispatchWorker) processBatch(ctx context.Context) {
 //
 // The instruction arrives already in DISPATCHING state (set by FetchDispatchable).
 func (w *DispatchWorker) processInstruction(ctx context.Context, instr *domain.Instruction) error {
-	// 1. Resolve route for this instruction type.
-	route, err := w.routeResolver.Resolve(ctx, instr.TenantID.String(), instr.InstructionType)
+	route, conn, err := w.resolveRouteAndConnection(ctx, instr)
 	if err != nil {
-		if errors.Is(err, ports.ErrRouteNotFound) {
-			return w.handleFailure(ctx, instr, fmt.Sprintf("route resolution failed: %v", err), "ROUTE_NOT_FOUND")
-		}
-		// Transient error (e.g., DB/network) — return error so the instruction stays
-		// DISPATCHING and will be picked up by the stuck-instruction reaper for retry.
-		return fmt.Errorf("route resolution transient error: %w", err)
+		return err
 	}
 
-	// 2. Look up the provider connection.
-	conn, err := w.connectionRepo.FindByID(ctx, instr.TenantID.String(), instr.ProviderConnectionID)
-	if err != nil {
-		if errors.Is(err, ports.ErrConnectionNotFound) {
-			return w.handleFailure(ctx, instr, fmt.Sprintf("connection lookup failed: %v", err), "CONNECTION_NOT_FOUND")
-		}
-		// Transient error — leave instruction in DISPATCHING for reaper.
-		return fmt.Errorf("connection lookup transient error: %w", err)
-	}
-
-	// 3. Check circuit breaker.
+	// Check circuit breaker.
 	if !conn.IsAvailable() {
 		return w.handleRetryOrFail(ctx, instr, conn, "circuit breaker open", "CIRCUIT_OPEN")
 	}
 
-	// 4. Dispatch to external provider.
+	// Dispatch to external provider.
 	result := w.dispatcher.Dispatch(ctx, instr, conn, route)
 
-	// 5. Handle transport-level error (no response received).
+	// Handle transport-level error (no response received).
 	if result.Error != nil {
-		if err := conn.RecordFailure(conn.RetryPolicy.MaxAttempts); err != nil {
-			w.logger.ErrorContext(ctx, "failed to record connection failure",
-				"connection_id", conn.ConnectionID, "error", err,
-			)
-		}
-		if saveErr := w.connectionRepo.UpdateHealth(ctx, conn); saveErr != nil {
-			w.logger.ErrorContext(ctx, "failed to persist connection health",
-				"connection_id", conn.ConnectionID, "error", saveErr,
-			)
-		}
-		return w.handleRetryOrFail(ctx, instr, conn, fmt.Sprintf("dispatch error: %v", result.Error), "DISPATCH_ERROR")
+		return w.handleDispatchError(ctx, instr, conn, result)
 	}
 
-	// 6. Record success on the connection circuit breaker.
+	// Record success on the connection circuit breaker.
+	w.recordConnectionSuccess(ctx, conn)
+
+	return w.handleDispatchOutcome(ctx, instr, conn, result)
+}
+
+// resolveRouteAndConnection resolves the route and provider connection for the instruction.
+// Returns a permanent failure (via handleFailure) for missing route/connection, or a transient
+// error for DB/network issues so the stuck-instruction reaper can retry.
+func (w *DispatchWorker) resolveRouteAndConnection(ctx context.Context, instr *domain.Instruction) (*ports.InstructionRoute, *domain.ProviderConnection, error) {
+	route, err := w.routeResolver.Resolve(ctx, instr.TenantID.String(), instr.InstructionType)
+	if err != nil {
+		if errors.Is(err, ports.ErrRouteNotFound) {
+			return nil, nil, w.handleFailure(ctx, instr, fmt.Sprintf("route resolution failed: %v", err), "ROUTE_NOT_FOUND")
+		}
+		return nil, nil, fmt.Errorf("route resolution transient error: %w", err)
+	}
+
+	conn, err := w.connectionRepo.FindByID(ctx, instr.TenantID.String(), instr.ProviderConnectionID)
+	if err != nil {
+		if errors.Is(err, ports.ErrConnectionNotFound) {
+			return nil, nil, w.handleFailure(ctx, instr, fmt.Sprintf("connection lookup failed: %v", err), "CONNECTION_NOT_FOUND")
+		}
+		return nil, nil, fmt.Errorf("connection lookup transient error: %w", err)
+	}
+
+	return route, conn, nil
+}
+
+// handleDispatchError records a transport-level failure on the connection and retries or fails.
+func (w *DispatchWorker) handleDispatchError(ctx context.Context, instr *domain.Instruction, conn *domain.ProviderConnection, result ports.DispatchResult) error {
+	if err := conn.RecordFailure(conn.RetryPolicy.MaxAttempts); err != nil {
+		w.logger.ErrorContext(ctx, "failed to record connection failure",
+			"connection_id", conn.ConnectionID, "error", err,
+		)
+	}
+	if saveErr := w.connectionRepo.UpdateHealth(ctx, conn); saveErr != nil {
+		w.logger.ErrorContext(ctx, "failed to persist connection health",
+			"connection_id", conn.ConnectionID, "error", saveErr,
+		)
+	}
+	return w.handleRetryOrFail(ctx, instr, conn, fmt.Sprintf("dispatch error: %v", result.Error), "DISPATCH_ERROR")
+}
+
+// recordConnectionSuccess records a successful dispatch on the connection circuit breaker.
+func (w *DispatchWorker) recordConnectionSuccess(ctx context.Context, conn *domain.ProviderConnection) {
 	conn.RecordSuccess()
 	if saveErr := w.connectionRepo.UpdateHealth(ctx, conn); saveErr != nil {
 		w.logger.ErrorContext(ctx, "failed to persist connection health",
 			"connection_id", conn.ConnectionID, "error", saveErr,
 		)
 	}
+}
 
-	// 7. Handle the parsed outcome.
+// handleDispatchOutcome processes the parsed outcome from a successful dispatch.
+func (w *DispatchWorker) handleDispatchOutcome(ctx context.Context, instr *domain.Instruction, conn *domain.ProviderConnection, result ports.DispatchResult) error {
 	if result.Outcome == nil {
 		return w.handleFailure(ctx, instr, "dispatch returned no outcome", "NO_OUTCOME")
 	}
@@ -247,7 +268,6 @@ func (w *DispatchWorker) processInstruction(ctx context.Context, instr *domain.I
 		return w.handleFailure(ctx, instr, outcome.FailureReason, "PROVIDER_REJECTED")
 	}
 
-	// 8. Mark delivered.
 	if err := instr.MarkDelivered(); err != nil {
 		return fmt.Errorf("marking delivered: %w", err)
 	}

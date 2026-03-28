@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -315,7 +316,11 @@ func (s *PositionKeepingService) validateMeasurementWithCEL(
 		return nil, err
 	}
 
-	bucketID, err := s.evalBucketKeyProgram(ctx, instrument, instrumentCode, activation["attributes"].(map[string]string), accountID)
+	attrs, ok := activation["attributes"].(map[string]string)
+	if !ok {
+		return nil, fmt.Errorf("attributes activation value has unexpected type")
+	}
+	bucketID, err := s.evalBucketKeyProgram(ctx, instrument, instrumentCode, attrs, accountID)
 	if err != nil {
 		return nil, err
 	}

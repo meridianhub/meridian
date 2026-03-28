@@ -158,7 +158,11 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		idempotencyLockAcquired = lockAcquired
 		if cachedResult != nil {
 			operationStatus = opStatusIdempotent
-			return cachedResult.(*pb.ExecuteLienResponse), nil
+			resp, ok := cachedResult.(*pb.ExecuteLienResponse)
+			if !ok {
+				return nil, status.Error(codes.Internal, "cached idempotency result has unexpected type")
+			}
+			return resp, nil
 		}
 
 		defer func() {
@@ -294,7 +298,11 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 		idempotencyLockAcquired = lockAcquired
 		if cachedResult != nil {
 			operationStatus = opStatusIdempotent
-			return cachedResult.(*pb.TerminateLienResponse), nil
+			resp, ok := cachedResult.(*pb.TerminateLienResponse)
+			if !ok {
+				return nil, status.Error(codes.Internal, "cached idempotency result has unexpected type")
+			}
+			return resp, nil
 		}
 
 		// On failure, clean up the pending key so retries are not blocked.

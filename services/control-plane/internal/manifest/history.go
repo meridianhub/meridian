@@ -209,7 +209,7 @@ func marshalManifestJSON(mf *controlplanev1.Manifest) ([]byte, error) {
 // when status is ApplyStatusApplied. Returns nil otherwise.
 func (s *HistoryService) maybeDiffSummary(ctx context.Context, mf *controlplanev1.Manifest, status ApplyStatus) (*string, error) {
 	if status != ApplyStatusApplied {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil summary is valid when status is not "applied"
 	}
 	summary, diffErr := s.generateDiffSummary(ctx, mf)
 	if diffErr != nil && !errors.Is(diffErr, ErrVersionNotFound) {
@@ -218,7 +218,7 @@ func (s *HistoryService) maybeDiffSummary(ctx context.Context, mf *controlplanev
 	if summary != "" {
 		return &summary, nil
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // nil summary is valid when no diff is available
 }
 
 // marshalGraphJSON serializes a relationship graph to JSON.

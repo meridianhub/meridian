@@ -570,8 +570,8 @@ func (h *OIDCHandler) resolveTenantID(ctx context.Context, tenantSlug string) (s
 // issueCodeAndRedirect signs a Meridian JWT, generates an MCP authorization code, stores it, and returns the redirect URL.
 func (h *OIDCHandler) issueCodeAndRedirect(email, tenantID string, flowState OIDCFlowState) (string, error) {
 	claims := map[string]interface{}{
-		"sub":          email,
-		"email":        email,
+		"sub":         email,
+		"email":       email,
 		"x-tenant-id": tenantID,
 	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)

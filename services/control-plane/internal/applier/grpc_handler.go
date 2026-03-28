@@ -185,7 +185,7 @@ func (h *ApplyManifestHandler) applyPlanAndExecute(
 	response.JobId = execResult.jobID
 
 	if execResult.err != nil {
-		return h.buildExecutionFailureResponse(ctx, req, execResult, response, logger), nil
+		return h.buildExecutionFailureResponse(ctx, req, execResult, response, logger), nil //nolint:nilerr // error conveyed via response status, not gRPC error
 	}
 
 	// Step 5: Record history (with optimistic locking check)

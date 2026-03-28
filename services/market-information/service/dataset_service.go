@@ -108,63 +108,15 @@ func (s *Server) UpdateDataSet(ctx context.Context, req *pb.UpdateDataSetRequest
 			"dataset must be in DRAFT status to update, current status: %s", existing.Status())
 	}
 
-	// Track if any CEL expressions changed
-	validationChanged := req.ValidationExpression != "" && req.ValidationExpression != existing.ValidationExpression()
-	resolutionKeyChanged := req.ResolutionKeyExpression != "" && req.ResolutionKeyExpression != existing.ResolutionKeyExpression()
-	errorMessageChanged := req.ErrorMessageExpression != "" && req.ErrorMessageExpression != existing.ErrorMessageExpression()
-
-	// Validate CEL expressions if any changed and validator is configured
-	if s.celValidator != nil && (validationChanged || resolutionKeyChanged || errorMessageChanged) {
-		// Use new values if provided, otherwise use existing
-		validationExpr := existing.ValidationExpression()
-		if req.ValidationExpression != "" {
-			validationExpr = req.ValidationExpression
-		}
-		resolutionKeyExpr := existing.ResolutionKeyExpression()
-		if req.ResolutionKeyExpression != "" {
-			resolutionKeyExpr = req.ResolutionKeyExpression
-		}
-		errorMessageExpr := existing.ErrorMessageExpression()
-		if req.ErrorMessageExpression != "" {
-			errorMessageExpr = req.ErrorMessageExpression
-		}
-
-		if err := s.validateCelExpressions(validationExpr, resolutionKeyExpr, errorMessageExpr); err != nil {
-			return nil, err
-		}
+	// Validate changed CEL expressions
+	if err := s.validateChangedCelExpressions(existing, req); err != nil {
+		return nil, err
 	}
 
-	// Apply updates using domain methods
-	updated := existing
-
-	// Update description if provided (allow clearing with empty string check)
-	if req.Description != existing.Description() {
-		updated, err = updated.UpdateDescription(req.Description)
-		if err != nil {
-			return nil, s.mapDataSetDomainError(err, "UpdateDataSet", req.Code)
-		}
-	}
-
-	// Update CEL expressions if provided
-	if validationChanged {
-		updated, err = updated.UpdateValidationExpression(req.ValidationExpression)
-		if err != nil {
-			return nil, s.mapDataSetDomainError(err, "UpdateDataSet", req.Code)
-		}
-	}
-
-	if resolutionKeyChanged {
-		updated, err = updated.UpdateResolutionKeyExpression(req.ResolutionKeyExpression)
-		if err != nil {
-			return nil, s.mapDataSetDomainError(err, "UpdateDataSet", req.Code)
-		}
-	}
-
-	if errorMessageChanged {
-		updated, err = updated.UpdateErrorMessageExpression(req.ErrorMessageExpression)
-		if err != nil {
-			return nil, s.mapDataSetDomainError(err, "UpdateDataSet", req.Code)
-		}
+	// Apply domain updates
+	updated, err := s.applyDataSetUpdates(existing, req)
+	if err != nil {
+		return nil, s.mapDataSetDomainError(err, "UpdateDataSet", req.Code)
 	}
 
 	// Persist the updated dataset
@@ -179,6 +131,70 @@ func (s *Server) UpdateDataSet(ctx context.Context, req *pb.UpdateDataSetRequest
 	return &pb.UpdateDataSetResponse{
 		Dataset: domainDataSetToProto(updated),
 	}, nil
+}
+
+// validateChangedCelExpressions validates CEL expressions that differ from the existing dataset.
+// Skips validation if no expressions changed or if the CEL validator is not configured.
+func (s *Server) validateChangedCelExpressions(existing domain.DataSetDefinition, req *pb.UpdateDataSetRequest) error {
+	validationChanged := req.ValidationExpression != "" && req.ValidationExpression != existing.ValidationExpression()
+	resolutionKeyChanged := req.ResolutionKeyExpression != "" && req.ResolutionKeyExpression != existing.ResolutionKeyExpression()
+	errorMessageChanged := req.ErrorMessageExpression != "" && req.ErrorMessageExpression != existing.ErrorMessageExpression()
+
+	if s.celValidator == nil || !(validationChanged || resolutionKeyChanged || errorMessageChanged) {
+		return nil
+	}
+
+	validationExpr := existing.ValidationExpression()
+	if req.ValidationExpression != "" {
+		validationExpr = req.ValidationExpression
+	}
+	resolutionKeyExpr := existing.ResolutionKeyExpression()
+	if req.ResolutionKeyExpression != "" {
+		resolutionKeyExpr = req.ResolutionKeyExpression
+	}
+	errorMessageExpr := existing.ErrorMessageExpression()
+	if req.ErrorMessageExpression != "" {
+		errorMessageExpr = req.ErrorMessageExpression
+	}
+
+	return s.validateCelExpressions(validationExpr, resolutionKeyExpr, errorMessageExpr)
+}
+
+// applyDataSetUpdates applies description and CEL expression updates from the request
+// to the existing dataset using domain methods.
+func (s *Server) applyDataSetUpdates(existing domain.DataSetDefinition, req *pb.UpdateDataSetRequest) (domain.DataSetDefinition, error) {
+	updated := existing
+	var err error
+
+	if req.Description != existing.Description() {
+		updated, err = updated.UpdateDescription(req.Description)
+		if err != nil {
+			return domain.DataSetDefinition{}, err
+		}
+	}
+
+	if req.ValidationExpression != "" && req.ValidationExpression != existing.ValidationExpression() {
+		updated, err = updated.UpdateValidationExpression(req.ValidationExpression)
+		if err != nil {
+			return domain.DataSetDefinition{}, err
+		}
+	}
+
+	if req.ResolutionKeyExpression != "" && req.ResolutionKeyExpression != existing.ResolutionKeyExpression() {
+		updated, err = updated.UpdateResolutionKeyExpression(req.ResolutionKeyExpression)
+		if err != nil {
+			return domain.DataSetDefinition{}, err
+		}
+	}
+
+	if req.ErrorMessageExpression != "" && req.ErrorMessageExpression != existing.ErrorMessageExpression() {
+		updated, err = updated.UpdateErrorMessageExpression(req.ErrorMessageExpression)
+		if err != nil {
+			return domain.DataSetDefinition{}, err
+		}
+	}
+
+	return updated, nil
 }
 
 // ActivateDataSet transitions a data set from DRAFT to ACTIVE.
@@ -302,40 +318,10 @@ func (s *Server) RetrieveDataSet(ctx context.Context, req *pb.RetrieveDataSetReq
 // Supports filtering by status, category, and pagination.
 func (s *Server) ListDataSets(ctx context.Context, req *pb.ListDataSetsRequest) (*pb.ListDataSetsResponse, error) {
 	// Build domain filters from proto request
-	filters := domain.DataSetFilters{}
-
-	// Apply status filter if specified (not UNSPECIFIED)
-	if req.StatusFilter != pb.DataSetStatus_DATA_SET_STATUS_UNSPECIFIED {
-		domainStatus, err := protoStatusToDomain(req.StatusFilter)
-		if err != nil {
-			s.logger.Warn("invalid status filter",
-				"status_filter", req.StatusFilter)
-			return nil, status.Errorf(codes.InvalidArgument, "invalid status filter: %v", err)
-		}
-		filters.Status = &domainStatus
+	filters, err := s.buildDataSetFilters(req)
+	if err != nil {
+		return nil, err
 	}
-
-	// Apply category filter if specified (not UNSPECIFIED)
-	if req.CategoryFilter != pb.DataCategory_DATA_CATEGORY_UNSPECIFIED {
-		domainCategory, err := protoCategoryToDomain(req.CategoryFilter)
-		if err != nil {
-			s.logger.Warn("invalid category filter",
-				"category_filter", req.CategoryFilter)
-			return nil, status.Errorf(codes.InvalidArgument, "invalid category filter: %v", err)
-		}
-		filters.Category = &domainCategory
-	}
-
-	// Apply pagination
-	pageSize := int(req.PageSize)
-	if pageSize == 0 {
-		pageSize = 50 // Default page size
-	}
-	if pageSize > 100 {
-		pageSize = 100 // Max page size from proto validation
-	}
-	filters.Limit = pageSize
-	filters.PageToken = req.PageToken
 
 	// Delegate to repository
 	datasets, nextPageToken, err := s.dataSetRepo.List(ctx, filters)
@@ -366,6 +352,44 @@ func (s *Server) ListDataSets(ctx context.Context, req *pb.ListDataSetsRequest) 
 		Datasets:      pbDatasets,
 		NextPageToken: nextPageToken,
 	}, nil
+}
+
+// buildDataSetFilters converts a ListDataSetsRequest into domain filters,
+// applying status, category, and pagination defaults.
+func (s *Server) buildDataSetFilters(req *pb.ListDataSetsRequest) (domain.DataSetFilters, error) {
+	filters := domain.DataSetFilters{}
+
+	if req.StatusFilter != pb.DataSetStatus_DATA_SET_STATUS_UNSPECIFIED {
+		domainStatus, err := protoStatusToDomain(req.StatusFilter)
+		if err != nil {
+			s.logger.Warn("invalid status filter",
+				"status_filter", req.StatusFilter)
+			return filters, status.Errorf(codes.InvalidArgument, "invalid status filter: %v", err)
+		}
+		filters.Status = &domainStatus
+	}
+
+	if req.CategoryFilter != pb.DataCategory_DATA_CATEGORY_UNSPECIFIED {
+		domainCategory, err := protoCategoryToDomain(req.CategoryFilter)
+		if err != nil {
+			s.logger.Warn("invalid category filter",
+				"category_filter", req.CategoryFilter)
+			return filters, status.Errorf(codes.InvalidArgument, "invalid category filter: %v", err)
+		}
+		filters.Category = &domainCategory
+	}
+
+	pageSize := int(req.PageSize)
+	if pageSize == 0 {
+		pageSize = 50
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	filters.Limit = pageSize
+	filters.PageToken = req.PageToken
+
+	return filters, nil
 }
 
 // validateCelExpressions validates all three CEL expressions using the CEL validator.
@@ -412,73 +436,66 @@ func (s *Server) validateCelExpressions(validation, resolutionKey, errorMessage 
 
 // mapDataSetDomainError converts domain errors to appropriate gRPC status codes.
 func (s *Server) mapDataSetDomainError(err error, operation, code string) error {
+	// Check state/identity errors first
+	if grpcErr := mapDataSetStateError(err, code); grpcErr != nil {
+		s.logger.Warn("dataset domain error",
+			"operation", operation,
+			"code", code,
+			"error", err)
+		return grpcErr
+	}
+
+	// Check validation errors
+	if grpcErr := mapDataSetValidationError(err); grpcErr != nil {
+		s.logger.Warn("dataset validation error",
+			"operation", operation,
+			"code", code,
+			"error", err)
+		return grpcErr
+	}
+
+	s.logger.Error("internal error",
+		"operation", operation,
+		"code", code,
+		"error", err)
+	return status.Errorf(codes.Internal, "internal error: %v", err)
+}
+
+// mapDataSetStateError maps dataset state/identity domain errors to gRPC status codes.
+// Returns nil if the error does not match any known state error.
+func mapDataSetStateError(err error, code string) error {
 	switch {
 	case errors.Is(err, domain.ErrDataSetNotFound):
-		s.logger.Warn("dataset not found",
-			"operation", operation,
-			"code", code)
 		return status.Errorf(codes.NotFound, "dataset not found: %s", code)
-
 	case errors.Is(err, domain.ErrDuplicateDataSetCode):
-		s.logger.Warn("dataset code already exists",
-			"operation", operation,
-			"code", code)
 		return status.Errorf(codes.AlreadyExists, "dataset already exists: %s", code)
-
 	case errors.Is(err, domain.ErrInvalidStatusTransition):
-		s.logger.Warn("invalid status transition",
-			"operation", operation,
-			"code", code,
-			"error", err)
 		return status.Errorf(codes.FailedPrecondition, "invalid status transition: %v", err)
-
 	case errors.Is(err, domain.ErrDataSetDeprecated):
-		s.logger.Warn("dataset is deprecated",
-			"operation", operation,
-			"code", code)
 		return status.Errorf(codes.FailedPrecondition, "dataset is deprecated: %s", code)
-
 	case errors.Is(err, domain.ErrVersionMismatch):
-		s.logger.Warn("version mismatch",
-			"operation", operation,
-			"code", code)
 		return status.Errorf(codes.Aborted, "version mismatch: dataset was modified concurrently")
-
-	case errors.Is(err, domain.ErrCodeRequired):
-		s.logger.Warn("dataset code required",
-			"operation", operation)
-		return status.Errorf(codes.InvalidArgument, "dataset code is required")
-
-	case errors.Is(err, domain.ErrNameRequired):
-		s.logger.Warn("dataset name required",
-			"operation", operation,
-			"code", code)
-		return status.Errorf(codes.InvalidArgument, "dataset name (display_name) is required")
-
-	case errors.Is(err, domain.ErrValidationExpressionRequired):
-		s.logger.Warn("validation expression required",
-			"operation", operation,
-			"code", code)
-		return status.Errorf(codes.InvalidArgument, "validation_expression is required")
-
-	case errors.Is(err, domain.ErrResolutionKeyExpressionRequired):
-		s.logger.Warn("resolution key expression required",
-			"operation", operation,
-			"code", code)
-		return status.Errorf(codes.InvalidArgument, "resolution_key_expression is required")
-
-	case errors.Is(err, domain.ErrInvalidDataCategory):
-		s.logger.Warn("invalid data category",
-			"operation", operation,
-			"code", code)
-		return status.Errorf(codes.InvalidArgument, "invalid data category")
-
 	default:
-		s.logger.Error("internal error",
-			"operation", operation,
-			"code", code,
-			"error", err)
-		return status.Errorf(codes.Internal, "internal error: %v", err)
+		return nil
+	}
+}
+
+// mapDataSetValidationError maps dataset validation domain errors to gRPC status codes.
+// Returns nil if the error does not match any known validation error.
+func mapDataSetValidationError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrCodeRequired):
+		return status.Errorf(codes.InvalidArgument, "dataset code is required")
+	case errors.Is(err, domain.ErrNameRequired):
+		return status.Errorf(codes.InvalidArgument, "dataset name (display_name) is required")
+	case errors.Is(err, domain.ErrValidationExpressionRequired):
+		return status.Errorf(codes.InvalidArgument, "validation_expression is required")
+	case errors.Is(err, domain.ErrResolutionKeyExpressionRequired):
+		return status.Errorf(codes.InvalidArgument, "resolution_key_expression is required")
+	case errors.Is(err, domain.ErrInvalidDataCategory):
+		return status.Errorf(codes.InvalidArgument, "invalid data category")
+	default:
+		return nil
 	}
 }
 

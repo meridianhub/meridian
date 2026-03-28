@@ -311,62 +311,12 @@ func updateBookingLogHandler(client *Client) saga.Handler {
 //   - status: Always "POSTED" for newly created postings
 func capturePostingHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
-		bookingLogID, err := saga.RequireStringParam(params, "booking_log_id")
+		req, err := buildCapturePostingRequest(ctx, params)
 		if err != nil {
 			return nil, err
-		}
-		accountID, err := saga.RequireStringParam(params, "account_id")
-		if err != nil {
-			return nil, err
-		}
-		amountStr, err := saga.RequireStringParam(params, "amount")
-		if err != nil {
-			return nil, err
-		}
-		currencyStr, err := saga.RequireStringParam(params, "currency")
-		if err != nil {
-			return nil, err
-		}
-		directionStr, err := saga.RequireStringParam(params, "direction")
-		if err != nil {
-			return nil, err
-		}
-
-		// Parse amount as decimal
-		amount, err := decimal.NewFromString(amountStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid amount: %w", err)
-		}
-
-		// Convert direction to proto enum
-		var direction commonv1.PostingDirection
-		switch directionStr {
-		case "DEBIT":
-			direction = commonv1.PostingDirection_POSTING_DIRECTION_DEBIT
-		case "CREDIT":
-			direction = commonv1.PostingDirection_POSTING_DIRECTION_CREDIT
-		default:
-			return nil, fmt.Errorf("%w: got %q", ErrInvalidDirection, directionStr)
 		}
 
 		clientCtx := prepareClientContext(ctx)
-
-		// Build the request
-		req := &financialaccountingv1.CaptureLedgerPostingRequest{
-			FinancialBookingLogId: bookingLogID,
-			AccountId:             accountID,
-			PostingDirection:      direction,
-			PostingAmount: &moneypb.Money{
-				CurrencyCode: currencyStr,
-				Units:        amount.IntPart(),
-				Nanos:        int32(amount.Sub(decimal.NewFromInt(amount.IntPart())).Mul(decimal.NewFromInt(1_000_000_000)).IntPart()),
-			},
-			ValueDate: timestamppb.Now(),
-			IdempotencyKey: &commonv1.IdempotencyKey{
-				Key: ctx.IdempotencyKey,
-			},
-		}
-
 		resp, err := client.CaptureLedgerPosting(clientCtx, req)
 		if err != nil {
 			return nil, fmt.Errorf("financial_accounting.capture_posting: %w", err)
@@ -377,6 +327,67 @@ func capturePostingHandler(client *Client) saga.Handler {
 			"posting_id": posting.GetId(),
 			"status":     "POSTED",
 		}, nil
+	}
+}
+
+// buildCapturePostingRequest parses Starlark parameters and builds a CaptureLedgerPostingRequest.
+func buildCapturePostingRequest(ctx *saga.StarlarkContext, params map[string]any) (*financialaccountingv1.CaptureLedgerPostingRequest, error) {
+	bookingLogID, err := saga.RequireStringParam(params, "booking_log_id")
+	if err != nil {
+		return nil, err
+	}
+	accountID, err := saga.RequireStringParam(params, "account_id")
+	if err != nil {
+		return nil, err
+	}
+	amountStr, err := saga.RequireStringParam(params, "amount")
+	if err != nil {
+		return nil, err
+	}
+	currencyStr, err := saga.RequireStringParam(params, "currency")
+	if err != nil {
+		return nil, err
+	}
+	directionStr, err := saga.RequireStringParam(params, "direction")
+	if err != nil {
+		return nil, err
+	}
+
+	amount, err := decimal.NewFromString(amountStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid amount: %w", err)
+	}
+
+	direction, err := parsePostingDirection(directionStr)
+	if err != nil {
+		return nil, err
+	}
+
+	return &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID,
+		AccountId:             accountID,
+		PostingDirection:      direction,
+		PostingAmount: &moneypb.Money{
+			CurrencyCode: currencyStr,
+			Units:        amount.IntPart(),
+			Nanos:        int32(amount.Sub(decimal.NewFromInt(amount.IntPart())).Mul(decimal.NewFromInt(1_000_000_000)).IntPart()),
+		},
+		ValueDate: timestamppb.Now(),
+		IdempotencyKey: &commonv1.IdempotencyKey{
+			Key: ctx.IdempotencyKey,
+		},
+	}, nil
+}
+
+// parsePostingDirection converts a string direction to the proto PostingDirection enum.
+func parsePostingDirection(directionStr string) (commonv1.PostingDirection, error) {
+	switch directionStr {
+	case "DEBIT":
+		return commonv1.PostingDirection_POSTING_DIRECTION_DEBIT, nil
+	case "CREDIT":
+		return commonv1.PostingDirection_POSTING_DIRECTION_CREDIT, nil
+	default:
+		return 0, fmt.Errorf("%w: got %q", ErrInvalidDirection, directionStr)
 	}
 }
 

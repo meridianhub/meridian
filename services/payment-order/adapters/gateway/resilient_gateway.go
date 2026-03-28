@@ -131,7 +131,6 @@ func NewResilientPaymentGateway(delegate PaymentGateway, config ResilientGateway
 
 // SendPayment sends a payment request with circuit breaker, rate limiting, and retry protection.
 func (r *ResilientPaymentGateway) SendPayment(ctx context.Context, req PaymentRequest) (PaymentResponse, error) {
-	// Check rate limit first (fast fail)
 	if !r.rateLimiter.Allow() {
 		r.logger.Warn("payment gateway rate limit exceeded",
 			"payment_order_id", req.PaymentOrderID.String(),
@@ -141,63 +140,24 @@ func (r *ResilientPaymentGateway) SendPayment(ctx context.Context, req PaymentRe
 
 	var result PaymentResponse
 
-	// Configure exponential backoff
-	b := backoff.NewExponentialBackOff()
-	b.InitialInterval = r.retryConfig.initialInterval
-	b.MaxInterval = r.retryConfig.maxInterval
-	b.Multiplier = r.retryConfig.multiplier
-	b.RandomizationFactor = r.retryConfig.randomizationFactor
-	b.MaxElapsedTime = 0 // No max elapsed time, we use MaxRetries instead
-	b.Reset()
-
+	b := r.buildBackoff()
 	backoffWithContext := backoff.WithContext(b, ctx)
 
 	attempt := 0
 	maxAttempts := r.retryConfig.maxRetries + 1
 
 	operation := func() error {
-		// Check context before each attempt
 		if err := ctx.Err(); err != nil {
 			return backoff.Permanent(err)
 		}
 
 		attempt++
 
-		// Execute through circuit breaker
 		resp, err := r.circuitBreaker.Execute(func() (PaymentResponse, error) {
 			return r.delegate.SendPayment(ctx, req)
 		})
 		if err != nil {
-			// Circuit breaker open - don't retry
-			if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
-				r.logger.Warn("payment gateway circuit breaker open",
-					"payment_order_id", req.PaymentOrderID.String(),
-					"attempt", attempt,
-				)
-				return backoff.Permanent(fmt.Errorf("%w: %v", ErrCircuitOpen, err)) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
-			}
-
-			// Check if we've exhausted retries
-			if attempt >= maxAttempts {
-				r.logger.Error("payment gateway call failed after max retries",
-					"payment_order_id", req.PaymentOrderID.String(),
-					"attempts", attempt,
-					"error", err,
-				)
-				return backoff.Permanent(err)
-			}
-
-			// Determine if error is retryable
-			if !r.isRetryable(err) {
-				return backoff.Permanent(err)
-			}
-
-			r.logger.Debug("payment gateway call failed, retrying",
-				"payment_order_id", req.PaymentOrderID.String(),
-				"attempt", attempt,
-				"error", err,
-			)
-			return err
+			return r.classifyRetryError(err, req, attempt, maxAttempts)
 		}
 
 		result = resp
@@ -209,6 +169,49 @@ func (r *ResilientPaymentGateway) SendPayment(ctx context.Context, req PaymentRe
 	}
 
 	return result, nil
+}
+
+// buildBackoff creates a configured exponential backoff instance.
+func (r *ResilientPaymentGateway) buildBackoff() *backoff.ExponentialBackOff {
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = r.retryConfig.initialInterval
+	b.MaxInterval = r.retryConfig.maxInterval
+	b.Multiplier = r.retryConfig.multiplier
+	b.RandomizationFactor = r.retryConfig.randomizationFactor
+	b.MaxElapsedTime = 0
+	b.Reset()
+	return b
+}
+
+// classifyRetryError determines whether to retry, permanently fail, or circuit-break on an error.
+func (r *ResilientPaymentGateway) classifyRetryError(err error, req PaymentRequest, attempt, maxAttempts int) error {
+	if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+		r.logger.Warn("payment gateway circuit breaker open",
+			"payment_order_id", req.PaymentOrderID.String(),
+			"attempt", attempt,
+		)
+		return backoff.Permanent(fmt.Errorf("%w: %v", ErrCircuitOpen, err)) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
+	}
+
+	if attempt >= maxAttempts {
+		r.logger.Error("payment gateway call failed after max retries",
+			"payment_order_id", req.PaymentOrderID.String(),
+			"attempts", attempt,
+			"error", err,
+		)
+		return backoff.Permanent(err)
+	}
+
+	if !r.isRetryable(err) {
+		return backoff.Permanent(err)
+	}
+
+	r.logger.Debug("payment gateway call failed, retrying",
+		"payment_order_id", req.PaymentOrderID.String(),
+		"attempt", attempt,
+		"error", err,
+	)
+	return err
 }
 
 // isRetryable determines if an error should be retried.

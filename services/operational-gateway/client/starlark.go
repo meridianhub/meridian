@@ -144,21 +144,30 @@ func buildDispatchRequest(ctx *saga.StarlarkContext, params map[string]any) (*op
 		IdempotencyKey:  &commonv1.IdempotencyKey{Key: ctx.IdempotencyKey},
 	}
 
+	if err := applyDispatchOptionalParams(ctx, params, req); err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// applyDispatchOptionalParams applies optional parameters (priority, correlation_id, etc.) to the request.
+func applyDispatchOptionalParams(ctx *saga.StarlarkContext, params map[string]any, req *opgatewayv1.DispatchInstructionRequest) error {
 	if rawPriority, exists := params["priority"]; exists && rawPriority != nil {
 		priorityStr, ok := rawPriority.(string)
 		if !ok {
-			return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w: priority must be a string, got %T", saga.ErrInvalidParamType, rawPriority)
+			return fmt.Errorf("operational_gateway.dispatch_instruction: %w: priority must be a string, got %T", saga.ErrInvalidParamType, rawPriority)
 		}
 		p, err := stringToPriority(priorityStr)
 		if err != nil {
-			return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
+			return fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
 		}
 		req.Priority = p
 	}
 
 	corrID, _, err := optionalStringParam(params, "correlation_id")
 	if err != nil {
-		return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
+		return fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
 	}
 	if corrID != "" {
 		req.CorrelationId = corrID
@@ -168,7 +177,7 @@ func buildDispatchRequest(ctx *saga.StarlarkContext, params map[string]any) (*op
 
 	causationID, _, err := optionalStringParam(params, "causation_id")
 	if err != nil {
-		return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
+		return fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
 	}
 	if causationID != "" {
 		req.CausationId = causationID
@@ -176,17 +185,17 @@ func buildDispatchRequest(ctx *saga.StarlarkContext, params map[string]any) (*op
 
 	scheduledAtStr, _, err := optionalStringParam(params, "scheduled_at")
 	if err != nil {
-		return nil, fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
+		return fmt.Errorf("operational_gateway.dispatch_instruction: %w", err)
 	}
 	if scheduledAtStr != "" {
 		t, parseErr := time.Parse(time.RFC3339, scheduledAtStr)
 		if parseErr != nil {
-			return nil, fmt.Errorf("operational_gateway.dispatch_instruction: invalid scheduled_at %q: %w", scheduledAtStr, parseErr)
+			return fmt.Errorf("operational_gateway.dispatch_instruction: invalid scheduled_at %q: %w", scheduledAtStr, parseErr)
 		}
 		req.ScheduledAt = timestamppb.New(t)
 	}
 
-	return req, nil
+	return nil
 }
 
 // extractPayload extracts and converts the payload param to a structpb.Struct.

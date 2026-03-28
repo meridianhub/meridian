@@ -119,7 +119,7 @@ func (v *FungibilityValidator) resolveEvaluator(ctx context.Context, instrumentC
 	}
 
 	if instrument.Definition.FungibilityKeyExpression == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil evaluator means fully fungible instrument
 	}
 
 	if v.evaluator != nil {
@@ -128,7 +128,7 @@ func (v *FungibilityValidator) resolveEvaluator(ctx context.Context, instrumentC
 	if instrument.BucketKeyProgram != nil {
 		return &celProgramAdapter{program: instrument.BucketKeyProgram}, nil
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // nil evaluator means no compiled program available
 }
 
 // compareFungibilityKeys evaluates the fungibility key for both debit and credit and compares them.

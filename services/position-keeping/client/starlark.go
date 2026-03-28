@@ -27,83 +27,7 @@ import (
 //	defer cleanup()
 //	err := RegisterStarlarkHandlers(registry, client)
 func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) error {
-	handlers := map[string]struct {
-		handler  saga.Handler
-		metadata saga.HandlerMetadata
-	}{
-		"position_keeping.initiate_log": {
-			handler: initiateLogHandler(client),
-			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategoryIngestion,
-				// Position Keeping ingests physical measurements (meter readings) and produces
-				// Physics instruments (KWH, GAS, WATER) from external sources.
-				ProducesInstruments:  []string{"KWH", "GAS", "WATER"},
-				CompensationStrategy: "auto",
-				HasAutoCompensation:  true,
-				Compensate:           "position_keeping.cancel_log",
-				Description:          "Initiate a position log entry for a DEBIT or CREDIT transaction",
-				ProtoRequestType:     (*positionkeepingv1.InitiateFinancialPositionLogRequest)(nil),
-				ProtoResponseType:    (*positionkeepingv1.InitiateFinancialPositionLogResponse)(nil),
-				Version:              1,
-				ParamOverrides: map[string]saga.ParamOverride{
-					"amount":          {Type: "Decimal"},
-					"direction":       {Type: "enum"},
-					"instrument_code": {Type: "string"},
-					"account_id": {
-						Alias:    "position_id",
-						Required: boolPtr(true),
-					},
-					"currency":              {Type: "string", Deprecated: "use instrument_code instead"},
-					"valuation_analysis":    {Derived: true},
-					"description":           {Type: "string"},
-					"external_reference_id": {Type: "string"},
-					"correlation_id":        {Type: "string"},
-					"transaction_id":        {Type: "string"},
-					"attributes":            {Type: "map"},
-				},
-			},
-		},
-		"position_keeping.update_log": {
-			handler: updateLogHandler(client),
-			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategoryIngestion,
-				// Updates don't produce new instruments, just modify existing logs
-				ProducesInstruments:  []string{},
-				CompensationStrategy: "none",
-				Description:          "Update an existing position log entry",
-				ProtoRequestType:     (*positionkeepingv1.UpdateFinancialPositionLogRequest)(nil),
-				ProtoResponseType:    (*positionkeepingv1.UpdateFinancialPositionLogResponse)(nil),
-				Version:              1,
-				ParamOverrides: map[string]saga.ParamOverride{
-					"new_entry":       {Derived: true},
-					"status_update":   {Derived: true},
-					"audit_entry":     {Derived: true},
-					"version":         {Derived: true},
-					"idempotency_key": {Derived: true},
-				},
-			},
-		},
-		"position_keeping.cancel_log": {
-			handler: cancelLogHandler(client),
-			metadata: saga.HandlerMetadata{
-				Category: saga.HandlerCategoryIngestion,
-				// Cancellations don't produce instruments
-				ProducesInstruments:  []string{},
-				CompensationStrategy: "none",
-				Description:          "Cancel a position log entry (compensation handler)",
-				ProtoRequestType:     (*positionkeepingv1.UpdateFinancialPositionLogRequest)(nil),
-				ProtoResponseType:    (*positionkeepingv1.UpdateFinancialPositionLogResponse)(nil),
-				Version:              1,
-				ParamOverrides: map[string]saga.ParamOverride{
-					"new_entry":       {Derived: true},
-					"status_update":   {Derived: true},
-					"audit_entry":     {Derived: true},
-					"version":         {Derived: true},
-					"idempotency_key": {Derived: true},
-				},
-			},
-		},
-	}
+	handlers := buildHandlerDefinitions(client)
 
 	for name, h := range handlers {
 		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
@@ -111,6 +35,90 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 		}
 	}
 	return nil
+}
+
+// handlerDef pairs a saga handler with its metadata.
+type handlerDef struct {
+	handler  saga.Handler
+	metadata saga.HandlerMetadata
+}
+
+// buildHandlerDefinitions returns the handler definitions for all Position Keeping Starlark bindings.
+func buildHandlerDefinitions(client *Client) map[string]handlerDef {
+	return map[string]handlerDef{
+		"position_keeping.initiate_log": {
+			handler:  initiateLogHandler(client),
+			metadata: buildInitiateLogMetadata(),
+		},
+		"position_keeping.update_log": {
+			handler: updateLogHandler(client),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategoryIngestion,
+				ProducesInstruments:  []string{},
+				CompensationStrategy: "none",
+				Description:          "Update an existing position log entry",
+				ProtoRequestType:     (*positionkeepingv1.UpdateFinancialPositionLogRequest)(nil),
+				ProtoResponseType:    (*positionkeepingv1.UpdateFinancialPositionLogResponse)(nil),
+				Version:              1,
+				ParamOverrides:       buildUpdateParamOverrides(),
+			},
+		},
+		"position_keeping.cancel_log": {
+			handler: cancelLogHandler(client),
+			metadata: saga.HandlerMetadata{
+				Category:             saga.HandlerCategoryIngestion,
+				ProducesInstruments:  []string{},
+				CompensationStrategy: "none",
+				Description:          "Cancel a position log entry (compensation handler)",
+				ProtoRequestType:     (*positionkeepingv1.UpdateFinancialPositionLogRequest)(nil),
+				ProtoResponseType:    (*positionkeepingv1.UpdateFinancialPositionLogResponse)(nil),
+				Version:              1,
+				ParamOverrides:       buildUpdateParamOverrides(),
+			},
+		},
+	}
+}
+
+// buildInitiateLogMetadata builds the handler metadata for position_keeping.initiate_log.
+func buildInitiateLogMetadata() saga.HandlerMetadata {
+	return saga.HandlerMetadata{
+		Category:             saga.HandlerCategoryIngestion,
+		ProducesInstruments:  []string{"KWH", "GAS", "WATER"},
+		CompensationStrategy: "auto",
+		HasAutoCompensation:  true,
+		Compensate:           "position_keeping.cancel_log",
+		Description:          "Initiate a position log entry for a DEBIT or CREDIT transaction",
+		ProtoRequestType:     (*positionkeepingv1.InitiateFinancialPositionLogRequest)(nil),
+		ProtoResponseType:    (*positionkeepingv1.InitiateFinancialPositionLogResponse)(nil),
+		Version:              1,
+		ParamOverrides: map[string]saga.ParamOverride{
+			"amount":          {Type: "Decimal"},
+			"direction":       {Type: "enum"},
+			"instrument_code": {Type: "string"},
+			"account_id": {
+				Alias:    "position_id",
+				Required: boolPtr(true),
+			},
+			"currency":              {Type: "string", Deprecated: "use instrument_code instead"},
+			"valuation_analysis":    {Derived: true},
+			"description":           {Type: "string"},
+			"external_reference_id": {Type: "string"},
+			"correlation_id":        {Type: "string"},
+			"transaction_id":        {Type: "string"},
+			"attributes":            {Type: "map"},
+		},
+	}
+}
+
+// buildUpdateParamOverrides returns the shared param overrides for update/cancel handlers.
+func buildUpdateParamOverrides() map[string]saga.ParamOverride {
+	return map[string]saga.ParamOverride{
+		"new_entry":       {Derived: true},
+		"status_update":   {Derived: true},
+		"audit_entry":     {Derived: true},
+		"version":         {Derived: true},
+		"idempotency_key": {Derived: true},
+	}
 }
 
 // initiateLogHandler creates a new financial position log via gRPC.

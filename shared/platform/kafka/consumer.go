@@ -413,11 +413,11 @@ func (c *ProtoConsumer) processMessageWithRetry(record *kgo.Record) error {
 func (c *ProtoConsumer) retryProcessing(record *kgo.Record, maxRetries int32) error {
 	var lastErr error
 	for attempt := int32(1); attempt <= maxRetries; attempt++ {
-		if err := c.processMessage(record); err == nil {
+		err := c.processMessage(record)
+		if err == nil {
 			return nil
-		} else {
-			lastErr = err
 		}
+		lastErr = err
 
 		log.Printf("WARN: Message processing attempt %d/%d failed for topic=%s partition=%d offset=%d: %v",
 			attempt, maxRetries, record.Topic, record.Partition, record.Offset, lastErr)

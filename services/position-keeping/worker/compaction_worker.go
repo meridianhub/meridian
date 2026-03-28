@@ -220,7 +220,6 @@ func (w *CompactionWorker) Stop() {
 // It finds fragmented buckets and consolidates them.
 // The caller must manage WaitGroup to prevent races with Stop().
 func (w *CompactionWorker) runCompactionIteration(ctx context.Context) {
-	// Check for context cancellation before starting
 	select {
 	case <-ctx.Done():
 		return
@@ -231,54 +230,47 @@ func (w *CompactionWorker) runCompactionIteration(ctx context.Context) {
 	start := time.Now()
 	RecordCompactionRun()
 
-	var totalProcessed, totalRowsConsolidated int
-	var iterationErrors []error
-
-	// Find fragmented buckets
 	fragmentedBuckets, err := w.findFragmentedBuckets(ctx)
 	if err != nil {
 		w.logger.Error("failed to find fragmented buckets", "error", err)
 		RecordCompactionError(ErrorTypeScan)
-		iterationErrors = append(iterationErrors, err)
-		w.logIterationComplete(start, totalProcessed, totalRowsConsolidated, iterationErrors)
+		w.logIterationComplete(start, 0, 0, []error{err})
 		return
 	}
 
-	// Update fragmented buckets gauge
 	SetFragmentedBucketsCount(len(fragmentedBuckets))
 
 	if len(fragmentedBuckets) == 0 {
-		w.logger.Debug("compaction iteration complete: no fragmented buckets found",
-			"duration", time.Since(start))
+		w.logger.Debug("compaction iteration complete: no fragmented buckets found", "duration", time.Since(start))
 		ObserveCompactionDuration(time.Since(start).Seconds())
 		return
 	}
 
-	w.logger.Info("found fragmented buckets",
-		"count", len(fragmentedBuckets),
-		"threshold", w.config.FragmentThreshold)
+	w.logger.Info("found fragmented buckets", "count", len(fragmentedBuckets), "threshold", w.config.FragmentThreshold)
 
-	// Process each fragmented bucket
-	for _, bucket := range fragmentedBuckets {
-		// Check for shutdown signal between buckets
+	totalProcessed, totalRowsConsolidated, iterationErrors := w.processFragmentedBuckets(ctx, fragmentedBuckets)
+	w.logIterationComplete(start, totalProcessed, totalRowsConsolidated, iterationErrors)
+}
+
+// processFragmentedBuckets compacts each fragmented bucket, returning tallied results.
+func (w *CompactionWorker) processFragmentedBuckets(ctx context.Context, buckets []FragmentedBucket) (int, int, []error) {
+	var totalProcessed, totalRowsConsolidated int
+	var iterationErrors []error
+
+	for _, bucket := range buckets {
 		select {
 		case <-ctx.Done():
-			w.logIterationComplete(start, totalProcessed, totalRowsConsolidated, iterationErrors)
-			return
+			return totalProcessed, totalRowsConsolidated, iterationErrors
 		case <-w.done:
-			w.logIterationComplete(start, totalProcessed, totalRowsConsolidated, iterationErrors)
-			return
+			return totalProcessed, totalRowsConsolidated, iterationErrors
 		default:
 		}
 
 		rowsConsolidated, err := w.compactBucket(ctx, bucket.AccountID, bucket.InstrumentCode, bucket.BucketKey)
 		if err != nil {
 			w.logger.Error("failed to compact bucket",
-				"account_id", bucket.AccountID,
-				"instrument_code", bucket.InstrumentCode,
-				"bucket_key", bucket.BucketKey,
-				"error", err)
-			// Determine error type for metrics
+				"account_id", bucket.AccountID, "instrument_code", bucket.InstrumentCode,
+				"bucket_key", bucket.BucketKey, "error", err)
 			RecordCompactionError(ErrorTypeTx)
 			iterationErrors = append(iterationErrors, err)
 			continue
@@ -290,13 +282,11 @@ func (w *CompactionWorker) runCompactionIteration(ctx context.Context) {
 		RecordRowsConsolidated(rowsConsolidated)
 
 		w.logger.Debug("compacted bucket",
-			"account_id", bucket.AccountID,
-			"instrument_code", bucket.InstrumentCode,
-			"bucket_key", bucket.BucketKey,
-			"rows_consolidated", rowsConsolidated)
+			"account_id", bucket.AccountID, "instrument_code", bucket.InstrumentCode,
+			"bucket_key", bucket.BucketKey, "rows_consolidated", rowsConsolidated)
 	}
 
-	w.logIterationComplete(start, totalProcessed, totalRowsConsolidated, iterationErrors)
+	return totalProcessed, totalRowsConsolidated, iterationErrors
 }
 
 // findFragmentedBuckets finds buckets with more rows than the fragment threshold.

@@ -317,7 +317,7 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 	logger.Info("starting manifest application")
 
 	// Create tracking job and resolve saga script.
-	job, script, err := e.prepareApplyJob(ctx, input, logger)
+	job, script, err := e.prepareApplyJob(ctx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +327,7 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 }
 
 // prepareApplyJob creates the tracking job and resolves the saga script.
-func (e *ManifestExecutor) prepareApplyJob(ctx context.Context, input *ApplyManifestInput, logger *slog.Logger) (*ApplyJob, string, error) {
+func (e *ManifestExecutor) prepareApplyJob(ctx context.Context, input *ApplyManifestInput) (*ApplyJob, string, error) {
 	versionInt := parseManifestVersion(input.ManifestVersion)
 	job, err := e.jobRepo.Create(ctx, versionInt)
 	if err != nil {
