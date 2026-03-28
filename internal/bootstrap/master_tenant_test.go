@@ -13,8 +13,8 @@ func TestLoadPlatformManifest(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, mf)
 
-	// Verify instruments (4 fiat + 1 commodity)
-	assert.Len(t, mf.Instruments, 5)
+	// Verify instruments (4 fiat + 4 commodity + 1 voucher)
+	assert.Len(t, mf.Instruments, 9)
 	codes := make([]string, len(mf.Instruments))
 	for i, inst := range mf.Instruments {
 		codes[i] = inst.Code
@@ -24,6 +24,10 @@ func TestLoadPlatformManifest(t *testing.T) {
 	assert.Contains(t, codes, "USD")
 	assert.Contains(t, codes, "NZD")
 	assert.Contains(t, codes, "ACTIVE_PARTY")
+	assert.Contains(t, codes, "KWH")
+	assert.Contains(t, codes, "TONNE_CO2E")
+	assert.Contains(t, codes, "GPU_HOUR")
+	assert.Contains(t, codes, "RICE_VOUCHER")
 
 	// Verify account types (3 standard + 3 platform billing)
 	assert.Len(t, mf.AccountTypes, 6)
@@ -38,8 +42,8 @@ func TestLoadPlatformManifest(t *testing.T) {
 	assert.Contains(t, acctCodes, "PLATFORM_RECEIVABLE")
 	assert.Contains(t, acctCodes, "PLATFORM_REVENUE")
 
-	// Verify valuation rules (3 FX + 1 usage pricing)
-	assert.Len(t, mf.ValuationRules, 4)
+	// Verify valuation rules (3 FX + 1 usage pricing + 4 non-fiat)
+	assert.Len(t, mf.ValuationRules, 8)
 
 	// Verify billing saga
 	assert.Len(t, mf.Sagas, 1)
