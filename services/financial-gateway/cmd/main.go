@@ -149,7 +149,7 @@ func setupGRPCServer(ctx context.Context, tracer *observability.Tracer, cfg conf
 
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
-		Build()
+		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
