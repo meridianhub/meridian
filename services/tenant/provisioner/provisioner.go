@@ -459,11 +459,14 @@ func getServiceDatabaseURL(serviceName string) string {
 	// the rest of the application (e.g. postgres:5432 on demo, cockroachdb:26257 in prod).
 	if baseURL := os.Getenv("DATABASE_URL"); baseURL != "" {
 		derived, err := deriveServiceURL(baseURL, dbName)
-		if err == nil {
+		if err != nil {
+			// DATABASE_URL is set but malformed - log without leaking credentials
+			// and fall through to hardcoded fallback as a last resort.
+			slog.Error("failed to derive service URL from DATABASE_URL",
+				"service", serviceName, "reason", "malformed DATABASE_URL")
+		} else {
 			return derived
 		}
-		slog.Warn("failed to derive service URL from DATABASE_URL, using hardcoded fallback",
-			"service", serviceName, "error", err)
 	}
 
 	// Hardcoded fallback for local development without DATABASE_URL.

@@ -447,9 +447,7 @@ func TestGetServiceDatabaseURL(t *testing.T) {
 	t.Run("derives from DATABASE_URL when service env var not set", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://user:pass@postgres:5432/meridian?sslmode=disable")
 		url := getServiceDatabaseURL("party")
-		assert.Contains(t, url, "postgres:5432")
-		assert.Contains(t, url, "/meridian_party")
-		assert.Contains(t, url, "user:pass")
+		assert.Equal(t, "postgres://user:pass@postgres:5432/meridian_party?sslmode=disable", url)
 	})
 
 	t.Run("returns hardcoded fallback when no env vars set", func(t *testing.T) {
@@ -467,8 +465,7 @@ func TestGetServiceDatabaseURL(t *testing.T) {
 	t.Run("derives with hyphens replaced", func(t *testing.T) {
 		t.Setenv("DATABASE_URL", "postgres://user@myhost:5432/db?sslmode=disable")
 		url := getServiceDatabaseURL("current-account")
-		assert.Contains(t, url, "meridian_current_account")
-		assert.Contains(t, url, "myhost:5432")
+		assert.Equal(t, "postgres://user@myhost:5432/meridian_current_account?sslmode=disable", url)
 	})
 
 	t.Run("service-specific env var takes priority over DATABASE_URL", func(t *testing.T) {
