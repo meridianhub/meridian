@@ -268,7 +268,7 @@ func (c *Container) initServiceDeps() ([]service.Option, error) {
 // wireVarianceComponents creates the variance detector, valuator, and account party resolver,
 // returning the corresponding service options.
 func (c *Container) wireVarianceComponents() []service.Option {
-	var opts []service.Option
+	opts := make([]service.Option, 0, 2) //nolint:mnd // detector + valuator
 
 	// Wire VarianceDetector (depends on repos only, always available)
 	detector := service.NewVarianceDetector(c.RunRepo, c.SnapshotRepo, c.VarianceRepo)
