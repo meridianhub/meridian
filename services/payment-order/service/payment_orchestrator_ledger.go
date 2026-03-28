@@ -288,7 +288,7 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 	}
 
 	// Step 6: Update BookingLog status to POSTED (all 4 balanced entries are complete)
-	if err := o.finalizeClearingBookingLog(ctx, po, bookingLogID, clearingAccountID, contraAccountID); err != nil {
+	if err := o.finalizeClearingBookingLog(ctx, po, bookingLogID); err != nil {
 		return "", err
 	}
 
@@ -470,8 +470,6 @@ func (o *PaymentOrchestrator) finalizeClearingBookingLog(
 	ctx context.Context,
 	po *domain.PaymentOrder,
 	bookingLogID string,
-	clearingAccountID string,
-	contraAccountID string,
 ) error {
 	_, err := o.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     bookingLogID,

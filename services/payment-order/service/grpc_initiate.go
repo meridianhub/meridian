@@ -71,11 +71,11 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		"correlation_id", correlationID)
 
 	// Publish event, cache result, build response
-	response := s.publishAndCacheInitiateResult(ctx, po, idempKey, correlationID)
+	response := s.publishAndCacheInitiateResult(ctx, po, idempKey)
 
 	// Start saga orchestration asynchronously
 	tenantID, _ := tenant.FromContext(ctx)
-	s.startSagaOrchestration(po.ID, tenantID, tenantID != "", correlationID)
+	s.startSagaOrchestration(po.ID, tenantID, tenantID != "", correlationID) //nolint:contextcheck // Intentionally using background context for async saga orchestration
 
 	// Prevent accidental access to po after goroutine launch - the goroutine
 	// reloads fresh state from DB, so any access to po here would be stale
@@ -140,7 +140,7 @@ func (s *Service) checkInitiateRedisIdempotency(ctx context.Context, idempKey id
 		return nil, status.Error(codes.Internal, "failed to acquire idempotency lock")
 	}
 
-	return nil, nil
+	return nil, nil //nolint:nilnil // nil,nil signals "no cached result, continue processing"
 }
 
 // checkInitiateDatabaseIdempotency checks the database for an existing payment order with the same idempotency key.
@@ -162,7 +162,7 @@ func (s *Service) checkInitiateDatabaseIdempotency(ctx context.Context, idempote
 			PaymentOrder: toProto(existingPO),
 		}, nil
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // nil,nil signals "no existing record, continue processing"
 }
 
 // validateAndPersistPaymentOrder validates the request amount, creates a domain payment order,
@@ -224,7 +224,7 @@ func (s *Service) handleCreateConflict(ctx context.Context, err error, idempoten
 
 // publishAndCacheInitiateResult publishes the PaymentOrderInitiated event to Kafka,
 // caches the result in Redis for idempotency, and returns the response.
-func (s *Service) publishAndCacheInitiateResult(ctx context.Context, po *domain.PaymentOrder, idempKey idempotency.Key, correlationID string) *pb.InitiatePaymentOrderResponse {
+func (s *Service) publishAndCacheInitiateResult(ctx context.Context, po *domain.PaymentOrder, idempKey idempotency.Key) *pb.InitiatePaymentOrderResponse {
 	// Publish PaymentOrderInitiated event to Kafka
 	s.publishEvent(ctx, TopicPaymentOrderInitiated, po.ID.String(), &eventsv1.PaymentOrderInitiatedEvent{
 		EventId:           uuid.New().String(),
@@ -265,7 +265,6 @@ func (s *Service) publishAndCacheInitiateResult(ctx context.Context, po *domain.
 
 // startSagaOrchestration launches the saga orchestration goroutine for a payment order.
 func (s *Service) startSagaOrchestration(paymentOrderID uuid.UUID, tid tenant.TenantID, hasTenantCtx bool, correlationID string) {
-	//nolint:contextcheck // Intentionally using background context for async saga orchestration
 	go func(paymentOrderID uuid.UUID, tid tenant.TenantID, hasTenantCtx bool) {
 		// Recover from panics to prevent silent goroutine termination
 		defer func() {

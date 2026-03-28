@@ -646,4 +646,3 @@ func toMinorUnits(amount decimal.Decimal, precision int32) int64 {
 func toMajorUnits(amountCents int64, precision int32) string {
 	return decimal.NewFromInt(amountCents).Shift(-precision).String()
 }
-

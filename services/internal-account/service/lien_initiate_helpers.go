@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
@@ -12,8 +13,6 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"time"
 )
 
 // validateInitiateLienInput validates the request fields and parses the input amount.
