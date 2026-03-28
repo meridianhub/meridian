@@ -127,7 +127,8 @@ func (s *Service) validateInstrument(ctx context.Context, instrumentCode string)
 		Code: instrumentCode,
 	})
 	if err != nil {
-		return "", "", s.mapInstrumentValidationError(err, instrumentCode, validationStart)
+		opStatus, grpcErr := s.mapInstrumentValidationError(err, instrumentCode, validationStart)
+		return "", opStatus, grpcErr
 	}
 
 	if refDataResp.Instrument == nil {
@@ -153,8 +154,8 @@ func (s *Service) validateInstrument(ctx context.Context, instrumentCode string)
 	return dimension, "", nil
 }
 
-// mapInstrumentValidationError maps a Reference Data retrieval error to a gRPC status error.
-func (s *Service) mapInstrumentValidationError(err error, instrumentCode string, validationStart time.Time) error {
+// mapInstrumentValidationError maps a Reference Data retrieval error to an operation status and gRPC status error.
+func (s *Service) mapInstrumentValidationError(err error, instrumentCode string, validationStart time.Time) (string, error) {
 	validationDuration := time.Since(validationStart)
 	errCode := status.Code(err)
 	s.logger.Warn("instrument validation failed", "instrument_code", instrumentCode, "error", err)
@@ -162,12 +163,12 @@ func (s *Service) mapInstrumentValidationError(err error, instrumentCode string,
 	switch errCode { //nolint:exhaustive // only handling specific gRPC codes
 	case codes.NotFound:
 		ibaobservability.RecordInstrumentValidation("not_found", validationDuration)
-		return status.Errorf(codes.InvalidArgument, "instrument not found: %s", instrumentCode)
+		return opStatusInstrumentNotFound, status.Errorf(codes.InvalidArgument, "instrument not found: %s", instrumentCode)
 	case codes.DeadlineExceeded, codes.Canceled:
 		ibaobservability.RecordInstrumentValidation("timeout", validationDuration)
-		return status.Errorf(codes.DeadlineExceeded, "instrument validation timed out for: %s", instrumentCode)
+		return opStatusInstrumentValidationErr, status.Errorf(codes.DeadlineExceeded, "instrument validation timed out for: %s", instrumentCode)
 	default:
 		ibaobservability.RecordInstrumentValidation("error", validationDuration)
-		return status.Errorf(codes.Internal, "failed to validate instrument: %v", err)
+		return opStatusInstrumentValidationErr, status.Errorf(codes.Internal, "failed to validate instrument: %v", err)
 	}
 }

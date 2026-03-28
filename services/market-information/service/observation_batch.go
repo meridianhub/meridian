@@ -23,8 +23,6 @@ import (
 
 // RecordObservationBatch records multiple observations with parallel validation.
 // Returns partial success with details for each observation.
-// RecordObservationBatch records multiple observations with parallel validation.
-// Returns partial success with details for each observation.
 func (s *Server) RecordObservationBatch(ctx context.Context, req *pb.RecordObservationBatchRequest) (*pb.RecordObservationBatchResponse, error) {
 	if len(req.Observations) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "at least one observation is required")

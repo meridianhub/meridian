@@ -213,13 +213,14 @@ func (s *Service) checkIdempotencyCache(
 	result, err := s.idempotencyService.Check(ctx, idempKey)
 	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
 		var cachedResp pb.ExecuteLienResponse
-		if unmarshalErr := proto.Unmarshal(result.Data, &cachedResp); unmarshalErr == nil {
+		unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
+		if unmarshalErr == nil {
 			s.logger.Info("returning cached execute lien response from Redis",
 				"lien_id", lienID, "transaction_id", cachedResp.TransactionId,
 				"idempotency_key", idempotencyKeyStr)
 			return &cachedResp, nil
 		}
-		s.logger.Warn("failed to unmarshal cached idempotency result", "error", err)
+		s.logger.Warn("failed to unmarshal cached idempotency result", "error", unmarshalErr)
 	} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
 		s.logger.Error("idempotency check failed", "error", err)
 		return nil, status.Error(codes.Internal, "failed to check idempotency")
