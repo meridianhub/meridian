@@ -207,70 +207,72 @@ func (r *Repository) SaveIdentityWithInvitation(ctx context.Context, identity *d
 	invEntity := toInvitationEntity(invitation)
 
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		// Save invitation first (mark token as consumed)
-		var existingInv InvitationEntity
-		invResult := tx.Where("id = ?", invEntity.ID).First(&existingInv)
-		if errors.Is(invResult.Error, gorm.ErrRecordNotFound) {
-			if err := tx.Create(invEntity).Error; err != nil {
-				return err
-			}
-		} else if invResult.Error != nil {
-			return invResult.Error
-		} else {
-			if err := tx.Model(&InvitationEntity{}).
-				Where("id = ?", invEntity.ID).
-				Updates(map[string]interface{}{
-					"status":     invEntity.Status,
-					"updated_at": invEntity.UpdatedAt,
-				}).Error; err != nil {
-				return err
-			}
+		if err := upsertInvitation(tx, invEntity); err != nil {
+			return err
 		}
+		return upsertIdentity(tx, identEntity, identity)
+	})
+}
 
-		// Save identity
-		var existingIdent IdentityEntity
-		identResult := tx.Where("id = ? AND deleted_at IS NULL", identEntity.ID).First(&existingIdent)
-		if errors.Is(identResult.Error, gorm.ErrRecordNotFound) {
-			if err := tx.Create(identEntity).Error; err != nil {
-				if isDuplicateKeyError(err) {
-					return domain.ErrEmailAlreadyExists
-				}
-				return err
-			}
-			identity.UpdateBaseVersion(identEntity.Version)
-			return nil
-		}
-		if identResult.Error != nil {
-			return identResult.Error
-		}
+// upsertInvitation creates or updates an invitation within a transaction.
+func upsertInvitation(tx *gorm.DB, invEntity *InvitationEntity) error {
+	var existingInv InvitationEntity
+	invResult := tx.Where("id = ?", invEntity.ID).First(&existingInv)
+	if errors.Is(invResult.Error, gorm.ErrRecordNotFound) {
+		return tx.Create(invEntity).Error
+	}
+	if invResult.Error != nil {
+		return invResult.Error
+	}
+	return tx.Model(&InvitationEntity{}).
+		Where("id = ?", invEntity.ID).
+		Updates(map[string]interface{}{
+			"status":     invEntity.Status,
+			"updated_at": invEntity.UpdatedAt,
+		}).Error
+}
 
-		// Use identity.BaseVersion() as the optimistic lock guard.
-		// BaseVersion records the DB version at load time; multiple mutations may
-		// occur between load and save, so this is more correct than identEntity.Version-1.
-		updateResult := tx.Model(&IdentityEntity{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", identEntity.ID, identity.BaseVersion()).
-			Updates(map[string]interface{}{
-				"email":           identEntity.Email,
-				"status":          identEntity.Status,
-				"password_hash":   identEntity.PasswordHash,
-				"external_idp":    identEntity.ExternalIDP,
-				"external_sub":    identEntity.ExternalSub,
-				"failed_attempts": identEntity.FailedAttempts,
-				"version":         identEntity.Version,
-				"updated_at":      identEntity.UpdatedAt,
-			})
-		if updateResult.Error != nil {
-			if isDuplicateKeyError(updateResult.Error) {
+// upsertIdentity creates or updates an identity within a transaction, with optimistic locking.
+func upsertIdentity(tx *gorm.DB, identEntity *IdentityEntity, identity *domain.Identity) error {
+	var existingIdent IdentityEntity
+	identResult := tx.Where("id = ? AND deleted_at IS NULL", identEntity.ID).First(&existingIdent)
+	if errors.Is(identResult.Error, gorm.ErrRecordNotFound) {
+		if err := tx.Create(identEntity).Error; err != nil {
+			if isDuplicateKeyError(err) {
 				return domain.ErrEmailAlreadyExists
 			}
-			return updateResult.Error
-		}
-		if updateResult.RowsAffected == 0 {
-			return ErrVersionConflict
+			return err
 		}
 		identity.UpdateBaseVersion(identEntity.Version)
 		return nil
-	})
+	}
+	if identResult.Error != nil {
+		return identResult.Error
+	}
+
+	updateResult := tx.Model(&IdentityEntity{}).
+		Where("id = ? AND version = ? AND deleted_at IS NULL", identEntity.ID, identity.BaseVersion()).
+		Updates(map[string]interface{}{
+			"email":           identEntity.Email,
+			"status":          identEntity.Status,
+			"password_hash":   identEntity.PasswordHash,
+			"external_idp":    identEntity.ExternalIDP,
+			"external_sub":    identEntity.ExternalSub,
+			"failed_attempts": identEntity.FailedAttempts,
+			"version":         identEntity.Version,
+			"updated_at":      identEntity.UpdatedAt,
+		})
+	if updateResult.Error != nil {
+		if isDuplicateKeyError(updateResult.Error) {
+			return domain.ErrEmailAlreadyExists
+		}
+		return updateResult.Error
+	}
+	if updateResult.RowsAffected == 0 {
+		return ErrVersionConflict
+	}
+	identity.UpdateBaseVersion(identEntity.Version)
+	return nil
 }
 
 // SaveInvitation persists a new or updated invitation.

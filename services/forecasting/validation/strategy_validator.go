@@ -214,7 +214,29 @@ func ValidateWithExecution(script string) Result {
 		return result
 	}
 
-	// Dry-run: parse and check that globals define compute_forecast as a callable
+	predeclared := buildValidationPredeclared()
+
+	thread := &starlarklib.Thread{Name: "validate"}
+	globals, err := starlarklib.ExecFileOptions(&syntax.FileOptions{}, thread, "strategy.star", script, predeclared)
+	if err != nil {
+		result.Valid = false
+		result.Errors = append(result.Errors, Error{
+			Line:       0,
+			Column:     0,
+			Message:    fmt.Sprintf("execution error: %s", err.Error()),
+			Suggestion: "Fix the runtime error in the top-level script code. Note: the script body outside compute_forecast runs at load time.",
+		})
+		return result
+	}
+
+	validateEntryPoint(globals, &result)
+
+	return result
+}
+
+// buildValidationPredeclared constructs the predeclared environment for dry-run validation,
+// including universe builtins and stub forecast builtins.
+func buildValidationPredeclared() starlarklib.StringDict {
 	predeclared := starlarklib.StringDict{}
 	for _, name := range []string{
 		"True", "False", "None",
@@ -230,7 +252,6 @@ func ValidateWithExecution(script string) Result {
 		}
 	}
 
-	// Add stub builtins that return None for validation purposes
 	stubBuiltin := starlarklib.NewBuiltin("stub", func(_ *starlarklib.Thread, _ *starlarklib.Builtin, _ starlarklib.Tuple, _ []starlarklib.Tuple) (starlarklib.Value, error) {
 		return starlarklib.None, nil
 	})
@@ -238,20 +259,11 @@ func ValidateWithExecution(script string) Result {
 		predeclared[name] = stubBuiltin
 	}
 
-	thread := &starlarklib.Thread{Name: "validate"}
-	globals, err := starlarklib.ExecFileOptions(&syntax.FileOptions{}, thread, "strategy.star", script, predeclared)
-	if err != nil {
-		result.Valid = false
-		result.Errors = append(result.Errors, Error{
-			Line:       0,
-			Column:     0,
-			Message:    fmt.Sprintf("execution error: %s", err.Error()),
-			Suggestion: "Fix the runtime error in the top-level script code. Note: the script body outside compute_forecast runs at load time.",
-		})
-		return result
-	}
+	return predeclared
+}
 
-	// Verify compute_forecast is a function
+// validateEntryPoint checks that compute_forecast exists as a function in the script globals.
+func validateEntryPoint(globals starlarklib.StringDict, result *Result) {
 	fn, ok := globals["compute_forecast"]
 	if !ok {
 		result.Valid = false
@@ -261,7 +273,7 @@ func ValidateWithExecution(script string) Result {
 			Message:    "compute_forecast not found in script globals after execution",
 			Suggestion: "Ensure compute_forecast is defined at the top level, not inside another function.",
 		})
-		return result
+		return
 	}
 
 	if _, ok := fn.(*starlarklib.Function); !ok {
@@ -273,6 +285,4 @@ func ValidateWithExecution(script string) Result {
 			Suggestion: "Define compute_forecast as: def compute_forecast(ctx): ...",
 		})
 	}
-
-	return result
 }

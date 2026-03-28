@@ -147,54 +147,17 @@ func (a *PaymentIntentAdapter) DispatchPayment(ctx context.Context, req *financi
 		tenantID = tid.String()
 	}
 
-	amountMinor := req.GetAmountUnits()
 	currencyLower := strings.ToLower(req.GetInstrumentCode())
 
-	params := &stripego.PaymentIntentCreateParams{
-		Amount:        stripego.Int64(amountMinor),
-		Currency:      stripego.String(currencyLower),
-		Customer:      stripego.String(req.GetDebtorAccountId()),
-		PaymentMethod: stripego.String(req.GetReference()),
-		Confirm:       stripego.Bool(true),
-		OffSession:    stripego.Bool(true),
-		Metadata: map[string]string{
-			"payment_order_id": req.GetPaymentOrderId(),
-			"tenant_id":        tenantID,
-		},
+	params, platformFeeAmount, err := a.buildPaymentIntentParams(req, accountID, tenantID, currencyLower)
+	if err != nil {
+		return DispatchResult{}, err
 	}
-
-	// Merge request metadata into Stripe metadata, protecting reserved keys
-	for k, v := range req.GetMetadata() {
-		if k == "payment_order_id" || k == "tenant_id" {
-			continue
-		}
-		params.Metadata[k] = v
-	}
-
-	// Calculate and set platform fee if configured
-	var platformFeeAmount int64
-	if a.config.PlatformFee != nil && !a.config.PlatformFee.IsZero() {
-		var err error
-		platformFeeAmount, err = a.config.PlatformFee.CalculateFee(amountMinor)
-		if err != nil {
-			return DispatchResult{}, fmt.Errorf("platform fee calculation failed: %w", err)
-		}
-		if platformFeeAmount > 0 {
-			params.ApplicationFeeAmount = stripego.Int64(platformFeeAmount)
-		}
-	}
-
-	// Set idempotency key from the proto request
-	idempotencyKey := IdempotencyKey(req.GetPaymentOrderId(), "payment_intent")
-	params.IdempotencyKey = stripego.String(idempotencyKey)
-
-	// Set Connected Account header
-	params.SetStripeAccount(accountID)
 
 	a.logger.Debug("creating stripe payment intent",
 		"payment_order_id", req.GetPaymentOrderId(),
 		"tenant_id", tenantID,
-		"amount", amountMinor,
+		"amount", req.GetAmountUnits(),
 		"currency", currencyLower,
 		"connected_account", accountID,
 	)
@@ -226,6 +189,54 @@ func (a *PaymentIntentAdapter) DispatchPayment(ctx context.Context, req *financi
 		Message:           string(pi.Status),
 		PlatformFeeAmount: platformFeeAmount,
 	}, nil
+}
+
+// buildPaymentIntentParams constructs the Stripe PaymentIntent creation parameters
+// including metadata merging and platform fee calculation.
+func (a *PaymentIntentAdapter) buildPaymentIntentParams(
+	req *financialgatewayv1.DispatchPaymentRequest,
+	accountID, tenantID, currencyLower string,
+) (*stripego.PaymentIntentCreateParams, int64, error) {
+	amountMinor := req.GetAmountUnits()
+
+	params := &stripego.PaymentIntentCreateParams{
+		Amount:        stripego.Int64(amountMinor),
+		Currency:      stripego.String(currencyLower),
+		Customer:      stripego.String(req.GetDebtorAccountId()),
+		PaymentMethod: stripego.String(req.GetReference()),
+		Confirm:       stripego.Bool(true),
+		OffSession:    stripego.Bool(true),
+		Metadata: map[string]string{
+			"payment_order_id": req.GetPaymentOrderId(),
+			"tenant_id":        tenantID,
+		},
+	}
+
+	// Merge request metadata, protecting reserved keys
+	for k, v := range req.GetMetadata() {
+		if k == "payment_order_id" || k == "tenant_id" {
+			continue
+		}
+		params.Metadata[k] = v
+	}
+
+	// Calculate and set platform fee if configured
+	var platformFeeAmount int64
+	if a.config.PlatformFee != nil && !a.config.PlatformFee.IsZero() {
+		var err error
+		platformFeeAmount, err = a.config.PlatformFee.CalculateFee(amountMinor)
+		if err != nil {
+			return nil, 0, fmt.Errorf("platform fee calculation failed: %w", err)
+		}
+		if platformFeeAmount > 0 {
+			params.ApplicationFeeAmount = stripego.Int64(platformFeeAmount)
+		}
+	}
+
+	params.IdempotencyKey = stripego.String(IdempotencyKey(req.GetPaymentOrderId(), "payment_intent"))
+	params.SetStripeAccount(accountID)
+
+	return params, platformFeeAmount, nil
 }
 
 // handleError processes Stripe API errors and maps them to appropriate responses.

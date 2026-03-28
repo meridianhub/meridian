@@ -459,47 +459,19 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Consume the code (one-time use, TTL check).
-	entry, ok := h.store.Consume(code)
-	if !ok {
-		writeOAuthError(w, "invalid_grant", "authorization code is invalid or expired")
-		return
-	}
-
-	// Validate client_id matches what was authorized.
-	if entry.ClientID != clientID {
-		writeOAuthError(w, "invalid_grant", "client_id mismatch")
-		return
-	}
-
-	// Validate redirect_uri if provided (RFC 6749 §4.1.3: MUST match if present).
-	if redirectURI != "" && redirectURI != entry.RedirectURI {
-		writeOAuthError(w, "invalid_grant", "redirect_uri mismatch")
-		return
-	}
-
-	// Verify PKCE: SHA256(verifier) must equal stored challenge.
-	if !verifyPKCE(verifier, entry.CodeChallenge) {
-		writeOAuthError(w, "invalid_grant", "PKCE verification failed")
+	// Validate the authorization code and PKCE verifier.
+	entry, errMsg := validateCodeExchange(h.store, code, verifier, clientID, redirectURI)
+	if errMsg != "" {
+		writeOAuthError(w, "invalid_grant", errMsg)
 		return
 	}
 
 	// Use pre-signed token from OIDC flow if available, otherwise issue via TokenIssuer.
-	var token string
-	if entry.Token != "" {
-		token = entry.Token
-	} else {
-		claims := map[string]any{
-			"client_id": clientID,
-			"iat":       time.Now().Unix(),
-		}
-		var err error
-		token, err = h.issuer.Issue(claims)
-		if err != nil {
-			h.logger.Error("token issuer failed", "error", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
+	token, err := h.resolveToken(entry, clientID)
+	if err != nil {
+		h.logger.Error("token issuer failed", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
 	}
 
 	h.logger.Info("access token issued", "client_id", clientID)
@@ -512,6 +484,37 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"token_type":   "Bearer",
 		"expires_in":   3600,
 	})
+}
+
+// validateCodeExchange consumes the authorization code and validates client_id, redirect_uri, and PKCE.
+// Returns the code entry on success, or an error message string on failure.
+func validateCodeExchange(store *CodeStore, code, verifier, clientID, redirectURI string) (CodeEntry, string) {
+	entry, ok := store.Consume(code)
+	if !ok {
+		return CodeEntry{}, "authorization code is invalid or expired"
+	}
+	if entry.ClientID != clientID {
+		return CodeEntry{}, "client_id mismatch"
+	}
+	if redirectURI != "" && redirectURI != entry.RedirectURI {
+		return CodeEntry{}, "redirect_uri mismatch"
+	}
+	if !verifyPKCE(verifier, entry.CodeChallenge) {
+		return CodeEntry{}, "PKCE verification failed"
+	}
+	return entry, ""
+}
+
+// resolveToken returns a pre-signed token from the OIDC flow or issues a new one via the TokenIssuer.
+func (h *TokenHandler) resolveToken(entry CodeEntry, clientID string) (string, error) {
+	if entry.Token != "" {
+		return entry.Token, nil
+	}
+	claims := map[string]any{
+		"client_id": clientID,
+		"iat":       time.Now().Unix(),
+	}
+	return h.issuer.Issue(claims)
 }
 
 // -----------------------------------------------------------------------

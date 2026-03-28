@@ -9,6 +9,26 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
+// parseAndConvertManifest parses a manifest input (YAML/JSON string or JSON object) into a proto Manifest.
+// Returns a validation error response (non-nil) on failure, or the manifest on success.
+func parseAndConvertManifest(input interface{}) (*controlplanev1.Manifest, interface{}) {
+	manifestJSON, err := parseManifestInput(input)
+	if err != nil {
+		return nil, map[string]interface{}{
+			"valid":  false,
+			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
+		}
+	}
+	manifest, err := manifestJSONToProto(manifestJSON)
+	if err != nil {
+		return nil, map[string]interface{}{
+			"valid":  false,
+			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
+		}
+	}
+	return manifest, nil
+}
+
 // buildManifestValidateTool returns the meridian_manifest_validate tool.
 func buildManifestValidateTool(client ManifestApplier) Tool {
 	return Tool{
@@ -83,19 +103,9 @@ func handleManifestValidate(ctx context.Context, client ManifestApplier, params 
 		}, nil
 	}
 
-	manifestJSON, err := parseManifestInput(p.Manifest)
-	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
-			"valid":  false,
-			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
-		}, nil
-	}
-	manifest, err := manifestJSONToProto(manifestJSON)
-	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
-			"valid":  false,
-			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
-		}, nil
+	manifest, errResp := parseAndConvertManifest(p.Manifest)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	resp, err := client.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
@@ -164,19 +174,9 @@ func handleManifestPlan(ctx context.Context, client ManifestApplier, sess PlanSt
 		return mcperrors.FormatGRPCError(err), nil
 	}
 
-	manifestJSON, err := parseManifestInput(p.Manifest)
-	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
-			"valid":  false,
-			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
-		}, nil
-	}
-	manifest, err := manifestJSONToProto(manifestJSON)
-	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
-			"valid":  false,
-			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
-		}, nil
+	manifest, errResp := parseAndConvertManifest(p.Manifest)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	resp, err := client.ApplyManifest(ctx, &controlplanev1.ApplyManifestRequest{
@@ -277,19 +277,9 @@ func handleManifestApply(ctx context.Context, client ManifestApplier, sess PlanS
 		}, nil
 	}
 
-	manifestJSON, err := parseManifestInput(p.Manifest)
-	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
-			"valid":  false,
-			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
-		}, nil
-	}
-	manifest, err := manifestJSONToProto(manifestJSON)
-	if err != nil {
-		return map[string]interface{}{ //nolint:nilerr // err is surfaced in the tool response
-			"valid":  false,
-			"errors": []interface{}{map[string]interface{}{"type": mcperrors.TypeManifestValidation, "message": err.Error()}},
-		}, nil
+	manifest, errResp := parseAndConvertManifest(p.Manifest)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	// Verify manifest content matches the plan by comparing canonical proto bytes.

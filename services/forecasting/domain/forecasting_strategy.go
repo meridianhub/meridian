@@ -69,32 +69,8 @@ func NewForecastingStrategy(
 	outputDatasetCode string,
 	referenceDataResolutionKey string,
 ) (ForecastingStrategy, error) {
-	if tenantID == "" {
-		return ForecastingStrategy{}, ErrTenantIDRequired
-	}
-	if name == "" {
-		return ForecastingStrategy{}, ErrNameRequired
-	}
-	if starlarkCode == "" {
-		return ForecastingStrategy{}, ErrStarlarkCodeRequired
-	}
-	if horizonHours < 1 || horizonHours > 168 {
-		return ForecastingStrategy{}, ErrInvalidHorizonHours
-	}
-	if granularityHours < 1 || granularityHours > horizonHours {
-		return ForecastingStrategy{}, ErrInvalidGranularityHours
-	}
-	if schedule == "" {
-		return ForecastingStrategy{}, ErrScheduleRequired
-	}
-	if _, err := cron.ParseStandard(schedule); err != nil {
-		return ForecastingStrategy{}, ErrInvalidSchedule
-	}
-	if len(inputDatasetCodes) == 0 {
-		return ForecastingStrategy{}, ErrInputDatasetCodesRequired
-	}
-	if outputDatasetCode == "" {
-		return ForecastingStrategy{}, ErrOutputDatasetCodeRequired
+	if err := validateNewStrategy(tenantID, name, starlarkCode, horizonHours, granularityHours, schedule, inputDatasetCodes, outputDatasetCode); err != nil {
+		return ForecastingStrategy{}, err
 	}
 
 	// Defensive copy of input slice
@@ -119,6 +95,44 @@ func NewForecastingStrategy(
 		createdAt:                  now,
 		updatedAt:                  now,
 	}, nil
+}
+
+// validateNewStrategy checks all required fields and constraints for a new strategy.
+func validateNewStrategy(
+	tenantID, name, starlarkCode string,
+	horizonHours, granularityHours int,
+	schedule string,
+	inputDatasetCodes []string,
+	outputDatasetCode string,
+) error {
+	if tenantID == "" {
+		return ErrTenantIDRequired
+	}
+	if name == "" {
+		return ErrNameRequired
+	}
+	if starlarkCode == "" {
+		return ErrStarlarkCodeRequired
+	}
+	if horizonHours < 1 || horizonHours > 168 {
+		return ErrInvalidHorizonHours
+	}
+	if granularityHours < 1 || granularityHours > horizonHours {
+		return ErrInvalidGranularityHours
+	}
+	if schedule == "" {
+		return ErrScheduleRequired
+	}
+	if _, err := cron.ParseStandard(schedule); err != nil {
+		return ErrInvalidSchedule
+	}
+	if len(inputDatasetCodes) == 0 {
+		return ErrInputDatasetCodesRequired
+	}
+	if outputDatasetCode == "" {
+		return ErrOutputDatasetCodeRequired
+	}
+	return nil
 }
 
 // Activate transitions the strategy to ACTIVE status.

@@ -69,44 +69,14 @@ func (s *Service) GrantRole(ctx context.Context, req *pb.GrantRoleRequest) (*pb.
 
 // RevokeRole revokes a role assignment from an identity.
 func (s *Service) RevokeRole(ctx context.Context, req *pb.RevokeRoleRequest) (*pb.RevokeRoleResponse, error) {
-	callerID, ok := auth.GetUserIDFromContext(ctx)
-	if !ok {
-		return nil, status.Errorf(codes.Unauthenticated, "missing authentication context")
-	}
-
-	revokerID, err := uuid.Parse(callerID)
+	revokerID, identityID, assignmentID, err := validateRevokeRoleRequest(ctx, req)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid caller identity ID")
+		return nil, err
 	}
 
-	identityID, err := uuid.Parse(req.GetIdentityId())
+	target, err := s.findRoleAssignment(ctx, identityID, assignmentID)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid identity ID: %v", err)
-	}
-
-	assignmentID, err := uuid.Parse(req.GetRoleAssignmentId())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid role assignment ID: %v", err)
-	}
-
-	assignments, err := s.repo.FindRoleAssignments(ctx, identityID)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to find role assignments",
-			"identity_id", identityID,
-			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to find role assignments")
-	}
-
-	var target *domain.RoleAssignment
-	for _, a := range assignments {
-		if a.ID() == assignmentID {
-			target = a
-			break
-		}
-	}
-
-	if target == nil {
-		return nil, status.Errorf(codes.NotFound, "role assignment not found")
+		return nil, err
 	}
 
 	// Enforce role hierarchy: revoker must hold a higher privilege than the target role.
@@ -124,14 +94,52 @@ func (s *Service) RevokeRole(ctx context.Context, req *pb.RevokeRoleRequest) (*p
 
 	if err := s.repo.SaveRoleAssignment(ctx, target); err != nil {
 		s.logger.ErrorContext(ctx, "failed to save revoked role assignment",
-			"assignment_id", assignmentID,
-			"error", err)
+			"assignment_id", assignmentID, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to save role revocation")
 	}
 
 	return &pb.RevokeRoleResponse{
 		RoleAssignment: roleAssignmentToProto(target),
 	}, nil
+}
+
+// validateRevokeRoleRequest parses and validates the IDs from the revoke role request.
+func validateRevokeRoleRequest(ctx context.Context, req *pb.RevokeRoleRequest) (uuid.UUID, uuid.UUID, uuid.UUID, error) {
+	callerID, ok := auth.GetUserIDFromContext(ctx)
+	if !ok {
+		return uuid.Nil, uuid.Nil, uuid.Nil, status.Errorf(codes.Unauthenticated, "missing authentication context")
+	}
+	revokerID, err := uuid.Parse(callerID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, uuid.Nil, status.Errorf(codes.Internal, "invalid caller identity ID")
+	}
+	identityID, err := uuid.Parse(req.GetIdentityId())
+	if err != nil {
+		return uuid.Nil, uuid.Nil, uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid identity ID: %v", err)
+	}
+	assignmentID, err := uuid.Parse(req.GetRoleAssignmentId())
+	if err != nil {
+		return uuid.Nil, uuid.Nil, uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid role assignment ID: %v", err)
+	}
+	return revokerID, identityID, assignmentID, nil
+}
+
+// findRoleAssignment looks up a specific role assignment by identity and assignment ID.
+func (s *Service) findRoleAssignment(ctx context.Context, identityID, assignmentID uuid.UUID) (*domain.RoleAssignment, error) {
+	assignments, err := s.repo.FindRoleAssignments(ctx, identityID)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to find role assignments",
+			"identity_id", identityID, "error", err)
+		return nil, status.Errorf(codes.Internal, "failed to find role assignments")
+	}
+
+	for _, a := range assignments {
+		if a.ID() == assignmentID {
+			return a, nil
+		}
+	}
+
+	return nil, status.Errorf(codes.NotFound, "role assignment not found")
 }
 
 // ListRoleAssignments lists the role assignments for an identity.

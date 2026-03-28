@@ -118,89 +118,20 @@ func formatError(msg string) map[string]interface{} {
 
 // buildManifestSummary converts a Manifest into a hierarchical summary map.
 func buildManifestSummary(version string, m *controlplanev1.Manifest) map[string]interface{} {
-	instruments := make([]map[string]interface{}, 0, len(m.GetInstruments()))
-	for _, inst := range m.GetInstruments() {
-		instruments = append(instruments, map[string]interface{}{
-			"code": inst.GetCode(),
-			"name": inst.GetName(),
-			"type": inst.GetType().String(),
-			"unit": func() string {
-				if inst.GetDimensions() != nil {
-					return inst.GetDimensions().GetUnit()
-				}
-				return ""
-			}(),
-			"precision": func() int32 {
-				if inst.GetDimensions() != nil {
-					return inst.GetDimensions().GetPrecision()
-				}
-				return 0
-			}(),
-		})
-	}
-
-	accountTypes := make([]map[string]interface{}, 0, len(m.GetAccountTypes()))
-	for _, at := range m.GetAccountTypes() {
-		entry := map[string]interface{}{
-			"code":           at.GetCode(),
-			"name":           at.GetName(),
-			"normal_balance": at.GetNormalBalance().String(),
-		}
-		if len(at.GetAllowedInstruments()) > 0 {
-			entry["allowed_instruments"] = at.GetAllowedInstruments()
-		}
-		accountTypes = append(accountTypes, entry)
-	}
-
-	valuationRules := make([]map[string]interface{}, 0, len(m.GetValuationRules()))
-	for _, vr := range m.GetValuationRules() {
-		valuationRules = append(valuationRules, map[string]interface{}{
-			"from_instrument": vr.GetFromInstrument(),
-			"to_instrument":   vr.GetToInstrument(),
-			"method":          vr.GetMethod().String(),
-			"source":          vr.GetSource(),
-		})
-	}
-
-	sagas := make([]map[string]interface{}, 0, len(m.GetSagas()))
-	for _, s := range m.GetSagas() {
-		sagas = append(sagas, map[string]interface{}{
-			"name":    s.GetName(),
-			"trigger": s.GetTrigger(),
-		})
-	}
-
-	paymentRails := make([]map[string]interface{}, 0, len(m.GetPaymentRails()))
-	for _, pr := range m.GetPaymentRails() {
-		paymentRails = append(paymentRails, map[string]interface{}{
-			"provider": pr.GetProvider(),
-			"mode":     pr.GetMode().String(),
-		})
-	}
+	instruments := buildInstrumentSummaries(m.GetInstruments())
+	accountTypes := buildAccountTypeSummaries(m.GetAccountTypes())
+	valuationRules := buildValuationRuleSummaries(m.GetValuationRules())
+	sagas := buildSagaSummaries(m.GetSagas())
+	paymentRails := buildPaymentRailSummaries(m.GetPaymentRails())
 
 	result := map[string]interface{}{
 		"version": version,
 		"economy": map[string]interface{}{
-			"instruments": map[string]interface{}{
-				"count": len(instruments),
-				"items": instruments,
-			},
-			"account_types": map[string]interface{}{
-				"count": len(accountTypes),
-				"items": accountTypes,
-			},
-			"valuation_rules": map[string]interface{}{
-				"count": len(valuationRules),
-				"items": valuationRules,
-			},
-			"sagas": map[string]interface{}{
-				"count": len(sagas),
-				"items": sagas,
-			},
-			"payment_rails": map[string]interface{}{
-				"count": len(paymentRails),
-				"items": paymentRails,
-			},
+			"instruments":     map[string]interface{}{"count": len(instruments), "items": instruments},
+			"account_types":   map[string]interface{}{"count": len(accountTypes), "items": accountTypes},
+			"valuation_rules": map[string]interface{}{"count": len(valuationRules), "items": valuationRules},
+			"sagas":           map[string]interface{}{"count": len(sagas), "items": sagas},
+			"payment_rails":   map[string]interface{}{"count": len(paymentRails), "items": paymentRails},
 		},
 	}
 
@@ -212,5 +143,81 @@ func buildManifestSummary(version string, m *controlplanev1.Manifest) map[string
 		}
 	}
 
+	return result
+}
+
+// buildInstrumentSummaries converts manifest instruments to summary maps.
+func buildInstrumentSummaries(instruments []*controlplanev1.InstrumentDefinition) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(instruments))
+	for _, inst := range instruments {
+		unit := ""
+		var precision int32
+		if inst.GetDimensions() != nil {
+			unit = inst.GetDimensions().GetUnit()
+			precision = inst.GetDimensions().GetPrecision()
+		}
+		result = append(result, map[string]interface{}{
+			"code":      inst.GetCode(),
+			"name":      inst.GetName(),
+			"type":      inst.GetType().String(),
+			"unit":      unit,
+			"precision": precision,
+		})
+	}
+	return result
+}
+
+// buildAccountTypeSummaries converts manifest account types to summary maps.
+func buildAccountTypeSummaries(accountTypes []*controlplanev1.AccountTypeDefinition) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(accountTypes))
+	for _, at := range accountTypes {
+		entry := map[string]interface{}{
+			"code":           at.GetCode(),
+			"name":           at.GetName(),
+			"normal_balance": at.GetNormalBalance().String(),
+		}
+		if len(at.GetAllowedInstruments()) > 0 {
+			entry["allowed_instruments"] = at.GetAllowedInstruments()
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+// buildValuationRuleSummaries converts manifest valuation rules to summary maps.
+func buildValuationRuleSummaries(rules []*controlplanev1.ValuationRule) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(rules))
+	for _, vr := range rules {
+		result = append(result, map[string]interface{}{
+			"from_instrument": vr.GetFromInstrument(),
+			"to_instrument":   vr.GetToInstrument(),
+			"method":          vr.GetMethod().String(),
+			"source":          vr.GetSource(),
+		})
+	}
+	return result
+}
+
+// buildSagaSummaries converts manifest sagas to summary maps.
+func buildSagaSummaries(sagaList []*controlplanev1.SagaDefinition) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(sagaList))
+	for _, s := range sagaList {
+		result = append(result, map[string]interface{}{
+			"name":    s.GetName(),
+			"trigger": s.GetTrigger(),
+		})
+	}
+	return result
+}
+
+// buildPaymentRailSummaries converts manifest payment rails to summary maps.
+func buildPaymentRailSummaries(rails []*controlplanev1.PaymentRails) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(rails))
+	for _, pr := range rails {
+		result = append(result, map[string]interface{}{
+			"provider": pr.GetProvider(),
+			"mode":     pr.GetMode().String(),
+		})
+	}
 	return result
 }

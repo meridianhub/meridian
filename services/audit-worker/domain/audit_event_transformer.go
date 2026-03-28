@@ -46,34 +46,15 @@ func NewAuditEventTransformer(tenantAccountMap map[uuid.UUID]uuid.UUID) *AuditEv
 // Transform converts an AuditEvent proto message into a Measurement domain model.
 // Returns an error if the event is invalid or tenant mapping is missing.
 func (t *AuditEventTransformer) Transform(event *auditv1.AuditEvent) (*Measurement, error) {
-	if event == nil {
-		return nil, fmt.Errorf("%w: event is nil", ErrInvalidAuditEvent)
+	if err := validateAuditEventFields(event); err != nil {
+		return nil, err
 	}
 
-	// Validate required fields
-	if event.Timestamp == nil {
-		return nil, fmt.Errorf("%w: timestamp is required", ErrInvalidAuditEvent)
-	}
-	if event.SchemaName == "" {
-		return nil, fmt.Errorf("%w: schema_name is required", ErrInvalidAuditEvent)
-	}
-
-	// Extract tenant_id from metadata
-	tenantIDStr, ok := event.Metadata["tenant_id"]
-	if !ok {
-		return nil, fmt.Errorf("%w: tenant_id not found in metadata", ErrInvalidAuditEvent)
-	}
-
-	tenantID, err := uuid.Parse(tenantIDStr)
+	tenantID, accountID, err := t.resolveAccount(event)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidTenantID, err)
+		return nil, err
 	}
-
-	// Map tenant_id to utilization account_id
-	accountID, ok := t.tenantAccountMap[tenantID]
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrTenantNotMapped, tenantID)
-	}
+	_ = tenantID // used only for account resolution
 
 	// Derive asset code from service name
 	assetCode := t.deriveAssetCode(event.SchemaName)
@@ -85,20 +66,14 @@ func (t *AuditEventTransformer) Transform(event *auditv1.AuditEvent) (*Measureme
 		return nil, fmt.Errorf("failed to create period: %w", err)
 	}
 
-	// Set quantity to 1 for per-event counting
-	quantity := decimal.NewFromInt(1)
-
-	// Populate attributes for fungibility and reporting
-	attributes := t.buildAttributes(event)
-
 	// Create measurement
 	measurement := &Measurement{
 		ID:            uuid.New(),
 		AccountID:     accountID,
 		AssetCode:     assetCode,
-		Quantity:      quantity,
+		Quantity:      decimal.NewFromInt(1),
 		Period:        period,
-		Attributes:    attributes,
+		Attributes:    t.buildAttributes(event),
 		Source:        "AUDIT_STREAM",
 		QualityScore:  t.defaultQualityScore,
 		ReceivedAt:    time.Now().UTC(),
@@ -108,6 +83,40 @@ func (t *AuditEventTransformer) Transform(event *auditv1.AuditEvent) (*Measureme
 	}
 
 	return measurement, nil
+}
+
+// validateAuditEventFields checks that the event and its required fields are present.
+func validateAuditEventFields(event *auditv1.AuditEvent) error {
+	if event == nil {
+		return fmt.Errorf("%w: event is nil", ErrInvalidAuditEvent)
+	}
+	if event.Timestamp == nil {
+		return fmt.Errorf("%w: timestamp is required", ErrInvalidAuditEvent)
+	}
+	if event.SchemaName == "" {
+		return fmt.Errorf("%w: schema_name is required", ErrInvalidAuditEvent)
+	}
+	return nil
+}
+
+// resolveAccount extracts the tenant ID from event metadata and maps it to a utilization account.
+func (t *AuditEventTransformer) resolveAccount(event *auditv1.AuditEvent) (uuid.UUID, uuid.UUID, error) {
+	tenantIDStr, ok := event.Metadata["tenant_id"]
+	if !ok {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("%w: tenant_id not found in metadata", ErrInvalidAuditEvent)
+	}
+
+	tenantID, err := uuid.Parse(tenantIDStr)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("%w: %w", ErrInvalidTenantID, err)
+	}
+
+	accountID, ok := t.tenantAccountMap[tenantID]
+	if !ok {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("%w: %s", ErrTenantNotMapped, tenantID)
+	}
+
+	return tenantID, accountID, nil
 }
 
 // deriveAssetCode creates a service-specific asset code from the schema name.

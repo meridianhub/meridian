@@ -171,39 +171,11 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 			continue
 		}
 
-		// Evaluate CEL filter, recording duration.
-		filterStart := time.Now()
-		out, _, evalErr := cs.FilterProgram.Eval(activation)
-		observability.RecordFilterEvaluationDuration(sagaName, time.Since(filterStart).Seconds())
-
-		if evalErr != nil {
-			observability.RecordFilterEvaluationError(sagaName)
-			h.logger.ErrorContext(ctx, "CEL filter evaluation error, skipping saga",
-				"saga_name", sagaName,
-				"channel", channel,
-				"correlation_id", idempotencyKey,
-				"error", evalErr,
-			)
-			continue
-		}
-
-		matched, ok := out.Value().(bool)
+		matched, ok := h.evaluateFilter(ctx, cs, activation, sagaName, channel, idempotencyKey)
 		if !ok {
-			h.logger.WarnContext(ctx, "CEL filter returned non-boolean, skipping saga",
-				"saga_name", sagaName,
-				"channel", channel,
-				"correlation_id", idempotencyKey,
-				"result_type", fmt.Sprintf("%T", out.Value()),
-			)
 			continue
 		}
-
 		if !matched {
-			h.logger.DebugContext(ctx, "CEL filter did not match, skipping saga",
-				"saga_name", sagaName,
-				"channel", channel,
-				"correlation_id", idempotencyKey,
-			)
 			continue
 		}
 
@@ -213,6 +185,51 @@ func (h *SagaDispatchHandler) Handle(ctx context.Context, channel string, event 
 	}
 
 	return nil
+}
+
+// evaluateFilter runs the CEL filter for a saga and returns (matched, valid).
+// Returns (false, false) when the filter errors or returns a non-boolean, meaning the saga should be skipped.
+func (h *SagaDispatchHandler) evaluateFilter(
+	ctx context.Context,
+	cs *registry.CompiledSaga,
+	activation map[string]any,
+	sagaName, channel, correlationID string,
+) (bool, bool) {
+	filterStart := time.Now()
+	out, _, evalErr := cs.FilterProgram.Eval(activation)
+	observability.RecordFilterEvaluationDuration(sagaName, time.Since(filterStart).Seconds())
+
+	if evalErr != nil {
+		observability.RecordFilterEvaluationError(sagaName)
+		h.logger.ErrorContext(ctx, "CEL filter evaluation error, skipping saga",
+			"saga_name", sagaName,
+			"channel", channel,
+			"correlation_id", correlationID,
+			"error", evalErr,
+		)
+		return false, false
+	}
+
+	matched, ok := out.Value().(bool)
+	if !ok {
+		h.logger.WarnContext(ctx, "CEL filter returned non-boolean, skipping saga",
+			"saga_name", sagaName,
+			"channel", channel,
+			"correlation_id", correlationID,
+			"result_type", fmt.Sprintf("%T", out.Value()),
+		)
+		return false, false
+	}
+
+	if !matched {
+		h.logger.DebugContext(ctx, "CEL filter did not match, skipping saga",
+			"saga_name", sagaName,
+			"channel", channel,
+			"correlation_id", correlationID,
+		)
+	}
+
+	return matched, true
 }
 
 // dispatchSaga triggers a single saga, optionally wrapping with idempotency protection.

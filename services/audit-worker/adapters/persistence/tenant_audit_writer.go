@@ -70,19 +70,37 @@ func (w *TenantAuditWriter) WriteAuditEvent(ctx context.Context, event *auditv1.
 		return fmt.Errorf("context cancelled before write: %w", err)
 	}
 
-	// Extract tenant ID from context (already injected by Kafka consumer from x-tenant-id header)
+	tenantID, operation, createdAt, err := validateAuditEvent(ctx, event)
+	if err != nil {
+		return err
+	}
+
+	// Build audit log entry map
+	auditLog := buildAuditLogMap(event, operation, createdAt)
+
+	// Write to audit_log table within a transaction with tenant schema scope
+	err = db.WithGormTenantTransaction(ctx, w.db, func(tx *gorm.DB) error {
+		return execIdempotentAuditInsert(tx, auditLog)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to write audit event for tenant %s: %w", tenantID, err)
+	}
+
+	return nil
+}
+
+// validateAuditEvent extracts and validates tenant ID and operation from context and event.
+func validateAuditEvent(ctx context.Context, event *auditv1.AuditEvent) (tenant.TenantID, string, time.Time, error) {
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
-		return ErrMissingTenantContext
+		return "", "", time.Time{}, ErrMissingTenantContext
 	}
 
-	// Convert protobuf operation to string
 	operation := domain.ProtoToOperation(event.Operation)
 	if operation == "" {
-		return fmt.Errorf("%w: %v", ErrInvalidOperation, event.Operation)
+		return "", "", time.Time{}, fmt.Errorf("%w: %v", ErrInvalidOperation, event.Operation)
 	}
 
-	// Handle potentially nil timestamp
 	var createdAt time.Time
 	if event.Timestamp != nil {
 		createdAt = event.Timestamp.AsTime()
@@ -90,64 +108,40 @@ func (w *TenantAuditWriter) WriteAuditEvent(ctx context.Context, event *auditv1.
 		createdAt = time.Now()
 	}
 
-	// Build audit log entry map
-	auditLog := buildAuditLogMap(event, operation, createdAt)
+	return tenantID, operation, createdAt, nil
+}
 
-	// Note: tenant ID is already in context (from Kafka message header via ProtoConsumer)
-	// No need to inject it again - it's used by db.WithGormTenantTransaction
+// execIdempotentAuditInsert performs an idempotent INSERT into audit_log using ON CONFLICT DO NOTHING.
+func execIdempotentAuditInsert(tx *gorm.DB, auditLog map[string]interface{}) error {
+	query := `
+		INSERT INTO audit_log (
+			event_id, table_name, operation, record_id, old_values, new_values,
+			created_at, schema_name, changed_by, transaction_id, client_ip, user_agent,
+			correlation_id, causation_id, idempotency_key
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (event_id) DO NOTHING
+	`
 
-	// Write to audit_log table within a transaction with tenant schema scope
-	// Uses db.WithGormTenantTransaction to:
-	// 1. Create a transaction
-	// 2. Set search_path to org_{tenant_id}, public
-	// 3. Execute the write
-	// 4. Commit or rollback automatically
-	err := db.WithGormTenantTransaction(ctx, w.db, func(tx *gorm.DB) error {
-		// Idempotent insert using ON CONFLICT DO NOTHING
-		// This handles retry scenarios where the same event_id is processed twice
-		// Note: Using raw SQL with ON CONFLICT since GORM's Clauses API may not fully support it
-		query := `
-			INSERT INTO audit_log (
-				event_id, table_name, operation, record_id, old_values, new_values,
-				created_at, schema_name, changed_by, transaction_id, client_ip, user_agent,
-				correlation_id, causation_id, idempotency_key
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (event_id) DO NOTHING
-		`
+	result := tx.Exec(query,
+		auditLog["event_id"],
+		auditLog["table_name"],
+		auditLog["operation"],
+		auditLog["record_id"],
+		auditLog["old_values"],
+		auditLog["new_values"],
+		auditLog["created_at"],
+		auditLog["schema_name"],
+		auditLog["changed_by"],
+		auditLog["transaction_id"],
+		auditLog["client_ip"],
+		auditLog["user_agent"],
+		auditLog["correlation_id"],
+		auditLog["causation_id"],
+		auditLog["idempotency_key"],
+	)
 
-		result := tx.Exec(query,
-			auditLog["event_id"],
-			auditLog["table_name"],
-			auditLog["operation"],
-			auditLog["record_id"],
-			auditLog["old_values"],
-			auditLog["new_values"],
-			auditLog["created_at"],
-			auditLog["schema_name"],
-			auditLog["changed_by"],
-			auditLog["transaction_id"],
-			auditLog["client_ip"],
-			auditLog["user_agent"],
-			auditLog["correlation_id"],
-			auditLog["causation_id"],
-			auditLog["idempotency_key"],
-		)
-
-		if result.Error != nil {
-			return fmt.Errorf("failed to insert audit log: %w", result.Error)
-		}
-
-		// If RowsAffected is 0, it means the event_id already exists (duplicate)
-		// This is not an error - it's expected in retry scenarios
-		if result.RowsAffected == 0 {
-			// Silently ignore duplicates - this is idempotent behavior
-			return nil
-		}
-
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to write audit event for tenant %s: %w", tenantID, err)
+	if result.Error != nil {
+		return fmt.Errorf("failed to insert audit log: %w", result.Error)
 	}
 
 	return nil
