@@ -36,28 +36,91 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		s.logger.Info("generated correlation ID", "correlation_id", correlationID)
 	}
 
-	// Get idempotency key (required)
+	// Validate idempotency key
+	idempotencyKey, idempKey, err := s.validateInitiateIdempotencyKey(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check Redis idempotency FIRST (before database check)
+	if resp, err := s.checkInitiateRedisIdempotency(ctx, idempKey, idempotencyKey); err != nil {
+		return nil, err
+	} else if resp != nil {
+		return resp, nil
+	}
+
+	// Check for existing payment order with same idempotency key (database fallback)
+	if resp, err := s.checkInitiateDatabaseIdempotency(ctx, idempotencyKey); err != nil {
+		return nil, err
+	} else if resp != nil {
+		return resp, nil
+	}
+
+	// Validate, create, and persist payment order
+	po, isNew, err := s.validateAndPersistPaymentOrder(ctx, req, correlationID, idempotencyKey, idempKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// Idempotency race: another request created the PO between our check and insert.
+	// Return the existing PO without publishing duplicate events or starting duplicate sagas.
+	if !isNew {
+		s.logger.Info("returning existing payment order (idempotency race)",
+			"payment_order_id", po.ID.String(),
+			"idempotency_key", idempotencyKey)
+		return &pb.InitiatePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
+	}
+
+	s.logger.Info("payment order created",
+		"payment_order_id", po.ID.String(),
+		"debtor_account_id", po.DebtorAccountID,
+		"amount_cents", safeMinorUnits(po.Amount),
+		"currency", domain.CurrencyCode(po.Amount),
+		"idempotency_key", po.IdempotencyKey,
+		"correlation_id", correlationID)
+
+	// Publish event, cache result, build response
+	response := s.publishAndCacheInitiateResult(ctx, po, idempKey)
+
+	// Start saga orchestration asynchronously
+	tenantID, _ := tenant.FromContext(ctx)
+	s.startSagaOrchestration(po.ID, tenantID, tenantID != "", correlationID) //nolint:contextcheck // Intentionally using background context for async saga orchestration
+
+	// Prevent accidental access to po after goroutine launch - the goroutine
+	// reloads fresh state from DB, so any access to po here would be stale
+	po = nil
+
+	return response, nil
+}
+
+// validateInitiateIdempotencyKey extracts and validates the idempotency key from the request.
+func (s *Service) validateInitiateIdempotencyKey(ctx context.Context, req *pb.InitiatePaymentOrderRequest) (string, idempotency.Key, error) {
 	var idempotencyKey string
 	if req.IdempotencyKey != nil {
 		idempotencyKey = req.IdempotencyKey.Key
 	}
 	if idempotencyKey == "" {
-		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required")
+		return "", idempotency.Key{}, status.Error(codes.InvalidArgument, "idempotency_key is required")
 	}
 	if len(idempotencyKey) > s.maxIdempotencyKeyLength {
-		return nil, status.Errorf(codes.InvalidArgument, "idempotency_key exceeds maximum length of %d", s.maxIdempotencyKeyLength)
+		return "", idempotency.Key{}, status.Errorf(codes.InvalidArgument, "idempotency_key exceeds maximum length of %d", s.maxIdempotencyKeyLength)
 	}
 
-	// Check Redis idempotency FIRST (before database check) - provides distributed lock protection
 	tenantID, _ := tenant.FromContext(ctx)
 	idempKey := idempotency.Key{
 		TenantID:  string(tenantID),
 		Namespace: idempotencyNamespace,
 		Operation: "initiate",
-		EntityID:  req.DebtorAccountId, // Use account as entity scope
+		EntityID:  req.DebtorAccountId,
 		RequestID: idempotencyKey,
 	}
 
+	return idempotencyKey, idempKey, nil
+}
+
+// checkInitiateRedisIdempotency checks Redis for a cached result and acquires the distributed lock.
+// Returns the cached response if found, or nil to continue processing.
+func (s *Service) checkInitiateRedisIdempotency(ctx context.Context, idempKey idempotency.Key, idempotencyKey string) (*pb.InitiatePaymentOrderResponse, error) {
 	result, err := s.idempotencyService.Check(ctx, idempKey)
 	// If operation already processed, return cached result
 	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
@@ -86,7 +149,11 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		return nil, status.Error(codes.Internal, "failed to acquire idempotency lock")
 	}
 
-	// Check for existing payment order with same idempotency key (idempotent).
+	return nil, nil //nolint:nilnil // nil,nil signals "no cached result, continue processing"
+}
+
+// checkInitiateDatabaseIdempotency checks the database for an existing payment order with the same idempotency key.
+func (s *Service) checkInitiateDatabaseIdempotency(ctx context.Context, idempotencyKey string) (*pb.InitiatePaymentOrderResponse, error) {
 	// Note: This check has a TOCTOU race window where concurrent requests with the same
 	// idempotency key could both pass this check. The database unique constraint on
 	// idempotency_key is the authoritative guard - concurrent inserts will fail with a
@@ -94,7 +161,6 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	existingPO, err := s.repo.FindByIdempotencyKey(ctx, idempotencyKey)
 	if err != nil && !errors.Is(err, persistence.ErrPaymentOrderNotFound) {
 		s.logger.Error("failed to check idempotency", "error", err)
-		// Don't cache internal errors - allow retry on recovery
 		return nil, status.Error(codes.Internal, "failed to check idempotency")
 	}
 	if existingPO != nil {
@@ -105,17 +171,21 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 			PaymentOrder: toProto(existingPO),
 		}, nil
 	}
+	return nil, nil //nolint:nilnil // nil,nil signals "no existing record, continue processing"
+}
 
+// validateAndPersistPaymentOrder validates the request amount, creates a domain payment order,
+// and persists it to the database, handling idempotency key conflicts.
+func (s *Service) validateAndPersistPaymentOrder(ctx context.Context, req *pb.InitiatePaymentOrderRequest, correlationID, idempotencyKey string, idempKey idempotency.Key) (*domain.PaymentOrder, bool, error) {
 	// Validate and convert amount
 	amount, err := protoToMoney(req.Amount)
 	if err != nil {
-		// Store validation failure for idempotent error responses
 		s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("invalid amount: %v", err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
+		return nil, false, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
 	}
 	if !amount.IsPositive() {
 		s.storeIdempotencyFailure(ctx, idempKey, "amount must be positive")
-		return nil, status.Error(codes.InvalidArgument, "amount must be positive")
+		return nil, false, status.Error(codes.InvalidArgument, "amount must be positive")
 	}
 
 	// Create domain payment order
@@ -129,44 +199,43 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	if err != nil {
 		s.logger.Error("failed to create payment order", "error", err)
 		s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("failed to create payment order: %v", err))
-		return nil, status.Errorf(codes.InvalidArgument, "failed to create payment order: %v", err)
+		return nil, false, status.Errorf(codes.InvalidArgument, "failed to create payment order: %v", err)
 	}
 
 	// Persist to database
 	if err := s.repo.Create(ctx, po); err != nil {
-		// Handle idempotency key conflict (TOCTOU race): another request won the race
-		// Reload and return the existing payment order for idempotent behavior
-		if errors.Is(err, persistence.ErrIdempotencyKeyConflict) {
-			existingPO, findErr := s.repo.FindByIdempotencyKey(ctx, idempotencyKey)
-			if findErr != nil {
-				s.logger.Error("failed to retrieve existing payment order after idempotency conflict",
-					"error", findErr,
-					"idempotency_key", idempotencyKey)
-				// Don't cache internal errors - allow retry on recovery
-				return nil, status.Error(codes.Internal, "failed to retrieve payment order")
-			}
-			s.logger.Info("returning existing payment order (idempotency race)",
-				"payment_order_id", existingPO.ID.String(),
-				"idempotency_key", idempotencyKey)
-			return &pb.InitiatePaymentOrderResponse{
-				PaymentOrder: toProto(existingPO),
-			}, nil
-		}
-		s.logger.Error("failed to save payment order", "error", err)
-		// Don't cache internal errors - allow retry on recovery
-		return nil, status.Error(codes.Internal, "failed to save payment order")
+		existingPO, createErr := s.handleCreateConflict(ctx, err, idempotencyKey)
+		return existingPO, false, createErr
 	}
 
-	s.logger.Info("payment order created",
-		"payment_order_id", po.ID.String(),
-		"debtor_account_id", po.DebtorAccountID,
-		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", domain.CurrencyCode(po.Amount),
-		"idempotency_key", po.IdempotencyKey,
-		"correlation_id", correlationID)
+	return po, true, nil
+}
 
+// handleCreateConflict handles idempotency key conflicts during payment order creation.
+func (s *Service) handleCreateConflict(ctx context.Context, err error, idempotencyKey string) (*domain.PaymentOrder, error) {
+	// Handle idempotency key conflict (TOCTOU race): another request won the race
+	// Reload and return the existing payment order for idempotent behavior
+	if errors.Is(err, persistence.ErrIdempotencyKeyConflict) {
+		existingPO, findErr := s.repo.FindByIdempotencyKey(ctx, idempotencyKey)
+		if findErr != nil {
+			s.logger.Error("failed to retrieve existing payment order after idempotency conflict",
+				"error", findErr,
+				"idempotency_key", idempotencyKey)
+			return nil, status.Error(codes.Internal, "failed to retrieve payment order")
+		}
+		s.logger.Info("returning existing payment order (idempotency race)",
+			"payment_order_id", existingPO.ID.String(),
+			"idempotency_key", idempotencyKey)
+		return existingPO, nil
+	}
+	s.logger.Error("failed to save payment order", "error", err)
+	return nil, status.Error(codes.Internal, "failed to save payment order")
+}
+
+// publishAndCacheInitiateResult publishes the PaymentOrderInitiated event to Kafka,
+// caches the result in Redis for idempotency, and returns the response.
+func (s *Service) publishAndCacheInitiateResult(ctx context.Context, po *domain.PaymentOrder, idempKey idempotency.Key) *pb.InitiatePaymentOrderResponse {
 	// Publish PaymentOrderInitiated event to Kafka
-	// Publish event (publishEvent handles nil kafkaPublisher)
 	s.publishEvent(ctx, TopicPaymentOrderInitiated, po.ID.String(), &eventsv1.PaymentOrderInitiatedEvent{
 		EventId:           uuid.New().String(),
 		PaymentOrderId:    po.ID.String(),
@@ -174,14 +243,13 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		CreditorReference: po.CreditorReference,
 		Amount:            toMoneyAmount(po.Amount),
 		CorrelationId:     po.CorrelationID,
-		CausationId:       po.ID.String(), // Initial event caused by the order creation
+		CausationId:       po.ID.String(),
 		Timestamp:         timestamppb.Now(),
 		Version:           int64(po.Version),
 		IdempotencyKey:    po.IdempotencyKey,
 	})
 
 	// Convert to proto BEFORE starting the async goroutine to avoid data race
-	// The saga may modify po while toProto reads from it
 	responseProto := toProto(po)
 
 	// Store successful result in Redis for future idempotency checks
@@ -197,18 +265,16 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 		})
 		if storeErr != nil {
 			s.logger.Error("failed to store idempotency result", "error", storeErr)
-			// Continue - operation succeeded, caching is optimization
 		}
 	} else {
 		s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
 	}
 
-	// Use tenantID from idempotency check above
-	hasTenant := tenantID != ""
+	return response
+}
 
-	// Start saga orchestration asynchronously
-	// The saga runs in the background after returning the response
-	//nolint:contextcheck // Intentionally using background context for async saga orchestration
+// startSagaOrchestration launches the saga orchestration goroutine for a payment order.
+func (s *Service) startSagaOrchestration(paymentOrderID uuid.UUID, tid tenant.TenantID, hasTenantCtx bool, correlationID string) {
 	go func(paymentOrderID uuid.UUID, tid tenant.TenantID, hasTenantCtx bool) {
 		// Recover from panics to prevent silent goroutine termination
 		defer func() {
@@ -217,25 +283,7 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 					"panic", r,
 					"payment_order_id", paymentOrderID.String(),
 					"correlation_id", correlationID)
-				// Reload fresh state before failing - the original po may be stale
-				// if the saga made state transitions before panicking
-				failCtx := context.Background()
-				if hasTenantCtx {
-					failCtx = tenant.WithTenant(failCtx, tid)
-				}
-				freshPO, err := s.repo.FindByID(failCtx, paymentOrderID)
-				if err != nil {
-					s.logger.Error("failed to reload payment order after panic",
-						"payment_order_id", paymentOrderID.String(),
-						"error", err)
-					return
-				}
-				// Async path: log and swallow error - best effort failure handling
-				if err := s.failPaymentOrder(failCtx, freshPO, "internal panic during saga orchestration", "INTERNAL_ERROR"); err != nil {
-					s.logger.Error("failed to mark payment order as failed after panic",
-						"payment_order_id", paymentOrderID.String(),
-						"error", err)
-				}
+				s.handleSagaPanic(paymentOrderID, tid, hasTenantCtx)
 			}
 		}()
 		// Create saga context with timeout to prevent indefinite hangs
@@ -258,15 +306,30 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 			return
 		}
 		s.orchestrator.Orchestrate(sagaCtx, freshPO)
-	}(po.ID, tenantID, hasTenant)
+	}(paymentOrderID, tid, hasTenantCtx)
+}
 
-	// Prevent accidental access to po after goroutine launch - the goroutine
-	// reloads fresh state from DB, so any access to po here would be stale
-	po = nil
-
-	return &pb.InitiatePaymentOrderResponse{
-		PaymentOrder: responseProto,
-	}, nil
+// handleSagaPanic handles panic recovery in the saga orchestration goroutine.
+func (s *Service) handleSagaPanic(paymentOrderID uuid.UUID, tid tenant.TenantID, hasTenantCtx bool) {
+	// Reload fresh state before failing - the original po may be stale
+	// if the saga made state transitions before panicking
+	failCtx := context.Background()
+	if hasTenantCtx {
+		failCtx = tenant.WithTenant(failCtx, tid)
+	}
+	freshPO, err := s.repo.FindByID(failCtx, paymentOrderID)
+	if err != nil {
+		s.logger.Error("failed to reload payment order after panic",
+			"payment_order_id", paymentOrderID.String(),
+			"error", err)
+		return
+	}
+	// Async path: log and swallow error - best effort failure handling
+	if err := s.failPaymentOrder(failCtx, freshPO, "internal panic during saga orchestration", "INTERNAL_ERROR"); err != nil {
+		s.logger.Error("failed to mark payment order as failed after panic",
+			"payment_order_id", paymentOrderID.String(),
+			"error", err)
+	}
 }
 
 // storeIdempotencyFailure stores a failure result for idempotency tracking.

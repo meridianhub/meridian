@@ -226,57 +226,88 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		}
 	}()
 
-	// First, check for idempotency without locking (read-only check)
-	// Note: Context is passed to enable organization scoping in multi-org mode
+	// Read-only idempotency check + prefetch account/balance data
+	lien, prefetchedBalanceCents, opStatus, err := s.prefetchExecuteLienData(ctx, lienID, req.LienId)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
+	}
+	if lien.Status == domain.LienStatusExecuted {
+		return s.returnExecuteLienIdempotent(ctx, lien, "lien already executed (idempotent)", &operationStatus)
+	}
+
+	// Execute atomically in a transaction
+	updatedLien, account, txErr := s.executeLienTransaction(ctx, lienID, lien, prefetchedBalanceCents)
+	if txErr != nil {
+		operationStatus, err = mapExecuteLienTxError(txErr, req.LienId, lien)
+		return nil, err
+	}
+	lien = updatedLien
+
+	// Handle case where lien was already executed by concurrent request
+	if account == nil {
+		return s.returnExecuteLienIdempotent(ctx, lien, "lien executed by concurrent request (idempotent)", &operationStatus)
+	}
+
+	// Build final response with post-execution processing
+	resp := s.buildExecuteLienFinalResponse(ctx, lien, account)
+	s.storeIdempotencyResult(ctx, idempotencyKeyStr, idempKey, resp)
+
+	return resp, nil
+}
+
+// returnExecuteLienIdempotent logs and returns an idempotent response for an already-executed lien.
+func (s *Service) returnExecuteLienIdempotent(ctx context.Context, lien *domain.Lien, logMsg string, operationStatus *string) (*pb.ExecuteLienResponse, error) {
+	s.logger.Info(logMsg, "lien_id", lien.ID.String())
+	resp, err := s.buildExecuteLienIdempotentResponse(ctx, lien)
+	if err != nil {
+		*operationStatus = opStatusRetrieveAccountFailed
+		return nil, err
+	}
+	return resp, nil
+}
+
+// prefetchExecuteLienData retrieves the lien, account, and balance before entering the transaction.
+// This avoids holding database locks during external service calls (deadlock prevention).
+func (s *Service) prefetchExecuteLienData(ctx context.Context, lienID uuid.UUID, lienIDStr string) (*domain.Lien, int64, string, error) {
+	// Read-only check: if already executed, return early
 	lien, err := s.lienRepo.FindByID(ctx, lienID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrLienNotFound) {
-			operationStatus = opStatusLienNotFound
-			return nil, status.Errorf(codes.NotFound, "lien not found: %s", req.LienId)
+			return nil, 0, opStatusLienNotFound, status.Errorf(codes.NotFound, "lien not found: %s", lienIDStr)
 		}
-		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve lien: %v", err)
+		return nil, 0, opStatusRetrieveFailed, status.Errorf(codes.Internal, "failed to retrieve lien: %v", err)
 	}
 
-	// Check if already executed (idempotent) - no transaction needed for read-only
 	if lien.Status == domain.LienStatusExecuted {
-		s.logger.Info("lien already executed (idempotent)", "lien_id", lien.ID.String())
-		resp, err := s.buildExecuteLienIdempotentResponse(ctx, lien)
-		if err != nil {
-			operationStatus = opStatusRetrieveAccountFailed
-			return nil, err
-		}
-		return resp, nil
+		return lien, 0, "", nil
 	}
 
-	// Prefetch account and balance from Position Keeping BEFORE entering transaction
-	// to avoid holding database locks during external service calls (deadlock prevention).
+	// Prefetch account
 	prefetchAccount, err := s.repo.FindByUUID(ctx, lien.AccountID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found for lien: %s", lien.AccountID)
+			return nil, 0, opStatusAccountNotFound, status.Errorf(codes.NotFound, "account not found for lien: %s", lien.AccountID)
 		}
-		operationStatus = opStatusRetrieveAccountFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+		return nil, 0, opStatusRetrieveAccountFailed, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
-	// Prefetch balance from Position Keeping.
-	// Note: Currently Position Keeping returns total balance regardless of bucket.
-	// The lien's bucket_id is used for bucket-scoped lien calculations within Current Account,
-	// but the balance comes from total Position Keeping balance.
+	// Prefetch balance from Position Keeping
 	prefetchedBalanceCents, err := s.getAccountBalanceMinorUnits(ctx, prefetchAccount.AccountID(), prefetchAccount.InstrumentCode(), prefetchAccount.Balance().Precision())
 	if err != nil {
-		operationStatus = opStatusRetrieveFailed
 		s.logger.Error("failed to prefetch balance from Position Keeping",
 			"account_id", prefetchAccount.AccountID(),
 			"bucket_id", lien.BucketID,
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+		return nil, 0, opStatusRetrieveFailed, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
 	}
 
-	// Execute atomically in a transaction with pessimistic locking to prevent race conditions.
-	// We lock both the lien and account to prevent concurrent execute/terminate operations.
+	return lien, prefetchedBalanceCents, "", nil
+}
+
+// executeLienTransaction executes the lien atomically in a transaction with pessimistic locking.
+// Returns the updated account (nil if lien was already executed by concurrent request).
+func (s *Service) executeLienTransaction(ctx context.Context, lienID uuid.UUID, lien *domain.Lien, prefetchedBalanceCents int64) (*domain.Lien, *domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
 	txErr := db.WithGormTenantTransaction(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
@@ -294,42 +325,36 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 			return nil // Will be handled as idempotent response
 		}
 
-		// Validate lien can be executed
 		if !lien.CanExecute() {
 			return errTxInvalidLienStatus
 		}
 
-		// Retrieve account with FOR UPDATE lock to prevent concurrent modifications
+		// Retrieve account with FOR UPDATE lock
 		accountResult, txErr := txRepo.FindByUUIDForUpdate(ctx, lien.AccountID)
 		if txErr != nil {
 			return fmt.Errorf("%w: %v", errTxSaveAccount, txErr) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
 		// Reconstruct account with pre-fetched balance (no external call inside tx)
-		// Balance was fetched from Position Keeping before entering transaction.
 		accountResult, txErr = s.hydrateAccountWithPrefetchedBalance(accountResult, prefetchedBalanceCents)
 		if txErr != nil {
 			return fmt.Errorf("%w: %v", errTxDomainError, txErr) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
-		// Execute lien (domain logic - marks status as executed)
 		if err := lien.Execute(); err != nil {
 			return fmt.Errorf("%w: %v", errTxExecuteFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
-		// Debit the account (immutable: capture returned value)
 		accountResult, err := accountResult.Withdraw(lien.Amount)
 		if err != nil {
 			return fmt.Errorf("%w: %v", errTxWithdrawFailed, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 		account = &accountResult
 
-		// Update lien status
 		if err := txLienRepo.Update(ctx, lien); err != nil {
 			return fmt.Errorf("%w: %v", errTxUpdateLien, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
 
-		// Save account with balance change (context carries audit user info)
 		if err := txRepo.Save(ctx, accountResult); err != nil {
 			return fmt.Errorf("%w: %v", errTxSaveAccount, err) //nolint:errorlint // second error is context-only to preserve errors.Is() for sentinel
 		}
@@ -337,22 +362,12 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		return nil
 	})
 
-	if txErr != nil {
-		operationStatus, err = mapExecuteLienTxError(txErr, req.LienId, lien)
-		return nil, err
-	}
+	return lien, account, txErr
+}
 
-	// Handle case where lien was already executed by concurrent request
-	if account == nil {
-		s.logger.Info("lien executed by concurrent request (idempotent)", "lien_id", lien.ID.String())
-		resp, err := s.buildExecuteLienIdempotentResponse(ctx, lien)
-		if err != nil {
-			operationStatus = opStatusRetrieveAccountFailed
-			return nil, err
-		}
-		return resp, nil
-	}
-
+// buildExecuteLienFinalResponse logs execution, checks basis drift, releases reservations,
+// and builds the final ExecuteLienResponse.
+func (s *Service) buildExecuteLienFinalResponse(ctx context.Context, lien *domain.Lien, account *domain.CurrentAccount) *pb.ExecuteLienResponse {
 	transactionID := fmt.Sprintf("TXN-LIEN-%s", lien.ID.String()[:8])
 	s.logger.Info("lien executed",
 		"lien_id", lien.ID.String(),
@@ -362,27 +377,21 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		"transaction_id", transactionID)
 
 	// Basis drift detection: warn if the valuation basis is stale.
-	// This does NOT block execution - the price lock is always used.
 	if lien.HasValuation() && lien.ValuationAnalysis != nil {
 		s.checkBasisDrift(lien)
 	}
 
 	// Release the Position Keeping reservation (best-effort).
-	// The lien execution succeeded, so the reservation should transition to EXECUTED.
 	s.releaseReservation(ctx, lien.ID.String(), positionkeepingv1.ReservationStatus_RESERVATION_STATUS_EXECUTED)
 
 	// Calculate available balance scoped to the lien's bucket (if any)
 	availableMoney := s.calculateAvailableBalanceByBucket(ctx, lien.AccountID, lien.BucketID, account.Balance())
-	resp := &pb.ExecuteLienResponse{
+	return &pb.ExecuteLienResponse{
 		Lien:             toLienProto(lien),
 		NewBalance:       toMoneyAmount(account.Balance()),
 		AvailableBalance: toMoneyAmount(availableMoney),
 		TransactionId:    transactionID,
 	}
-
-	s.storeIdempotencyResult(ctx, idempotencyKeyStr, idempKey, resp)
-
-	return resp, nil
 }
 
 // TerminateLien releases a reservation without executing

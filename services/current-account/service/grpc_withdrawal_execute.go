@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
@@ -48,62 +49,19 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		return nil, err
 	}
 
-	// Get idempotency key if provided
-	var idempotencyKey string
-	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
-		idempotencyKey = req.IdempotencyKey.Key
+	// Acquire idempotency lock
+	idempotencyKey, idempKey, idempotencyLockAcquired, cachedResp, opStatus, err := s.acquireWithdrawalIdempotency(ctx, req, accountID)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
+	}
+	if cachedResp != nil {
+		operationStatus = opStatusIdempotent
+		return cachedResp, nil
 	}
 
-	// Build idempotency key structure for Redis
-	var idempKey idempotency.Key
-	var idempotencyLockAcquired bool
-	if idempotencyKey != "" && s.idempotencyService != nil {
-		tenantID, ok := tenant.FromContext(ctx)
-		if !ok {
-			s.logger.Debug("tenant not found in context for idempotency key",
-				"account_id", accountID)
-		}
-		idempKey = idempotency.Key{
-			TenantID:  string(tenantID),
-			Namespace: idempotencyNamespace,
-			Operation: "withdrawal",
-			EntityID:  accountID,
-			RequestID: idempotencyKey,
-		}
-
-		// Check Redis for existing result
-		result, err := s.idempotencyService.Check(ctx, idempKey)
-		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
-			var cachedResp pb.ExecuteWithdrawalResponse
-			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
-			if unmarshalErr == nil {
-				s.logger.Info("returning cached withdrawal response from Redis",
-					"account_id", accountID,
-					"transaction_id", cachedResp.TransactionId,
-					"idempotency_key", idempotencyKey)
-				operationStatus = opStatusIdempotent
-				return &cachedResp, nil
-			}
-			s.logger.Warn("failed to unmarshal cached idempotency result",
-				"error", unmarshalErr)
-		} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-			s.logger.Error("idempotency check failed", "error", err)
-			return nil, status.Error(codes.Internal, "failed to check idempotency")
-		}
-
-		// Mark operation as pending (distributed lock)
-		if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
-			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				s.logger.Info("operation already in progress, please retry",
-					"idempotency_key", idempotencyKey)
-				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
-			}
-			s.logger.Error("failed to mark operation pending", "error", err)
-			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
-		}
-		idempotencyLockAcquired = true
-
-		// Cleanup pending state on failure
+	// Cleanup pending state on failure
+	if idempotencyLockAcquired {
 		defer func() {
 			if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
 				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
@@ -115,42 +73,125 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 		}()
 	}
 
+	// Retrieve and prepare account for withdrawal
+	account, amount, transactionID, opStatus, err := s.prepareAccountForWithdrawal(ctx, accountID, reqAmount)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
+	}
+
+	// Orchestrate transaction with saga pattern - Position Keeping is the source of truth for balance
+	resp, err := s.withdrawalOrchestrator.Orchestrate(ctx, *account, amount, transactionID, req.Attributes)
+	if err != nil {
+		operationStatus = opStatusSagaFailed
+		return nil, err
+	}
+
+	// Record withdrawal and finalize response
+	caobservability.RecordWithdrawal(amount.InstrumentCode())
+	s.finalizeWithdrawalResponse(ctx, resp, account, transactionID)
+
+	// Complete pending withdrawal if applicable
+	s.completePendingWithdrawal(ctx, pendingWithdrawal)
+
+	// Store successful result in Redis for future idempotency checks
+	s.storeWithdrawalIdempotencyResult(ctx, idempotencyKey, idempKey, resp)
+
+	return resp, nil
+}
+
+// acquireWithdrawalIdempotency checks Redis for a cached result and acquires the distributed lock.
+func (s *Service) acquireWithdrawalIdempotency(ctx context.Context, req *pb.ExecuteWithdrawalRequest, accountID string) (string, idempotency.Key, bool, *pb.ExecuteWithdrawalResponse, string, error) {
+	var idempotencyKey string
+	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
+		idempotencyKey = req.IdempotencyKey.Key
+	}
+
+	var idempKey idempotency.Key
+	if idempotencyKey == "" || s.idempotencyService == nil {
+		return idempotencyKey, idempKey, false, nil, "", nil
+	}
+
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		s.logger.Debug("tenant not found in context for idempotency key",
+			"account_id", accountID)
+	}
+	idempKey = idempotency.Key{
+		TenantID:  string(tenantID),
+		Namespace: idempotencyNamespace,
+		Operation: "withdrawal",
+		EntityID:  accountID,
+		RequestID: idempotencyKey,
+	}
+
+	// Check Redis for existing result
+	result, err := s.idempotencyService.Check(ctx, idempKey)
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
+		var cachedResp pb.ExecuteWithdrawalResponse
+		unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
+		if unmarshalErr == nil {
+			s.logger.Info("returning cached withdrawal response from Redis",
+				"account_id", accountID,
+				"transaction_id", cachedResp.TransactionId,
+				"idempotency_key", idempotencyKey)
+			return idempotencyKey, idempKey, false, &cachedResp, opStatusIdempotent, nil
+		}
+		s.logger.Warn("failed to unmarshal cached idempotency result",
+			"error", unmarshalErr)
+	} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		s.logger.Error("idempotency check failed", "error", err)
+		return "", idempKey, false, nil, operationStatusFailed, status.Error(codes.Internal, "failed to check idempotency")
+	}
+
+	// Mark operation as pending (distributed lock)
+	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			s.logger.Info("operation already in progress, please retry",
+				"idempotency_key", idempotencyKey)
+			return "", idempKey, false, nil, operationStatusFailed, status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
+		s.logger.Error("failed to mark operation pending", "error", err)
+		return "", idempKey, false, nil, operationStatusFailed, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
+	}
+
+	return idempotencyKey, idempKey, true, nil, "", nil
+}
+
+// prepareAccountForWithdrawal retrieves the account, validates it, and prepares it for debit.
+func (s *Service) prepareAccountForWithdrawal(ctx context.Context, accountID string, reqAmount *commonpb.MoneyAmount) (*domain.CurrentAccount, domain.Amount, string, string, error) {
+	var zeroAmount domain.Amount
+
 	// Retrieve account (context carries organization for multi-tenant routing)
 	account, err := s.repo.FindByID(ctx, accountID)
 	if err != nil {
 		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", accountID)
+			return nil, zeroAmount, "", opStatusAccountNotFound, status.Errorf(codes.NotFound, "account not found: %s", accountID)
 		}
-		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+		return nil, zeroAmount, "", opStatusRetrieveFailed, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
 	}
 
 	// Hydrate account with balance from Position Keeping (balance no longer persisted locally)
 	account, err = s.hydrateAccountWithBalance(ctx, account)
 	if err != nil {
-		operationStatus = opStatusRetrieveFailed
 		s.logger.Error("failed to hydrate account balance from Position Keeping",
 			"account_id", accountID,
 			"error", err)
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
+		return nil, zeroAmount, "", opStatusRetrieveFailed, status.Errorf(codes.Internal, "failed to retrieve account balance: %v", err)
 	}
 
 	// Check account status - cannot withdraw from frozen or closed accounts
 	if account.Status() == domain.AccountStatusFrozen {
-		operationStatus = opStatusAccountFrozen
-		return nil, status.Errorf(codes.FailedPrecondition, "cannot withdraw from frozen account: %s", accountID)
+		return nil, zeroAmount, "", opStatusAccountFrozen, status.Errorf(codes.FailedPrecondition, "cannot withdraw from frozen account: %s", accountID)
 	}
 	if account.Status() == domain.AccountStatusClosed {
-		operationStatus = opStatusAccountClosed
-		return nil, status.Errorf(codes.FailedPrecondition, "cannot withdraw from closed account: %s", accountID)
+		return nil, zeroAmount, "", opStatusAccountClosed, status.Errorf(codes.FailedPrecondition, "cannot withdraw from closed account: %s", accountID)
 	}
 
 	// Validate and convert amount
 	amount, opStatus, amountErr := validateWithdrawalAmount(reqAmount, account)
 	if amountErr != nil {
-		operationStatus = opStatus
-		return nil, amountErr
+		return nil, zeroAmount, "", opStatus, amountErr
 	}
 
 	amountCents, _ := amount.ToMinorUnits()
@@ -161,36 +202,32 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 	// Prepare account for debit transaction (validates status, funds, increments version)
 	account, err = account.PrepareForDebit(amount)
 	if err != nil {
-		if errors.Is(err, domain.ErrInsufficientFunds) {
-			operationStatus = opStatusInsufficientFunds
-			availCents, _ := account.AvailableBalance().ToMinorUnits()
-			return nil, status.Errorf(codes.FailedPrecondition,
-				"insufficient funds: requested %d cents, available %d cents", amountCents, availCents)
-		}
-		if errors.Is(err, domain.ErrAccountFrozen) {
-			operationStatus = opStatusAccountFrozen
-			return nil, status.Errorf(codes.FailedPrecondition, "account is frozen")
-		}
-		if errors.Is(err, domain.ErrAccountClosed) {
-			operationStatus = opStatusAccountClosed
-			return nil, status.Errorf(codes.FailedPrecondition, "account is closed")
-		}
-		operationStatus = opStatusWithdrawalFailed
-		return nil, status.Errorf(codes.InvalidArgument, "withdrawal failed: %v", err)
+		opStatus, grpcErr := mapPrepareForDebitError(err, amountCents, account)
+		return nil, zeroAmount, "", opStatus, grpcErr
 	}
 
-	// Orchestrate transaction with saga pattern - Position Keeping is the source of truth for balance
-	resp, err := s.withdrawalOrchestrator.Orchestrate(ctx, account, amount, transactionID, req.Attributes)
-	if err != nil {
-		operationStatus = opStatusSagaFailed
-		return nil, err
+	return &account, amount, transactionID, "", nil
+}
+
+// mapPrepareForDebitError maps domain debit preparation errors to gRPC status errors.
+func mapPrepareForDebitError(err error, amountCents int64, account domain.CurrentAccount) (string, error) {
+	if errors.Is(err, domain.ErrInsufficientFunds) {
+		availCents, _ := account.AvailableBalance().ToMinorUnits()
+		return opStatusInsufficientFunds, status.Errorf(codes.FailedPrecondition,
+			"insufficient funds: requested %d cents, available %d cents", amountCents, availCents)
 	}
+	if errors.Is(err, domain.ErrAccountFrozen) {
+		return opStatusAccountFrozen, status.Errorf(codes.FailedPrecondition, "account is frozen")
+	}
+	if errors.Is(err, domain.ErrAccountClosed) {
+		return opStatusAccountClosed, status.Errorf(codes.FailedPrecondition, "account is closed")
+	}
+	return opStatusWithdrawalFailed, status.Errorf(codes.InvalidArgument, "withdrawal failed: %v", err)
+}
 
-	// Record withdrawal transaction (the withdrawal itself succeeded regardless of balance fetch)
-	caobservability.RecordWithdrawal(amount.InstrumentCode())
-
-	// After saga completes, query Position Keeping for the new balance
-	account, err = s.hydrateAccountWithBalance(ctx, account)
+// finalizeWithdrawalResponse updates the response with the latest balance from Position Keeping.
+func (s *Service) finalizeWithdrawalResponse(ctx context.Context, resp *pb.ExecuteWithdrawalResponse, account *domain.CurrentAccount, transactionID string) {
+	hydrated, err := s.hydrateAccountWithBalance(ctx, *account)
 	if err != nil {
 		s.logger.Error("failed to retrieve updated balance from Position Keeping after withdrawal",
 			"account_id", account.AccountID(),
@@ -198,68 +235,74 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 			"error", err)
 		// Transaction succeeded but balance fetch failed - leave balance fields nil
 		// Client should call RetrieveCurrentAccount to get accurate balance
+		return
+	}
+	// Update response with balance from Position Keeping
+	resp.NewBalance = toMoneyAmount(hydrated.Balance())
+	resp.AvailableBalance = toMoneyAmount(hydrated.AvailableBalance())
+	// Record balance gauge only when we have accurate post-transaction balance
+	caobservability.RecordBalance(safeMinorUnits(hydrated.Balance()), hydrated.InstrumentCode())
+}
+
+// completePendingWithdrawal marks a pending withdrawal as completed using the transactional outbox pattern.
+func (s *Service) completePendingWithdrawal(ctx context.Context, pendingWithdrawal *domain.Withdrawal) {
+	if pendingWithdrawal == nil || s.withdrawalRepo == nil {
+		return
+	}
+	// Use internal UUID from withdrawal (not the business account ID which is like "ACC-xxxx")
+	accountUUID := pendingWithdrawal.AccountID
+	if err := s.completeWithdrawalWithOutbox(ctx, pendingWithdrawal, accountUUID); err != nil {
+		// CRITICAL: Outbox write failed but funds already moved. Must not leave withdrawal PENDING
+		// as that would allow re-execution. Fall back to direct status update without outbox.
+		s.logger.Error("outbox withdrawal completion failed, attempting fallback direct update",
+			"withdrawal_id", pendingWithdrawal.Reference,
+			"account_id", accountUUID,
+			"outbox_error", err)
+		s.fallbackCompleteWithdrawal(ctx, pendingWithdrawal, err)
+	}
+}
+
+// fallbackCompleteWithdrawal attempts to mark a withdrawal completed directly when the outbox write fails.
+func (s *Service) fallbackCompleteWithdrawal(ctx context.Context, pendingWithdrawal *domain.Withdrawal, originalErr error) {
+	if fallbackErr := pendingWithdrawal.Complete(); fallbackErr != nil {
+		s.logger.Error("fallback withdrawal completion also failed - withdrawal stuck in PENDING",
+			"withdrawal_id", pendingWithdrawal.Reference,
+			"fallback_error", fallbackErr,
+			"original_error", originalErr)
+		return
+	}
+	if fallbackErr := s.withdrawalRepo.Update(ctx, pendingWithdrawal); fallbackErr != nil {
+		s.logger.Error("fallback withdrawal persistence failed - withdrawal stuck in PENDING",
+			"withdrawal_id", pendingWithdrawal.Reference,
+			"fallback_error", fallbackErr,
+			"original_error", originalErr)
 	} else {
-		// Update response with balance from Position Keeping
-		resp.NewBalance = toMoneyAmount(account.Balance())
-		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
-		// Record balance gauge only when we have accurate post-transaction balance
-		caobservability.RecordBalance(safeMinorUnits(account.Balance()), account.InstrumentCode())
+		s.logger.Warn("withdrawal marked completed via fallback (outbox events lost)",
+			"withdrawal_id", pendingWithdrawal.Reference)
 	}
+}
 
-	// Mark pending withdrawal as completed (if executing a pending withdrawal)
-	// Uses transactional outbox pattern to ensure atomicity between status update and event publication.
-	// If the outbox write fails, the withdrawal status update is rolled back, ensuring consistency.
-	if pendingWithdrawal != nil && s.withdrawalRepo != nil {
-		// Use internal UUID from withdrawal (not the business account ID which is like "ACC-xxxx")
-		accountUUID := pendingWithdrawal.AccountID
-		if err := s.completeWithdrawalWithOutbox(ctx, pendingWithdrawal, accountUUID); err != nil {
-			// CRITICAL: Outbox write failed but funds already moved. Must not leave withdrawal PENDING
-			// as that would allow re-execution. Fall back to direct status update without outbox.
-			s.logger.Error("outbox withdrawal completion failed, attempting fallback direct update",
-				"withdrawal_id", pendingWithdrawal.Reference,
-				"account_id", accountUUID,
-				"outbox_error", err)
-
-			// Fallback: Mark withdrawal completed directly (idempotent, safe to retry)
-			if fallbackErr := pendingWithdrawal.Complete(); fallbackErr != nil {
-				s.logger.Error("fallback withdrawal completion also failed - withdrawal stuck in PENDING",
-					"withdrawal_id", pendingWithdrawal.Reference,
-					"fallback_error", fallbackErr,
-					"original_error", err)
-				// Don't fail the RPC - funds already moved, but log critical issue
-			} else if fallbackErr := s.withdrawalRepo.Update(ctx, pendingWithdrawal); fallbackErr != nil {
-				s.logger.Error("fallback withdrawal persistence failed - withdrawal stuck in PENDING",
-					"withdrawal_id", pendingWithdrawal.Reference,
-					"fallback_error", fallbackErr,
-					"original_error", err)
-			} else {
-				s.logger.Warn("withdrawal marked completed via fallback (outbox events lost)",
-					"withdrawal_id", pendingWithdrawal.Reference)
-			}
+// storeWithdrawalIdempotencyResult stores the withdrawal response in Redis for future idempotency checks.
+func (s *Service) storeWithdrawalIdempotencyResult(ctx context.Context, idempotencyKey string, idempKey idempotency.Key, resp *pb.ExecuteWithdrawalResponse) {
+	if idempotencyKey == "" || s.idempotencyService == nil {
+		return
+	}
+	responseData, marshalErr := proto.Marshal(resp)
+	if marshalErr == nil {
+		storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+			Key:         idempKey,
+			Status:      idempotency.StatusCompleted,
+			Data:        responseData,
+			CompletedAt: time.Now(),
+			TTL:         idempotencyResultTTL,
+		})
+		if storeErr != nil {
+			s.logger.Error("failed to store idempotency result", "error", storeErr)
+			// Continue - operation succeeded, caching is optimization
 		}
+	} else {
+		s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
 	}
-
-	// Store successful result in Redis for future idempotency checks
-	if idempotencyKey != "" && s.idempotencyService != nil {
-		responseData, marshalErr := proto.Marshal(resp)
-		if marshalErr == nil {
-			storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-				Key:         idempKey,
-				Status:      idempotency.StatusCompleted,
-				Data:        responseData,
-				CompletedAt: time.Now(),
-				TTL:         idempotencyResultTTL,
-			})
-			if storeErr != nil {
-				s.logger.Error("failed to store idempotency result", "error", storeErr)
-				// Continue - operation succeeded, caching is optimization
-			}
-		} else {
-			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
-		}
-	}
-
-	return resp, nil
 }
 
 // completeWithdrawalWithOutbox atomically updates withdrawal status and writes status change event to outbox.

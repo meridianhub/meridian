@@ -277,6 +277,45 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 	amountCents int64,
 	currencyCode string,
 ) (string, error) {
+	// Steps 2-3: Debit customer, credit clearing account
+	if err := o.postCustomerToClearingLeg(ctx, po, bookingLogID, postingAmount, valueDate, clearingAccountID, amountCents); err != nil {
+		return "", err
+	}
+
+	// Steps 4-5: Debit clearing account, credit gateway
+	if err := o.postClearingToGatewayLeg(ctx, po, bookingLogID, postingAmount, valueDate, clearingAccountID, contraAccountID, amountCents); err != nil {
+		return "", err
+	}
+
+	// Step 6: Update BookingLog status to POSTED (all 4 balanced entries are complete)
+	if err := o.finalizeClearingBookingLog(ctx, po, bookingLogID); err != nil {
+		return "", err
+	}
+
+	o.logger.Info("ledger posting completed successfully (clearing flow)",
+		"booking_log_id", bookingLogID,
+		"payment_order_id", po.ID.String(),
+		"debtor_account", po.DebtorAccountID,
+		"clearing_account", clearingAccountID,
+		"contra_account", contraAccountID,
+		"posting_count", 4,
+		"amount_cents", amountCents,
+		"currency", currencyCode)
+
+	return bookingLogID, nil
+}
+
+// postCustomerToClearingLeg creates the first two postings of the clearing flow:
+// DEBIT customer account and CREDIT clearing account.
+func (o *PaymentOrchestrator) postCustomerToClearingLeg(
+	ctx context.Context,
+	po *domain.PaymentOrder,
+	bookingLogID string,
+	postingAmount *money.Money,
+	valueDate *timestamppb.Timestamp,
+	clearingAccountID string,
+	amountCents int64,
+) error {
 	// Step 2: Create DEBIT posting (customer account - funds leaving)
 	debitCustomerIdempKey := fmt.Sprintf("debit-customer-%s", po.IdempotencyKey)
 	_, err := o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
@@ -299,7 +338,7 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 			"debtor_account", po.DebtorAccountID,
 			"clearing_account", clearingAccountID,
 			"error", err.Error())
-		return "", fmt.Errorf("failed to create debit posting for customer account %s: %w", po.DebtorAccountID, err)
+		return fmt.Errorf("failed to create debit posting for customer account %s: %w", po.DebtorAccountID, err)
 	}
 
 	o.logger.Debug("created debit posting (customer) in clearing flow",
@@ -331,7 +370,7 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 			"clearing_account", clearingAccountID,
 			"has_debit_customer_posting", true,
 			"error", err.Error())
-		return "", fmt.Errorf("failed to create credit posting for clearing account %s: %w", clearingAccountID, err)
+		return fmt.Errorf("failed to create credit posting for clearing account %s: %w", clearingAccountID, err)
 	}
 
 	o.logger.Debug("created credit posting (clearing) in clearing flow",
@@ -340,9 +379,24 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 		"amount_cents", amountCents,
 		"payment_order_id", po.ID.String())
 
+	return nil
+}
+
+// postClearingToGatewayLeg creates the second two postings of the clearing flow:
+// DEBIT clearing account and CREDIT gateway contra-account.
+func (o *PaymentOrchestrator) postClearingToGatewayLeg(
+	ctx context.Context,
+	po *domain.PaymentOrder,
+	bookingLogID string,
+	postingAmount *money.Money,
+	valueDate *timestamppb.Timestamp,
+	clearingAccountID string,
+	contraAccountID string,
+	amountCents int64,
+) error {
 	// Step 4: Create DEBIT posting (clearing account - funds leave clearing)
 	debitClearingIdempKey := fmt.Sprintf("debit-clearing-%s", po.IdempotencyKey)
-	_, err = o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+	_, err := o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID,
 		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
 		PostingAmount:         postingAmount,
@@ -364,7 +418,7 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 			"has_debit_customer_posting", true,
 			"has_credit_clearing_posting", true,
 			"error", err.Error())
-		return "", fmt.Errorf("failed to create debit posting for clearing account %s: %w", clearingAccountID, err)
+		return fmt.Errorf("failed to create debit posting for clearing account %s: %w", clearingAccountID, err)
 	}
 
 	o.logger.Debug("created debit posting (clearing) in clearing flow",
@@ -399,7 +453,7 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 			"has_credit_clearing_posting", true,
 			"has_debit_clearing_posting", true,
 			"error", err.Error())
-		return "", fmt.Errorf("failed to create credit posting for gateway account %s: %w", contraAccountID, err)
+		return fmt.Errorf("failed to create credit posting for gateway account %s: %w", contraAccountID, err)
 	}
 
 	o.logger.Debug("created credit posting (gateway) in clearing flow",
@@ -408,8 +462,16 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 		"amount_cents", amountCents,
 		"payment_order_id", po.ID.String())
 
-	// Step 6: Update BookingLog status to POSTED (all 4 balanced entries are complete)
-	_, err = o.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+	return nil
+}
+
+// finalizeClearingBookingLog updates the booking log status to POSTED after all 4 postings complete.
+func (o *PaymentOrchestrator) finalizeClearingBookingLog(
+	ctx context.Context,
+	po *domain.PaymentOrder,
+	bookingLogID string,
+) error {
+	_, err := o.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
 		Id:     bookingLogID,
 		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
 	})
@@ -427,20 +489,9 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 			"has_credit_gateway_posting", true,
 			"resolution", "manually update booking log status to POSTED",
 			"error", err.Error())
-		return "", fmt.Errorf("failed to update booking log to POSTED: %w", err)
+		return fmt.Errorf("failed to update booking log to POSTED: %w", err)
 	}
-
-	o.logger.Info("ledger posting completed successfully (clearing flow)",
-		"booking_log_id", bookingLogID,
-		"payment_order_id", po.ID.String(),
-		"debtor_account", po.DebtorAccountID,
-		"clearing_account", clearingAccountID,
-		"contra_account", contraAccountID,
-		"posting_count", 4,
-		"amount_cents", amountCents,
-		"currency", currencyCode)
-
-	return bookingLogID, nil
+	return nil
 }
 
 // PostLedgerEntriesFromParams creates double-entry bookkeeping entries using map params.

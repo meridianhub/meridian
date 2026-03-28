@@ -32,63 +32,19 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		caobservability.RecordOperationDuration("execute_deposit", operationStatus, time.Since(start))
 	}()
 
-	// Get idempotency key if provided
-	var idempotencyKey string
-	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
-		idempotencyKey = req.IdempotencyKey.Key
+	// Acquire idempotency lock (returns cached response if already processed)
+	idempotencyKey, idempKey, idempotencyLockAcquired, cachedResp, opStatus, err := s.acquireDepositIdempotency(ctx, req)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
+	}
+	if cachedResp != nil {
+		operationStatus = opStatusIdempotent
+		return cachedResp, nil
 	}
 
-	// Build idempotency key structure for Redis
-	var idempKey idempotency.Key
-	var idempotencyLockAcquired bool
-	if idempotencyKey != "" && s.idempotencyService != nil {
-		tenantID, ok := tenant.FromContext(ctx)
-		if !ok {
-			s.logger.Debug("tenant not found in context for idempotency key",
-				"account_id", req.AccountId)
-		}
-		idempKey = idempotency.Key{
-			TenantID:  string(tenantID),
-			Namespace: idempotencyNamespace,
-			Operation: "deposit",
-			EntityID:  req.AccountId,
-			RequestID: idempotencyKey,
-		}
-
-		// Check Redis for existing result
-		result, err := s.idempotencyService.Check(ctx, idempKey)
-		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
-			var cachedResp pb.ExecuteDepositResponse
-			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
-			if unmarshalErr == nil {
-				s.logger.Info("returning cached deposit response from Redis",
-					"account_id", req.AccountId,
-					"transaction_id", cachedResp.TransactionId,
-					"idempotency_key", idempotencyKey)
-				operationStatus = opStatusIdempotent
-				return &cachedResp, nil
-			}
-			s.logger.Warn("failed to unmarshal cached idempotency result",
-				"error", unmarshalErr)
-		} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-			s.logger.Error("idempotency check failed", "error", err)
-			return nil, status.Error(codes.Internal, "failed to check idempotency")
-		}
-
-		// Mark operation as pending (distributed lock)
-		if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
-			// Check if another request is already processing this operation
-			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				s.logger.Info("operation already in progress, please retry",
-					"idempotency_key", idempotencyKey)
-				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
-			}
-			s.logger.Error("failed to mark operation pending", "error", err)
-			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
-		}
-		idempotencyLockAcquired = true
-
-		// Cleanup pending state on failure - ensures retries aren't blocked for 5 minutes
+	// Cleanup pending state on failure
+	if idempotencyLockAcquired {
 		defer func() {
 			if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
 				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
@@ -100,47 +56,11 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		}()
 	}
 
-	// Pre-validate amount presence before account fetch to fail fast on malformed requests
-	useInput := req.Input != nil
-	if useInput {
-		if req.Input.Amount == "" || req.Input.InstrumentCode == "" {
-			operationStatus = opStatusInvalidAmount
-			return nil, status.Error(codes.InvalidArgument, "input.amount and input.instrument_code are required when input is provided")
-		}
-	} else {
-		if req.Amount == nil || req.Amount.Amount == nil {
-			operationStatus = opStatusMissingAmount
-			return nil, status.Error(codes.InvalidArgument, "amount is required (provide amount or input)")
-		}
-	}
-
-	// Retrieve account (context carries organization for multi-tenant routing)
-	account, err := s.repo.FindByID(ctx, req.AccountId)
+	// Resolve account and validate/parse deposit amount
+	account, amount, opStatus, err := s.resolveDepositAccountAndAmount(ctx, req)
 	if err != nil {
-		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-		}
-		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
-	}
-
-	// Parse and validate amount (multi-asset or legacy mode)
-	var amount domain.Amount
-	if useInput {
-		var opStatus string
-		amount, opStatus, err = parseDepositInput(req.Input, account)
-		if err != nil {
-			operationStatus = opStatus
-			return nil, err
-		}
-	} else {
-		var opStatus string
-		amount, opStatus, err = parseDepositLegacyAmount(req.Amount, account)
-		if err != nil {
-			operationStatus = opStatus
-			return nil, err
-		}
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	// Generate transaction ID (full UUID required by position-keeping service)
@@ -163,11 +83,124 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 		return nil, err
 	}
 
-	// Record deposit transaction (the deposit itself succeeded regardless of balance fetch)
+	// Record deposit and finalize response with updated balance
 	caobservability.RecordDeposit(amount.InstrumentCode())
+	s.finalizeDepositResponse(ctx, resp, &account, transactionID)
 
-	// After saga completes, query Position Keeping for the new balance
-	account, err = s.hydrateAccountWithBalance(ctx, account)
+	// Store successful result in Redis for future idempotency checks
+	s.storeDepositIdempotencyResult(ctx, idempotencyKey, idempKey, resp)
+
+	return resp, nil
+}
+
+// resolveDepositAccountAndAmount validates the request, retrieves the account,
+// and parses/validates the deposit amount.
+func (s *Service) resolveDepositAccountAndAmount(ctx context.Context, req *pb.ExecuteDepositRequest) (domain.CurrentAccount, domain.Amount, string, error) {
+	var zeroAccount domain.CurrentAccount
+	var zeroAmount domain.Amount
+
+	// Pre-validate amount presence before account fetch to fail fast on malformed requests
+	useInput := req.Input != nil
+	if useInput {
+		if req.Input.Amount == "" || req.Input.InstrumentCode == "" {
+			return zeroAccount, zeroAmount, opStatusInvalidAmount, status.Error(codes.InvalidArgument, "input.amount and input.instrument_code are required when input is provided")
+		}
+	} else {
+		if req.Amount == nil || req.Amount.Amount == nil {
+			return zeroAccount, zeroAmount, opStatusMissingAmount, status.Error(codes.InvalidArgument, "amount is required (provide amount or input)")
+		}
+	}
+
+	// Retrieve account (context carries organization for multi-tenant routing)
+	account, err := s.repo.FindByID(ctx, req.AccountId)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			return zeroAccount, zeroAmount, opStatusAccountNotFound, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
+		}
+		return zeroAccount, zeroAmount, opStatusRetrieveFailed, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	// Parse and validate amount (multi-asset or legacy mode)
+	var amount domain.Amount
+	if useInput {
+		var opStatus string
+		amount, opStatus, err = parseDepositInput(req.Input, account)
+		if err != nil {
+			return zeroAccount, zeroAmount, opStatus, err
+		}
+	} else {
+		var opStatus string
+		amount, opStatus, err = parseDepositLegacyAmount(req.Amount, account)
+		if err != nil {
+			return zeroAccount, zeroAmount, opStatus, err
+		}
+	}
+
+	return account, amount, "", nil
+}
+
+// acquireDepositIdempotency checks Redis for a cached result and acquires the distributed lock.
+// Returns: idempotencyKey string, idempKey struct, lockAcquired bool, cached response (or nil), opStatus, error.
+func (s *Service) acquireDepositIdempotency(ctx context.Context, req *pb.ExecuteDepositRequest) (string, idempotency.Key, bool, *pb.ExecuteDepositResponse, string, error) {
+	var idempotencyKey string
+	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
+		idempotencyKey = req.IdempotencyKey.Key
+	}
+
+	var idempKey idempotency.Key
+	if idempotencyKey == "" || s.idempotencyService == nil {
+		return idempotencyKey, idempKey, false, nil, "", nil
+	}
+
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		s.logger.Debug("tenant not found in context for idempotency key",
+			"account_id", req.AccountId)
+	}
+	idempKey = idempotency.Key{
+		TenantID:  string(tenantID),
+		Namespace: idempotencyNamespace,
+		Operation: "deposit",
+		EntityID:  req.AccountId,
+		RequestID: idempotencyKey,
+	}
+
+	// Check Redis for existing result
+	result, err := s.idempotencyService.Check(ctx, idempKey)
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
+		var cachedResp pb.ExecuteDepositResponse
+		unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
+		if unmarshalErr == nil {
+			s.logger.Info("returning cached deposit response from Redis",
+				"account_id", req.AccountId,
+				"transaction_id", cachedResp.TransactionId,
+				"idempotency_key", idempotencyKey)
+			return idempotencyKey, idempKey, false, &cachedResp, opStatusIdempotent, nil
+		}
+		s.logger.Warn("failed to unmarshal cached idempotency result",
+			"error", unmarshalErr)
+	} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		s.logger.Error("idempotency check failed", "error", err)
+		return "", idempKey, false, nil, operationStatusFailed, status.Error(codes.Internal, "failed to check idempotency")
+	}
+
+	// Mark operation as pending (distributed lock)
+	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			s.logger.Info("operation already in progress, please retry",
+				"idempotency_key", idempotencyKey)
+			return "", idempKey, false, nil, operationStatusFailed, status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
+		s.logger.Error("failed to mark operation pending", "error", err)
+		return "", idempKey, false, nil, operationStatusFailed, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
+	}
+
+	return idempotencyKey, idempKey, true, nil, "", nil
+}
+
+// finalizeDepositResponse updates the response with the latest balance from Position Keeping.
+func (s *Service) finalizeDepositResponse(ctx context.Context, resp *pb.ExecuteDepositResponse, account *domain.CurrentAccount, transactionID string) {
+	hydrated, err := s.hydrateAccountWithBalance(ctx, *account)
 	if err != nil {
 		s.logger.Error("failed to retrieve updated balance from Position Keeping after deposit",
 			"account_id", account.AccountID(),
@@ -175,33 +208,34 @@ func (s *Service) ExecuteDeposit(ctx context.Context, req *pb.ExecuteDepositRequ
 			"error", err)
 		// Transaction succeeded but balance fetch failed - leave balance fields nil
 		// Client should call RetrieveCurrentAccount to get accurate balance
-	} else {
-		// Update response with balance from Position Keeping
-		resp.NewBalance = toMoneyAmount(account.Balance())
-		resp.AvailableBalance = toMoneyAmount(account.AvailableBalance())
-		// Record balance gauge only when we have accurate post-transaction balance
-		caobservability.RecordBalance(safeMinorUnits(account.Balance()), account.InstrumentCode())
+		return
 	}
+	// Update response with balance from Position Keeping
+	resp.NewBalance = toMoneyAmount(hydrated.Balance())
+	resp.AvailableBalance = toMoneyAmount(hydrated.AvailableBalance())
+	// Record balance gauge only when we have accurate post-transaction balance
+	caobservability.RecordBalance(safeMinorUnits(hydrated.Balance()), hydrated.InstrumentCode())
+}
 
-	// Store successful result in Redis for future idempotency checks
-	if idempotencyKey != "" && s.idempotencyService != nil {
-		responseData, marshalErr := proto.Marshal(resp)
-		if marshalErr == nil {
-			storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-				Key:         idempKey,
-				Status:      idempotency.StatusCompleted,
-				Data:        responseData,
-				CompletedAt: time.Now(),
-				TTL:         idempotencyResultTTL,
-			})
-			if storeErr != nil {
-				s.logger.Error("failed to store idempotency result", "error", storeErr)
-				// Continue - operation succeeded, caching is optimization
-			}
-		} else {
-			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
+// storeDepositIdempotencyResult stores the deposit response in Redis for future idempotency checks.
+func (s *Service) storeDepositIdempotencyResult(ctx context.Context, idempotencyKey string, idempKey idempotency.Key, resp *pb.ExecuteDepositResponse) {
+	if idempotencyKey == "" || s.idempotencyService == nil {
+		return
+	}
+	responseData, marshalErr := proto.Marshal(resp)
+	if marshalErr == nil {
+		storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
+			Key:         idempKey,
+			Status:      idempotency.StatusCompleted,
+			Data:        responseData,
+			CompletedAt: time.Now(),
+			TTL:         idempotencyResultTTL,
+		})
+		if storeErr != nil {
+			s.logger.Error("failed to store idempotency result", "error", storeErr)
+			// Continue - operation succeeded, caching is optimization
 		}
+	} else {
+		s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
 	}
-
-	return resp, nil
 }
