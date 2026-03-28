@@ -57,9 +57,18 @@ func (s *Service) InitiatePaymentOrder(ctx context.Context, req *pb.InitiatePaym
 	}
 
 	// Validate, create, and persist payment order
-	po, err := s.validateAndPersistPaymentOrder(ctx, req, correlationID, idempotencyKey, idempKey)
+	po, isNew, err := s.validateAndPersistPaymentOrder(ctx, req, correlationID, idempotencyKey, idempKey)
 	if err != nil {
 		return nil, err
+	}
+
+	// Idempotency race: another request created the PO between our check and insert.
+	// Return the existing PO without publishing duplicate events or starting duplicate sagas.
+	if !isNew {
+		s.logger.Info("returning existing payment order (idempotency race)",
+			"payment_order_id", po.ID.String(),
+			"idempotency_key", idempotencyKey)
+		return &pb.InitiatePaymentOrderResponse{PaymentOrder: toProto(po)}, nil
 	}
 
 	s.logger.Info("payment order created",
@@ -167,16 +176,16 @@ func (s *Service) checkInitiateDatabaseIdempotency(ctx context.Context, idempote
 
 // validateAndPersistPaymentOrder validates the request amount, creates a domain payment order,
 // and persists it to the database, handling idempotency key conflicts.
-func (s *Service) validateAndPersistPaymentOrder(ctx context.Context, req *pb.InitiatePaymentOrderRequest, correlationID, idempotencyKey string, idempKey idempotency.Key) (*domain.PaymentOrder, error) {
+func (s *Service) validateAndPersistPaymentOrder(ctx context.Context, req *pb.InitiatePaymentOrderRequest, correlationID, idempotencyKey string, idempKey idempotency.Key) (*domain.PaymentOrder, bool, error) {
 	// Validate and convert amount
 	amount, err := protoToMoney(req.Amount)
 	if err != nil {
 		s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("invalid amount: %v", err))
-		return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
+		return nil, false, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
 	}
 	if !amount.IsPositive() {
 		s.storeIdempotencyFailure(ctx, idempKey, "amount must be positive")
-		return nil, status.Error(codes.InvalidArgument, "amount must be positive")
+		return nil, false, status.Error(codes.InvalidArgument, "amount must be positive")
 	}
 
 	// Create domain payment order
@@ -190,15 +199,16 @@ func (s *Service) validateAndPersistPaymentOrder(ctx context.Context, req *pb.In
 	if err != nil {
 		s.logger.Error("failed to create payment order", "error", err)
 		s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("failed to create payment order: %v", err))
-		return nil, status.Errorf(codes.InvalidArgument, "failed to create payment order: %v", err)
+		return nil, false, status.Errorf(codes.InvalidArgument, "failed to create payment order: %v", err)
 	}
 
 	// Persist to database
 	if err := s.repo.Create(ctx, po); err != nil {
-		return s.handleCreateConflict(ctx, err, idempotencyKey)
+		existingPO, createErr := s.handleCreateConflict(ctx, err, idempotencyKey)
+		return existingPO, false, createErr
 	}
 
-	return po, nil
+	return po, true, nil
 }
 
 // handleCreateConflict handles idempotency key conflicts during payment order creation.
