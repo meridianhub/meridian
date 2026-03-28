@@ -140,10 +140,8 @@ func (e *SagaExecutor) HandleStepFailure(
 		return nil, ErrNilError
 	}
 
-	// Classify the error
 	category := ClassifyError(err)
 
-	// Get current saga state
 	instance, fetchErr := e.instanceRepo.FindByID(ctx, sagaID)
 	if fetchErr != nil {
 		return nil, fmt.Errorf("failed to fetch saga instance: %w", fetchErr)
@@ -171,91 +169,126 @@ func (e *SagaExecutor) HandleStepFailure(
 		"max_replays", maxReplays,
 	)
 
-	// Decision logic based on error category
 	switch category {
 	case ErrorCategoryFatal:
-		// FATAL errors: Transition to COMPENSATING immediately
-		// Do NOT increment replay_count (FR-28)
-		result.Action = FailureActionCompensate
-
-		if updateErr := e.instanceRepo.UpdateStatusWithError(
-			ctx, sagaID, SagaStatusCompensating, stepIndex, err, category,
-		); updateErr != nil {
-			return nil, fmt.Errorf("failed to transition saga to COMPENSATING: %w", updateErr)
-		}
-
-		RecordStepFailure(stepName, string(category))
-
-		e.logger.Warn("FATAL error detected, transitioning to COMPENSATING",
-			"saga_id", sagaID,
-			"step_index", stepIndex,
-			"step_name", stepName,
-			"error", err.Error(),
-		)
-
+		return e.handleFatalFailure(ctx, result, instance, err)
 	case ErrorCategoryTransient:
-		// TRANSIENT errors: Check if max replays exceeded
-		if instance.ReplayCount >= maxReplays {
-			// Max replays exceeded - zombie detected
-			result.Action = FailureActionManualIntervention
-
-			if updateErr := e.instanceRepo.UpdateStatusWithError(
-				ctx, sagaID, SagaStatusFailedManualIntervention, stepIndex, err, category,
-			); updateErr != nil {
-				return nil, fmt.Errorf("failed to transition saga to FAILED_MANUAL_INTERVENTION: %w", updateErr)
-			}
-
-			RecordZombieSagaDetected(instance.SagaDefinitionID.String())
-
-			e.logger.Error("max replays exceeded, transitioning to FAILED_MANUAL_INTERVENTION",
-				"saga_id", sagaID,
-				"step_index", stepIndex,
-				"replay_count", instance.ReplayCount,
-				"max_replays", maxReplays,
-			)
-		} else {
-			// Retry: Release lease and let claiming service pick it up
-			result.Action = FailureActionRetry
-
-			// Release the lease so another worker can claim it
-			// The claiming service will increment replay_count when claiming
-			if e.claimService != nil {
-				if releaseErr := e.claimService.ReleaseLease(ctx, sagaID); releaseErr != nil {
-					e.logger.Error("failed to release lease for retry",
-						"saga_id", sagaID,
-						"error", releaseErr,
-					)
-					// Don't fail the operation, just log the error
-				}
-			}
-
-			RecordStepFailure(stepName, string(category))
-
-			e.logger.Info("TRANSIENT error, releasing lease for retry",
-				"saga_id", sagaID,
-				"step_index", stepIndex,
-				"step_name", stepName,
-				"replay_count", instance.ReplayCount,
-			)
-		}
-
+		return e.handleTransientFailure(ctx, result, instance, err, maxReplays)
 	default:
-		// Unknown category - treat as FATAL (fail-safe)
-		result.Action = FailureActionCompensate
-		result.ErrorCategory = ErrorCategoryFatal
-
-		if updateErr := e.instanceRepo.UpdateStatusWithError(
-			ctx, sagaID, SagaStatusCompensating, stepIndex, err, ErrorCategoryFatal,
-		); updateErr != nil {
-			return nil, fmt.Errorf("failed to transition saga to COMPENSATING: %w", updateErr)
-		}
-
-		e.logger.Warn("unknown error category, treating as FATAL",
-			"saga_id", sagaID,
-			"step_index", stepIndex,
-			"error", err.Error(),
-		)
+		return e.handleUnknownCategoryFailure(ctx, result, err)
 	}
+}
+
+// handleFatalFailure transitions the saga to COMPENSATING immediately without incrementing replay_count (FR-28).
+func (e *SagaExecutor) handleFatalFailure(
+	ctx context.Context,
+	result *StepFailureResult,
+	_ *SagaInstance,
+	err error,
+) (*StepFailureResult, error) {
+	result.Action = FailureActionCompensate
+
+	if updateErr := e.instanceRepo.UpdateStatusWithError(
+		ctx, result.SagaID, SagaStatusCompensating, result.StepIndex, err, result.ErrorCategory,
+	); updateErr != nil {
+		return nil, fmt.Errorf("failed to transition saga to COMPENSATING: %w", updateErr)
+	}
+
+	RecordStepFailure(result.StepName, string(result.ErrorCategory))
+
+	e.logger.Warn("FATAL error detected, transitioning to COMPENSATING",
+		"saga_id", result.SagaID,
+		"step_index", result.StepIndex,
+		"step_name", result.StepName,
+		"error", err.Error(),
+	)
+
+	return result, nil
+}
+
+// handleTransientFailure either retries (releasing the lease) or escalates to manual intervention
+// if max replays have been exceeded.
+func (e *SagaExecutor) handleTransientFailure(
+	ctx context.Context,
+	result *StepFailureResult,
+	instance *SagaInstance,
+	err error,
+	maxReplays int,
+) (*StepFailureResult, error) {
+	if instance.ReplayCount >= maxReplays {
+		return e.handleZombieDetected(ctx, result, instance, err)
+	}
+
+	result.Action = FailureActionRetry
+
+	if e.claimService != nil {
+		if releaseErr := e.claimService.ReleaseLease(ctx, result.SagaID); releaseErr != nil {
+			e.logger.Error("failed to release lease for retry",
+				"saga_id", result.SagaID,
+				"error", releaseErr,
+			)
+		}
+	}
+
+	RecordStepFailure(result.StepName, string(result.ErrorCategory))
+
+	e.logger.Info("TRANSIENT error, releasing lease for retry",
+		"saga_id", result.SagaID,
+		"step_index", result.StepIndex,
+		"step_name", result.StepName,
+		"replay_count", instance.ReplayCount,
+	)
+
+	return result, nil
+}
+
+// handleZombieDetected transitions the saga to FAILED_MANUAL_INTERVENTION when max replays are exceeded.
+func (e *SagaExecutor) handleZombieDetected(
+	ctx context.Context,
+	result *StepFailureResult,
+	instance *SagaInstance,
+	err error,
+) (*StepFailureResult, error) {
+	result.Action = FailureActionManualIntervention
+
+	if updateErr := e.instanceRepo.UpdateStatusWithError(
+		ctx, result.SagaID, SagaStatusFailedManualIntervention, result.StepIndex, err, result.ErrorCategory,
+	); updateErr != nil {
+		return nil, fmt.Errorf("failed to transition saga to FAILED_MANUAL_INTERVENTION: %w", updateErr)
+	}
+
+	RecordZombieSagaDetected(instance.SagaDefinitionID.String())
+
+	e.logger.Error("max replays exceeded, transitioning to FAILED_MANUAL_INTERVENTION",
+		"saga_id", result.SagaID,
+		"step_index", result.StepIndex,
+		"replay_count", instance.ReplayCount,
+		"max_replays", instance.ReplayCount,
+	)
+
+	return result, nil
+}
+
+// handleUnknownCategoryFailure treats unknown error categories as FATAL (fail-safe).
+func (e *SagaExecutor) handleUnknownCategoryFailure(
+	ctx context.Context,
+	result *StepFailureResult,
+	err error,
+) (*StepFailureResult, error) {
+	result.Action = FailureActionCompensate
+	result.ErrorCategory = ErrorCategoryFatal
+
+	if updateErr := e.instanceRepo.UpdateStatusWithError(
+		ctx, result.SagaID, SagaStatusCompensating, result.StepIndex, err, ErrorCategoryFatal,
+	); updateErr != nil {
+		return nil, fmt.Errorf("failed to transition saga to COMPENSATING: %w", updateErr)
+	}
+
+	e.logger.Warn("unknown error category, treating as FATAL",
+		"saga_id", result.SagaID,
+		"step_index", result.StepIndex,
+		"error", err.Error(),
+	)
 
 	return result, nil
 }

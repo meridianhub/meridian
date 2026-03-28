@@ -141,64 +141,24 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 
 	logger.Info("starting Starlark saga execution")
 
-	// Create StarlarkContext for domain handlers
-	starlarkCtx := &StarlarkContext{
-		Context:         ctx,
-		PartyScope:      input.PartyScope,
-		SagaExecutionID: input.SagaExecutionID,
-		CorrelationID:   input.CorrelationID,
-		KnowledgeAt:     input.KnowledgeAt,
-		Logger:          logger,
-		LookupCache:     NewLookupResultCache(),
-	}
+	starlarkCtx := r.buildStarlarkContext(ctx, input, logger)
 
-	// Track step results for service module calls
 	var stepResults []StepResult
 
-	// Build input for Starlark script
-	scriptInput := make(map[string]interface{})
-	for k, v := range input.Input {
-		scriptInput[k] = v
-	}
-
-	// Add metadata as special inputs
-	scriptInput["_saga_execution_id"] = input.SagaExecutionID.String()
-	scriptInput["_correlation_id"] = input.CorrelationID.String()
-
-	// Build additional predeclared globals
-	predeclared := make(starlark.StringDict)
-
-	// Inject service modules into Starlark global scope
-	for name, module := range r.serviceModules {
-		predeclared[name] = module
-	}
+	scriptInput := r.buildScriptInput(input)
+	predeclared := r.buildPredeclaredModules()
 
 	// Execute the Starlark script with service modules and StarlarkContext on the thread
 	result, err := r.runtime.ExecuteSagaWithInput(ctx, sagaName, script, ExecutionInput{
 		Data:        scriptInput,
 		Predeclared: predeclared,
 		ThreadSetup: func(thread *starlark.Thread) {
-			// Set StarlarkContext on the thread so service module handlers can access it
 			thread.SetLocal("saga.StarlarkContext", starlarkCtx)
-			// Set stepResults pointer so service modules can append compensation metadata
 			thread.SetLocal("saga.StepResults", &stepResults)
 		},
 	})
 	if err != nil {
-		logger.Error("Starlark saga execution failed", "error", err)
-
-		// Execute compensation handlers in LIFO order
-		if compErr := r.executeCompensation(starlarkCtx, stepResults); compErr != nil {
-			logger.Error("compensation execution failed", "error", compErr)
-			// Append compensation error to saga error
-			err = fmt.Errorf("saga failed: %w; compensation also failed: %w", err, compErr)
-		}
-
-		return &RunnerOutput{
-			Success:     false,
-			Error:       err.Error(),
-			StepResults: stepResults,
-		}, nil
+		return r.handleExecutionFailure(starlarkCtx, stepResults, err, logger), nil
 	}
 
 	// Check if the saga was suspended
@@ -218,22 +178,70 @@ func (r *StarlarkSagaRunner) ExecuteSaga(ctx context.Context, sagaName string, s
 		"step_count", len(stepResults),
 		"success", true)
 
-	// Extract the "output" global variable if present (common pattern in saga scripts)
-	// Otherwise fall back to using all globals as the output
-	outputMap := result.Globals
-	if outputValue, ok := result.Globals["output"]; ok {
-		// result.Globals values are already Go types (converted from Starlark)
-		// Try to use it as a map directly
-		if outputAsMap, ok := outputValue.(map[string]interface{}); ok {
-			outputMap = outputAsMap
-		}
+	return &RunnerOutput{
+		Success:     true,
+		Output:      extractOutputMap(result.Globals),
+		StepResults: stepResults,
+	}, nil
+}
+
+// buildStarlarkContext creates a StarlarkContext for domain handler execution.
+func (r *StarlarkSagaRunner) buildStarlarkContext(ctx context.Context, input RunnerInput, logger *slog.Logger) *StarlarkContext {
+	return &StarlarkContext{
+		Context:         ctx,
+		PartyScope:      input.PartyScope,
+		SagaExecutionID: input.SagaExecutionID,
+		CorrelationID:   input.CorrelationID,
+		KnowledgeAt:     input.KnowledgeAt,
+		Logger:          logger,
+		LookupCache:     NewLookupResultCache(),
+	}
+}
+
+// buildScriptInput creates the input map for the Starlark script, including metadata.
+func (r *StarlarkSagaRunner) buildScriptInput(input RunnerInput) map[string]interface{} {
+	scriptInput := make(map[string]interface{})
+	for k, v := range input.Input {
+		scriptInput[k] = v
+	}
+	scriptInput["_saga_execution_id"] = input.SagaExecutionID.String()
+	scriptInput["_correlation_id"] = input.CorrelationID.String()
+	return scriptInput
+}
+
+// buildPredeclaredModules injects service modules into a Starlark StringDict for global scope.
+func (r *StarlarkSagaRunner) buildPredeclaredModules() starlark.StringDict {
+	predeclared := make(starlark.StringDict)
+	for name, module := range r.serviceModules {
+		predeclared[name] = module
+	}
+	return predeclared
+}
+
+// handleExecutionFailure runs compensation and returns a failure RunnerOutput.
+func (r *StarlarkSagaRunner) handleExecutionFailure(starlarkCtx *StarlarkContext, stepResults []StepResult, err error, logger *slog.Logger) *RunnerOutput {
+	logger.Error("Starlark saga execution failed", "error", err)
+
+	if compErr := r.executeCompensation(starlarkCtx, stepResults); compErr != nil {
+		logger.Error("compensation execution failed", "error", compErr)
+		err = fmt.Errorf("saga failed: %w; compensation also failed: %w", err, compErr)
 	}
 
 	return &RunnerOutput{
-		Success:     true,
-		Output:      outputMap,
+		Success:     false,
+		Error:       err.Error(),
 		StepResults: stepResults,
-	}, nil
+	}
+}
+
+// extractOutputMap extracts the "output" global variable if present, falling back to all globals.
+func extractOutputMap(globals map[string]interface{}) map[string]interface{} {
+	if outputValue, ok := globals["output"]; ok {
+		if outputAsMap, ok := outputValue.(map[string]interface{}); ok {
+			return outputAsMap
+		}
+	}
+	return globals
 }
 
 // WithLogger returns a new runner with the given logger.
@@ -273,61 +281,59 @@ func (r *StarlarkSagaRunner) executeCompensation(ctx *StarlarkContext, completed
 
 	// Iterate in reverse order (LIFO)
 	for i := len(completedSteps) - 1; i >= 0; i-- {
-		step := completedSteps[i]
-
-		// Skip steps without compensation handlers
-		if step.CompensateHandler == "" {
-			logger.Debug("skipping step without compensation handler", "step_name", step.StepName)
-			continue
+		if err := r.compensateStep(ctx, completedSteps[i], i, logger); err != nil {
+			compensationErrors = append(compensationErrors, err)
 		}
-
-		logger.Info("executing compensation",
-			"step_name", step.StepName,
-			"compensate_handler", step.CompensateHandler,
-			"step_index", i,
-		)
-
-		// Look up compensation handler
-		handler, err := r.registry.Get(step.CompensateHandler)
-		if err != nil {
-			logger.Error("compensation handler not found",
-				"compensate_handler", step.CompensateHandler,
-				"error", err,
-			)
-			compensationErrors = append(compensationErrors,
-				fmt.Errorf("compensation handler %s not found for step %s: %w",
-					step.CompensateHandler, step.StepName, err))
-			continue
-		}
-
-		// Execute compensation handler
-		_, err = handler(ctx, step.CompensateParams)
-		if err != nil {
-			logger.Error("compensation failed",
-				"compensate_handler", step.CompensateHandler,
-				"step_name", step.StepName,
-				"error", err,
-			)
-			compensationErrors = append(compensationErrors,
-				fmt.Errorf("compensation failed for %s (step %s): %w",
-					step.CompensateHandler, step.StepName, err))
-			continue
-		}
-
-		logger.Info("compensation succeeded",
-			"compensate_handler", step.CompensateHandler,
-			"step_name", step.StepName,
-		)
 	}
 
 	if len(compensationErrors) > 0 {
 		logger.Error("compensation completed with errors",
 			"error_count", len(compensationErrors),
 		)
-		// Return first error for simplicity, but log all errors above
 		return compensationErrors[0]
 	}
 
 	logger.Info("compensation execution completed successfully")
+	return nil
+}
+
+// compensateStep executes compensation for a single step, returning an error if it fails.
+func (r *StarlarkSagaRunner) compensateStep(ctx *StarlarkContext, step StepResult, index int, logger *slog.Logger) error {
+	if step.CompensateHandler == "" {
+		logger.Debug("skipping step without compensation handler", "step_name", step.StepName)
+		return nil
+	}
+
+	logger.Info("executing compensation",
+		"step_name", step.StepName,
+		"compensate_handler", step.CompensateHandler,
+		"step_index", index,
+	)
+
+	handler, err := r.registry.Get(step.CompensateHandler)
+	if err != nil {
+		logger.Error("compensation handler not found",
+			"compensate_handler", step.CompensateHandler,
+			"error", err,
+		)
+		return fmt.Errorf("compensation handler %s not found for step %s: %w",
+			step.CompensateHandler, step.StepName, err)
+	}
+
+	_, err = handler(ctx, step.CompensateParams)
+	if err != nil {
+		logger.Error("compensation failed",
+			"compensate_handler", step.CompensateHandler,
+			"step_name", step.StepName,
+			"error", err,
+		)
+		return fmt.Errorf("compensation failed for %s (step %s): %w",
+			step.CompensateHandler, step.StepName, err)
+	}
+
+	logger.Info("compensation succeeded",
+		"compensate_handler", step.CompensateHandler,
+		"step_name", step.StepName,
+	)
 	return nil
 }

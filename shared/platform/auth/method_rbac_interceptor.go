@@ -52,66 +52,22 @@ func newMethodRBACInterceptor(cfg MethodRBACConfig, audit AuditFunc) grpc.UnaryS
 	) (interface{}, error) {
 		perm, mapped := cfg.Permissions[info.FullMethod]
 
-		// Fail-closed: unmapped methods are denied unless AllowUnmapped is set
 		if !mapped {
-			if cfg.AllowUnmapped {
-				if audit != nil {
-					userID := ""
-					if claims, ok := GetClaimsFromContext(ctx); ok {
-						userID = claims.EffectiveUserID()
-					}
-					audit(info.FullMethod, userID, "allowed_unmapped")
-				}
-				return handler(ctx, req)
-			}
-			slog.Warn("RBAC denied unmapped method",
-				"method", info.FullMethod,
-			)
-			if audit != nil {
-				userID := ""
-				if claims, ok := GetClaimsFromContext(ctx); ok {
-					userID = claims.EffectiveUserID()
-				}
-				audit(info.FullMethod, userID, "denied_unmapped")
-			}
-			return nil, status.Errorf(codes.PermissionDenied,
-				"method %s is not configured in RBAC policy", info.FullMethod)
+			return handleUnmappedMethod(ctx, req, info, handler, cfg.AllowUnmapped, audit)
 		}
 
-		// Fail closed on misconfiguration: Public + AllowedRoles is contradictory.
-		// A method cannot be both public (no auth) and role-restricted simultaneously.
 		if perm.Public && len(perm.AllowedRoles) > 0 {
-			slog.Error("RBAC misconfiguration: method is both Public and has AllowedRoles",
-				"method", info.FullMethod,
-			)
-			if audit != nil {
-				userID := ""
-				if claims, ok := GetClaimsFromContext(ctx); ok {
-					userID = claims.EffectiveUserID()
-				}
-				audit(info.FullMethod, userID, "denied_misconfigured")
-			}
-			return nil, status.Errorf(codes.Internal,
-				"RBAC misconfiguration for method %s: Public and AllowedRoles are mutually exclusive", info.FullMethod)
+			return handleMisconfiguredMethod(ctx, info, audit)
 		}
 
-		// Public methods bypass authentication entirely (e.g., login, password reset).
 		if perm.Public {
-			if audit != nil {
-				userID := ""
-				if claims, ok := GetClaimsFromContext(ctx); ok {
-					userID = claims.EffectiveUserID()
-				}
-				audit(info.FullMethod, userID, "allowed_public")
-			}
+			emitAudit(ctx, audit, info.FullMethod, "allowed_public")
 			return handler(ctx, req)
 		}
 
 		claims, ok := GetClaimsFromContext(ctx)
 		if !ok {
-			if audit != nil {
-				audit(info.FullMethod, "", "denied")
-			}
+			emitAudit(ctx, audit, info.FullMethod, "denied")
 			return nil, status.Error(codes.Unauthenticated, "missing authentication context")
 		}
 
@@ -130,6 +86,39 @@ func newMethodRBACInterceptor(cfg MethodRBACConfig, audit AuditFunc) grpc.UnaryS
 
 		return handler(ctx, req)
 	}
+}
+
+// handleUnmappedMethod handles methods not present in the RBAC permission map.
+func handleUnmappedMethod(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler, allowUnmapped bool, audit AuditFunc) (interface{}, error) {
+	if allowUnmapped {
+		emitAudit(ctx, audit, info.FullMethod, "allowed_unmapped")
+		return handler(ctx, req)
+	}
+	slog.Warn("RBAC denied unmapped method", "method", info.FullMethod)
+	emitAudit(ctx, audit, info.FullMethod, "denied_unmapped")
+	return nil, status.Errorf(codes.PermissionDenied,
+		"method %s is not configured in RBAC policy", info.FullMethod)
+}
+
+// handleMisconfiguredMethod rejects methods that are both Public and have AllowedRoles.
+func handleMisconfiguredMethod(ctx context.Context, info *grpc.UnaryServerInfo, audit AuditFunc) (interface{}, error) {
+	slog.Error("RBAC misconfiguration: method is both Public and has AllowedRoles",
+		"method", info.FullMethod)
+	emitAudit(ctx, audit, info.FullMethod, "denied_misconfigured")
+	return nil, status.Errorf(codes.Internal,
+		"RBAC misconfiguration for method %s: Public and AllowedRoles are mutually exclusive", info.FullMethod)
+}
+
+// emitAudit calls the audit function if non-nil, extracting user ID from context claims.
+func emitAudit(ctx context.Context, audit AuditFunc, method, decision string) {
+	if audit == nil {
+		return
+	}
+	userID := ""
+	if claims, ok := GetClaimsFromContext(ctx); ok {
+		userID = claims.EffectiveUserID()
+	}
+	audit(method, userID, decision)
 }
 
 // checkMethodPermission checks whether claims satisfy the method permission.

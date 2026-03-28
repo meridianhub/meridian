@@ -257,54 +257,50 @@ func publishToKafkaWithFallback(
 ) error {
 	publisher := GetGlobalPublisher()
 
-	// If Kafka is available and enabled, try to publish
 	if publisher != nil && publisher.IsEnabled() {
-		var ctx context.Context
-		if tx.Statement != nil && tx.Statement.Context != nil {
-			ctx = tx.Statement.Context
-		} else {
-			ctx = context.Background()
-		}
-
-		event := CreateAuditEvent(
-			ctx,
-			tableName,
-			operation,
-			recordID,
-			oldJSON,
-			newJSON,
-			changedBy,
-			schemaName,
-		)
-
-		// Try to publish to Kafka with a timeout
-		pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-
-		startTime := time.Now()
-		err := publisher.Publish(pubCtx, event)
-		duration := time.Since(startTime).Seconds()
-		RecordKafkaPublishDuration(duration)
-
-		if err == nil {
-			// Successfully published to Kafka
-			RecordKafkaPublished(schemaName, operation, "success")
+		if err := tryKafkaPublish(tx, publisher, tableName, operation, recordID, oldJSON, newJSON, changedBy, schemaName); err == nil {
 			return nil
 		}
-
-		// Kafka publish failed, log error and fall through to outbox fallback
-		log.Printf("WARN: Kafka audit publish failed, using outbox fallback: %v", err)
-		RecordKafkaPublished(schemaName, operation, "failure")
-		RecordKafkaFallback(schemaName, "publish_error")
 	} else if publisher == nil {
-		// Kafka not configured, record fallback usage
 		RecordKafkaFallback(schemaName, "not_configured")
 	} else {
-		// Kafka disabled, record fallback usage
 		RecordKafkaFallback(schemaName, "disabled")
 	}
 
-	// Fallback: write to audit_outbox table
+	return writeOutboxFallback(tx, tableName, operation, recordID, oldJSON, newJSON, changedBy)
+}
+
+// tryKafkaPublish attempts to publish an audit event to Kafka. Returns nil on success.
+func tryKafkaPublish(tx *gorm.DB, publisher *Publisher, tableName, operation, recordID, oldJSON, newJSON, changedBy, schemaName string) error {
+	var ctx context.Context
+	if tx.Statement != nil && tx.Statement.Context != nil {
+		ctx = tx.Statement.Context
+	} else {
+		ctx = context.Background()
+	}
+
+	event := CreateAuditEvent(ctx, tableName, operation, recordID, oldJSON, newJSON, changedBy, schemaName)
+
+	pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	startTime := time.Now()
+	err := publisher.Publish(pubCtx, event)
+	RecordKafkaPublishDuration(time.Since(startTime).Seconds())
+
+	if err == nil {
+		RecordKafkaPublished(schemaName, operation, "success")
+		return nil
+	}
+
+	log.Printf("WARN: Kafka audit publish failed, using outbox fallback: %v", err)
+	RecordKafkaPublished(schemaName, operation, "failure")
+	RecordKafkaFallback(schemaName, "publish_error")
+	return err
+}
+
+// writeOutboxFallback writes an audit event to the outbox table as a fallback.
+func writeOutboxFallback(tx *gorm.DB, tableName, operation, recordID, oldJSON, newJSON, changedBy string) error {
 	outbox := AuditOutbox{
 		ID:        uuid.New(),
 		Table:     tableName,

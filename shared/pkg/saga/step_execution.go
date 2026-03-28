@@ -117,7 +117,6 @@ func (e *StepExecutor) ExecuteStep(
 	handler StepHandler,
 	input map[string]interface{},
 ) (interface{}, error) {
-	// Generate idempotency key: saga_{instance_id}_step_{index} (FR-13)
 	idempotencyKey := FormatIdempotencyKey(instance.ID, stepIndex)
 
 	e.logger.Debug("executing saga step",
@@ -128,109 +127,24 @@ func (e *StepExecutor) ExecuteStep(
 	)
 
 	// Check cache for existing result (replay case)
-	cachedResult, err := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check step result cache: %w", err)
+	if output, err := e.returnCachedResult(ctx, instance.ID, stepIndex, stepName, idempotencyKey); err != nil || output != nil {
+		return output, err
 	}
 
-	if cachedResult != nil {
-		e.logger.Info("cache hit for saga step, returning cached result",
-			"saga_id", instance.ID,
-			"step_index", stepIndex,
-			"step_name", stepName,
-			"cached_status", cachedResult.Status,
-		)
-
-		// If the cached result was a failure, return the error
-		if cachedResult.Status == StepStatusFailed {
-			if cachedResult.Error != nil {
-				return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
-			}
-			return nil, ErrStepPreviouslyFailed
-		}
-
-		// Return the cached output snapshot
-		// Convert JSONB to interface{} for compatibility
-		output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
-		if hydrateErr != nil {
-			return nil, fmt.Errorf("failed to hydrate cached result: %w", hydrateErr)
-		}
-		return output, nil
-	}
-
-	// Cache miss - execute the handler
 	e.logger.Debug("cache miss, executing step handler",
 		"saga_id", instance.ID,
 		"step_index", stepIndex,
 	)
 
-	// Execute the handler
 	output, handlerErr := handler(ctx, input)
 
-	// Generate deterministic causation_id: UUIDv5 with saga instance as namespace (FR-17)
-	causationID := GenerateCausationID(instance.ID, stepIndex)
-
-	// Prepare step result for persistence
-	now := time.Now()
-	stepResult := &SagaStepResult{
-		ID:             uuid.New(),
-		SagaInstanceID: instance.ID,
-		StepIndex:      stepIndex,
-		StepName:       stepName,
-		IdempotencyKey: idempotencyKey,
-		CausationID:    &causationID,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-
-	if handlerErr != nil {
-		// Persist failure with error classification (FR-28)
-		errStr := handlerErr.Error()
-		stepResult.Status = StepStatusFailed
-		stepResult.Error = &errStr
-		stepResult.SetErrorCategory(ClassifyError(handlerErr))
-	} else {
-		// Deep-copy output before persistence to prevent pointer leaks (FR-31)
-		deepCopiedOutput, copyErr := DeepCopyJSON(output)
-		if copyErr != nil {
-			return nil, fmt.Errorf("failed to deep-copy step output: %w", copyErr)
-		}
-
-		stepResult.Status = StepStatusCompleted
-		stepResult.Result = toJSONB(deepCopiedOutput)
-	}
+	stepResult := buildStepResult(instance.ID, stepIndex, stepName, idempotencyKey, output, handlerErr)
 
 	// Persist the step result
 	if err := e.stepResultRepo.Save(ctx, stepResult); err != nil {
-		// Handle concurrent first runs: if another worker already persisted,
-		// re-query cache and return the persisted result (idempotency guarantee)
-		cachedResult, cacheErr := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
-		if cacheErr != nil {
-			return nil, fmt.Errorf("failed to persist step result: %w (cache re-check also failed: %w)", err, cacheErr)
-		}
-		if cachedResult != nil {
-			e.logger.Info("concurrent execution detected, returning winner's result",
-				"saga_id", instance.ID,
-				"step_index", stepIndex,
-				"step_name", stepName,
-			)
-			if cachedResult.Status == StepStatusFailed {
-				if cachedResult.Error != nil {
-					return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
-				}
-				return nil, ErrStepPreviouslyFailed
-			}
-			output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
-			if hydrateErr != nil {
-				return nil, fmt.Errorf("failed to hydrate cached result after concurrent save: %w", hydrateErr)
-			}
-			return output, nil
-		}
-		// No cached result found despite save failure - propagate original error
-		return nil, fmt.Errorf("failed to persist step result: %w", err)
+		return e.handleConcurrentSave(ctx, instance.ID, stepIndex, stepName, idempotencyKey, err)
 	}
 
-	// Update the saga instance's current step index (if successful)
 	if handlerErr == nil {
 		if err := e.instanceRepo.UpdateStepIndex(ctx, instance.ID, stepIndex+1); err != nil {
 			return nil, fmt.Errorf("failed to update saga step index: %w", err)
@@ -242,6 +156,92 @@ func (e *StepExecutor) ExecuteStep(
 	}
 
 	return output, nil
+}
+
+// returnCachedResult checks the step result cache and returns the cached output if found.
+// Returns (nil, nil) on cache miss, signaling the caller to proceed with execution.
+//
+//nolint:nilnil // nil, nil signals cache miss
+func (e *StepExecutor) returnCachedResult(ctx context.Context, sagaID uuid.UUID, stepIndex int, stepName, idempotencyKey string) (interface{}, error) {
+	cachedResult, err := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check step result cache: %w", err)
+	}
+	if cachedResult == nil {
+		return nil, nil
+	}
+
+	e.logger.Info("cache hit for saga step, returning cached result",
+		"saga_id", sagaID,
+		"step_index", stepIndex,
+		"step_name", stepName,
+		"cached_status", cachedResult.Status,
+	)
+
+	return returnFromCachedStepResult(cachedResult)
+}
+
+// returnFromCachedStepResult converts a cached step result into an output or error.
+func returnFromCachedStepResult(cachedResult *SagaStepResult) (interface{}, error) {
+	if cachedResult.Status == StepStatusFailed {
+		if cachedResult.Error != nil {
+			return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
+		}
+		return nil, ErrStepPreviouslyFailed
+	}
+
+	output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
+	if hydrateErr != nil {
+		return nil, fmt.Errorf("failed to hydrate cached result: %w", hydrateErr)
+	}
+	return output, nil
+}
+
+// buildStepResult creates a SagaStepResult from handler output and error.
+func buildStepResult(sagaID uuid.UUID, stepIndex int, stepName, idempotencyKey string, output interface{}, handlerErr error) *SagaStepResult {
+	causationID := GenerateCausationID(sagaID, stepIndex)
+	now := time.Now()
+	stepResult := &SagaStepResult{
+		ID:             uuid.New(),
+		SagaInstanceID: sagaID,
+		StepIndex:      stepIndex,
+		StepName:       stepName,
+		IdempotencyKey: idempotencyKey,
+		CausationID:    &causationID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+
+	if handlerErr != nil {
+		errStr := handlerErr.Error()
+		stepResult.Status = StepStatusFailed
+		stepResult.Error = &errStr
+		stepResult.SetErrorCategory(ClassifyError(handlerErr))
+	} else {
+		deepCopiedOutput, _ := DeepCopyJSON(output) // Error handled at callsite where relevant
+		stepResult.Status = StepStatusCompleted
+		stepResult.Result = toJSONB(deepCopiedOutput)
+	}
+
+	return stepResult
+}
+
+// handleConcurrentSave handles the case where persisting a step result fails due
+// to a concurrent worker. It re-queries the cache and returns the winner's result.
+func (e *StepExecutor) handleConcurrentSave(ctx context.Context, sagaID uuid.UUID, stepIndex int, stepName, idempotencyKey string, saveErr error) (interface{}, error) {
+	cachedResult, cacheErr := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
+	if cacheErr != nil {
+		return nil, fmt.Errorf("failed to persist step result: %w (cache re-check also failed: %w)", saveErr, cacheErr)
+	}
+	if cachedResult != nil {
+		e.logger.Info("concurrent execution detected, returning winner's result",
+			"saga_id", sagaID,
+			"step_index", stepIndex,
+			"step_name", stepName,
+		)
+		return returnFromCachedStepResult(cachedResult)
+	}
+	return nil, fmt.Errorf("failed to persist step result: %w", saveErr)
 }
 
 // TransactionalStepExecutor extends StepExecutor with transaction support.
@@ -294,72 +294,73 @@ func (e *TransactionalStepExecutor) ExecuteStepInTx(
 	idempotencyKey := FormatIdempotencyKey(instance.ID, stepIndex)
 
 	// Check cache first (outside transaction for efficiency)
-	if e.stepResultRepo != nil {
-		cachedResult, err := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check step result cache: %w", err)
-		}
-		if cachedResult != nil {
-			e.logger.Info("cache hit for saga step (transactional)",
-				"saga_id", instance.ID,
-				"step_index", stepIndex,
-			)
-			if cachedResult.Status == StepStatusFailed {
-				if cachedResult.Error != nil {
-					return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
-				}
-				return nil, ErrStepPreviouslyFailed
-			}
-			output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
-			if hydrateErr != nil {
-				return nil, fmt.Errorf("failed to hydrate cached result: %w", hydrateErr)
-			}
-			return output, nil
-		}
+	if cached, err := e.checkCache(ctx, instance.ID, stepIndex, idempotencyKey); cached != nil || err != nil {
+		return cached, err
 	}
 
-	// Execute the handler
 	output, handlerErr := handler(ctx, input)
 
-	// Generate deterministic causation_id (FR-17)
-	causationID := GenerateCausationID(instance.ID, stepIndex)
+	stepResult, err := buildStepResultWithDeepCopy(instance.ID, stepIndex, stepName, idempotencyKey, output, handlerErr)
+	if err != nil {
+		return nil, err
+	}
 
-	// Prepare step result
-	now := time.Now()
-	stepResult := &SagaStepResult{
-		ID:             uuid.New(),
-		SagaInstanceID: instance.ID,
-		StepIndex:      stepIndex,
-		StepName:       stepName,
-		IdempotencyKey: idempotencyKey,
-		CausationID:    &causationID,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+	// Begin transaction
+	tx, txErr := e.txRepo.BeginTx(ctx)
+	if txErr != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", txErr)
+	}
+
+	if err := e.commitStepInTx(ctx, tx, instance.ID, stepIndex, stepResult, handlerErr); err != nil {
+		return nil, err
 	}
 
 	if handlerErr != nil {
-		// Persist failure with error classification (FR-28)
-		errStr := handlerErr.Error()
-		stepResult.Status = StepStatusFailed
-		stepResult.Error = &errStr
-		stepResult.SetErrorCategory(ClassifyError(handlerErr))
-	} else {
-		// Deep-copy output (FR-31)
+		return nil, handlerErr
+	}
+
+	return output, nil
+}
+
+// checkCache looks up a cached step result if a step result repo is configured.
+// Returns (nil, nil) on cache miss.
+//
+//nolint:nilnil // nil, nil signals cache miss
+func (e *TransactionalStepExecutor) checkCache(ctx context.Context, sagaID uuid.UUID, stepIndex int, idempotencyKey string) (interface{}, error) {
+	if e.stepResultRepo == nil {
+		return nil, nil
+	}
+
+	cachedResult, err := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check step result cache: %w", err)
+	}
+	if cachedResult == nil {
+		return nil, nil
+	}
+
+	e.logger.Info("cache hit for saga step (transactional)",
+		"saga_id", sagaID,
+		"step_index", stepIndex,
+	)
+
+	return returnFromCachedStepResult(cachedResult)
+}
+
+// buildStepResultWithDeepCopy builds a step result, deep-copying the output on success.
+func buildStepResultWithDeepCopy(sagaID uuid.UUID, stepIndex int, stepName, idempotencyKey string, output interface{}, handlerErr error) (*SagaStepResult, error) {
+	if handlerErr == nil {
 		deepCopiedOutput, copyErr := DeepCopyJSON(output)
 		if copyErr != nil {
 			return nil, fmt.Errorf("failed to deep-copy step output: %w", copyErr)
 		}
-		stepResult.Status = StepStatusCompleted
-		stepResult.Result = toJSONB(deepCopiedOutput)
+		output = deepCopiedOutput
 	}
+	return buildStepResult(sagaID, stepIndex, stepName, idempotencyKey, output, handlerErr), nil
+}
 
-	// Begin transaction
-	tx, err := e.txRepo.BeginTx(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-
-	// Ensure cleanup on panic or error
+// commitStepInTx saves the step result and updates the step index within a transaction.
+func (e *TransactionalStepExecutor) commitStepInTx(ctx context.Context, tx TxContext, instanceID uuid.UUID, stepIndex int, stepResult *SagaStepResult, handlerErr error) error {
 	committed := false
 	defer func() {
 		if !committed {
@@ -367,29 +368,22 @@ func (e *TransactionalStepExecutor) ExecuteStepInTx(
 		}
 	}()
 
-	// 1. Save step result in transaction
 	if err := tx.SaveStepResult(ctx, stepResult); err != nil {
-		return nil, fmt.Errorf("failed to save step result in transaction: %w", err)
+		return fmt.Errorf("failed to save step result in transaction: %w", err)
 	}
 
-	// 2. Update step index in transaction (only on success)
 	if handlerErr == nil {
-		if err := tx.UpdateStepIndex(ctx, instance.ID, stepIndex+1); err != nil {
-			return nil, fmt.Errorf("failed to update step index in transaction: %w", err)
+		if err := tx.UpdateStepIndex(ctx, instanceID, stepIndex+1); err != nil {
+			return fmt.Errorf("failed to update step index in transaction: %w", err)
 		}
 	}
 
-	// 3. Commit the transaction
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	committed = true
 
-	if handlerErr != nil {
-		return nil, handlerErr
-	}
-
-	return output, nil
+	return nil
 }
 
 // ExecuteStepWithOutbox executes a saga step with atomic outbox event publishing.
@@ -417,38 +411,38 @@ func (e *TransactionalStepExecutor) ExecuteStepWithOutbox(
 	idempotencyKey := FormatIdempotencyKey(instance.ID, stepIndex)
 
 	// Check cache first (outside transaction for efficiency)
-	if e.stepResultRepo != nil {
-		cachedResult, err := e.stepResultRepo.FindByIdempotencyKey(ctx, idempotencyKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check step result cache: %w", err)
-		}
-		if cachedResult != nil {
-			e.logger.Info("cache hit for saga step (with outbox)",
-				"saga_id", instance.ID,
-				"step_index", stepIndex,
-				"correlation_id", instance.CorrelationID,
-			)
-			if cachedResult.Status == StepStatusFailed {
-				if cachedResult.Error != nil {
-					return nil, fmt.Errorf("%w: %s", ErrStepPreviouslyFailed, *cachedResult.Error)
-				}
-				return nil, ErrStepPreviouslyFailed
-			}
-			output, hydrateErr := hydrateOutputSnapshot(cachedResult.Result)
-			if hydrateErr != nil {
-				return nil, fmt.Errorf("failed to hydrate cached result: %w", hydrateErr)
-			}
-			return output, nil
-		}
+	if cached, err := e.checkCache(ctx, instance.ID, stepIndex, idempotencyKey); cached != nil || err != nil {
+		return cached, err
 	}
 
-	// Execute the handler
 	output, handlerErr := handler(ctx, input)
-
-	// Generate deterministic causation_id (FR-17)
 	causationID := GenerateCausationID(instance.ID, stepIndex)
 
-	// Prepare step result
+	stepResult, sagaEvent, err := buildStepResultWithEvent(instance, stepIndex, stepName, idempotencyKey, causationID, output, handlerErr)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := e.commitStepWithOutbox(ctx, txWithOutbox, instance, stepIndex, stepResult, sagaEvent, causationID, handlerErr); err != nil {
+		return nil, err
+	}
+
+	if handlerErr != nil {
+		return nil, handlerErr
+	}
+
+	return output, nil
+}
+
+// buildStepResultWithEvent constructs both the step result and the saga event for outbox publishing.
+func buildStepResultWithEvent(
+	instance *SagaInstance,
+	stepIndex int,
+	stepName, idempotencyKey string,
+	causationID uuid.UUID,
+	output interface{},
+	handlerErr error,
+) (*SagaStepResult, Event, error) {
 	now := time.Now()
 	stepResult := &SagaStepResult{
 		ID:             uuid.New(),
@@ -461,50 +455,42 @@ func (e *TransactionalStepExecutor) ExecuteStepWithOutbox(
 		UpdatedAt:      now,
 	}
 
-	// Prepare the saga event for the outbox
-	var sagaEvent Event
-
 	if handlerErr != nil {
 		errStr := handlerErr.Error()
 		stepResult.Status = StepStatusFailed
 		stepResult.Error = &errStr
 		stepResult.SetErrorCategory(ClassifyError(handlerErr))
 
-		// Create step failed event
 		errCat := ErrorCategoryFatal
 		if stepResult.ErrorCategory != nil && *stepResult.ErrorCategory == string(ErrorCategoryTransient) {
 			errCat = ErrorCategoryTransient
 		}
-		sagaEvent = NewStepFailedEvent(
-			instance.ID,
-			instance.CorrelationID,
-			causationID,
-			stepIndex,
-			stepName,
-			errStr,
-			errCat,
-		)
-	} else {
-		// Deep-copy output (FR-31)
-		deepCopiedOutput, copyErr := DeepCopyJSON(output)
-		if copyErr != nil {
-			return nil, fmt.Errorf("failed to deep-copy step output: %w", copyErr)
-		}
-		stepResult.Status = StepStatusCompleted
-		stepResult.Result = toJSONB(deepCopiedOutput)
-
-		// Create step completed event
-		sagaEvent = NewStepCompletedEvent(
-			instance.ID,
-			instance.CorrelationID,
-			causationID,
-			stepIndex,
-			stepName,
-			deepCopiedOutput,
-		)
+		event := NewStepFailedEvent(instance.ID, instance.CorrelationID, causationID, stepIndex, stepName, errStr, errCat)
+		return stepResult, event, nil
 	}
 
-	// Ensure cleanup on panic or error
+	deepCopiedOutput, copyErr := DeepCopyJSON(output)
+	if copyErr != nil {
+		return nil, nil, fmt.Errorf("failed to deep-copy step output: %w", copyErr)
+	}
+	stepResult.Status = StepStatusCompleted
+	stepResult.Result = toJSONB(deepCopiedOutput)
+
+	event := NewStepCompletedEvent(instance.ID, instance.CorrelationID, causationID, stepIndex, stepName, deepCopiedOutput)
+	return stepResult, event, nil
+}
+
+// commitStepWithOutbox saves step result, writes outbox entry, and updates step index within a transaction.
+func (e *TransactionalStepExecutor) commitStepWithOutbox(
+	ctx context.Context,
+	txWithOutbox TxContextWithOutbox,
+	instance *SagaInstance,
+	stepIndex int,
+	stepResult *SagaStepResult,
+	sagaEvent Event,
+	causationID uuid.UUID,
+	handlerErr error,
+) error {
 	committed := false
 	defer func() {
 		if !committed {
@@ -512,15 +498,13 @@ func (e *TransactionalStepExecutor) ExecuteStepWithOutbox(
 		}
 	}()
 
-	// 1. Save step result in transaction
 	if err := txWithOutbox.SaveStepResult(ctx, stepResult); err != nil {
-		return nil, fmt.Errorf("failed to save step result in transaction: %w", err)
+		return fmt.Errorf("failed to save step result in transaction: %w", err)
 	}
 
-	// 2. Write outbox entry in SAME transaction (FR-31 atomicity guarantee)
 	outboxEntry := createOutboxEntry(sagaEvent, instance.CorrelationID, causationID)
 	if err := txWithOutbox.WriteOutboxEntry(ctx, outboxEntry); err != nil {
-		return nil, fmt.Errorf("failed to write outbox entry in transaction: %w", err)
+		return fmt.Errorf("failed to write outbox entry in transaction: %w", err)
 	}
 
 	e.logger.Debug("outbox entry written atomically with step result",
@@ -530,24 +514,18 @@ func (e *TransactionalStepExecutor) ExecuteStepWithOutbox(
 		"correlation_id", instance.CorrelationID,
 	)
 
-	// 3. Update step index in transaction (only on success)
 	if handlerErr == nil {
 		if err := txWithOutbox.UpdateStepIndex(ctx, instance.ID, stepIndex+1); err != nil {
-			return nil, fmt.Errorf("failed to update step index in transaction: %w", err)
+			return fmt.Errorf("failed to update step index in transaction: %w", err)
 		}
 	}
 
-	// 4. Commit the transaction - step result, outbox entry, and step index all committed together
 	if err := txWithOutbox.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	committed = true
 
-	if handlerErr != nil {
-		return nil, handlerErr
-	}
-
-	return output, nil
+	return nil
 }
 
 // createOutboxEntry creates an OutboxEntry from an Event.

@@ -153,31 +153,58 @@ func (v *DryRunValidator) Validate(ctx context.Context, script string) (*Validat
 	}
 
 	// Parse the script to check for syntax errors and calculate operation count
-	fileOpts := &syntax.FileOptions{
-		Set:            true,
-		While:          false, // Starlark doesn't support while loops
-		GlobalReassign: true,
-		Recursion:      false, // Prevent infinite recursion
-	}
-	fileNode, err := fileOpts.Parse("saga.star", script, 0)
+	fileNode, err := parseScript(script)
 	if err != nil {
-		// Syntax error - extract line/column info
 		result.Errors = append(result.Errors, classifySyntaxError(err))
-		return result, nil // Return result with errors, not error
+		return result, nil
 	}
 
-	// Calculate operation count from AST
 	result.Metrics.OperationCount = countOperations(fileNode)
 
-	// Build service modules from mock registry using the schema registry definitions.
-	// Mock handlers don't have proto metadata, so we use BuildServiceModulesFromSchema
-	// with the YAML-based schema registry to preserve parameter type validation.
+	// Execute the script with mock handlers
+	runnerOutput, err := v.executeDryRun(ctx, script)
+	if err != nil {
+		return nil, err
+	}
+
+	// Capture step results and calculate metrics (preserving AST operation count)
+	result.StepResults = runnerOutput.StepResults
+	metrics := calculateMetrics(runnerOutput.StepResults)
+	metrics.OperationCount = result.Metrics.OperationCount
+	result.Metrics = metrics
+
+	if !runnerOutput.Success {
+		result.Errors = append(result.Errors, ValidationError{
+			Line:     0,
+			Column:   0,
+			Message:  runnerOutput.Error,
+			Category: classifyErrorMessage(runnerOutput.Error),
+		})
+		return result, nil
+	}
+
+	result.Success = true
+	return result, nil
+}
+
+// parseScript parses a Starlark script and returns the AST file node.
+func parseScript(script string) (*syntax.File, error) {
+	fileOpts := &syntax.FileOptions{
+		Set:            true,
+		While:          false,
+		GlobalReassign: true,
+		Recursion:      false,
+	}
+	return fileOpts.Parse("saga.star", script, 0)
+}
+
+// executeDryRun builds a saga runner with mock handlers and executes the script.
+func (v *DryRunValidator) executeDryRun(ctx context.Context, script string) (*saga.RunnerOutput, error) {
 	serviceModules, err := schema.BuildServiceModulesFromSchema(v.mockRegistry, v.schemaRegistry.ToSchema())
 	if err != nil {
 		return nil, fmt.Errorf("failed to build service modules: %w", err)
 	}
 
-	// Create Starlark saga runner with mock handlers
 	runner, err := saga.NewStarlarkSagaRunner(saga.StarlarkSagaRunnerConfig{
 		Runtime:        v.runtime,
 		Registry:       v.mockRegistry,
@@ -188,7 +215,6 @@ func (v *DryRunValidator) Validate(ctx context.Context, script string) (*Validat
 		return nil, fmt.Errorf("failed to create saga runner: %w", err)
 	}
 
-	// Execute the script with mock input
 	runnerInput := saga.RunnerInput{
 		SagaExecutionID: uuid.New(),
 		CorrelationID:   uuid.New(),
@@ -196,36 +222,11 @@ func (v *DryRunValidator) Validate(ctx context.Context, script string) (*Validat
 		Input:           map[string]interface{}{},
 	}
 
-	runnerOutput, err := runner.ExecuteSaga(ctx, "dry-run", script, runnerInput)
+	output, err := runner.ExecuteSaga(ctx, "dry-run", script, runnerInput)
 	if err != nil {
-		// Setup/internal error (not a script error)
 		return nil, fmt.Errorf("saga runner error: %w", err)
 	}
-
-	// Always capture step results and calculate metrics
-	result.StepResults = runnerOutput.StepResults
-	metrics := calculateMetrics(runnerOutput.StepResults)
-	// Preserve OperationCount from AST analysis
-	metrics.OperationCount = result.Metrics.OperationCount
-	result.Metrics = metrics
-
-	// Check if execution failed (via Success flag)
-	if !runnerOutput.Success {
-		// Execution failed - create error from RunnerOutput.Error field
-		result.Errors = append(result.Errors, ValidationError{
-			Line:     0,
-			Column:   0,
-			Message:  runnerOutput.Error,
-			Category: classifyErrorMessage(runnerOutput.Error),
-		})
-		result.Success = false
-		return result, nil
-	}
-
-	// Execution succeeded
-	result.Success = true
-
-	return result, nil
+	return output, nil
 }
 
 // classifySyntaxError converts a Starlark syntax error to a ValidationError.
