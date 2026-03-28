@@ -50,6 +50,42 @@
         "unit": "PARTY",
         "precision": 0
       }
+    },
+    {
+      "code": "KWH",
+      "name": "Kilowatt Hour",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "KWH",
+        "precision": 3
+      }
+    },
+    {
+      "code": "TONNE_CO2E",
+      "name": "Tonne of CO2 Equivalent",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "TONNE_CO2E",
+        "precision": 4
+      }
+    },
+    {
+      "code": "GPU_HOUR",
+      "name": "GPU Compute Hour",
+      "type": "INSTRUMENT_TYPE_COMMODITY",
+      "dimensions": {
+        "unit": "GPU_HOUR",
+        "precision": 6
+      }
+    },
+    {
+      "code": "RICE_VOUCHER",
+      "name": "Rice Distribution Voucher",
+      "type": "INSTRUMENT_TYPE_VOUCHER",
+      "dimensions": {
+        "unit": "RICE_VOUCHER",
+        "precision": 0
+      }
     }
   ],
   "accountTypes": [
@@ -132,6 +168,30 @@
       "toInstrument": "GBP",
       "method": "VALUATION_METHOD_FIXED",
       "source": "platform_pricing"
+    },
+    {
+      "fromInstrument": "KWH",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "energy_market"
+    },
+    {
+      "fromInstrument": "TONNE_CO2E",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_SPOT_RATE",
+      "source": "carbon_market"
+    },
+    {
+      "fromInstrument": "GPU_HOUR",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "compute_pricing"
+    },
+    {
+      "fromInstrument": "RICE_VOUCHER",
+      "toInstrument": "GBP",
+      "method": "VALUATION_METHOD_FIXED",
+      "source": "voucher_pricing"
     }
   ],
   "sagas": [
