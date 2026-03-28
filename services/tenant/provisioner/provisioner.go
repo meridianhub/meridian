@@ -426,6 +426,11 @@ func DefaultConfig() *Config {
 				MigrationPath: basePath + "/identity",
 				DatabaseURL:   getServiceDatabaseURL("identity"),
 			},
+			{
+				Name:          "control-plane",
+				MigrationPath: basePath + "/control-plane",
+				DatabaseURL:   getServiceDatabaseURL("control-plane"),
+			},
 		},
 		ProvisioningTimeout: defaults.DefaultRPCTimeout,
 		DataRetentionPeriod: 7 * 365 * 24 * time.Hour, // 7 years

@@ -286,7 +286,7 @@ func TestSeedManifestVersion_Idempotent(t *testing.T) {
 	assert.False(t, seeded2, "expected second call to skip seeding")
 }
 
-const manifestVersionsDDL = `CREATE TABLE IF NOT EXISTS %s.manifest_versions (
+const manifestVersionsDDL = `CREATE TABLE IF NOT EXISTS %s.manifest_version (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	version VARCHAR(50) NOT NULL,
 	manifest_json JSONB NOT NULL,
