@@ -237,11 +237,12 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	}
 
 	// Execute atomically in a transaction
-	account, txErr := s.executeLienTransaction(ctx, lienID, lien, prefetchedBalanceCents)
+	updatedLien, account, txErr := s.executeLienTransaction(ctx, lienID, lien, prefetchedBalanceCents)
 	if txErr != nil {
 		operationStatus, err = mapExecuteLienTxError(txErr, req.LienId, lien)
 		return nil, err
 	}
+	lien = updatedLien
 
 	// Handle case where lien was already executed by concurrent request
 	if account == nil {
@@ -306,7 +307,7 @@ func (s *Service) prefetchExecuteLienData(ctx context.Context, lienID uuid.UUID,
 
 // executeLienTransaction executes the lien atomically in a transaction with pessimistic locking.
 // Returns the updated account (nil if lien was already executed by concurrent request).
-func (s *Service) executeLienTransaction(ctx context.Context, lienID uuid.UUID, lien *domain.Lien, prefetchedBalanceCents int64) (*domain.CurrentAccount, error) {
+func (s *Service) executeLienTransaction(ctx context.Context, lienID uuid.UUID, lien *domain.Lien, prefetchedBalanceCents int64) (*domain.Lien, *domain.CurrentAccount, error) {
 	var account *domain.CurrentAccount
 	txErr := db.WithGormTenantTransaction(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
@@ -361,7 +362,7 @@ func (s *Service) executeLienTransaction(ctx context.Context, lienID uuid.UUID, 
 		return nil
 	})
 
-	return account, txErr
+	return lien, account, txErr
 }
 
 // buildExecuteLienFinalResponse logs execution, checks basis drift, releases reservations,
