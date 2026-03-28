@@ -36,13 +36,11 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
-	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
 	"github.com/meridianhub/meridian/shared/platform/observability"
 )
 
@@ -132,7 +130,7 @@ type Config struct {
 }
 
 // ErrTargetRequired is returned when neither Target nor ServiceName is provided.
-var ErrTargetRequired = errors.New("either Target or ServiceName must be provided")
+var ErrTargetRequired = clients.ErrConnTargetRequired
 
 // Client provides access to the Reference Data service with tiered caching.
 type Client struct {
@@ -212,7 +210,14 @@ func createL2Cache(ctx context.Context, cfg Config) (cache.L2Cache, *redis.Clien
 func New(ctx context.Context, cfg Config) (*Client, func() error, error) {
 	cfg.applyDefaults()
 
-	conn, err := createGRPCConnection(ctx, cfg)
+	conn, _, err := clients.NewConn(ctx, clients.ConnConfig{
+		Target:      cfg.Target,
+		ServiceName: cfg.ServiceName,
+		Namespace:   cfg.Namespace,
+		Port:        cfg.Port,
+		Tracer:      cfg.Tracer,
+		DialOptions: cfg.DialOptions,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -273,59 +278,6 @@ func New(ctx context.Context, cfg Config) (*Client, func() error, error) {
 	}
 
 	return client, cleanup, nil
-}
-
-// createGRPCConnection creates the gRPC connection based on configuration.
-func createGRPCConnection(ctx context.Context, cfg Config) (*grpc.ClientConn, error) {
-	// Use platform gRPC factory when ServiceName is provided (preferred)
-	if cfg.ServiceName != "" {
-		dialOpts := cfg.DialOptions
-
-		// Add tracing interceptors if tracer is provided
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithChainUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithChainStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		conn, err := platformgrpc.NewClient(ctx, platformgrpc.ClientConfig{
-			ServiceName: cfg.ServiceName,
-			Namespace:   cfg.Namespace,
-			Port:        cfg.Port,
-			DialOptions: dialOpts,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create grpc connection via platform factory: %w", err)
-		}
-		return conn, nil
-	}
-
-	if cfg.Target != "" {
-		// Fallback to legacy direct connection
-		dialOpts := cfg.DialOptions
-		if dialOpts == nil {
-			dialOpts = []grpc.DialOption{
-				grpc.WithTransportCredentials(insecure.NewCredentials()),
-			}
-		}
-
-		// Add tracing interceptors if tracer is provided
-		if cfg.Tracer != nil {
-			dialOpts = append(dialOpts,
-				grpc.WithChainUnaryInterceptor(cfg.Tracer.UnaryClientInterceptor()),
-				grpc.WithChainStreamInterceptor(cfg.Tracer.StreamClientInterceptor()),
-			)
-		}
-
-		conn, err := grpc.NewClient(cfg.Target, dialOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("create grpc connection to %s: %w", cfg.Target, err)
-		}
-		return conn, nil
-	}
-
-	return nil, ErrTargetRequired
 }
 
 // GetInstrument retrieves an instrument with compiled CEL programs.
