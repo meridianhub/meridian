@@ -188,7 +188,8 @@ func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	poobservability.RecordLienExecutionStatusUpdateExhausted()
 }
 
-// buildFreshContext creates a fresh background context with tenant propagation.
+// buildFreshContext creates a fresh background context with tenant propagation and timeout.
+// A fresh context is used so the operation can complete even if the parent context has been cancelled.
 func buildFreshContext(parentCtx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx := context.Background()
 	if tenantID, hasTenant := tenant.FromContext(parentCtx); hasTenant {
