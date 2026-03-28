@@ -125,7 +125,7 @@ func flattenTree(w *csv.Writer, node *saga.CausationTreeNode, parentSagaID strin
 }
 
 // writeStepRow writes a single step row to the CSV writer.
-func writeStepRow(w *csv.Writer, node *saga.CausationTreeNode, step saga.CausationStepInfo, failedStep, knowledgeAt, parentSagaID string, depth int) error {
+func writeStepRow(w *csv.Writer, node *saga.CausationTreeNode, step saga.StepNode, failedStep, knowledgeAt, parentSagaID string, depth int) error {
 	executedAt := formatOptionalTime(step.ExecutedAt)
 	stepError := ""
 	if step.Error != nil {
@@ -160,7 +160,7 @@ func formatOptionalTime(t *time.Time) string {
 }
 
 // formatFailedStep formats a failed step summary or returns empty string if nil.
-func formatFailedStep(fs *saga.FailedStepInfo) string {
+func formatFailedStep(fs *saga.FailedStep) string {
 	if fs == nil {
 		return ""
 	}

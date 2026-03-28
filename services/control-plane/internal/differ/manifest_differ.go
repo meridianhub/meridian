@@ -66,7 +66,24 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 
 	plan := &DiffPlan{}
 
-	// Diff each resource type independently
+	d.diffAllResourceTypes(lastApplied, newManifest, plan)
+
+	if err := d.finalizeDiffPlan(ctx, lastApplied, plan, cfg); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(plan.Actions, func(i, j int) bool {
+		if plan.Actions[i].ResourceType != plan.Actions[j].ResourceType {
+			return plan.Actions[i].ResourceType < plan.Actions[j].ResourceType
+		}
+		return plan.Actions[i].ResourceCode < plan.Actions[j].ResourceCode
+	})
+
+	return plan, nil
+}
+
+// diffAllResourceTypes diffs each resource type independently.
+func (d *ManifestDiffer) diffAllResourceTypes(lastApplied, newManifest *controlplanev1.Manifest, plan *DiffPlan) {
 	d.diffInstruments(lastApplied, newManifest, plan)
 	d.diffAccountTypes(lastApplied, newManifest, plan)
 	d.diffValuationRules(lastApplied, newManifest, plan)
@@ -78,16 +95,14 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 	d.diffMarketDataSets(lastApplied, newManifest, plan)
 	d.diffOrganizations(lastApplied, newManifest, plan)
 	d.diffInternalAccounts(lastApplied, newManifest, plan)
+}
 
-	// Run safety checks on all DELETE actions (skip when validating for a new tenant)
+// finalizeDiffPlan runs safety checks, flags breaking changes, and detects drift.
+func (d *ManifestDiffer) finalizeDiffPlan(ctx context.Context, lastApplied *controlplanev1.Manifest, plan *DiffPlan, cfg *diffConfig) error {
 	if !cfg.skipSafetyChecks {
 		if err := d.runSafetyChecks(ctx, plan); err != nil {
-			return nil, fmt.Errorf("safety check failed: %w", err)
+			return fmt.Errorf("safety check failed: %w", err)
 		}
-	}
-
-	// Flag breaking changes (skip when validating for a new tenant)
-	if !cfg.skipSafetyChecks {
 		for i := range plan.Actions {
 			if plan.Actions[i].Action == ActionDelete {
 				plan.Actions[i].Breaking = true
@@ -96,24 +111,15 @@ func (d *ManifestDiffer) Diff(ctx context.Context, lastApplied, newManifest *con
 		}
 	}
 
-	// Detect drift if we have a last-applied manifest
 	if lastApplied != nil {
 		warnings, err := d.drift.DetectDrift(ctx, lastApplied)
 		if err != nil {
-			return nil, fmt.Errorf("drift detection failed: %w", err)
+			return fmt.Errorf("drift detection failed: %w", err)
 		}
 		plan.DriftWarnings = warnings
 	}
 
-	// Sort actions for deterministic output
-	sort.Slice(plan.Actions, func(i, j int) bool {
-		if plan.Actions[i].ResourceType != plan.Actions[j].ResourceType {
-			return plan.Actions[i].ResourceType < plan.Actions[j].ResourceType
-		}
-		return plan.Actions[i].ResourceCode < plan.Actions[j].ResourceCode
-	})
-
-	return plan, nil
+	return nil
 }
 
 func (d *ManifestDiffer) runSafetyChecks(ctx context.Context, plan *DiffPlan) error {

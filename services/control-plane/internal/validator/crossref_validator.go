@@ -122,7 +122,14 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 	manifest *controlplanev1.Manifest,
 	result *ValidationResult,
 ) {
-	// Check duplicate market data source codes
+	validateMarketDataSourceDuplicates(manifest, result)
+	validateMarketDataSetDuplicates(manifest, result)
+	validateOrganizationDuplicates(manifest, result)
+	validateInternalAccountDuplicates(manifest, result)
+}
+
+// validateMarketDataSourceDuplicates checks for duplicate market data source codes.
+func validateMarketDataSourceDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	mdSourceCodes := make(map[string]int)
 	for i, src := range manifest.GetMarketData().GetSources() {
 		if prev, exists := mdSourceCodes[src.GetCode()]; exists {
@@ -138,8 +145,10 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 			mdSourceCodes[src.GetCode()] = i
 		}
 	}
+}
 
-	// Check duplicate market data set codes
+// validateMarketDataSetDuplicates checks for duplicate market data set codes.
+func validateMarketDataSetDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	mdSetCodes := make(map[string]int)
 	for i, ds := range manifest.GetMarketData().GetDatasets() {
 		if prev, exists := mdSetCodes[ds.GetCode()]; exists {
@@ -155,8 +164,10 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 			mdSetCodes[ds.GetCode()] = i
 		}
 	}
+}
 
-	// Check duplicate organization codes
+// validateOrganizationDuplicates checks for duplicate organization codes.
+func validateOrganizationDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	orgCodes := make(map[string]int)
 	for i, org := range manifest.GetOrganizations() {
 		if prev, exists := orgCodes[org.GetCode()]; exists {
@@ -172,8 +183,10 @@ func (v *ManifestValidator) validateMarketDataAndOrgDuplicates(
 			orgCodes[org.GetCode()] = i
 		}
 	}
+}
 
-	// Check duplicate internal account codes
+// validateInternalAccountDuplicates checks for duplicate internal account codes.
+func validateInternalAccountDuplicates(manifest *controlplanev1.Manifest, result *ValidationResult) {
 	iaCodes := make(map[string]int)
 	for i, ia := range manifest.GetInternalAccounts() {
 		if prev, exists := iaCodes[ia.GetCode()]; exists {
