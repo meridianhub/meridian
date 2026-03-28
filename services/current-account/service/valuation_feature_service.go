@@ -51,87 +51,109 @@ func (s *Service) CreateValuationFeature(ctx context.Context, req *pb.CreateValu
 		caobservability.RecordOperationDuration("create_valuation_feature", operationStatus, time.Since(start))
 	}()
 
-	// Validate valuation feature repository is configured
 	if s.valuationFeatureRepo == nil {
 		operationStatus = opStatusValuationFeatureRepoNil
 		return nil, status.Error(codes.FailedPrecondition, "valuation feature operations not configured")
 	}
 
-	// Get creator from auth context
 	createdBy := defaultSystemUser
 	if claims, ok := auth.GetClaimsFromContext(ctx); ok && claims != nil {
 		createdBy = claims.Subject
 	}
 
-	// Retrieve account to validate native instrument
-	account, err := s.repo.FindByID(ctx, req.AccountId)
+	// Validate account and output instrument
+	account, opStatus, err := s.validateAccountForValuationFeature(ctx, req.AccountId, req.OutputInstrument)
 	if err != nil {
-		if errors.Is(err, persistence.ErrAccountNotFound) {
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-		}
-		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+		operationStatus = opStatus
+		return nil, err
 	}
 
-	// CRITICAL VALIDATION: Method output_instrument must match account's native instrument
-	nativeInstrument := account.Balance().InstrumentCode()
-	if req.OutputInstrument != nativeInstrument {
-		operationStatus = opStatusMethodOutputMismatch
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"method output_instrument mismatch: expected %s (account native instrument), got %s",
-			nativeInstrument, req.OutputInstrument)
-	}
-
-	// Parse method ID
-	methodID, err := uuid.Parse(req.ValuationMethodId)
+	// Parse and validate request inputs
+	methodID, parameters, opStatus, err := validateCreateValuationFeatureInputs(req)
 	if err != nil {
-		operationStatus = opStatusInvalidRequest
-		return nil, status.Errorf(codes.InvalidArgument, "invalid valuation_method_id: %v", err)
+		operationStatus = opStatus
+		return nil, err
 	}
 
-	// Parse parameters JSON if provided
-	var parameters map[string]interface{}
-	if req.Parameters != "" {
-		if err := json.Unmarshal([]byte(req.Parameters), &parameters); err != nil {
-			operationStatus = opStatusInvalidRequest
-			return nil, status.Errorf(codes.InvalidArgument, "invalid parameters JSON: %v", err)
-		}
-	}
-
-	// Create the domain entity
-	feature, err := domain.NewValuationFeature(
-		account.ID(),
-		req.InstrumentCode,
-		methodID,
-		int(req.ValuationMethodVersion),
-		parameters,
-		createdBy,
-	)
+	// Create, activate, and save
+	feature, opStatus, err := s.buildAndSaveValuationFeature(ctx, account, req.InstrumentCode, methodID, int(req.ValuationMethodVersion), parameters, createdBy, req.AccountId)
 	if err != nil {
-		operationStatus = opStatusInvalidRequest
-		return nil, status.Errorf(codes.InvalidArgument, "failed to create valuation feature: %v", err)
-	}
-
-	// Activate the feature immediately (standard flow)
-	if err := feature.Activate(createdBy); err != nil {
-		operationStatus = opStatusFeatureLifecycleError
-		return nil, status.Errorf(codes.Internal, "failed to activate valuation feature: %v", err)
-	}
-
-	// Save to database
-	if err := s.valuationFeatureRepo.Create(ctx, feature); err != nil {
-		if errors.Is(err, persistence.ErrValuationFeatureAlreadyExists) {
-			operationStatus = opStatusFeatureAlreadyExists
-			return nil, status.Errorf(codes.AlreadyExists, "valuation feature already exists for account %s and instrument %s", req.AccountId, req.InstrumentCode)
-		}
-		operationStatus = opStatusSaveFailed
-		return nil, status.Errorf(codes.Internal, "failed to save valuation feature: %v", err)
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	return &pb.CreateValuationFeatureResponse{
 		Feature: s.domainToProtoValuationFeature(feature),
 	}, nil
+}
+
+// validateAccountForValuationFeature retrieves the account and validates the output instrument.
+func (s *Service) validateAccountForValuationFeature(ctx context.Context, accountID, outputInstrument string) (domain.CurrentAccount, string, error) {
+	account, err := s.repo.FindByID(ctx, accountID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			return account, opStatusAccountNotFound,
+				status.Errorf(codes.NotFound, "account not found: %s", accountID)
+		}
+		return account, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve account: %v", err)
+	}
+
+	nativeInstrument := account.Balance().InstrumentCode()
+	if outputInstrument != nativeInstrument {
+		return account, opStatusMethodOutputMismatch,
+			status.Errorf(codes.FailedPrecondition,
+				"method output_instrument mismatch: expected %s (account native instrument), got %s",
+				nativeInstrument, outputInstrument)
+	}
+
+	return account, "", nil
+}
+
+// validateCreateValuationFeatureInputs parses the method ID and parameters from the request.
+func validateCreateValuationFeatureInputs(req *pb.CreateValuationFeatureRequest) (uuid.UUID, map[string]interface{}, string, error) {
+	methodID, err := uuid.Parse(req.ValuationMethodId)
+	if err != nil {
+		return uuid.Nil, nil, opStatusInvalidRequest,
+			status.Errorf(codes.InvalidArgument, "invalid valuation_method_id: %v", err)
+	}
+
+	var parameters map[string]interface{}
+	if req.Parameters != "" {
+		if err := json.Unmarshal([]byte(req.Parameters), &parameters); err != nil {
+			return uuid.Nil, nil, opStatusInvalidRequest,
+				status.Errorf(codes.InvalidArgument, "invalid parameters JSON: %v", err)
+		}
+	}
+
+	return methodID, parameters, "", nil
+}
+
+// buildAndSaveValuationFeature creates, activates, and persists a valuation feature.
+func (s *Service) buildAndSaveValuationFeature(ctx context.Context, account domain.CurrentAccount, instrumentCode string, methodID uuid.UUID, methodVersion int, parameters map[string]interface{}, createdBy, accountID string) (*domain.ValuationFeature, string, error) {
+	feature, err := domain.NewValuationFeature(
+		account.ID(), instrumentCode, methodID, methodVersion, parameters, createdBy,
+	)
+	if err != nil {
+		return nil, opStatusInvalidRequest,
+			status.Errorf(codes.InvalidArgument, "failed to create valuation feature: %v", err)
+	}
+
+	if err := feature.Activate(createdBy); err != nil {
+		return nil, opStatusFeatureLifecycleError,
+			status.Errorf(codes.Internal, "failed to activate valuation feature: %v", err)
+	}
+
+	if err := s.valuationFeatureRepo.Create(ctx, feature); err != nil {
+		if errors.Is(err, persistence.ErrValuationFeatureAlreadyExists) {
+			return nil, opStatusFeatureAlreadyExists,
+				status.Errorf(codes.AlreadyExists, "valuation feature already exists for account %s and instrument %s", accountID, instrumentCode)
+		}
+		return nil, opStatusSaveFailed,
+			status.Errorf(codes.Internal, "failed to save valuation feature: %v", err)
+	}
+
+	return feature, "", nil
 }
 
 // UpdateValuationFeature performs lifecycle transitions on a valuation feature.
@@ -142,64 +164,28 @@ func (s *Service) UpdateValuationFeature(ctx context.Context, req *pb.UpdateValu
 		caobservability.RecordOperationDuration("update_valuation_feature", operationStatus, time.Since(start))
 	}()
 
-	// Validate valuation feature repository is configured
 	if s.valuationFeatureRepo == nil {
 		operationStatus = opStatusValuationFeatureRepoNil
 		return nil, status.Error(codes.FailedPrecondition, "valuation feature operations not configured")
 	}
 
-	// Get updater from auth context
 	updatedBy := defaultSystemUser
 	if claims, ok := auth.GetClaimsFromContext(ctx); ok && claims != nil {
 		updatedBy = claims.Subject
 	}
 
-	// Parse feature ID
-	featureID, err := uuid.Parse(req.FeatureId)
-	if err != nil {
-		operationStatus = opStatusInvalidFeatureID
-		return nil, status.Errorf(codes.InvalidArgument, "invalid feature_id: %v", err)
-	}
-
 	// Retrieve feature
-	feature, err := s.valuationFeatureRepo.FindByID(ctx, featureID)
+	feature, opStatus, err := s.retrieveValuationFeature(ctx, req.FeatureId)
 	if err != nil {
-		if errors.Is(err, persistence.ErrValuationFeatureNotFound) {
-			operationStatus = opStatusFeatureNotFound
-			return nil, status.Errorf(codes.NotFound, "valuation feature not found: %s", req.FeatureId)
-		}
-		operationStatus = opStatusRetrieveFailed
-		return nil, status.Errorf(codes.Internal, "failed to retrieve valuation feature: %v", err)
+		operationStatus = opStatus
+		return nil, err
 	}
 
-	// Apply lifecycle transition based on action
-	switch req.Action {
-	case pb.ValuationFeatureAction_VALUATION_FEATURE_ACTION_ACTIVATE:
-		if err := feature.Activate(updatedBy); err != nil {
-			if errors.Is(err, domain.ErrInvalidValuationFeatureTransition) {
-				operationStatus = opStatusFeatureLifecycleError
-				return nil, status.Errorf(codes.FailedPrecondition, "cannot activate feature: %v", err)
-			}
-			operationStatus = opStatusFeatureLifecycleError
-			return nil, status.Errorf(codes.Internal, "failed to activate valuation feature: %v", err)
-		}
-
-	case pb.ValuationFeatureAction_VALUATION_FEATURE_ACTION_TERMINATE:
-		if err := feature.Terminate(updatedBy); err != nil {
-			if errors.Is(err, domain.ErrInvalidValuationFeatureTransition) {
-				operationStatus = opStatusFeatureLifecycleError
-				return nil, status.Errorf(codes.FailedPrecondition, "cannot terminate feature: %v", err)
-			}
-			operationStatus = opStatusFeatureLifecycleError
-			return nil, status.Errorf(codes.Internal, "failed to terminate valuation feature: %v", err)
-		}
-
-	case pb.ValuationFeatureAction_VALUATION_FEATURE_ACTION_UNSPECIFIED:
-		operationStatus = opStatusInvalidFeatureAction
-		return nil, status.Error(codes.InvalidArgument, "action must be specified")
-	default:
-		operationStatus = opStatusInvalidFeatureAction
-		return nil, status.Errorf(codes.InvalidArgument, "unsupported action: %v", req.Action)
+	// Apply lifecycle transition
+	opStatus, err = applyValuationFeatureAction(feature, req.Action, updatedBy)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	// Save changes
@@ -217,6 +203,59 @@ func (s *Service) UpdateValuationFeature(ctx context.Context, req *pb.UpdateValu
 	}, nil
 }
 
+// retrieveValuationFeature parses the feature ID and retrieves the feature.
+func (s *Service) retrieveValuationFeature(ctx context.Context, featureIDStr string) (*domain.ValuationFeature, string, error) {
+	featureID, err := uuid.Parse(featureIDStr)
+	if err != nil {
+		return nil, opStatusInvalidFeatureID,
+			status.Errorf(codes.InvalidArgument, "invalid feature_id: %v", err)
+	}
+
+	feature, err := s.valuationFeatureRepo.FindByID(ctx, featureID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrValuationFeatureNotFound) {
+			return nil, opStatusFeatureNotFound,
+				status.Errorf(codes.NotFound, "valuation feature not found: %s", featureIDStr)
+		}
+		return nil, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve valuation feature: %v", err)
+	}
+	return feature, "", nil
+}
+
+// applyValuationFeatureAction applies the lifecycle transition to a valuation feature.
+func applyValuationFeatureAction(feature *domain.ValuationFeature, action pb.ValuationFeatureAction, updatedBy string) (string, error) {
+	switch action {
+	case pb.ValuationFeatureAction_VALUATION_FEATURE_ACTION_ACTIVATE:
+		if err := feature.Activate(updatedBy); err != nil {
+			if errors.Is(err, domain.ErrInvalidValuationFeatureTransition) {
+				return opStatusFeatureLifecycleError,
+					status.Errorf(codes.FailedPrecondition, "cannot activate feature: %v", err)
+			}
+			return opStatusFeatureLifecycleError,
+				status.Errorf(codes.Internal, "failed to activate valuation feature: %v", err)
+		}
+
+	case pb.ValuationFeatureAction_VALUATION_FEATURE_ACTION_TERMINATE:
+		if err := feature.Terminate(updatedBy); err != nil {
+			if errors.Is(err, domain.ErrInvalidValuationFeatureTransition) {
+				return opStatusFeatureLifecycleError,
+					status.Errorf(codes.FailedPrecondition, "cannot terminate feature: %v", err)
+			}
+			return opStatusFeatureLifecycleError,
+				status.Errorf(codes.Internal, "failed to terminate valuation feature: %v", err)
+		}
+
+	case pb.ValuationFeatureAction_VALUATION_FEATURE_ACTION_UNSPECIFIED:
+		return opStatusInvalidFeatureAction,
+			status.Error(codes.InvalidArgument, "action must be specified")
+	default:
+		return opStatusInvalidFeatureAction,
+			status.Errorf(codes.InvalidArgument, "unsupported action: %v", action)
+	}
+	return "", nil
+}
+
 // GetValuationFeature retrieves a valuation feature by ID or by account+instrument with bi-temporal query.
 func (s *Service) GetValuationFeature(ctx context.Context, req *pb.GetValuationFeatureRequest) (*pb.GetValuationFeatureResponse, error) {
 	start := time.Now()
@@ -225,69 +264,82 @@ func (s *Service) GetValuationFeature(ctx context.Context, req *pb.GetValuationF
 		caobservability.RecordOperationDuration("get_valuation_feature", operationStatus, time.Since(start))
 	}()
 
-	// Validate valuation feature repository is configured
 	if s.valuationFeatureRepo == nil {
 		operationStatus = opStatusValuationFeatureRepoNil
 		return nil, status.Error(codes.FailedPrecondition, "valuation feature operations not configured")
 	}
 
-	var feature *domain.ValuationFeature
-	var err error
-
-	// Mode 1: Direct lookup by feature_id
-	if req.FeatureId != "" {
-		featureID, parseErr := uuid.Parse(req.FeatureId)
-		if parseErr != nil {
-			operationStatus = opStatusInvalidFeatureID
-			return nil, status.Errorf(codes.InvalidArgument, "invalid feature_id: %v", parseErr)
-		}
-
-		feature, err = s.valuationFeatureRepo.FindByID(ctx, featureID)
-		if err != nil {
-			if errors.Is(err, persistence.ErrValuationFeatureNotFound) {
-				operationStatus = opStatusFeatureNotFound
-				return nil, status.Errorf(codes.NotFound, "valuation feature not found: %s", req.FeatureId)
-			}
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to retrieve valuation feature: %v", err)
-		}
-	} else if req.AccountId != "" && req.InstrumentCode != "" {
-		// Mode 2: Bi-temporal lookup by account_id + instrument_code + knowledge_at
-		// Resolve account ID from string to UUID
-		account, accountErr := s.repo.FindByID(ctx, req.AccountId)
-		if accountErr != nil {
-			if errors.Is(accountErr, persistence.ErrAccountNotFound) {
-				operationStatus = opStatusAccountNotFound
-				return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-			}
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to retrieve account: %v", accountErr)
-		}
-
-		// Determine knowledge_at time
-		knowledgeAt := time.Now()
-		if req.KnowledgeAt != nil {
-			knowledgeAt = req.KnowledgeAt.AsTime()
-		}
-
-		feature, err = s.valuationFeatureRepo.FindByAccountIDAndInstrument(ctx, account.ID(), req.InstrumentCode, knowledgeAt)
-		if err != nil {
-			if errors.Is(err, persistence.ErrValuationFeatureNotFound) {
-				operationStatus = opStatusFeatureNotFound
-				return nil, status.Errorf(codes.NotFound, "no active valuation feature found for account %s and instrument %s at %v",
-					req.AccountId, req.InstrumentCode, knowledgeAt)
-			}
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to retrieve valuation feature: %v", err)
-		}
-	} else {
-		operationStatus = opStatusMissingAccountOrInstrument
-		return nil, status.Error(codes.InvalidArgument, "must provide either feature_id or (account_id + instrument_code)")
+	feature, opStatus, err := s.resolveValuationFeatureByRequest(ctx, req)
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	return &pb.GetValuationFeatureResponse{
 		Feature: s.domainToProtoValuationFeature(feature),
 	}, nil
+}
+
+// resolveValuationFeatureByRequest resolves a valuation feature by ID or by account+instrument lookup.
+func (s *Service) resolveValuationFeatureByRequest(ctx context.Context, req *pb.GetValuationFeatureRequest) (*domain.ValuationFeature, string, error) {
+	if req.FeatureId != "" {
+		return s.getValuationFeatureByID(ctx, req.FeatureId)
+	}
+	if req.AccountId != "" && req.InstrumentCode != "" {
+		return s.getValuationFeatureByAccountAndInstrument(ctx, req.AccountId, req.InstrumentCode, req.KnowledgeAt)
+	}
+	return nil, opStatusMissingAccountOrInstrument,
+		status.Error(codes.InvalidArgument, "must provide either feature_id or (account_id + instrument_code)")
+}
+
+// getValuationFeatureByID retrieves a valuation feature by its UUID.
+func (s *Service) getValuationFeatureByID(ctx context.Context, featureIDStr string) (*domain.ValuationFeature, string, error) {
+	featureID, parseErr := uuid.Parse(featureIDStr)
+	if parseErr != nil {
+		return nil, opStatusInvalidFeatureID,
+			status.Errorf(codes.InvalidArgument, "invalid feature_id: %v", parseErr)
+	}
+
+	feature, err := s.valuationFeatureRepo.FindByID(ctx, featureID)
+	if err != nil {
+		if errors.Is(err, persistence.ErrValuationFeatureNotFound) {
+			return nil, opStatusFeatureNotFound,
+				status.Errorf(codes.NotFound, "valuation feature not found: %s", featureIDStr)
+		}
+		return nil, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve valuation feature: %v", err)
+	}
+	return feature, "", nil
+}
+
+// getValuationFeatureByAccountAndInstrument performs a bi-temporal lookup by account+instrument.
+func (s *Service) getValuationFeatureByAccountAndInstrument(ctx context.Context, accountID, instrumentCode string, knowledgeAtPb *timestamppb.Timestamp) (*domain.ValuationFeature, string, error) {
+	account, accountErr := s.repo.FindByID(ctx, accountID)
+	if accountErr != nil {
+		if errors.Is(accountErr, persistence.ErrAccountNotFound) {
+			return nil, opStatusAccountNotFound,
+				status.Errorf(codes.NotFound, "account not found: %s", accountID)
+		}
+		return nil, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve account: %v", accountErr)
+	}
+
+	knowledgeAt := time.Now()
+	if knowledgeAtPb != nil {
+		knowledgeAt = knowledgeAtPb.AsTime()
+	}
+
+	feature, err := s.valuationFeatureRepo.FindByAccountIDAndInstrument(ctx, account.ID(), instrumentCode, knowledgeAt)
+	if err != nil {
+		if errors.Is(err, persistence.ErrValuationFeatureNotFound) {
+			return nil, opStatusFeatureNotFound,
+				status.Errorf(codes.NotFound, "no active valuation feature found for account %s and instrument %s at %v",
+					accountID, instrumentCode, knowledgeAt)
+		}
+		return nil, opStatusRetrieveFailed,
+			status.Errorf(codes.Internal, "failed to retrieve valuation feature: %v", err)
+	}
+	return feature, "", nil
 }
 
 // ListValuationFeatures retrieves all valuation features for an account.

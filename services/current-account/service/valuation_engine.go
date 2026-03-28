@@ -12,6 +12,7 @@ import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
+	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
@@ -175,74 +176,107 @@ func (s *Service) valuateInternal(ctx context.Context, accountID string, inputAm
 
 	// If a valuation engine is configured, delegate to it
 	if s.valuationEngine != nil {
-		result, err := s.valuationEngine.Evaluate(ctx, ValuationParams{
-			MethodID:      feature.ValuationMethodID,
-			MethodVersion: feature.ValuationMethodVersion,
-			InputAmount:   inputAmount,
-			InputCode:     inputCode,
-			OutputCode:    nativeInstrument,
-			Parameters:    feature.Parameters,
-			KnowledgeAt:   knowledgeAt,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrValuationEngineFailed, err)
-		}
-
-		executionMs := time.Since(start).Milliseconds()
-
-		// Build analysis from engine result
-		analysis := &pb.ValuationAnalysis{
-			MethodId:          feature.ValuationMethodID.String(),
-			MethodVersion:     strconv.Itoa(feature.ValuationMethodVersion),
-			AppliedRates:      result.AppliedRates,
-			ObservationIds:    result.ObservationIDs,
-			ComputedAt:        timestamppb.New(result.ComputedAt),
-			KnowledgeAt:       timestamppb.New(knowledgeAt),
-			AccountParameters: accountParams,
-			CalculationPath:   result.CalculationPath,
-			DegradedMode:      result.DegradedMode,
-		}
-
-		// Convert warnings
-		for _, w := range result.Warnings {
-			analysis.Warnings = append(analysis.Warnings, &pb.ValuationWarning{
-				Code:     w.Code,
-				Message:  w.Message,
-				Severity: w.Severity,
-			})
-		}
-
-		// Convert market data qualities
-		for _, q := range result.MarketQualities {
-			analysis.MarketDataQualities = append(analysis.MarketDataQualities, &pb.MarketDataQuality{
-				Source:           q.Source,
-				QualityLevel:     q.QualityLevel,
-				ObservedAt:       timestamppb.New(q.ObservedAt),
-				StalenessSeconds: q.StalenessSeconds,
-			})
-		}
-
-		return &valuateInternalResult{
-			OutputAmount: result.OutputAmount,
-			OutputCode:   result.OutputCode,
-			Analysis:     analysis,
-			CacheHit:     result.CacheHit,
-			ExecutionMs:  executionMs,
-		}, nil
+		return s.evaluateWithEngine(ctx, feature, inputAmount, inputCode, nativeInstrument, knowledgeAt, accountParams, start)
 	}
 
 	// Fallback: No valuation engine configured.
-	// Use the feature's method reference to build a stub analysis.
-	// In production, the valuation engine MUST be configured.
+	return buildDegradedValuationResult(s.logger, accountID, inputCode, inputAmount, nativeInstrument, feature, knowledgeAt, accountParams, start), nil
+}
+
+// evaluateWithEngine delegates valuation to the configured engine and builds the result.
+func (s *Service) evaluateWithEngine(
+	ctx context.Context,
+	feature *domain.ValuationFeature,
+	inputAmount decimal.Decimal,
+	inputCode, nativeInstrument string,
+	knowledgeAt time.Time,
+	accountParams *structpb.Struct,
+	start time.Time,
+) (*valuateInternalResult, error) {
+	result, err := s.valuationEngine.Evaluate(ctx, ValuationParams{
+		MethodID:      feature.ValuationMethodID,
+		MethodVersion: feature.ValuationMethodVersion,
+		InputAmount:   inputAmount,
+		InputCode:     inputCode,
+		OutputCode:    nativeInstrument,
+		Parameters:    feature.Parameters,
+		KnowledgeAt:   knowledgeAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrValuationEngineFailed, err)
+	}
+
+	executionMs := time.Since(start).Milliseconds()
+	analysis := buildValuationAnalysis(feature, result, knowledgeAt, accountParams)
+
+	return &valuateInternalResult{
+		OutputAmount: result.OutputAmount,
+		OutputCode:   result.OutputCode,
+		Analysis:     analysis,
+		CacheHit:     result.CacheHit,
+		ExecutionMs:  executionMs,
+	}, nil
+}
+
+// buildValuationAnalysis converts engine result to proto analysis.
+func buildValuationAnalysis(
+	feature *domain.ValuationFeature,
+	result *ValuationResult,
+	knowledgeAt time.Time,
+	accountParams *structpb.Struct,
+) *pb.ValuationAnalysis {
+	analysis := &pb.ValuationAnalysis{
+		MethodId:          feature.ValuationMethodID.String(),
+		MethodVersion:     strconv.Itoa(feature.ValuationMethodVersion),
+		AppliedRates:      result.AppliedRates,
+		ObservationIds:    result.ObservationIDs,
+		ComputedAt:        timestamppb.New(result.ComputedAt),
+		KnowledgeAt:       timestamppb.New(knowledgeAt),
+		AccountParameters: accountParams,
+		CalculationPath:   result.CalculationPath,
+		DegradedMode:      result.DegradedMode,
+	}
+
+	for _, w := range result.Warnings {
+		analysis.Warnings = append(analysis.Warnings, &pb.ValuationWarning{
+			Code:     w.Code,
+			Message:  w.Message,
+			Severity: w.Severity,
+		})
+	}
+
+	for _, q := range result.MarketQualities {
+		analysis.MarketDataQualities = append(analysis.MarketDataQualities, &pb.MarketDataQuality{
+			Source:           q.Source,
+			QualityLevel:     q.QualityLevel,
+			ObservedAt:       timestamppb.New(q.ObservedAt),
+			StalenessSeconds: q.StalenessSeconds,
+		})
+	}
+
+	return analysis
+}
+
+// buildDegradedValuationResult returns a passthrough result when no engine is configured.
+func buildDegradedValuationResult(
+	logger interface{ Warn(string, ...any) },
+	accountID, inputCode string,
+	inputAmount decimal.Decimal,
+	nativeInstrument string,
+	feature *domain.ValuationFeature,
+	knowledgeAt time.Time,
+	accountParams *structpb.Struct,
+	start time.Time,
+) *valuateInternalResult {
 	executionMs := time.Since(start).Milliseconds()
 
-	s.logger.Warn("no valuation engine configured, returning unvalued amount with degraded analysis",
+	logger.Warn("no valuation engine configured, returning unvalued amount with degraded analysis",
 		"account_id", accountID,
 		"input_code", inputCode,
 		"method_id", feature.ValuationMethodID.String())
 
 	return &valuateInternalResult{
-		OutputAmount: inputAmount, // Passthrough (no actual conversion)
+		OutputAmount: inputAmount,
 		OutputCode:   nativeInstrument,
 		Analysis: &pb.ValuationAnalysis{
 			MethodId:          feature.ValuationMethodID.String(),
@@ -263,7 +297,7 @@ func (s *Service) valuateInternal(ctx context.Context, accountID string, inputAm
 		},
 		CacheHit:    false,
 		ExecutionMs: executionMs,
-	}, nil
+	}
 }
 
 // EvaluateAssetValuation performs an inquiry-only (non-binding) valuation.
@@ -276,72 +310,18 @@ func (s *Service) EvaluateAssetValuation(ctx context.Context, req *pb.EvaluateAs
 		caobservability.RecordOperationDuration("evaluate_asset_valuation", operationStatus, time.Since(start))
 	}()
 
-	// Validate valuation feature repository is configured
-	if s.valuationFeatureRepo == nil {
-		operationStatus = opStatusValuationFeatureRepoNil
-		return nil, status.Error(codes.FailedPrecondition, "valuation feature operations not configured")
-	}
-
-	// Validate input
-	if req.AccountId == "" {
-		operationStatus = opStatusMissingAccountID
-		return nil, status.Error(codes.InvalidArgument, "account_id is required")
-	}
-	if req.Input == nil {
-		operationStatus = opStatusInvalidRequest
-		return nil, status.Error(codes.InvalidArgument, "input amount is required")
-	}
-	if req.Input.InstrumentCode == "" {
-		operationStatus = opStatusInputInstrumentEmpty
-		return nil, status.Error(codes.InvalidArgument, "input instrument_code is required")
-	}
-	if req.Input.Amount == "" {
-		operationStatus = opStatusInvalidInputAmount
-		return nil, status.Error(codes.InvalidArgument, "input amount value is required")
-	}
-
-	// Parse input amount
-	inputAmount, err := decimal.NewFromString(req.Input.Amount)
+	// Validate request
+	inputAmount, knowledgeAt, opStatus, err := validateAssetValuationRequest(req, s.valuationFeatureRepo)
 	if err != nil {
-		operationStatus = opStatusInvalidInputAmount
-		return nil, status.Errorf(codes.InvalidArgument, "invalid input amount: %v", err)
-	}
-
-	if !inputAmount.IsPositive() {
-		operationStatus = opStatusInputAmountNonPositive
-		return nil, status.Error(codes.InvalidArgument, "input amount must be positive")
-	}
-
-	// Determine knowledge_at time
-	knowledgeAt := time.Now()
-	if req.KnowledgeAt != nil {
-		knowledgeAt = req.KnowledgeAt.AsTime()
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	// Execute valuation via shared function (prevents Ghost Pricing)
 	result, err := s.valuateInternal(ctx, req.AccountId, inputAmount, req.Input.InstrumentCode, knowledgeAt)
 	if err != nil {
-		// Map internal errors to gRPC status codes using sentinel errors
-		switch {
-		case errors.Is(err, ErrValuationAccountNotFound):
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "%v", err)
-		case errors.Is(err, ErrNoActiveValuationFeature):
-			operationStatus = opStatusNoValuationFeature
-			return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-		case errors.Is(err, ErrValuationFeatureNotActive):
-			operationStatus = opStatusFeatureNotActive
-			return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-		case errors.Is(err, ErrValuationRepoNotConfigured):
-			operationStatus = opStatusValuationFeatureRepoNil
-			return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-		case errors.Is(err, ErrValuationEngineFailed):
-			operationStatus = opStatusValuationFailed
-			return nil, status.Errorf(codes.Internal, "%v", err)
-		default:
-			operationStatus = opStatusValuationFailed
-			return nil, status.Errorf(codes.Internal, "valuation failed: %v", err)
-		}
+		operationStatus = mapValuationInternalError(err)
+		return nil, mapValuationErrorToGRPC(err)
 	}
 
 	executionMs := time.Since(start).Milliseconds()
@@ -357,4 +337,79 @@ func (s *Service) EvaluateAssetValuation(ctx context.Context, req *pb.EvaluateAs
 		CacheHit:        result.CacheHit,
 		IsEstimate:      true, // Always true for inquiry operations
 	}, nil
+}
+
+// validateAssetValuationRequest validates the EvaluateAssetValuationRequest fields.
+func validateAssetValuationRequest(req *pb.EvaluateAssetValuationRequest, valuationFeatureRepo *persistence.ValuationFeatureRepository) (decimal.Decimal, time.Time, string, error) {
+	if valuationFeatureRepo == nil {
+		return decimal.Decimal{}, time.Time{}, opStatusValuationFeatureRepoNil,
+			status.Error(codes.FailedPrecondition, "valuation feature operations not configured")
+	}
+	if req.AccountId == "" {
+		return decimal.Decimal{}, time.Time{}, opStatusMissingAccountID,
+			status.Error(codes.InvalidArgument, "account_id is required")
+	}
+	if req.Input == nil {
+		return decimal.Decimal{}, time.Time{}, opStatusInvalidRequest,
+			status.Error(codes.InvalidArgument, "input amount is required")
+	}
+	if req.Input.InstrumentCode == "" {
+		return decimal.Decimal{}, time.Time{}, opStatusInputInstrumentEmpty,
+			status.Error(codes.InvalidArgument, "input instrument_code is required")
+	}
+	if req.Input.Amount == "" {
+		return decimal.Decimal{}, time.Time{}, opStatusInvalidInputAmount,
+			status.Error(codes.InvalidArgument, "input amount value is required")
+	}
+
+	inputAmount, err := decimal.NewFromString(req.Input.Amount)
+	if err != nil {
+		return decimal.Decimal{}, time.Time{}, opStatusInvalidInputAmount,
+			status.Errorf(codes.InvalidArgument, "invalid input amount: %v", err)
+	}
+	if !inputAmount.IsPositive() {
+		return decimal.Decimal{}, time.Time{}, opStatusInputAmountNonPositive,
+			status.Error(codes.InvalidArgument, "input amount must be positive")
+	}
+
+	knowledgeAt := time.Now()
+	if req.KnowledgeAt != nil {
+		knowledgeAt = req.KnowledgeAt.AsTime()
+	}
+
+	return inputAmount, knowledgeAt, "", nil
+}
+
+// mapValuationInternalError maps a valuation error to an operation status string.
+func mapValuationInternalError(err error) string {
+	switch {
+	case errors.Is(err, ErrValuationAccountNotFound):
+		return opStatusAccountNotFound
+	case errors.Is(err, ErrNoActiveValuationFeature):
+		return opStatusNoValuationFeature
+	case errors.Is(err, ErrValuationFeatureNotActive):
+		return opStatusFeatureNotActive
+	case errors.Is(err, ErrValuationRepoNotConfigured):
+		return opStatusValuationFeatureRepoNil
+	default:
+		return opStatusValuationFailed
+	}
+}
+
+// mapValuationErrorToGRPC maps valuation errors to gRPC status errors.
+func mapValuationErrorToGRPC(err error) error {
+	switch {
+	case errors.Is(err, ErrValuationAccountNotFound):
+		return status.Errorf(codes.NotFound, "%v", err)
+	case errors.Is(err, ErrNoActiveValuationFeature):
+		return status.Errorf(codes.FailedPrecondition, "%v", err)
+	case errors.Is(err, ErrValuationFeatureNotActive):
+		return status.Errorf(codes.FailedPrecondition, "%v", err)
+	case errors.Is(err, ErrValuationRepoNotConfigured):
+		return status.Errorf(codes.FailedPrecondition, "%v", err)
+	case errors.Is(err, ErrValuationEngineFailed):
+		return status.Errorf(codes.Internal, "%v", err)
+	default:
+		return status.Errorf(codes.Internal, "valuation failed: %v", err)
+	}
 }

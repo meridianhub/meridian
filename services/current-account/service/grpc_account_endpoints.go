@@ -158,13 +158,10 @@ func (s *Service) seedValuationFeatures(ctx context.Context, accountID uuid.UUID
 
 // ListCurrentAccounts returns a paginated list of current accounts with optional filtering.
 func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAccountsRequest) (*pb.ListCurrentAccountsResponse, error) {
-	// Apply defaults and validate page size
-	pageSize := int(req.PageSize)
-	if pageSize <= 0 {
-		pageSize = 25
-	}
-	if pageSize > 100 {
-		pageSize = 100
+	// Build filter params from request
+	params, err := buildListAccountsParams(req)
+	if err != nil {
+		return nil, err
 	}
 
 	// Decode cursor
@@ -173,43 +170,7 @@ func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAc
 		s.logger.Warn("invalid page_token", "page_token", req.PageToken, "error", err)
 		return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
 	}
-
-	// Build filter params
-	params := persistence.ListAccountsParams{
-		Limit:  pageSize,
-		Cursor: cursor,
-		IBAN:   req.Iban,
-	}
-
-	if req.Status != pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED {
-		statusStr, ok := protoToAccountStatus(req.Status)
-		if !ok {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid status: %v", req.Status)
-		}
-		params.Status = statusStr
-	}
-
-	if req.PartyId != "" {
-		partyUUID, err := uuid.Parse(req.PartyId)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid party_id: must be a valid UUID")
-		}
-		if partyUUID == uuid.Nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid party_id: zero UUID is not allowed")
-		}
-		params.PartyID = partyUUID
-	}
-
-	if req.OrgPartyId != "" {
-		orgPartyUUID, err := uuid.Parse(req.OrgPartyId)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: must be a valid UUID")
-		}
-		if orgPartyUUID == uuid.Nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid org_party_id: zero UUID is not allowed")
-		}
-		params.OrgPartyID = orgPartyUUID
-	}
+	params.Cursor = cursor
 
 	// Execute query
 	result, err := s.repo.ListAccounts(ctx, params)
@@ -229,6 +190,54 @@ func (s *Service) ListCurrentAccounts(ctx context.Context, req *pb.ListCurrentAc
 		NextPageToken: result.NextCursor,
 		TotalCount:    result.TotalCount,
 	}, nil
+}
+
+// buildListAccountsParams validates the request and builds ListAccountsParams.
+func buildListAccountsParams(req *pb.ListCurrentAccountsRequest) (persistence.ListAccountsParams, error) {
+	pageSize := int(req.PageSize)
+	if pageSize <= 0 {
+		pageSize = 25
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	params := persistence.ListAccountsParams{
+		Limit: pageSize,
+		IBAN:  req.Iban,
+	}
+
+	if req.Status != pb.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED {
+		statusStr, ok := protoToAccountStatus(req.Status)
+		if !ok {
+			return params, status.Errorf(codes.InvalidArgument, "invalid status: %v", req.Status)
+		}
+		params.Status = statusStr
+	}
+
+	if req.PartyId != "" {
+		partyUUID, err := uuid.Parse(req.PartyId)
+		if err != nil {
+			return params, status.Errorf(codes.InvalidArgument, "invalid party_id: must be a valid UUID")
+		}
+		if partyUUID == uuid.Nil {
+			return params, status.Errorf(codes.InvalidArgument, "invalid party_id: zero UUID is not allowed")
+		}
+		params.PartyID = partyUUID
+	}
+
+	if req.OrgPartyId != "" {
+		orgPartyUUID, err := uuid.Parse(req.OrgPartyId)
+		if err != nil {
+			return params, status.Errorf(codes.InvalidArgument, "invalid org_party_id: must be a valid UUID")
+		}
+		if orgPartyUUID == uuid.Nil {
+			return params, status.Errorf(codes.InvalidArgument, "invalid org_party_id: zero UUID is not allowed")
+		}
+		params.OrgPartyID = orgPartyUUID
+	}
+
+	return params, nil
 }
 
 // protoToAccountStatus converts a proto AccountStatus to a domain status string.

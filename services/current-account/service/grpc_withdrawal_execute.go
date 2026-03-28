@@ -311,16 +311,61 @@ func (s *Service) storeWithdrawalIdempotencyResult(ctx context.Context, idempote
 func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *domain.Withdrawal, accountID uuid.UUID) error {
 	// If outbox repo is not configured, fall back to direct update (graceful degradation)
 	if s.outboxRepo == nil || s.db == nil {
+		return s.completeWithdrawalDirect(ctx, withdrawal)
+	}
+
+	// Create and marshal event payload
+	eventPayload, err := buildWithdrawalStatusEvent(withdrawal, accountID)
+	if err != nil {
+		return err
+	}
+
+	// Use transaction to ensure atomicity between withdrawal update and outbox entry
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := withdrawal.Complete(); err != nil {
 			return fmt.Errorf("failed to transition withdrawal to completed status: %w", err)
 		}
-		if err := s.withdrawalRepo.Update(ctx, withdrawal); err != nil {
+
+		withdrawalRepoTx := s.withdrawalRepo.WithTx(tx)
+		if err := withdrawalRepoTx.Update(ctx, withdrawal); err != nil {
 			return fmt.Errorf("failed to persist withdrawal completion: %w", err)
 		}
+
+		outboxEntry := buildWithdrawalOutboxEntry(withdrawal, accountID, eventPayload, topics.CurrentAccountWithdrawalStatusV1)
+		if err := s.outboxRepo.Insert(ctx, tx, outboxEntry); err != nil {
+			return fmt.Errorf("failed to create outbox entry: %w", err)
+		}
+
 		return nil
+	}); err != nil {
+		return err
 	}
 
-	// Create typed protobuf event for publication
+	// Best-effort: insert deprecated outbox entry outside the main transaction
+	deprecatedEntry := buildWithdrawalOutboxEntry(withdrawal, accountID, eventPayload, "current-account.withdrawal.status")
+	if err := s.outboxRepo.Insert(ctx, s.db, deprecatedEntry); err != nil {
+		s.logger.Warn("failed to create deprecated outbox entry (continuing)",
+			"topic", deprecatedEntry.Topic,
+			"error", err,
+		)
+	}
+
+	return nil
+}
+
+// completeWithdrawalDirect completes a withdrawal without outbox (fallback for tests or missing config).
+func (s *Service) completeWithdrawalDirect(ctx context.Context, withdrawal *domain.Withdrawal) error {
+	if err := withdrawal.Complete(); err != nil {
+		return fmt.Errorf("failed to transition withdrawal to completed status: %w", err)
+	}
+	if err := s.withdrawalRepo.Update(ctx, withdrawal); err != nil {
+		return fmt.Errorf("failed to persist withdrawal completion: %w", err)
+	}
+	return nil
+}
+
+// buildWithdrawalStatusEvent creates and marshals a WithdrawalStatusUpdatedEvent.
+func buildWithdrawalStatusEvent(withdrawal *domain.Withdrawal, accountID uuid.UUID) ([]byte, error) {
 	now := time.Now().UTC()
 	event := &eventsv1.WithdrawalStatusUpdatedEvent{
 		EventId:       uuid.New().String(),
@@ -333,73 +378,26 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 		Version:       int64(withdrawal.Version),
 	}
 
-	// Marshal event payload as protobuf
-	eventPayload, err := proto.Marshal(event)
+	payload, err := proto.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("failed to marshal withdrawal status event: %w", err)
+		return nil, fmt.Errorf("failed to marshal withdrawal status event: %w", err)
 	}
+	return payload, nil
+}
 
-	// Use transaction to ensure atomicity between withdrawal update and outbox entry
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		// Update withdrawal status within transaction
-		if err := withdrawal.Complete(); err != nil {
-			return fmt.Errorf("failed to transition withdrawal to completed status: %w", err)
-		}
-
-		// Save withdrawal state using transactional repository
-		withdrawalRepoTx := s.withdrawalRepo.WithTx(tx)
-		if err := withdrawalRepoTx.Update(ctx, withdrawal); err != nil {
-			return fmt.Errorf("failed to persist withdrawal completion: %w", err)
-		}
-
-		// Create outbox entry within the same transaction (new canonical topic)
-		outboxEntry := &events.EventOutbox{
-			ID:            uuid.New(),
-			EventType:     "WithdrawalStatusUpdated",
-			AggregateID:   withdrawal.Reference,
-			AggregateType: "Withdrawal",
-			EventPayload:  eventPayload,
-			Status:        events.StatusPending,
-			Topic:         topics.CurrentAccountWithdrawalStatusV1,
-			PartitionKey:  accountID.String(),
-			CreatedAt:     time.Now(),
-			RetryCount:    0,
-			ServiceName:   "current-account",
-		}
-
-		// Insert outbox entry within the transaction
-		if err := s.outboxRepo.Insert(ctx, tx, outboxEntry); err != nil {
-			return fmt.Errorf("failed to create outbox entry: %w", err)
-		}
-
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	// Best-effort: insert deprecated outbox entry outside the main transaction
-	// so a failure does not abort the committed canonical entry (CockroachDB
-	// aborts the entire transaction on any statement error).
-	deprecatedEntry := &events.EventOutbox{
+// buildWithdrawalOutboxEntry creates an EventOutbox entry for withdrawal status updates.
+func buildWithdrawalOutboxEntry(withdrawal *domain.Withdrawal, accountID uuid.UUID, eventPayload []byte, topic string) *events.EventOutbox {
+	return &events.EventOutbox{
 		ID:            uuid.New(),
 		EventType:     "WithdrawalStatusUpdated",
 		AggregateID:   withdrawal.Reference,
 		AggregateType: "Withdrawal",
 		EventPayload:  eventPayload,
 		Status:        events.StatusPending,
-		Topic:         "current-account.withdrawal.status",
+		Topic:         topic,
 		PartitionKey:  accountID.String(),
 		CreatedAt:     time.Now(),
 		RetryCount:    0,
 		ServiceName:   "current-account",
 	}
-
-	if err := s.outboxRepo.Insert(ctx, s.db, deprecatedEntry); err != nil {
-		s.logger.Warn("failed to create deprecated outbox entry (continuing)",
-			"topic", deprecatedEntry.Topic,
-			"error", err,
-		)
-	}
-
-	return nil
 }
