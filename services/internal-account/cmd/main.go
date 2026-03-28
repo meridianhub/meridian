@@ -13,14 +13,11 @@ import (
 	"strings"
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
-	"github.com/meridianhub/meridian/services/internal-account/adapters/persistence"
+	"github.com/meridianhub/meridian/services/internal-account/app"
 	"github.com/meridianhub/meridian/services/internal-account/service"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
-	"github.com/meridianhub/meridian/shared/platform/events"
-	"github.com/meridianhub/meridian/shared/platform/kafka"
-	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -62,96 +59,28 @@ func main() {
 func run(logger *slog.Logger) error {
 	ctx := context.Background()
 
-	// Initialize OpenTelemetry tracer
-	tracer, err := bootstrap.NewTracer(ctx, bootstrap.TracerConfig{
-		ServiceName:    "internal-account-service",
-		ServiceVersion: Version,
-		Logger:         logger,
-	})
+	// Initialize dependency container
+	container, err := app.NewContainer(ctx, logger, Version)
 	if err != nil {
-		return fmt.Errorf("failed to initialize tracer: %w", err)
+		return err
 	}
-	defer bootstrap.ShutdownTracer(tracer, logger)
-
-	// Initialize database connection
-	dbConfig := bootstrap.DefaultDatabaseConfig()
-	dbConfig.Logger = logger
-	db, err := bootstrap.NewDatabase(ctx, dbConfig)
-	if err != nil {
-		return fmt.Errorf("failed to initialize database: %w", err)
-	}
-
-	logger.Info("database connection established")
-
-	// Create repository
-	repo := persistence.NewRepository(db)
-
-	// Create outbox repository and publisher for event publishing
-	outboxRepo := events.NewPostgresOutboxRepository(db)
-	outboxPublisher := events.NewOutboxPublisher("internal-account")
-
-	// Create service (no cross-service clients - each service is independently deployable)
-	internalAccountService, svcClients, err := createServiceWithClients(
-		repo,
-		logger,
-		tracer,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create service: %w", err)
-	}
-
-	// Wire outbox publisher for domain event publishing
-	internalAccountService.SetOutboxPublisher(outboxPublisher, db)
-
-	logger.Info("service initialized with external clients")
-
-	// Start outbox worker for Kafka event delivery (optional - depends on KAFKA_BOOTSTRAP_SERVERS)
-	var outboxWorkerStop func()
-	bootstrapServers := env.GetEnvOrDefault("KAFKA_BOOTSTRAP_SERVERS", "")
-	if bootstrapServers != "" {
-		producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
-			BootstrapServers: bootstrapServers,
-			ClientID:         "internal-account-outbox-worker",
-			Acks:             "all",
-			Retries:          3,
-			Compression:      "snappy",
-		})
-		if err != nil {
-			logger.Warn("failed to create Kafka producer for outbox worker - events will be persisted but not published",
-				"error", err)
-		} else {
-			w := events.NewWorker(outboxRepo, producer, events.DefaultWorkerConfig("internal-account"), logger)
-			w.Start(ctx)
-			outboxWorkerStop = w.Stop
-			logger.Info("outbox worker started")
-		}
-	} else {
-		logger.Warn("KAFKA_BOOTSTRAP_SERVERS not configured, outbox worker disabled - events will be persisted but not published")
-	}
-
-	// Initialize auth interceptor (optional - based on AUTH_ENABLED)
-	authConfig := bootstrap.DefaultAuthConfig(logger)
-	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
-	if err != nil {
-		return fmt.Errorf("failed to initialize auth: %w", err)
-	}
+	defer container.Close()
 
 	// Create gRPC server with interceptor chain
 	// Order is handled by bootstrap: tracing -> auth -> recovery
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
-		WithAuthInterceptor(authInterceptor).
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(container.Tracer, logger).
+		WithAuthInterceptor(container.AuthInterceptor).
 		Build()
 	if err != nil {
 		return fmt.Errorf("failed to build grpc server: %w", err)
 	}
 
 	// Register services
-	pb.RegisterInternalAccountServiceServer(grpcServer, internalAccountService)
+	pb.RegisterInternalAccountServiceServer(grpcServer, container.Service)
 
-	// Register health check service with database dependency checking.
-	// Cross-service health checks (position-keeping) are not wired here.
+	// Register health check service with database dependency checking
 	healthChecker, err := service.NewHealthChecker(service.HealthCheckerConfig{
-		Repository:   repo,
+		Repository:   container.Repo,
 		Logger:       logger,
 		ServiceName:  "internal-account",
 		CheckTimeout: defaults.DefaultHealthCheckTimeout,
@@ -252,7 +181,7 @@ func run(logger *slog.Logger) error {
 	// Wait for shutdown signal and orchestrate graceful shutdown
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
 
-	// Register cleanup functions (LIFO order - HTTP server first, then external clients, then database)
+	// Register cleanup functions (LIFO order - HTTP server first, database etc handled by container.Close())
 	orchestrator.AddCleanup(func() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
 		defer cancel()
@@ -261,26 +190,6 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 		logger.Info("HTTP server stopped")
-		return nil
-	})
-
-	if outboxWorkerStop != nil {
-		orchestrator.AddCleanup(func() error {
-			outboxWorkerStop()
-			return nil
-		})
-	}
-
-	for _, cleanup := range svcClients.cleanupFuncs {
-		fn := cleanup // capture for closure
-		orchestrator.AddCleanup(func() error {
-			fn()
-			return nil
-		})
-	}
-
-	orchestrator.AddCleanup(func() error {
-		bootstrap.CloseDatabase(db, logger)
 		return nil
 	})
 
@@ -300,39 +209,4 @@ func parseLogLevel(levelStr string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// serviceClients holds any clients created by createServiceWithClients.
-// Cross-service clients (position-keeping) are NOT wired here - they belong
-// in the saga orchestration layer.
-type serviceClients struct {
-	// Cleanup functions for graceful shutdown
-	cleanupFuncs []func()
-}
-
-// createServiceWithClients creates the service without cross-service clients.
-// Cross-service coordination (position-keeping for balance hydration) belongs
-// in the saga orchestration layer or the frontend.
-func createServiceWithClients(
-	repo *persistence.Repository,
-	logger *slog.Logger,
-	tracer *observability.Tracer,
-) (*service.Service, *serviceClients, error) {
-	// Create service without cross-service clients
-	svc, err := service.NewServiceWithClients(
-		repo,
-		nil, // posKeepingClient - delegated to saga layer
-		nil, // referenceDataClient - not wired yet
-		logger,
-		tracer,
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create service: %w", err)
-	}
-
-	svcClients := &serviceClients{
-		cleanupFuncs: nil,
-	}
-
-	return svc, svcClients, nil
 }
