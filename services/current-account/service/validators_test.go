@@ -35,15 +35,6 @@ func newGBPAccount(accountID string) domain.CurrentAccount {
 	return acc
 }
 
-// newUSDAccount creates a USD CurrentAccount for testing.
-func newUSDAccount(accountID string) domain.CurrentAccount {
-	acc, err := domain.NewCurrentAccount(accountID, "US82WEST12345698765432", "party-1", "USD")
-	if err != nil {
-		panic("failed to create test account: " + err.Error())
-	}
-	return acc
-}
-
 // ---------------------------------------------------------------------------
 // validateOrgPartyID
 // ---------------------------------------------------------------------------
@@ -171,9 +162,9 @@ func TestParseDepositInput(t *testing.T) {
 			wantMsg:  "exceeds instrument precision",
 		},
 		{
-			name:     "valid input",
-			input:    &quantitypb.InstrumentAmount{Amount: "10.50", InstrumentCode: "GBP"},
-			wantErr:  false,
+			name:    "valid input",
+			input:   &quantitypb.InstrumentAmount{Amount: "10.50", InstrumentCode: "GBP"},
+			wantErr: false,
 		},
 	}
 
