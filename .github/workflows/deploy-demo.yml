@@ -221,6 +221,15 @@ jobs:
           script: |
             docker exec meridian-meridian-1 /meridian --migrate
 
+      - name: Bootstrap master tenant
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            docker exec meridian-meridian-1 /meridian --bootstrap
+
       - name: Seed demo data
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
