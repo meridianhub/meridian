@@ -197,15 +197,7 @@ func (f *ClientFactory) fetchWithResilience(ctx context.Context, tenantID string
 	var result TenantConfig
 
 	cb := f.cbRegistry.Get(tenant.TenantID(tenantID))
-
-	b := backoff.NewExponentialBackOff()
-	b.InitialInterval = f.retryConfig.initialInterval
-	b.MaxInterval = f.retryConfig.maxInterval
-	b.Multiplier = f.retryConfig.multiplier
-	b.RandomizationFactor = f.retryConfig.randomizationFactor
-	b.MaxElapsedTime = 0
-	b.Reset()
-
+	b := f.newRetryBackoff()
 	backoffWithContext := backoff.WithContext(b, ctx)
 
 	attempt := 0
@@ -222,36 +214,7 @@ func (f *ClientFactory) fetchWithResilience(ctx context.Context, tenantID string
 			return f.configProvider.GetTenantConfig(tenantID)
 		})
 		if err != nil {
-			// Circuit breaker open - don't retry
-			if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
-				f.logger.Warn("stripe config circuit breaker open",
-					"tenant_id", tenantID,
-					"attempt", attempt,
-				)
-				return backoff.Permanent(fmt.Errorf("%w: %v", ErrCircuitOpen, err)) //nolint:errorlint // second error is context-only
-			}
-
-			// Business logic errors - don't retry or log as infrastructure failure
-			if errors.Is(err, ErrTenantConfigNotFound) {
-				return backoff.Permanent(err)
-			}
-
-			// Infrastructure failure - check retry budget
-			if attempt >= maxAttempts {
-				f.logger.Error("stripe config fetch failed after max retries",
-					"tenant_id", tenantID,
-					"attempts", attempt,
-					"error", err,
-				)
-				return backoff.Permanent(err)
-			}
-
-			f.logger.Debug("stripe config fetch failed, retrying",
-				"tenant_id", tenantID,
-				"attempt", attempt,
-				"error", err,
-			)
-			return err
+			return f.classifyFetchError(err, tenantID, attempt, maxAttempts)
 		}
 
 		result = cfg
@@ -263,6 +226,53 @@ func (f *ClientFactory) fetchWithResilience(ctx context.Context, tenantID string
 	}
 
 	return result, nil
+}
+
+// newRetryBackoff creates a configured exponential backoff from the factory's retry settings.
+func (f *ClientFactory) newRetryBackoff() *backoff.ExponentialBackOff {
+	b := backoff.NewExponentialBackOff()
+	b.InitialInterval = f.retryConfig.initialInterval
+	b.MaxInterval = f.retryConfig.maxInterval
+	b.Multiplier = f.retryConfig.multiplier
+	b.RandomizationFactor = f.retryConfig.randomizationFactor
+	b.MaxElapsedTime = 0
+	b.Reset()
+	return b
+}
+
+// classifyFetchError determines whether a config fetch error should be retried, permanently
+// failed, or has exhausted its retry budget.
+func (f *ClientFactory) classifyFetchError(err error, tenantID string, attempt, maxAttempts int) error {
+	// Circuit breaker open - don't retry
+	if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+		f.logger.Warn("stripe config circuit breaker open",
+			"tenant_id", tenantID,
+			"attempt", attempt,
+		)
+		return backoff.Permanent(fmt.Errorf("%w: %v", ErrCircuitOpen, err)) //nolint:errorlint // second error is context-only
+	}
+
+	// Business logic errors - don't retry or log as infrastructure failure
+	if errors.Is(err, ErrTenantConfigNotFound) {
+		return backoff.Permanent(err)
+	}
+
+	// Infrastructure failure - check retry budget
+	if attempt >= maxAttempts {
+		f.logger.Error("stripe config fetch failed after max retries",
+			"tenant_id", tenantID,
+			"attempts", attempt,
+			"error", err,
+		)
+		return backoff.Permanent(err)
+	}
+
+	f.logger.Debug("stripe config fetch failed, retrying",
+		"tenant_id", tenantID,
+		"attempt", attempt,
+		"error", err,
+	)
+	return err
 }
 
 // InvalidateTenantConfig removes a tenant's cached config, forcing a refresh

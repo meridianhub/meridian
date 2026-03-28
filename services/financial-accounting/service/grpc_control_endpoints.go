@@ -140,7 +140,7 @@ func (s *FinancialAccountingService) checkControlIdempotency(
 	if err := s.idempotency.MarkPending(ctx, key, defaultIdempotencyTTL); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // intentional: nil,nil signals "no cached result, proceed with operation"
 }
 
 // executeControlTransaction executes the control action within a database transaction.

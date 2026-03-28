@@ -240,7 +240,7 @@ func newRegistrationError(status int, inner error) *registrationError {
 }
 
 // provisionAdminIdentity creates the initial admin identity within the new tenant's scope.
-func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenantIDStr, email, password string) *registrationError {
+func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenantIDStr, emailAddr, password string) *registrationError {
 	tid, err := tenant.NewTenantID(tenantIDStr)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "registration: invalid tenant ID from creation",
@@ -250,47 +250,12 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
-	var identity *identitydomain.Identity
-	if h.emailVerificationRequired {
-		identity, err = identitydomain.NewSelfRegisteredIdentity(tid, email, true)
-	} else {
-		identity, err = identitydomain.NewIdentity(tid, email)
-	}
-	if err != nil {
-		return newRegistrationError(http.StatusBadRequest, fmt.Errorf("%w: %w", errIdentityCreationFailed, err))
+	identity, regErr := h.buildAdminIdentity(ctx, tid, emailAddr, password)
+	if regErr != nil {
+		return regErr
 	}
 
-	hash, err := credentials.HashPassword(password)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "registration: failed to hash password", "error", err)
-		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
-	}
-
-	if err := identity.SetPassword(hash); err != nil {
-		h.logger.ErrorContext(ctx, "registration: failed to set password", "error", err)
-		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
-	}
-
-	if !h.emailVerificationRequired {
-		if err := identity.Activate(); err != nil {
-			h.logger.ErrorContext(ctx, "registration: failed to activate identity", "error", err)
-			return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
-		}
-	}
-
-	now := time.Now()
-	// ReconstructRoleAssignment is used instead of NewRoleAssignment because
-	// this is a system-level bootstrap operation (no granting identity exists yet).
-	// This follows the same pattern as identity/bootstrap/bootstrap.go.
-	ra := identitydomain.ReconstructRoleAssignment(
-		uuid.New(),
-		tid,
-		identity.ID(),
-		identity.ID(),
-		identitydomain.RoleTenantOwner,
-		nil, nil, nil,
-		now, now,
-	)
+	ra := buildBootstrapRoleAssignment(tid, identity)
 
 	if err := h.identityRepo.SaveIdentityWithRoles(tenantCtx, identity, []*identitydomain.RoleAssignment{ra}); err != nil {
 		if errors.Is(err, identitydomain.ErrEmailAlreadyExists) {
@@ -301,12 +266,62 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 		return newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
 	}
 
-	// Queue verification email when verification is required.
 	if h.emailVerificationRequired && h.outboxRepo != nil {
 		h.queueRegistrationVerificationEmail(tenantCtx, tenantIDStr, identity)
 	}
 
 	return nil
+}
+
+// buildAdminIdentity creates a new identity with the given credentials and activates it
+// if email verification is not required.
+func (h *RegistrationHandler) buildAdminIdentity(ctx context.Context, tid tenant.TenantID, emailAddr, password string) (*identitydomain.Identity, *registrationError) {
+	var identity *identitydomain.Identity
+	var err error
+	if h.emailVerificationRequired {
+		identity, err = identitydomain.NewSelfRegisteredIdentity(tid, emailAddr, true)
+	} else {
+		identity, err = identitydomain.NewIdentity(tid, emailAddr)
+	}
+	if err != nil {
+		return nil, newRegistrationError(http.StatusBadRequest, fmt.Errorf("%w: %w", errIdentityCreationFailed, err))
+	}
+
+	hash, err := credentials.HashPassword(password)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "registration: failed to hash password", "error", err)
+		return nil, newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
+	}
+
+	if err := identity.SetPassword(hash); err != nil {
+		h.logger.ErrorContext(ctx, "registration: failed to set password", "error", err)
+		return nil, newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
+	}
+
+	if !h.emailVerificationRequired {
+		if err := identity.Activate(); err != nil {
+			h.logger.ErrorContext(ctx, "registration: failed to activate identity", "error", err)
+			return nil, newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
+		}
+	}
+
+	return identity, nil
+}
+
+// buildBootstrapRoleAssignment creates a tenant-owner role assignment for a bootstrap
+// identity. Uses ReconstructRoleAssignment because this is a system-level bootstrap
+// operation (no granting identity exists yet).
+func buildBootstrapRoleAssignment(tid tenant.TenantID, identity *identitydomain.Identity) *identitydomain.RoleAssignment {
+	now := time.Now()
+	return identitydomain.ReconstructRoleAssignment(
+		uuid.New(),
+		tid,
+		identity.ID(),
+		identity.ID(),
+		identitydomain.RoleTenantOwner,
+		nil, nil, nil,
+		now, now,
+	)
 }
 
 // queueRegistrationVerificationEmail creates a verification token and queues the email.

@@ -29,10 +29,24 @@ import (
 //	defer cleanup()
 //	err := RegisterStarlarkHandlers(registry, client)
 func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
-	handlers := map[string]struct {
-		handler  saga.Handler
-		metadata saga.HandlerMetadata
-	}{
+	for name, h := range buildStarlarkHandlerDefs(c) {
+		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
+			return fmt.Errorf("failed to register %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// starlarkHandlerDef pairs a saga handler with its metadata for registration.
+type starlarkHandlerDef struct {
+	handler  saga.Handler
+	metadata saga.HandlerMetadata
+}
+
+// buildStarlarkHandlerDefs constructs the handler definitions for all FinancialGateway
+// Starlark service bindings.
+func buildStarlarkHandlerDefs(c *Client) map[string]starlarkHandlerDef {
+	return map[string]starlarkHandlerDef{
 		"financial_gateway.dispatch_payment": {
 			handler: dispatchPaymentHandler(c),
 			metadata: saga.HandlerMetadata{
@@ -91,13 +105,6 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, c *Client) error {
 			},
 		},
 	}
-
-	for name, h := range handlers {
-		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
-			return fmt.Errorf("failed to register %s: %w", name, err)
-		}
-	}
-	return nil
 }
 
 // dispatchPaymentParams holds validated parameters for a dispatch_payment call.

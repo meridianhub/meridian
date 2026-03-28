@@ -235,38 +235,7 @@ func (c *ForwardCurveCache) Get(ctx context.Context, resolutionKey string, ts ti
 	// Singleflight to deduplicate concurrent lookups
 	sfKey := fmt.Sprintf("%s:%s:%d", tenantID, resolutionKey, hourEpoch)
 	result, err, _ := c.sfGroup.Do(sfKey, func() (interface{}, error) {
-		// Double-check L1 after acquiring singleflight slot
-		if entry, found := c.l1.Get(key); found && time.Now().Before(entry.expiresAt) {
-			return entry.obs, nil
-		}
-
-		// L2 lookup
-		obs := c.getFromL2(ctx, string(tenantID), resolutionKey, hourEpoch)
-		if obs != nil {
-			atomic.AddInt64(&c.l2Hits, 1)
-			cacheHitsTotal.WithLabelValues("redis").Inc()
-			c.putL1(key, obs)
-			return obs, nil
-		}
-		atomic.AddInt64(&c.l2Misses, 1)
-		cacheHitsTotal.WithLabelValues("miss").Inc()
-
-		// L3 lookup (source of truth)
-		start := time.Now()
-		obs, err := c.source.GetForwardPrice(ctx, resolutionKey, ts)
-		cacheLatency.WithLabelValues("source").Observe(time.Since(start).Seconds())
-		if err != nil {
-			return nil, err
-		}
-		atomic.AddInt64(&c.sourceLoads, 1)
-
-		// Populate L2 (best-effort)
-		c.putL2(ctx, string(tenantID), resolutionKey, hourEpoch, obs)
-
-		// Populate L1
-		c.putL1(key, obs)
-
-		return obs, nil
+		return c.loadFromL2OrSource(ctx, key, string(tenantID), resolutionKey, hourEpoch, ts)
 	})
 
 	if err != nil {
@@ -281,6 +250,52 @@ func (c *ForwardCurveCache) Get(ctx context.Context, resolutionKey string, ts ti
 	return obs, nil
 }
 
+// loadFromL2OrSource attempts L1 (double-check), L2, then L3 lookup.
+// Called within a singleflight group to deduplicate concurrent cache misses.
+func (c *ForwardCurveCache) loadFromL2OrSource(ctx context.Context, key l1Key, tenantID, resolutionKey string, hourEpoch int64, ts time.Time) (*Observation, error) {
+	// Double-check L1 after acquiring singleflight slot
+	if entry, found := c.l1.Get(key); found && time.Now().Before(entry.expiresAt) {
+		return entry.obs, nil
+	}
+
+	// L2 lookup
+	obs := c.getFromL2(ctx, tenantID, resolutionKey, hourEpoch)
+	if obs != nil {
+		atomic.AddInt64(&c.l2Hits, 1)
+		cacheHitsTotal.WithLabelValues("redis").Inc()
+		c.putL1(key, obs)
+		return obs, nil
+	}
+	atomic.AddInt64(&c.l2Misses, 1)
+	cacheHitsTotal.WithLabelValues("miss").Inc()
+
+	// L3 lookup (source of truth)
+	start := time.Now()
+	obs, err := c.source.GetForwardPrice(ctx, resolutionKey, ts)
+	cacheLatency.WithLabelValues("source").Observe(time.Since(start).Seconds())
+	if err != nil {
+		return nil, err
+	}
+	atomic.AddInt64(&c.sourceLoads, 1)
+
+	// Populate L2 (best-effort)
+	c.putL2(ctx, tenantID, resolutionKey, hourEpoch, obs)
+
+	// Populate L1
+	c.putL1(key, obs)
+
+	return obs, nil
+}
+
+// rangeCollector accumulates observations from cache lookups and tracks misses.
+type rangeCollector struct {
+	hours      []int64
+	obsByEpoch map[int64]*Observation
+	missStart  time.Time
+	missEnd    time.Time
+	haveMiss   bool
+}
+
 // GetRange retrieves multiple forward curve observations in a time range.
 // Tries L1/L2 for each hourly bucket, falls back to L3 for misses.
 // Results are returned in chronological order by ValidFrom.
@@ -290,84 +305,82 @@ func (c *ForwardCurveCache) GetRange(ctx context.Context, resolutionKey string, 
 		return nil, ErrTenantContextRequired
 	}
 
-	// Iterate over hourly buckets (inclusive of the hour containing end)
+	tid := string(tenantID)
+	rc := c.collectCachedBuckets(ctx, tid, resolutionKey, start, end)
+
+	if rc.haveMiss {
+		if err := c.backfillMisses(ctx, tid, resolutionKey, rc); err != nil {
+			return nil, err
+		}
+	}
+
+	// Assemble results in chronological order
+	observations := make([]*Observation, 0, len(rc.obsByEpoch))
+	for _, epoch := range rc.hours {
+		if obs, ok := rc.obsByEpoch[epoch]; ok {
+			observations = append(observations, obs)
+		}
+	}
+
+	return observations, nil
+}
+
+// collectCachedBuckets iterates over hourly buckets in [start, end], checking L1 and L2
+// caches for each. Returns a collector with hits indexed by epoch and miss range tracked.
+func (c *ForwardCurveCache) collectCachedBuckets(ctx context.Context, tenantID, resolutionKey string, start, end time.Time) *rangeCollector {
 	current := start.Truncate(time.Hour)
 	endTrunc := end.Truncate(time.Hour)
 
-	// Collect hourly epochs in order and observations by epoch
-	var hours []int64
-	obsByEpoch := make(map[int64]*Observation)
-	var missStart, missEnd time.Time
-	var haveMiss bool
+	rc := &rangeCollector{obsByEpoch: make(map[int64]*Observation)}
 
 	for !current.After(endTrunc) {
 		hourEpoch := current.Unix()
-		hours = append(hours, hourEpoch)
-		key := l1Key{
-			TenantID:      string(tenantID),
-			ResolutionKey: resolutionKey,
-			HourEpoch:     hourEpoch,
-		}
+		rc.hours = append(rc.hours, hourEpoch)
+		key := l1Key{TenantID: tenantID, ResolutionKey: resolutionKey, HourEpoch: hourEpoch}
 
-		// Try L1
 		if entry, found := c.l1.Get(key); found {
 			if time.Now().Before(entry.expiresAt) {
-				obsByEpoch[hourEpoch] = entry.obs
+				rc.obsByEpoch[hourEpoch] = entry.obs
 				current = current.Add(time.Hour)
 				continue
 			}
 			c.l1.Remove(key)
 		}
 
-		// Try L2
-		obs := c.getFromL2(ctx, string(tenantID), resolutionKey, hourEpoch)
-		if obs != nil {
+		if obs := c.getFromL2(ctx, tenantID, resolutionKey, hourEpoch); obs != nil {
 			c.putL1(key, obs)
-			obsByEpoch[hourEpoch] = obs
+			rc.obsByEpoch[hourEpoch] = obs
 			current = current.Add(time.Hour)
 			continue
 		}
 
-		// Track the range of cache misses
-		if !haveMiss {
-			missStart = current
-			haveMiss = true
+		if !rc.haveMiss {
+			rc.missStart = current
+			rc.haveMiss = true
 		}
-		missEnd = current
-
+		rc.missEnd = current
 		current = current.Add(time.Hour)
 	}
 
-	// If we had cache misses, bulk-query the source
-	if haveMiss {
-		rangeObs, err := c.source.GetForwardPriceRange(ctx, resolutionKey, missStart, missEnd.Add(time.Hour))
-		if err != nil {
-			return nil, err
-		}
+	return rc
+}
 
-		// Populate caches and index by epoch
-		for _, obs := range rangeObs {
-			hourEpoch := truncateToHour(obs.ValidFrom)
-			key := l1Key{
-				TenantID:      string(tenantID),
-				ResolutionKey: resolutionKey,
-				HourEpoch:     hourEpoch,
-			}
-			c.putL1(key, obs)
-			c.putL2(ctx, string(tenantID), resolutionKey, hourEpoch, obs)
-			obsByEpoch[hourEpoch] = obs
-		}
+// backfillMisses bulk-queries the source for the miss range and populates both caches.
+func (c *ForwardCurveCache) backfillMisses(ctx context.Context, tenantID, resolutionKey string, rc *rangeCollector) error {
+	rangeObs, err := c.source.GetForwardPriceRange(ctx, resolutionKey, rc.missStart, rc.missEnd.Add(time.Hour))
+	if err != nil {
+		return err
 	}
 
-	// Assemble results in chronological order
-	observations := make([]*Observation, 0, len(obsByEpoch))
-	for _, epoch := range hours {
-		if obs, ok := obsByEpoch[epoch]; ok {
-			observations = append(observations, obs)
-		}
+	for _, obs := range rangeObs {
+		hourEpoch := truncateToHour(obs.ValidFrom)
+		key := l1Key{TenantID: tenantID, ResolutionKey: resolutionKey, HourEpoch: hourEpoch}
+		c.putL1(key, obs)
+		c.putL2(ctx, tenantID, resolutionKey, hourEpoch, obs)
+		rc.obsByEpoch[hourEpoch] = obs
 	}
 
-	return observations, nil
+	return nil
 }
 
 // Invalidate removes a specific entry from L1 cache.

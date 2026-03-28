@@ -340,25 +340,7 @@ func (a *PaymentIntentAdapter) CancelPayment(ctx context.Context, paymentOrderID
 
 	pi, err := a.config.Canceller.Cancel(ctx, piID, params)
 	if err != nil {
-		var stripeErr *stripego.Error
-		if errors.As(err, &stripeErr) && stripeErr.Code == stripego.ErrorCodePaymentIntentUnexpectedState {
-			// Stripe returns payment_intent_unexpected_state when the PI
-			// is in a non-cancellable state. Check if it's already canceled
-			// (idempotent success) vs a truly non-cancellable state (e.g., succeeded).
-			if strings.Contains(stripeErr.Msg, "status of canceled") {
-				a.logger.Info("stripe payment intent already cancelled",
-					"payment_order_id", paymentOrderID,
-					"payment_intent_id", piID,
-				)
-				return CancelResult{
-					ProviderReference: piID,
-					Status:            financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED,
-				}, nil
-			}
-			// Non-cancellable state (e.g., succeeded) — return as invalid request
-			return CancelResult{}, fmt.Errorf("payment intent %s cannot be cancelled: %w", piID, ErrInvalidRequest)
-		}
-		return CancelResult{}, fmt.Errorf("stripe cancel failed: %w", err)
+		return a.handleCancelError(err, paymentOrderID, piID)
 	}
 
 	status := mapPaymentIntentStatus(pi.Status)
@@ -373,6 +355,27 @@ func (a *PaymentIntentAdapter) CancelPayment(ctx context.Context, paymentOrderID
 		ProviderReference: pi.ID,
 		Status:            status,
 	}, nil
+}
+
+// handleCancelError maps Stripe cancellation errors to appropriate results.
+// Already-cancelled intents are treated as idempotent success; non-cancellable states
+// (e.g., succeeded) are returned as invalid request errors.
+func (a *PaymentIntentAdapter) handleCancelError(err error, paymentOrderID, piID string) (CancelResult, error) {
+	var stripeErr *stripego.Error
+	if errors.As(err, &stripeErr) && stripeErr.Code == stripego.ErrorCodePaymentIntentUnexpectedState {
+		if strings.Contains(stripeErr.Msg, "status of canceled") {
+			a.logger.Info("stripe payment intent already cancelled",
+				"payment_order_id", paymentOrderID,
+				"payment_intent_id", piID,
+			)
+			return CancelResult{
+				ProviderReference: piID,
+				Status:            financialgatewayv1.DispatchStatus_DISPATCH_STATUS_FAILED,
+			}, nil
+		}
+		return CancelResult{}, fmt.Errorf("payment intent %s cannot be cancelled: %w", piID, ErrInvalidRequest)
+	}
+	return CancelResult{}, fmt.Errorf("stripe cancel failed: %w", err)
 }
 
 // mapPaymentIntentStatus maps a Stripe PaymentIntent status to a gateway DispatchStatus.

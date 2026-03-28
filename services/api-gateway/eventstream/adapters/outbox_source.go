@@ -158,33 +158,31 @@ func (s *OutboxEventSource) pollEvents(ctx context.Context, handler eventstream.
 		return nil
 	}
 
-	// blocked tracks services where a handler error occurred in this batch.
-	// Once a service is blocked, remaining entries for that service are skipped
-	// so the high-water mark does not advance past the failed entry, preserving
-	// at-least-once retry semantics across polls.
+	newMarks := s.deliverEntries(ctx, entries, hwm, handler)
+	s.commitHighWaterMarks(newMarks)
+
+	return nil
+}
+
+// deliverEntries processes outbox entries, delivering each to the handler and tracking
+// per-service high-water marks. Services that encounter a handler error are blocked
+// for the remainder of the batch to preserve at-least-once retry semantics.
+func (s *OutboxEventSource) deliverEntries(
+	ctx context.Context,
+	entries []events.EventOutbox,
+	hwm map[string]waterMark,
+	handler eventstream.EventHandler,
+) map[string]waterMark {
 	blocked := make(map[string]struct{})
 	newMarks := make(map[string]waterMark)
 
 	for _, entry := range entries {
-		// Skip any further entries for a service that failed earlier in this batch.
 		if _, isBlocked := blocked[entry.ServiceName]; isBlocked {
 			continue
 		}
 
-		mark, seen := hwm[entry.ServiceName]
-		if seen {
-			// Skip entries at or before the high-water mark for this service.
-			// The query orders by (created_at ASC, id ASC). We use lexicographic
-			// UUID string comparison for same-timestamp entries because UUIDs are
-			// not time-ordered, but the ORDER BY clause makes the sort stable and
-			// consistent across polls. Any entry whose (createdAt, id) position is
-			// at or before the mark has already been delivered.
-			if entry.CreatedAt.Before(mark.createdAt) {
-				continue
-			}
-			if entry.CreatedAt.Equal(mark.createdAt) && entry.ID.String() <= mark.id.String() {
-				continue
-			}
+		if s.isBeforeHighWaterMark(entry, hwm) {
+			continue
 		}
 
 		event := s.outboxToDomainEvent(entry)
@@ -196,35 +194,50 @@ func (s *OutboxEventSource) pollEvents(ctx context.Context, handler eventstream.
 				"event_type", entry.EventType,
 				"service", entry.ServiceName,
 			)
-			// Block this service for the remainder of the batch so no later
-			// entries overwrite newMarks and skip past the failed position.
 			blocked[entry.ServiceName] = struct{}{}
 			continue
 		}
 
-		// Advance the high-water mark for this service.
 		newMarks[entry.ServiceName] = waterMark{
 			createdAt: entry.CreatedAt,
 			id:        entry.ID,
 		}
 	}
 
-	// Commit the new high-water marks under the lock.
-	// Use the same lexicographic UUID comparison as the skip logic above to
-	// ensure the mark only ever advances forward.
-	if len(newMarks) > 0 {
-		s.mu.Lock()
-		for svc, mark := range newMarks {
-			current, exists := s.highWaterMark[svc]
-			if !exists || mark.createdAt.After(current.createdAt) ||
-				(mark.createdAt.Equal(current.createdAt) && mark.id.String() > current.id.String()) {
-				s.highWaterMark[svc] = mark
-			}
-		}
-		s.mu.Unlock()
-	}
+	return newMarks
+}
 
-	return nil
+// isBeforeHighWaterMark returns true if the entry is at or before the high-water mark
+// for its service, meaning it has already been delivered.
+func (s *OutboxEventSource) isBeforeHighWaterMark(entry events.EventOutbox, hwm map[string]waterMark) bool {
+	mark, seen := hwm[entry.ServiceName]
+	if !seen {
+		return false
+	}
+	if entry.CreatedAt.Before(mark.createdAt) {
+		return true
+	}
+	if entry.CreatedAt.Equal(mark.createdAt) && entry.ID.String() <= mark.id.String() {
+		return true
+	}
+	return false
+}
+
+// commitHighWaterMarks updates the per-service high-water marks under the lock.
+// Marks only advance forward using lexicographic UUID comparison for same-timestamp entries.
+func (s *OutboxEventSource) commitHighWaterMarks(newMarks map[string]waterMark) {
+	if len(newMarks) == 0 {
+		return
+	}
+	s.mu.Lock()
+	for svc, mark := range newMarks {
+		current, exists := s.highWaterMark[svc]
+		if !exists || mark.createdAt.After(current.createdAt) ||
+			(mark.createdAt.Equal(current.createdAt) && mark.id.String() > current.id.String()) {
+			s.highWaterMark[svc] = mark
+		}
+	}
+	s.mu.Unlock()
 }
 
 // outboxToDomainEvent converts an EventOutbox entry to a DomainEvent.

@@ -119,12 +119,21 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 	}
 	c.dlqProducer = dlqProducer
 
-	// Message factory creates new AuditEvent instances for deserialization
+	consumer, err := buildProtoConsumer(config, dlqProducer, dlqConfig, c)
+	if err != nil {
+		return nil, err
+	}
+	c.consumer = consumer
+
+	return c, nil
+}
+
+// buildProtoConsumer creates the Kafka proto consumer with DLQ support and audit event handler.
+func buildProtoConsumer(config ConsumerConfig, dlqProducer *platformkafka.DLQProducer, dlqConfig platformkafka.DLQConfig, c *AuditConsumer) (*platformkafka.ProtoConsumer, error) {
 	msgFactory := func() proto.Message {
 		return &auditv1.AuditEvent{}
 	}
 
-	// Handler processes each audit event
 	handler := func(ctx context.Context, _ []byte, msg proto.Message) error {
 		event, ok := msg.(*auditv1.AuditEvent)
 		if !ok {
@@ -133,7 +142,6 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 		return c.handleAuditEvent(ctx, event)
 	}
 
-	// Create the Kafka consumer with DLQ support
 	consumer, err := platformkafka.NewProtoConsumer(
 		platformkafka.ConsumerConfig{
 			BootstrapServers: config.BootstrapServers,
@@ -152,9 +160,8 @@ func NewAuditConsumer(config ConsumerConfig) (*AuditConsumer, error) {
 		dlqProducer.Close()
 		return nil, fmt.Errorf("failed to create Kafka consumer: %w", err)
 	}
-	c.consumer = consumer
 
-	return c, nil
+	return consumer, nil
 }
 
 // validateConsumerConfig checks required fields on the consumer configuration.

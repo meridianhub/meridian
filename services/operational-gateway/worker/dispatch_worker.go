@@ -186,6 +186,11 @@ func (w *DispatchWorker) processInstruction(ctx context.Context, instr *domain.I
 	if err != nil {
 		return err
 	}
+	// handleFailure returns nil error after marking instruction as failed.
+	// In that case route and conn are nil - nothing more to do.
+	if route == nil || conn == nil {
+		return nil
+	}
 
 	// Check circuit breaker.
 	if !conn.IsAvailable() {

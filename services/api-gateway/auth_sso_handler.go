@@ -47,6 +47,9 @@ var (
 	ErrSSOCallbackURLInvalid = errors.New("sso handler: callback URL must be a valid absolute URL")
 	// ErrSSODexIssuerInvalid is returned when the Dex issuer URL is not a valid absolute URL.
 	ErrSSODexIssuerInvalid = errors.New("sso handler: dex issuer URL must be an absolute URL with scheme and host")
+
+	// errNoMatchingAccount is returned when SSO identity resolution finds no matching account.
+	errNoMatchingAccount = errors.New("no matching account")
 )
 
 // IdentityResolver resolves an identity by email without password validation.
@@ -308,7 +311,7 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// Exchange code, resolve identity, and sign JWT.
 	identity, tokenStr, err := h.exchangeAndResolve(ctx, code, stateData)
 	if err != nil {
-		h.handleCallbackError(w, ctx, stateData, err)
+		h.handleCallbackError(ctx, w, stateData, err)
 		return
 	}
 
@@ -374,7 +377,7 @@ func (h *SSOHandler) exchangeAndResolve(ctx context.Context, code string, state 
 		return connector.Identity{}, "", &callbackError{stage: callbackStageIdentityResolve, err: err}
 	}
 	if !found {
-		return connector.Identity{}, "", &callbackError{stage: callbackStageIdentityNotFound, err: fmt.Errorf("no matching account")}
+		return connector.Identity{}, "", &callbackError{stage: callbackStageIdentityNotFound, err: errNoMatchingAccount}
 	}
 
 	tokenStr, err := h.signCallbackToken(identity, state)
@@ -398,7 +401,7 @@ func (h *SSOHandler) signCallbackToken(identity connector.Identity, state StateD
 }
 
 // handleCallbackError maps a callbackError to the appropriate HTTP response.
-func (h *SSOHandler) handleCallbackError(w http.ResponseWriter, ctx context.Context, state StateData, err error) {
+func (h *SSOHandler) handleCallbackError(ctx context.Context, w http.ResponseWriter, state StateData, err error) {
 	var cbErr *callbackError
 	if !errors.As(err, &cbErr) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})

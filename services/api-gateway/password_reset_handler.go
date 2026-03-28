@@ -94,53 +94,48 @@ func (h *PasswordResetHandler) HandleForgotPassword(w http.ResponseWriter, r *ht
 		return
 	}
 
-	ctx := r.Context()
+	h.issueForgotPasswordToken(r.Context(), req)
 
+	// Timing-safe: always return 200 regardless of outcome.
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// issueForgotPasswordToken performs the timing-safe password reset token flow.
+// All error paths are silent (logged but not exposed) to prevent email enumeration.
+func (h *PasswordResetHandler) issueForgotPasswordToken(ctx context.Context, req forgotPasswordRequest) {
 	tid, err := tenant.NewTenantID(req.TenantID)
 	if err != nil {
-		// Timing-safe: return 200 even for invalid tenant.
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
-	// Timing-safe: always return 200. Do not reveal whether the email exists.
 	identity, err := h.identityRepo.FindByEmail(tenantCtx, req.Email)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
-	// Rate limit: max 3 tokens per hour per identity.
-	// Timing-safe: return 200 even when rate limited to avoid leaking email existence.
 	count, err := h.identityRepo.CountPasswordResetTokensInWindow(tenantCtx, identity.ID(), time.Hour)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to count tokens in window", "error", err)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 	if count >= maxPasswordResetTokensPerHour {
 		h.logger.WarnContext(ctx, "password-reset: rate limited", "identity_id", identity.ID())
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	ptoken, plaintext, err := identitydomain.NewPasswordResetToken(req.TenantID, identity.ID())
 	if err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to create token", "error", err)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	if err := h.identityRepo.SavePasswordResetToken(tenantCtx, ptoken); err != nil {
 		h.logger.ErrorContext(ctx, "password-reset: failed to save token", "error", err)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	h.queuePasswordResetEmail(tenantCtx, identity.Email(), req.TenantID, plaintext)
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // HandleResetPassword handles POST /api/v1/reset-password.

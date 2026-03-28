@@ -131,7 +131,7 @@ func (dc *DepositConsumer) handleDepositEvent(ctx context.Context, event *events
 	defer func() { _ = dc.idempotency.Release(ctx, idempotencyKey, lockToken) }()
 
 	// Re-check after acquiring lock (double-check pattern)
-	if alreadyProcessed, err := dc.checkIdempotency(ctx, idempotencyKey); alreadyProcessed {
+	if alreadyProcessed, err := dc.recheckIdempotency(ctx, idempotencyKey); alreadyProcessed {
 		return nil
 	} else if err != nil {
 		return err
@@ -174,6 +174,19 @@ func (dc *DepositConsumer) checkIdempotency(ctx context.Context, key idempotency
 	}
 	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
 		return false, fmt.Errorf("idempotency check failed: %w", err)
+	}
+	return false, nil
+}
+
+// recheckIdempotency performs the post-lock idempotency re-check (double-check pattern).
+// Returns (true, nil) if already processed, (false, nil) if not found, or (false, err) on failure.
+func (dc *DepositConsumer) recheckIdempotency(ctx context.Context, key idempotency.Key) (bool, error) {
+	_, err := dc.idempotency.Check(ctx, key)
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		return false, fmt.Errorf("idempotency re-check failed: %w", err)
 	}
 	return false, nil
 }

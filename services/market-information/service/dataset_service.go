@@ -140,7 +140,7 @@ func (s *Server) validateChangedCelExpressions(existing domain.DataSetDefinition
 	resolutionKeyChanged := req.ResolutionKeyExpression != "" && req.ResolutionKeyExpression != existing.ResolutionKeyExpression()
 	errorMessageChanged := req.ErrorMessageExpression != "" && req.ErrorMessageExpression != existing.ErrorMessageExpression()
 
-	if s.celValidator == nil || !(validationChanged || resolutionKeyChanged || errorMessageChanged) {
+	if s.celValidator == nil || (!validationChanged && !resolutionKeyChanged && !errorMessageChanged) {
 		return nil
 	}
 

@@ -178,18 +178,13 @@ func run(logger *slog.Logger) error {
 	auditWorker.Start(workerCtx)
 	logger.Info("audit worker started", "schema", schema)
 
-	// Get port from environment or use default
+	// Setup and start HTTP server
 	port := getPort()
-
-	// Setup routes on a new mux
 	mux := http.NewServeMux()
 	setupRoutes(mux)
-
-	// Create server with proper timeouts (security best practice)
 	server := createServer(port)
 	server.Handler = mux
 
-	// Start server in background
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("starting HTTP server", "port", port)
@@ -198,7 +193,12 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Wait for interrupt signal or server error
+	return awaitShutdown(logger, server, auditWorker, workerCancel, serverErrors)
+}
+
+// awaitShutdown waits for an interrupt signal or server error, then performs
+// graceful shutdown of the audit worker and HTTP server.
+func awaitShutdown(logger *slog.Logger, server *http.Server, auditWorker *audit.Worker, workerCancel context.CancelFunc, serverErrors <-chan error) error {
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
 
@@ -211,18 +211,13 @@ func run(logger *slog.Logger) error {
 		runErr = err
 	}
 
-	// Graceful shutdown (runs for both signal and server error paths)
 	logger.Info("shutting down...")
-
-	// Cancel audit worker context (also deferred above for early-return paths)
 	workerCancel()
 
-	// Stop audit worker gracefully
 	logger.Info("stopping audit worker...")
 	auditWorker.Stop()
 	logger.Info("audit worker stopped")
 
-	// Graceful shutdown with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaults.DefaultGracefulShutdown)
 	defer cancel()
 

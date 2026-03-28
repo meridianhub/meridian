@@ -123,7 +123,6 @@ func (o *PaymentOrchestrator) ExecuteLienWithRetry(parentCtx context.Context, pa
 // Uses distributed locking to prevent concurrent updates across service instances, combined with
 // optimistic locking (version conflict retry) for additional safety.
 // Note: Uses a fresh context to ensure the status update completes even if the parent context has timed out.
-//
 func (o *PaymentOrchestrator) updateLienExecutionStatus(
 	parentCtx context.Context,
 	paymentOrderID uuid.UUID,

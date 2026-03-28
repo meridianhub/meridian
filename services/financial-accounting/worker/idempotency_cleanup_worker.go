@@ -219,10 +219,7 @@ func (w *IdempotencyCleanupWorker) runCleanupIteration(ctx context.Context) {
 	staleCountByService := make(map[string]int)
 
 	// Process in batches until no more stale keys found
-	for {
-		if w.shouldStopIteration(ctx) {
-			break
-		}
+	for !w.shouldStopIteration(ctx) {
 
 		staleKeys, err := w.cleaner.ScanStalePendingKeys(
 			ctx, w.config.KeyPattern, w.config.StaleThreshold, w.config.BatchSize,

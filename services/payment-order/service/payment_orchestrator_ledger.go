@@ -178,14 +178,14 @@ func (o *PaymentOrchestrator) postLedgerEntriesStandard(
 	// Step 2: Create DEBIT posting (customer account - funds leaving)
 	if err := o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
 		po.DebtorAccountID, "debit-customer", commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-		"debit_customer_posting", "standard", amountCents); err != nil {
+		"debit_customer_posting", "standard", amountCents, "debit posting"); err != nil {
 		return "", err
 	}
 
 	// Step 3: Create CREDIT posting (gateway contra-account)
 	if err := o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
 		contraAccountID, "credit-gateway", commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-		"credit_gateway_posting", "standard", amountCents); err != nil {
+		"credit_gateway_posting", "standard", amountCents, "credit posting"); err != nil {
 		return "", err
 	}
 
@@ -219,6 +219,7 @@ func (o *PaymentOrchestrator) capturePosting(
 	failedStep string,
 	postingFlow string,
 	amountCents int64,
+	postingDescription string,
 ) error {
 	idempKey := fmt.Sprintf("%s-%s", idempKeyPrefix, po.IdempotencyKey)
 	_, err := o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
@@ -238,7 +239,7 @@ func (o *PaymentOrchestrator) capturePosting(
 			"posting_flow", postingFlow,
 			"account_id", accountID,
 			"error", err.Error())
-		return fmt.Errorf("failed to create posting for account %s: %w", accountID, err)
+		return fmt.Errorf("failed to create %s for account %s: %w", postingDescription, accountID, err)
 	}
 
 	o.logger.Debug("created posting",
@@ -326,13 +327,13 @@ func (o *PaymentOrchestrator) postCustomerToClearingLeg(
 ) error {
 	if err := o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
 		po.DebtorAccountID, "debit-customer", commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-		"debit_customer_posting", "clearing", amountCents); err != nil {
+		"debit_customer_posting", "clearing", amountCents, "debit posting for customer account"); err != nil {
 		return err
 	}
 
 	return o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
 		clearingAccountID, "credit-clearing", commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-		"credit_clearing_posting", "clearing", amountCents)
+		"credit_clearing_posting", "clearing", amountCents, "credit posting for clearing account")
 }
 
 // postClearingToGatewayLeg creates the second two postings of the clearing flow:
@@ -349,13 +350,13 @@ func (o *PaymentOrchestrator) postClearingToGatewayLeg(
 ) error {
 	if err := o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
 		clearingAccountID, "debit-clearing", commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-		"debit_clearing_posting", "clearing", amountCents); err != nil {
+		"debit_clearing_posting", "clearing", amountCents, "debit posting for clearing account"); err != nil {
 		return err
 	}
 
 	return o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
 		contraAccountID, "credit-gateway", commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-		"credit_gateway_posting", "clearing", amountCents)
+		"credit_gateway_posting", "clearing", amountCents, "credit posting for gateway account")
 }
 
 // finalizeClearingBookingLog updates the booking log status to POSTED after all 4 postings complete.

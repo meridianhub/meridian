@@ -159,7 +159,7 @@ func buildGRPCServer(
 
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
-		Build()
+		Build() //nolint:contextcheck // builder pattern; context passed via auth interceptor
 	if err != nil {
 		return nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}

@@ -85,11 +85,11 @@ func WithGormTenantScopeAndLogger(ctx context.Context, tx *gorm.DB, logger *slog
 	quotedSchema := pq.QuoteIdentifier(schema)
 
 	bypassCtx := WithTenantGuardBypass(ctx)
-	if err := setLocalSearchPath(tx, bypassCtx, quotedSchema, tenantID, logger); err != nil {
+	if err := setLocalSearchPath(bypassCtx, tx, quotedSchema, tenantID, logger); err != nil {
 		return nil, err
 	}
 
-	if err := verifySchemaExists(tx, bypassCtx, schema, tenantID, logger); err != nil {
+	if err := verifySchemaExists(bypassCtx, tx, schema, tenantID, logger); err != nil {
 		return nil, err
 	}
 
@@ -115,7 +115,7 @@ func validateTenantTransaction(tx *gorm.DB) error {
 }
 
 // setLocalSearchPath executes SET LOCAL search_path for tenant isolation.
-func setLocalSearchPath(tx *gorm.DB, ctx context.Context, quotedSchema string, tenantID tenant.TenantID, logger *slog.Logger) error {
+func setLocalSearchPath(ctx context.Context, tx *gorm.DB, quotedSchema string, tenantID tenant.TenantID, logger *slog.Logger) error {
 	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", quotedSchema)
 	if err := tx.WithContext(ctx).Exec(query).Error; err != nil {
 		logger.ErrorContext(ctx, "tenant scope: failed to set search_path",
@@ -129,7 +129,7 @@ func setLocalSearchPath(tx *gorm.DB, ctx context.Context, quotedSchema string, t
 // verifySchemaExists checks that the tenant schema exists in pg_namespace.
 // PostgreSQL silently accepts non-existent schemas in search_path, which would
 // cause queries to fall through to public schema and expose cross-tenant data.
-func verifySchemaExists(tx *gorm.DB, ctx context.Context, schema string, tenantID tenant.TenantID, logger *slog.Logger) error {
+func verifySchemaExists(ctx context.Context, tx *gorm.DB, schema string, tenantID tenant.TenantID, logger *slog.Logger) error {
 	var schemaExists bool
 	if err := tx.WithContext(ctx).Raw("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = ?)", schema).Scan(&schemaExists).Error; err != nil {
 		logger.ErrorContext(ctx, "tenant scope: failed to verify schema existence",

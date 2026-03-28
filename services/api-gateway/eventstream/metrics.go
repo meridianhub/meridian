@@ -36,68 +36,77 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 	if reg == nil {
 		return nil, ErrNilRegisterer
 	}
-	activeConnections := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "meridian_ws_connections_active",
-			Help: "Number of active WebSocket connections.",
-		},
-		[]string{"tenant_id"},
-	)
-	eventsDelivered := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "meridian_ws_events_delivered_total",
-			Help: "Total number of events successfully delivered to WebSocket clients.",
-		},
-		[]string{"tenant_id", "channel"},
-	)
-	eventsDropped := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "meridian_ws_events_dropped_total",
-			Help: "Total number of events dropped before delivery.",
-		},
-		[]string{"reason"},
-	)
-	subscriptionCount := prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "meridian_ws_subscription_count",
-			Help: "Current number of active WebSocket subscriptions.",
-		},
-	)
-	eventLatency := prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Name:    "meridian_ws_event_latency_seconds",
-			Help:    "Publish-to-delivery latency for WebSocket events in seconds.",
-			Buckets: latencyBuckets,
-		},
-	)
 
+	m := buildMetricCollectors()
+
+	if err := registerCollectors(reg, m); err != nil {
+		return nil, err
+	}
+
+	return m, nil
+}
+
+// buildMetricCollectors creates all eventstream Prometheus metric collectors.
+func buildMetricCollectors() *Metrics {
+	return &Metrics{
+		activeConnections: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "meridian_ws_connections_active",
+				Help: "Number of active WebSocket connections.",
+			},
+			[]string{"tenant_id"},
+		),
+		eventsDelivered: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "meridian_ws_events_delivered_total",
+				Help: "Total number of events successfully delivered to WebSocket clients.",
+			},
+			[]string{"tenant_id", "channel"},
+		),
+		eventsDropped: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "meridian_ws_events_dropped_total",
+				Help: "Total number of events dropped before delivery.",
+			},
+			[]string{"reason"},
+		),
+		subscriptionCount: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "meridian_ws_subscription_count",
+				Help: "Current number of active WebSocket subscriptions.",
+			},
+		),
+		eventLatency: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "meridian_ws_event_latency_seconds",
+				Help:    "Publish-to-delivery latency for WebSocket events in seconds.",
+				Buckets: latencyBuckets,
+			},
+		),
+	}
+}
+
+// registerCollectors registers all metric collectors with the given registry.
+// On partial failure, already-registered collectors are unregistered.
+func registerCollectors(reg prometheus.Registerer, m *Metrics) error {
 	collectors := []prometheus.Collector{
-		activeConnections,
-		eventsDelivered,
-		eventsDropped,
-		subscriptionCount,
-		eventLatency,
+		m.activeConnections,
+		m.eventsDelivered,
+		m.eventsDropped,
+		m.subscriptionCount,
+		m.eventLatency,
 	}
 	var registered []prometheus.Collector
 	for _, c := range collectors {
 		if err := reg.Register(c); err != nil {
-			// Best-effort cleanup: unregister already-registered collectors so the
-			// caller's registry is not polluted on partial failure.
 			for _, r := range registered {
 				reg.Unregister(r)
 			}
-			return nil, err
+			return err
 		}
 		registered = append(registered, c)
 	}
-
-	return &Metrics{
-		activeConnections: activeConnections,
-		eventsDelivered:   eventsDelivered,
-		eventsDropped:     eventsDropped,
-		subscriptionCount: subscriptionCount,
-		eventLatency:      eventLatency,
-	}, nil
+	return nil
 }
 
 // IncConnectionOpened increments the active connection gauge for the given tenant.

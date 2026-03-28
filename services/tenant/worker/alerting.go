@@ -189,18 +189,18 @@ func (a *AlertManager) CheckFailedProvisioningAlerts(ctx context.Context, thresh
 
 // sendPagerDutyAlertWithRetry sends a PagerDuty alert with rate limiting, retry, and DLQ.
 func (a *AlertManager) sendPagerDutyAlertWithRetry(ctx context.Context, tenant *domain.Tenant) {
-	a.sendAlertWithRetry(ctx, tenant, AlertTypePagerDuty, observability.AlertProviderPagerDuty,
+	a.sendAlertWithRetry(ctx, tenant, AlertTypePagerDuty, observability.AlertProviderPagerDuty, "PagerDuty",
 		func() error { return a.sendPagerDutyAlert(ctx, tenant) })
 }
 
 // sendSlackAlertWithRetry sends a Slack alert with rate limiting, retry, and DLQ.
 func (a *AlertManager) sendSlackAlertWithRetry(ctx context.Context, tenant *domain.Tenant) {
-	a.sendAlertWithRetry(ctx, tenant, AlertTypeSlack, observability.AlertProviderSlack,
+	a.sendAlertWithRetry(ctx, tenant, AlertTypeSlack, observability.AlertProviderSlack, "Slack",
 		func() error { return a.slackNotifier.NotifyProvisioningFailure(ctx, tenant) })
 }
 
 // sendAlertWithRetry is the shared implementation for sending alerts with rate limiting, retry, and DLQ.
-func (a *AlertManager) sendAlertWithRetry(ctx context.Context, tenant *domain.Tenant, alertType string, provider string, sendFn func() error) {
+func (a *AlertManager) sendAlertWithRetry(ctx context.Context, tenant *domain.Tenant, alertType string, provider string, displayName string, sendFn func() error) {
 	severity := observability.AlertSeverityCritical
 
 	// Check rate limit
@@ -223,7 +223,7 @@ func (a *AlertManager) sendAlertWithRetry(ctx context.Context, tenant *domain.Te
 	attemptCount, lastErr := a.executeAlertWithRetry(ctx, tenant.ID, alertType, sendFn)
 
 	if lastErr != nil {
-		a.logger.Error("failed to send alert after retries",
+		a.logger.Error(fmt.Sprintf("failed to send %s alert after retries", displayName),
 			"tenant_id", tenant.ID,
 			"alert_type", alertType,
 			"attempts", attemptCount,

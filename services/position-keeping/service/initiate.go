@@ -46,7 +46,10 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
 	}
 
-	accountServiceDomain := s.resolveAccountDomain(ctx, req.AccountId)
+	accountServiceDomain, valErr := s.resolveAccountDomain(ctx, req.AccountId)
+	if valErr != nil {
+		return nil, valErr
+	}
 
 	initialEntry, lineage, err := convertInitiateProtoToDomain(req)
 	if err != nil {
@@ -79,17 +82,18 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 
 // resolveAccountDomain validates the account and resolves its service domain.
 // Returns empty string if validation is disabled or the account cannot be resolved.
-func (s *PositionKeepingService) resolveAccountDomain(ctx context.Context, accountID string) AccountServiceDomain {
+// Returns an error if validation is enabled and the account is invalid.
+func (s *PositionKeepingService) resolveAccountDomain(ctx context.Context, accountID string) (AccountServiceDomain, error) {
 	if !s.accountValidationEnabled || s.accountValidator == nil {
-		return ""
+		return "", nil
 	}
 	if err := s.accountValidator.ValidateExists(ctx, accountID); err != nil {
-		return ""
+		return "", err
 	}
 	if resolver, ok := s.accountValidator.(AccountResolver); ok {
-		return resolver.ResolveServiceDomain(ctx, accountID)
+		return resolver.ResolveServiceDomain(ctx, accountID), nil
 	}
-	return ""
+	return "", nil
 }
 
 // convertInitiateProtoToDomain converts proto initial entry and lineage to domain types.

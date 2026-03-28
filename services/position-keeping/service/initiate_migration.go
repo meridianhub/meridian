@@ -220,10 +220,12 @@ func (s *PositionKeepingService) handleMigrationIdempotencyResult(
 	case idempotency.StatusPending:
 		return nil, status.Errorf(codes.Aborted, "operation already in progress, please retry")
 
-	default:
-		// StatusFailed - allow retry
-		_ = key // suppress unused warning
+	case idempotency.StatusFailed:
+		// Allow retry for failed operations
 		return nil, nil
+
+	default:
+		return nil, status.Errorf(codes.Internal, "unexpected idempotency status: %s", result.Status)
 	}
 }
 

@@ -405,6 +405,12 @@ func (c *ProtoConsumer) processMessageWithRetry(record *kgo.Record) error {
 		return nil
 	}
 
+	// If shutdown occurred during retry backoff, return the error directly
+	// without sending to DLQ - the message will be reprocessed after restart.
+	if c.ctx.Err() != nil {
+		return lastErr
+	}
+
 	return c.sendToDLQ(record, lastErr, maxRetries, firstFailureTime)
 }
 

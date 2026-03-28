@@ -100,7 +100,7 @@ func (s *Service) validateAssociationParties(ctx context.Context, req *pb.Regist
 // buildAssociationInput constructs the optional AssociationInput from the request fields.
 func buildAssociationInput(req *pb.RegisterAssociationsRequest) (*persistence.AssociationInput, error) {
 	if req.Metadata == nil && req.Status == pb.AssociationStatus_ASSOCIATION_STATUS_UNSPECIFIED && req.EffectiveFrom == nil && req.EffectiveTo == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // intentional: nil,nil means no optional fields provided
 	}
 
 	input := &persistence.AssociationInput{}

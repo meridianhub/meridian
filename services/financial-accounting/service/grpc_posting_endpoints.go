@@ -183,7 +183,7 @@ func (s *FinancialAccountingService) checkCapturePostingIdempotency(
 	if err := s.idempotency.MarkPending(ctx, key, defaultIdempotencyTTL); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // intentional: nil,nil signals "no cached result, proceed with operation"
 }
 
 // buildAndPersistPosting validates, creates, and persists a new ledger posting.

@@ -92,9 +92,11 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	for _, cleanup := range optCleanups {
-		defer cleanup()
-	}
+	defer func() {
+		for _, cleanup := range optCleanups {
+			cleanup()
+		}
+	}()
 
 	// Create server
 	server := gateway.NewServer(config, logger, nil, serverOpts...)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -267,6 +266,9 @@ func (s *PositionKeepingService) checkMeasurementIdempotencyAndAcquireLock(
 	return &key, nil, nil
 }
 
+// errUnexpectedAttributesType is returned when the CEL activation attributes value is not map[string]string.
+var errUnexpectedAttributesType = errors.New("attributes activation value has unexpected type")
+
 // MeasurementValidationResult contains the result of CEL validation and bucket key generation.
 type MeasurementValidationResult struct {
 	// BucketID is the generated bucket key for the measurement.
@@ -318,7 +320,7 @@ func (s *PositionKeepingService) validateMeasurementWithCEL(
 
 	attrs, ok := activation["attributes"].(map[string]string)
 	if !ok {
-		return nil, fmt.Errorf("attributes activation value has unexpected type")
+		return nil, errUnexpectedAttributesType
 	}
 	bucketID, err := s.evalBucketKeyProgram(ctx, instrument, instrumentCode, attrs, accountID)
 	if err != nil {
