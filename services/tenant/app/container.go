@@ -32,7 +32,7 @@ const envValueTrue = "true"
 
 // Sentinel errors for worker configuration validation.
 var (
-	errInvalidPollInterval = errors.New("poll interval must be >= 1s")
+	errInvalidPollInterval    = errors.New("poll interval must be >= 1s")
 	errInvalidMaxRetries      = errors.New("max retries must be >= 0 and <= 20")
 	errInvalidRetryBaseDelay  = errors.New("retry base delay must be > 0")
 	errInvalidRetryMaxDelay   = errors.New("retry max delay must be > 0")
