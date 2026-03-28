@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -63,6 +64,7 @@ import (
 	tenantservice "github.com/meridianhub/meridian/services/tenant/service"
 
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/observability"
@@ -390,14 +392,22 @@ func wireReconciliation(
 
 // ─── Audit Wiring ────────────────────────────────────────────────────────────
 
-func wireAudit(server *grpc.Server, db *gorm.DB, logger *slog.Logger) error {
+func wireAudit(ctx context.Context, server *grpc.Server, db *gorm.DB, logger *slog.Logger) (*audit.MultiTenantWorker, error) {
 	svc, err := auditservice.NewAuditService(db, logger)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	auditv1.RegisterAuditServiceServer(server, svc)
-	logger.Info("registered audit service")
-	return nil
+
+	// Start multi-tenant audit worker that discovers tenant schemas dynamically
+	// and processes audit_outbox -> audit_log within each tenant schema.
+	mtWorker := audit.NewMultiTenantWorker(db, "org_%", logger,
+		audit.WithAdaptivePolling(100*time.Millisecond, 30*time.Second),
+	)
+	mtWorker.Start(ctx)
+
+	logger.Info("registered audit service and started multi-tenant audit worker")
+	return mtWorker, nil
 }
 
 // ─── Control Plane Wiring ────────────────────────────────────────────────────

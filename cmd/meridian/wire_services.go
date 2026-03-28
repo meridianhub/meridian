@@ -17,6 +17,7 @@ import (
 	tenantworker "github.com/meridianhub/meridian/services/tenant/worker"
 
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
+	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	"github.com/meridianhub/meridian/shared/platform/events"
@@ -33,7 +34,8 @@ import (
 )
 
 // registerServices wires all gRPC services into the shared server in tier dependency order,
-// then enables health checking and reflection.
+// then enables health checking and reflection. It returns the multi-tenant audit worker
+// (if started) so that the caller can stop it during graceful shutdown.
 func registerServices(
 	ctx context.Context,
 	grpcServer *grpc.Server,
@@ -47,9 +49,12 @@ func registerServices(
 	schemaProvisioner tenantprovisioner.SchemaProvisioner,
 	tracer *observability.Tracer,
 	logger *slog.Logger,
-) error {
+) (*audit.MultiTenantWorker, error) {
 	// refDataComps is populated by wireReferenceData and used by wireInternalAccount for the account type cache.
 	var refDataComps *refDataComponents
+
+	// auditWorker is populated by wireAudit and stopped during graceful shutdown.
+	var auditWorker *audit.MultiTenantWorker
 
 	// Tier 0: No gRPC dependencies
 	for _, wire := range []struct {
@@ -70,11 +75,15 @@ func registerServices(
 		{"control-plane", func() error {
 			return wireControlPlane(ctx, grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), loopback, logger)
 		}},
-		{"audit", func() error { return wireAudit(grpcServer, conns.gormDB("tenant"), logger) }}, // audit uses platform DB
+		{"audit", func() error {
+			var err error
+			auditWorker, err = wireAudit(ctx, grpcServer, conns.gormDB("party"), logger)
+			return err
+		}},
 		{"identity", func() error { return wireIdentity(grpcServer, conns.gormDB("identity"), logger) }},
 	} {
 		if err := wire.fn(); err != nil {
-			return fmt.Errorf("%s: %w", wire.name, err)
+			return nil, fmt.Errorf("%s: %w", wire.name, err)
 		}
 	}
 	logger.Info("Tier 0 services registered")
@@ -106,7 +115,7 @@ func registerServices(
 		{"forecasting", func() error { return wireForecasting(grpcServer, conns.pgxPool("forecasting"), loopback.mds, logger) }},
 	} {
 		if err := wire.fn(); err != nil {
-			return fmt.Errorf("%s: %w", wire.name, err)
+			return nil, fmt.Errorf("%s: %w", wire.name, err)
 		}
 	}
 	logger.Info("Tier 1 services registered")
@@ -114,7 +123,7 @@ func registerServices(
 	// Tier 2: Depend on Tier 1 (current-account needs PK, FA loopback clients for saga orchestration)
 	caOutboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("current-account"))
 	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, loopback.party, idempotencySvc, caOutboxRepo, refDataComps, tracer, logger); err != nil {
-		return fmt.Errorf("current-account: %w", err)
+		return nil, fmt.Errorf("current-account: %w", err)
 	}
 	logger.Info("Tier 2 services registered")
 
@@ -129,7 +138,7 @@ func registerServices(
 		{"reconciliation", func() error { return wireReconciliation(grpcServer, conns.gormDB("reconciliation"), logger) }},
 	} {
 		if err := wire.fn(); err != nil {
-			return fmt.Errorf("%s: %w", wire.name, err)
+			return nil, fmt.Errorf("%s: %w", wire.name, err)
 		}
 	}
 	logger.Info("Tier 3 services registered")
@@ -140,7 +149,7 @@ func registerServices(
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 	reflection.Register(grpcServer)
 
-	return nil
+	return auditWorker, nil
 }
 
 // refDataComponents holds objects created during wireReferenceData that other
