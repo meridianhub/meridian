@@ -39,33 +39,12 @@ func (c *GrpcPositionKeepingClient) GetPositionSummary(ctx context.Context, acco
 			return nil, fmt.Errorf("listing position logs: %w", err)
 		}
 
-		for _, log := range resp.GetLogs() {
-			for _, entry := range log.GetTransactionLogEntries() {
-				m := entry.GetAmount().GetAmount()
-				if m == nil {
-					continue
-				}
-
-				// Filter by instrument code using the entry's currency code.
-				if instrumentCode != "" && m.GetCurrencyCode() != instrumentCode {
-					continue
-				}
-
-				amount, err := moneyToDecimal(m)
-				if err != nil {
-					return nil, fmt.Errorf("converting amount for entry in log %s: %w", log.GetLogId(), err)
-				}
-
-				switch entry.GetDirection() {
-				case commonv1.PostingDirection_POSTING_DIRECTION_DEBIT:
-					totalDebits = totalDebits.Add(amount)
-				case commonv1.PostingDirection_POSTING_DIRECTION_CREDIT:
-					totalCredits = totalCredits.Add(amount)
-				case commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED:
-					// Skip entries with unspecified direction
-				}
-			}
+		debits, credits, err := aggregateLogEntries(resp.GetLogs(), instrumentCode)
+		if err != nil {
+			return nil, err
 		}
+		totalDebits = totalDebits.Add(debits)
+		totalCredits = totalCredits.Add(credits)
 
 		nextToken := ""
 		if resp.GetPagination() != nil {
@@ -82,4 +61,40 @@ func (c *GrpcPositionKeepingClient) GetPositionSummary(ctx context.Context, acco
 		TotalDebits:    totalDebits,
 		TotalCredits:   totalCredits,
 	}, nil
+}
+
+// aggregateLogEntries sums debits and credits from position log entries,
+// filtering by instrument code when specified.
+func aggregateLogEntries(logs []*positionkeepingv1.FinancialPositionLog, instrumentCode string) (decimal.Decimal, decimal.Decimal, error) {
+	debits := decimal.Zero
+	credits := decimal.Zero
+
+	for _, log := range logs {
+		for _, entry := range log.GetTransactionLogEntries() {
+			m := entry.GetAmount().GetAmount()
+			if m == nil {
+				continue
+			}
+
+			if instrumentCode != "" && m.GetCurrencyCode() != instrumentCode {
+				continue
+			}
+
+			amount, err := moneyToDecimal(m)
+			if err != nil {
+				return decimal.Zero, decimal.Zero, fmt.Errorf("converting amount for entry in log %s: %w", log.GetLogId(), err)
+			}
+
+			switch entry.GetDirection() {
+			case commonv1.PostingDirection_POSTING_DIRECTION_DEBIT:
+				debits = debits.Add(amount)
+			case commonv1.PostingDirection_POSTING_DIRECTION_CREDIT:
+				credits = credits.Add(amount)
+			case commonv1.PostingDirection_POSTING_DIRECTION_UNSPECIFIED:
+				// Skip entries with unspecified direction
+			}
+		}
+	}
+
+	return debits, credits, nil
 }

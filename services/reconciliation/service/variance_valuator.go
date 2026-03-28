@@ -79,23 +79,13 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 	ctx, cancel := context.WithTimeout(ctx, valuationTimeout)
 	defer cancel()
 
-	variances, err := vv.varianceRepo.FindByRunID(ctx, runID)
+	detected, err := vv.fetchDetectedVariances(ctx, runID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch variances for run %s: %w", runID, err)
-	}
-
-	// Filter to only DETECTED variances
-	detected := make([]*domain.Variance, 0, len(variances))
-	for _, v := range variances {
-		if v.Status == domain.VarianceStatusDetected {
-			detected = append(detected, v)
-		}
+		return err
 	}
 
 	if len(detected) == 0 {
-		slog.InfoContext(ctx, "no detected variances to value",
-			"run_id", runID,
-		)
+		slog.InfoContext(ctx, "no detected variances to value", "run_id", runID)
 		return nil
 	}
 
@@ -104,8 +94,49 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 		"variance_count", len(detected),
 	)
 
-	// Pre-resolve party IDs to avoid N+1 gRPC calls per variance.
-	// Multiple variances may share the same account, so we deduplicate lookups.
+	partyIDs := vv.resolvePartyIDs(ctx, detected)
+
+	valuedCount, failedCount, totalValue, err := vv.valueConcurrently(ctx, detected, partyIDs)
+	if err != nil {
+		return fmt.Errorf("variance valuation failed: %w", err)
+	}
+
+	if failedCount > 0 && valuedCount == 0 {
+		return fmt.Errorf("%d variances: %w", failedCount, ErrAllValuationsFailed)
+	}
+
+	if err := vv.updateRunSummary(ctx, runID, valuedCount); err != nil {
+		return err
+	}
+
+	slog.InfoContext(ctx, "variance valuation completed",
+		"run_id", runID,
+		"valued_count", valuedCount,
+		"total_value", totalValue.String(),
+	)
+
+	return nil
+}
+
+// fetchDetectedVariances retrieves variances for a run and filters to DETECTED status.
+func (vv *VarianceValuator) fetchDetectedVariances(ctx context.Context, runID uuid.UUID) ([]*domain.Variance, error) {
+	variances, err := vv.varianceRepo.FindByRunID(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch variances for run %s: %w", runID, err)
+	}
+
+	detected := make([]*domain.Variance, 0, len(variances))
+	for _, v := range variances {
+		if v.Status == domain.VarianceStatusDetected {
+			detected = append(detected, v)
+		}
+	}
+
+	return detected, nil
+}
+
+// resolvePartyIDs pre-resolves party IDs for all unique accounts to avoid N+1 lookups.
+func (vv *VarianceValuator) resolvePartyIDs(ctx context.Context, detected []*domain.Variance) map[string]uuid.UUID {
 	partyIDs := make(map[string]uuid.UUID)
 	for _, v := range detected {
 		if _, ok := partyIDs[v.AccountID]; !ok {
@@ -120,7 +151,11 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 			partyIDs[v.AccountID] = pid
 		}
 	}
+	return partyIDs
+}
 
+// valueConcurrently values all detected variances with bounded parallelism.
+func (vv *VarianceValuator) valueConcurrently(ctx context.Context, detected []*domain.Variance, partyIDs map[string]uuid.UUID) (int, int, decimal.Decimal, error) {
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(vv.concurrency)
 
@@ -161,14 +196,14 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 	}
 
 	if err := g.Wait(); err != nil {
-		return fmt.Errorf("variance valuation failed: %w", err)
+		return valuedCount, failedCount, totalValue, err
 	}
 
-	if failedCount > 0 && valuedCount == 0 {
-		return fmt.Errorf("%d variances: %w", failedCount, ErrAllValuationsFailed)
-	}
+	return valuedCount, failedCount, totalValue, nil
+}
 
-	// Update run summary
+// updateRunSummary updates the run's variance count after valuation completes.
+func (vv *VarianceValuator) updateRunSummary(ctx context.Context, runID uuid.UUID, valuedCount int) error {
 	run, err := vv.runRepo.FindByID(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("failed to find run for summary update: %w", err)
@@ -177,13 +212,6 @@ func (vv *VarianceValuator) ValueVariances(ctx context.Context, runID uuid.UUID)
 	if err := vv.runRepo.Update(ctx, run); err != nil {
 		return fmt.Errorf("failed to update run variance summary: %w", err)
 	}
-
-	slog.InfoContext(ctx, "variance valuation completed",
-		"run_id", runID,
-		"valued_count", valuedCount,
-		"total_value", totalValue.String(),
-	)
-
 	return nil
 }
 

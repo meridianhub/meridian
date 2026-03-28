@@ -119,36 +119,22 @@ func NewSettlementFinalizer(
 //  7. Mark run as FINALIZED and snapshots as FINAL
 //  8. Publish PositionLockRequestedEvent
 func (f *SettlementFinalizer) FinalizeSettlement(ctx context.Context, runID uuid.UUID) error {
-	// Step 1: Authorization - only service accounts can finalize
 	if err := f.requireServiceRole(ctx); err != nil {
 		observability.SettlementFinalityTotal.WithLabelValues("UNAUTHORIZED").Inc()
 		return err
 	}
 
-	// Step 2: Load the settlement run
 	run, err := f.runRepo.FindByID(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("loading settlement run %s: %w", runID, err)
 	}
 
-	// Step 3: Idempotency - if already finalized, return success
-	if run.Status == domain.RunStatusFinalized {
-		f.logger.InfoContext(ctx, "settlement run already finalized, skipping",
-			"run_id", runID)
-		observability.SettlementFinalityTotal.WithLabelValues("IDEMPOTENT").Inc()
+	skip, err := f.validateFinalizable(ctx, run)
+	if err != nil {
+		return err
+	}
+	if skip {
 		return nil
-	}
-
-	// Step 4: Validate run is in COMPLETED state
-	if run.Status != domain.RunStatusCompleted {
-		return fmt.Errorf("settlement run %s is in %s state: %w",
-			runID, run.Status, domain.ErrRunNotCompleted)
-	}
-
-	// Step 5: Validate run type is FINAL
-	if !run.IsFinalSettlement() {
-		return fmt.Errorf("settlement run %s has type %s: %w",
-			runID, run.SettlementType, domain.ErrNotFinalSettlement)
 	}
 
 	f.logger.InfoContext(ctx, "starting settlement finalization",
@@ -158,20 +144,8 @@ func (f *SettlementFinalizer) FinalizeSettlement(ctx context.Context, runID uuid
 		"period_end", run.PeriodEnd,
 	)
 
-	// Step 6: Check for pending operations that would conflict with locking
-	if f.lockClient != nil {
-		pendingCount, err := f.lockClient.CheckPendingOperations(
-			ctx, run.AccountID, run.PeriodStart, run.PeriodEnd)
-		if err != nil {
-			f.logger.WarnContext(ctx, "failed to check pending operations, proceeding with lock attempt",
-				"run_id", runID, "error", err)
-		} else if pendingCount > 0 {
-			f.logger.WarnContext(ctx, "pending operations detected before lock attempt",
-				"run_id", runID, "pending_count", pendingCount)
-		}
-	}
+	f.checkPendingOperations(ctx, run)
 
-	// Step 7: Request position lock with exponential backoff
 	if err := f.requestLockWithRetry(ctx, run); err != nil {
 		observability.SettlementFinalityTotal.WithLabelValues("LOCK_FAILED").Inc()
 		f.logger.Error("settlement finalization failed: position lock not acquired",
@@ -181,35 +155,11 @@ func (f *SettlementFinalizer) FinalizeSettlement(ctx context.Context, runID uuid
 		return fmt.Errorf("position lock failed for run %s: %w", runID, err)
 	}
 
-	// Step 8: Update run status to FINALIZED
-	if err := run.Finalize(); err != nil {
-		return fmt.Errorf("transitioning run %s to FINALIZED: %w", runID, err)
-	}
-	if err := f.runRepo.Update(ctx, run); err != nil {
-		return fmt.Errorf("persisting FINALIZED state for run %s: %w", runID, err)
+	if err := f.markFinalized(ctx, run); err != nil {
+		return err
 	}
 
-	// Step 9: Mark all snapshots as FINAL settlement type
-	if err := f.snapRepo.MarkRunSnapshotsFinal(ctx, runID); err != nil {
-		f.logger.WarnContext(ctx, "failed to mark snapshots as FINAL",
-			"run_id", runID, "error", err)
-	}
-
-	// Step 10: Publish PositionLockRequestedEvent
-	if f.publisher != nil {
-		event := PositionLockRequestedEvent{
-			RunID:       runID.String(),
-			AccountID:   run.AccountID,
-			Scope:       run.Scope.String(),
-			PeriodStart: run.PeriodStart.Format(time.RFC3339),
-			PeriodEnd:   run.PeriodEnd.Format(time.RFC3339),
-			Status:      "LOCKED",
-		}
-		if pubErr := f.publisher.Publish(ctx, messaging.TopicPositionLockRequested, event); pubErr != nil {
-			f.logger.WarnContext(ctx, "failed to publish PositionLockRequestedEvent",
-				"run_id", runID, "error", pubErr)
-		}
-	}
+	f.publishLockEvent(ctx, run)
 
 	observability.SettlementFinalityTotal.WithLabelValues("SUCCESS").Inc()
 
@@ -219,6 +169,84 @@ func (f *SettlementFinalizer) FinalizeSettlement(ctx context.Context, runID uuid
 	)
 
 	return nil
+}
+
+// validateFinalizable checks that a run is in a state that allows finalization.
+// Returns (true, nil) if the run is already finalized (caller should skip).
+// Returns (false, nil) if the run is ready to finalize.
+// Returns (false, error) if the run cannot be finalized.
+func (f *SettlementFinalizer) validateFinalizable(ctx context.Context, run *domain.SettlementRun) (bool, error) {
+	if run.Status == domain.RunStatusFinalized {
+		f.logger.InfoContext(ctx, "settlement run already finalized, skipping",
+			"run_id", run.RunID)
+		observability.SettlementFinalityTotal.WithLabelValues("IDEMPOTENT").Inc()
+		return true, nil
+	}
+
+	if run.Status != domain.RunStatusCompleted {
+		return false, fmt.Errorf("settlement run %s is in %s state: %w",
+			run.RunID, run.Status, domain.ErrRunNotCompleted)
+	}
+
+	if !run.IsFinalSettlement() {
+		return false, fmt.Errorf("settlement run %s has type %s: %w",
+			run.RunID, run.SettlementType, domain.ErrNotFinalSettlement)
+	}
+
+	return false, nil
+}
+
+// checkPendingOperations logs a warning if PK has in-flight operations that
+// may conflict with position locking.
+func (f *SettlementFinalizer) checkPendingOperations(ctx context.Context, run *domain.SettlementRun) {
+	if f.lockClient == nil {
+		return
+	}
+	pendingCount, err := f.lockClient.CheckPendingOperations(
+		ctx, run.AccountID, run.PeriodStart, run.PeriodEnd)
+	if err != nil {
+		f.logger.WarnContext(ctx, "failed to check pending operations, proceeding with lock attempt",
+			"run_id", run.RunID, "error", err)
+	} else if pendingCount > 0 {
+		f.logger.WarnContext(ctx, "pending operations detected before lock attempt",
+			"run_id", run.RunID, "pending_count", pendingCount)
+	}
+}
+
+// markFinalized transitions the run to FINALIZED and marks snapshots as FINAL.
+func (f *SettlementFinalizer) markFinalized(ctx context.Context, run *domain.SettlementRun) error {
+	if err := run.Finalize(); err != nil {
+		return fmt.Errorf("transitioning run %s to FINALIZED: %w", run.RunID, err)
+	}
+	if err := f.runRepo.Update(ctx, run); err != nil {
+		return fmt.Errorf("persisting FINALIZED state for run %s: %w", run.RunID, err)
+	}
+
+	if err := f.snapRepo.MarkRunSnapshotsFinal(ctx, run.RunID); err != nil {
+		f.logger.WarnContext(ctx, "failed to mark snapshots as FINAL",
+			"run_id", run.RunID, "error", err)
+	}
+
+	return nil
+}
+
+// publishLockEvent publishes a PositionLockRequestedEvent after successful finalization.
+func (f *SettlementFinalizer) publishLockEvent(ctx context.Context, run *domain.SettlementRun) {
+	if f.publisher == nil {
+		return
+	}
+	event := PositionLockRequestedEvent{
+		RunID:       run.RunID.String(),
+		AccountID:   run.AccountID,
+		Scope:       run.Scope.String(),
+		PeriodStart: run.PeriodStart.Format(time.RFC3339),
+		PeriodEnd:   run.PeriodEnd.Format(time.RFC3339),
+		Status:      "LOCKED",
+	}
+	if pubErr := f.publisher.Publish(ctx, messaging.TopicPositionLockRequested, event); pubErr != nil {
+		f.logger.WarnContext(ctx, "failed to publish PositionLockRequestedEvent",
+			"run_id", run.RunID, "error", pubErr)
+	}
 }
 
 // requestLockWithRetry attempts to acquire a position lock with exponential backoff.

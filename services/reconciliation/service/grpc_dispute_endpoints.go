@@ -110,15 +110,8 @@ func (s *AccountReconciliationService) InitiateDispute(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid run_id: %v", err)
 	}
 
-	// Validate that the variance exists
-	if s.varianceRepo != nil {
-		_, err := s.varianceRepo.FindByID(ctx, varianceID)
-		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				return nil, status.Errorf(codes.NotFound, "variance %s not found", varianceID)
-			}
-			return nil, status.Errorf(codes.Internal, "failed to validate variance: %v", err)
-		}
+	if err := s.validateVarianceExists(ctx, varianceID); err != nil {
+		return nil, err
 	}
 
 	dispute, err := domain.NewDispute(
@@ -141,33 +134,57 @@ func (s *AccountReconciliationService) InitiateDispute(
 		return nil, status.Errorf(codes.Internal, "failed to create dispute: %v", err)
 	}
 
-	// Mark variance as disputed
-	if s.varianceRepo != nil {
-		if err := s.varianceRepo.UpdateStatus(ctx, varianceID, domain.VarianceStatusDisputed); err != nil {
-			slog.WarnContext(ctx, "failed to update variance status to disputed",
-				"variance_id", varianceID, "error", err)
-		}
-	}
-
-	// Publish event
-	if s.eventPublisher != nil {
-		event := DisputeCreatedEvent{
-			DisputeID:  dispute.DisputeID.String(),
-			VarianceID: dispute.VarianceID.String(),
-			RunID:      dispute.RunID.String(),
-			AccountID:  dispute.AccountID,
-			Reason:     dispute.Reason,
-			RaisedBy:   dispute.RaisedBy,
-		}
-		if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeCreated, event); err != nil {
-			slog.WarnContext(ctx, "failed to publish DisputeCreatedEvent",
-				"dispute_id", dispute.DisputeID, "error", err)
-		}
-	}
+	s.markVarianceDisputed(ctx, varianceID)
+	s.publishDisputeCreatedEvent(ctx, dispute)
 
 	return &reconciliationv1.InitiateDisputeResponse{
 		Dispute: toDisputeDetailProto(dispute),
 	}, nil
+}
+
+// validateVarianceExists checks that the variance exists in the repository.
+func (s *AccountReconciliationService) validateVarianceExists(ctx context.Context, varianceID uuid.UUID) error {
+	if s.varianceRepo == nil {
+		return nil
+	}
+	_, err := s.varianceRepo.FindByID(ctx, varianceID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return status.Errorf(codes.NotFound, "variance %s not found", varianceID)
+		}
+		return status.Errorf(codes.Internal, "failed to validate variance: %v", err)
+	}
+	return nil
+}
+
+// markVarianceDisputed updates the variance status to DISPUTED.
+func (s *AccountReconciliationService) markVarianceDisputed(ctx context.Context, varianceID uuid.UUID) {
+	if s.varianceRepo == nil {
+		return
+	}
+	if err := s.varianceRepo.UpdateStatus(ctx, varianceID, domain.VarianceStatusDisputed); err != nil {
+		slog.WarnContext(ctx, "failed to update variance status to disputed",
+			"variance_id", varianceID, "error", err)
+	}
+}
+
+// publishDisputeCreatedEvent publishes a DisputeCreatedEvent to the outbox.
+func (s *AccountReconciliationService) publishDisputeCreatedEvent(ctx context.Context, dispute *domain.Dispute) {
+	if s.eventPublisher == nil {
+		return
+	}
+	event := DisputeCreatedEvent{
+		DisputeID:  dispute.DisputeID.String(),
+		VarianceID: dispute.VarianceID.String(),
+		RunID:      dispute.RunID.String(),
+		AccountID:  dispute.AccountID,
+		Reason:     dispute.Reason,
+		RaisedBy:   dispute.RaisedBy,
+	}
+	if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeCreated, event); err != nil {
+		slog.WarnContext(ctx, "failed to publish DisputeCreatedEvent",
+			"dispute_id", dispute.DisputeID, "error", err)
+	}
 }
 
 // ControlDispute controls a dispute lifecycle (escalate, resolve, reject).
@@ -193,48 +210,8 @@ func (s *AccountReconciliationService) ControlDispute(
 	}
 
 	action := req.GetAction()
-
-	switch action { //nolint:exhaustive // UNSPECIFIED handled by default
-	case reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_ESCALATE:
-		if err := dispute.Escalate(); err != nil {
-			return nil, status.Errorf(codes.FailedPrecondition, "cannot escalate dispute: %v", err)
-		}
-
-	case reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_RESOLVE:
-		// Resolve requires admin or operator role
-		if err := requireAdminOrOperator(ctx); err != nil {
-			return nil, err
-		}
-		if err := dispute.Resolve(req.GetResolution(), req.GetResolvedBy()); err != nil {
-			return nil, status.Errorf(codes.FailedPrecondition, "cannot resolve dispute: %v", err)
-		}
-
-		// Invoke reconciliation_adjustment saga for resolved disputes
-		if s.sagaRuntime != nil {
-			sagaParams := map[string]interface{}{
-				"variance_id": dispute.VarianceID.String(),
-				"dispute_id":  dispute.DisputeID.String(),
-				"account_id":  dispute.AccountID,
-				"resolved_by": dispute.ResolvedBy,
-				"resolution":  dispute.Resolution,
-			}
-			if err := s.sagaRuntime.InvokeSaga(ctx, "reconciliation_adjustment", sagaParams); err != nil {
-				slog.WarnContext(ctx, "failed to invoke reconciliation_adjustment saga",
-					"dispute_id", dispute.DisputeID, "error", err)
-			}
-		}
-
-	case reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_REJECT:
-		// Reject requires admin or operator role
-		if err := requireAdminOrOperator(ctx); err != nil {
-			return nil, err
-		}
-		if err := dispute.Reject(req.GetResolution(), req.GetResolvedBy()); err != nil {
-			return nil, status.Errorf(codes.FailedPrecondition, "cannot reject dispute: %v", err)
-		}
-
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "unknown dispute control action: %v", action)
+	if err := s.applyDisputeAction(ctx, dispute, action, req); err != nil {
+		return nil, err
 	}
 
 	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
@@ -242,26 +219,92 @@ func (s *AccountReconciliationService) ControlDispute(
 		return nil, status.Errorf(codes.Internal, "failed to update dispute: %v", err)
 	}
 
-	// Publish resolved event for terminal states
-	if dispute.Status.IsFinal() && s.eventPublisher != nil {
-		event := DisputeResolvedEvent{
-			DisputeID:  dispute.DisputeID.String(),
-			VarianceID: dispute.VarianceID.String(),
-			RunID:      dispute.RunID.String(),
-			AccountID:  dispute.AccountID,
-			Action:     action.String(),
-			Resolution: dispute.Resolution,
-			ResolvedBy: dispute.ResolvedBy,
-		}
-		if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeResolved, event); err != nil {
-			slog.WarnContext(ctx, "failed to publish DisputeResolvedEvent",
-				"dispute_id", dispute.DisputeID, "error", err)
-		}
-	}
+	s.publishDisputeResolvedEvent(ctx, dispute, action)
 
 	return &reconciliationv1.ControlDisputeResponse{
 		Dispute: toDisputeDetailProto(dispute),
 	}, nil
+}
+
+// applyDisputeAction applies the requested control action to a dispute.
+func (s *AccountReconciliationService) applyDisputeAction(
+	ctx context.Context,
+	dispute *domain.Dispute,
+	action reconciliationv1.DisputeControlAction,
+	req *reconciliationv1.ControlDisputeRequest,
+) error {
+	switch action { //nolint:exhaustive // UNSPECIFIED handled by default
+	case reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_ESCALATE:
+		if err := dispute.Escalate(); err != nil {
+			return status.Errorf(codes.FailedPrecondition, "cannot escalate dispute: %v", err)
+		}
+
+	case reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_RESOLVE:
+		if err := requireAdminOrOperator(ctx); err != nil {
+			return err
+		}
+		if err := dispute.Resolve(req.GetResolution(), req.GetResolvedBy()); err != nil {
+			return status.Errorf(codes.FailedPrecondition, "cannot resolve dispute: %v", err)
+		}
+		s.invokeReconciliationAdjustment(ctx, dispute)
+
+	case reconciliationv1.DisputeControlAction_DISPUTE_CONTROL_ACTION_REJECT:
+		if err := requireAdminOrOperator(ctx); err != nil {
+			return err
+		}
+		if err := dispute.Reject(req.GetResolution(), req.GetResolvedBy()); err != nil {
+			return status.Errorf(codes.FailedPrecondition, "cannot reject dispute: %v", err)
+		}
+
+	default:
+		return status.Errorf(codes.InvalidArgument, "unknown dispute control action: %v", action)
+	}
+
+	return nil
+}
+
+// invokeReconciliationAdjustment triggers the reconciliation_adjustment saga for resolved disputes.
+func (s *AccountReconciliationService) invokeReconciliationAdjustment(ctx context.Context, dispute *domain.Dispute) {
+	if s.sagaRuntime == nil {
+		return
+	}
+	sagaParams := map[string]interface{}{
+		"variance_id": dispute.VarianceID.String(),
+		"dispute_id":  dispute.DisputeID.String(),
+		"account_id":  dispute.AccountID,
+		"resolved_by": dispute.ResolvedBy,
+		"resolution":  dispute.Resolution,
+	}
+	if err := s.sagaRuntime.InvokeSaga(ctx, "reconciliation_adjustment", sagaParams); err != nil {
+		slog.WarnContext(ctx, "failed to invoke reconciliation_adjustment saga",
+			"dispute_id", dispute.DisputeID, "error", err)
+	}
+}
+
+// publishDisputeResolvedEvent publishes a DisputeResolvedEvent for terminal states.
+func (s *AccountReconciliationService) publishDisputeResolvedEvent(ctx context.Context, dispute *domain.Dispute, action reconciliationv1.DisputeControlAction) {
+	s.publishDisputeResolvedEventWithAction(ctx, dispute, action.String())
+}
+
+// publishDisputeResolvedEventWithAction publishes a DisputeResolvedEvent for terminal states
+// using the provided action string.
+func (s *AccountReconciliationService) publishDisputeResolvedEventWithAction(ctx context.Context, dispute *domain.Dispute, actionStr string) {
+	if !dispute.Status.IsFinal() || s.eventPublisher == nil {
+		return
+	}
+	event := DisputeResolvedEvent{
+		DisputeID:  dispute.DisputeID.String(),
+		VarianceID: dispute.VarianceID.String(),
+		RunID:      dispute.RunID.String(),
+		AccountID:  dispute.AccountID,
+		Action:     actionStr,
+		Resolution: dispute.Resolution,
+		ResolvedBy: dispute.ResolvedBy,
+	}
+	if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeResolved, event); err != nil {
+		slog.WarnContext(ctx, "failed to publish DisputeResolvedEvent",
+			"dispute_id", dispute.DisputeID, "error", err)
+	}
 }
 
 // RetrieveDispute retrieves a dispute by ID.

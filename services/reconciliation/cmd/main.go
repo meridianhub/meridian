@@ -19,6 +19,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/health"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
@@ -75,32 +76,10 @@ func run(logger *slog.Logger) error {
 	}
 	defer container.Close()
 
-	// Create gRPC server with interceptor chain
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(container.Tracer, logger).
-		WithAuthInterceptor(container.AuthInterceptor).
-		Build()
+	grpcServer, healthAggregator, err := buildGRPCServer(container, logger)
 	if err != nil {
-		return fmt.Errorf("failed to build grpc server: %w", err)
+		return err
 	}
-
-	// Register AccountReconciliationService
-	reconciliationv1.RegisterAccountReconciliationServiceServer(grpcServer, container.ReconciliationService)
-
-	// Register health check service with available checkers
-	healthCheckers := []health.Checker{
-		observability.NewDatabaseChecker(container.DB),
-	}
-	if container.RedisClient != nil {
-		healthCheckers = append(healthCheckers, observability.NewRedisChecker(container.RedisClient))
-	}
-	healthAggregator := health.NewAggregator(healthCheckers)
-	grpc_health_v1.RegisterHealthServer(grpcServer, newHealthServer(healthAggregator, logger))
-
-	// Register reflection service for debugging
-	reflection.Register(grpcServer)
-
-	logger.Info("gRPC services registered",
-		"services", []string{"AccountReconciliationService", "Health", "Reflection"})
 
 	// Create gRPC listener
 	grpcAddress := fmt.Sprintf(":%s", cfg.Server.Port)
@@ -129,28 +108,8 @@ func run(logger *slog.Logger) error {
 		}()
 	}
 
-	// Start HTTP server for metrics and health endpoints
-	httpMux := http.NewServeMux()
-	httpMux.Handle("/metrics", promhttp.Handler())
-
-	healthHandler := health.NewHTTPHandler(healthAggregator)
-	healthHandler.RegisterHandlers(httpMux)
-
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%s", cfg.Observability.MetricsPort),
-		Handler:           httpMux,
-		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      30 * time.Second,
-	}
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			logger.Error("HTTP server shutdown error", "error", err)
-		} else {
-			logger.Info("HTTP server stopped")
-		}
-	}()
+	httpServer := buildHTTPServer(cfg, healthAggregator)
+	defer shutdownHTTPServer(httpServer, logger)
 
 	go func() {
 		logger.Info("starting HTTP server for health and metrics",
@@ -173,7 +132,68 @@ func run(logger *slog.Logger) error {
 		runErr = fmt.Errorf("server error: %w", err)
 	}
 
-	// Graceful shutdown (runs for both signal and server error paths)
+	gracefulShutdown(container, grpcServer, cfg, schedulerCancel, logger)
+
+	return runErr
+}
+
+// buildGRPCServer creates and configures the gRPC server with all service registrations.
+func buildGRPCServer(container *app.Container, logger *slog.Logger) (*grpc.Server, *health.Aggregator, error) {
+	grpcServer, err := bootstrap.NewGrpcServerBuilder(container.Tracer, logger).
+		WithAuthInterceptor(container.AuthInterceptor).
+		Build()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build grpc server: %w", err)
+	}
+
+	reconciliationv1.RegisterAccountReconciliationServiceServer(grpcServer, container.ReconciliationService)
+
+	healthCheckers := []health.Checker{
+		observability.NewDatabaseChecker(container.DB),
+	}
+	if container.RedisClient != nil {
+		healthCheckers = append(healthCheckers, observability.NewRedisChecker(container.RedisClient))
+	}
+	healthAggregator := health.NewAggregator(healthCheckers)
+	grpc_health_v1.RegisterHealthServer(grpcServer, newHealthServer(healthAggregator, logger))
+
+	reflection.Register(grpcServer)
+
+	logger.Info("gRPC services registered",
+		"services", []string{"AccountReconciliationService", "Health", "Reflection"})
+
+	return grpcServer, healthAggregator, nil
+}
+
+// buildHTTPServer creates the HTTP server for metrics and health endpoints.
+func buildHTTPServer(cfg *config.Config, healthAggregator *health.Aggregator) *http.Server {
+	httpMux := http.NewServeMux()
+	httpMux.Handle("/metrics", promhttp.Handler())
+
+	healthHandler := health.NewHTTPHandler(healthAggregator)
+	healthHandler.RegisterHandlers(httpMux)
+
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%s", cfg.Observability.MetricsPort),
+		Handler:           httpMux,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
+}
+
+// shutdownHTTPServer gracefully shuts down the HTTP server.
+func shutdownHTTPServer(httpServer *http.Server, logger *slog.Logger) {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("HTTP server shutdown error", "error", err)
+	} else {
+		logger.Info("HTTP server stopped")
+	}
+}
+
+// gracefulShutdown stops the scheduler and gRPC server in order.
+func gracefulShutdown(container *app.Container, grpcServer *grpc.Server, cfg *config.Config, schedulerCancel context.CancelFunc, logger *slog.Logger) {
 	logger.Info("shutting down servers...")
 
 	// Stop scheduler first (it makes gRPC calls to self)
@@ -189,7 +209,6 @@ func run(logger *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.GracefulShutdownTimeout)
 	defer cancel()
 
-	// Gracefully stop gRPC server
 	stopped := make(chan struct{})
 	go func() {
 		grpcServer.GracefulStop()
@@ -203,8 +222,6 @@ func run(logger *slog.Logger) error {
 		logger.Warn("graceful shutdown timeout, forcing stop")
 		grpcServer.Stop()
 	}
-
-	return runErr
 }
 
 // healthServer implements the gRPC health checking protocol.

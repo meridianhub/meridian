@@ -22,10 +22,22 @@ import (
 //	defer cleanup()
 //	err := RegisterStarlarkHandlers(registry, client)
 func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) error {
-	handlers := map[string]struct {
-		handler  saga.Handler
-		metadata saga.HandlerMetadata
-	}{
+	for name, h := range buildHandlerMap(client) {
+		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
+			return fmt.Errorf("failed to register %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+type handlerEntry struct {
+	handler  saga.Handler
+	metadata saga.HandlerMetadata
+}
+
+// buildHandlerMap creates the map of handler name to handler+metadata for registration.
+func buildHandlerMap(client *Client) map[string]handlerEntry {
+	return map[string]handlerEntry{
 		"reconciliation.initiate_run": {
 			handler: initiateRunHandler(client),
 			metadata: saga.HandlerMetadata{
@@ -98,13 +110,6 @@ func RegisterStarlarkHandlers(registry *saga.HandlerRegistry, client *Client) er
 			},
 		},
 	}
-
-	for name, h := range handlers {
-		if err := registry.RegisterWithMetadata(name, h.handler, &h.metadata); err != nil {
-			return fmt.Errorf("failed to register %s: %w", name, err)
-		}
-	}
-	return nil
 }
 
 // initiateRunHandler starts a new settlement run via gRPC.
