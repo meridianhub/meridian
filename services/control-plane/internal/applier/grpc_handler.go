@@ -148,6 +148,20 @@ func (h *ApplyManifestHandler) ApplyManifest(
 		return response, nil
 	}
 
+	// Steps 3-5: Plan, execute, and record history
+	return h.applyPlanAndExecute(ctx, req, diffResult, validationResult, response, logger, skipImmutability)
+}
+
+// applyPlanAndExecute handles the plan, execute, and record history steps of ApplyManifest.
+func (h *ApplyManifestHandler) applyPlanAndExecute(
+	ctx context.Context,
+	req *controlplanev1.ApplyManifestRequest,
+	diffResult diffOutput,
+	validationResult validationOutput,
+	response *controlplanev1.ApplyManifestResponse,
+	logger *slog.Logger,
+	_ bool,
+) (*controlplanev1.ApplyManifestResponse, error) {
 	// Step 3: Plan execution
 	logger.Info("step 3: planning execution")
 	tenantID, _ := tenant.FromContext(ctx)
@@ -162,18 +176,7 @@ func (h *ApplyManifestHandler) ApplyManifest(
 
 	// Step 4: Execute (or dry-run)
 	if req.GetDryRun() {
-		logger.Info("step 4: dry run - skipping execution",
-			"planned_calls", len(execPlan.Calls))
-		response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN
-		response.StepResults = append(response.StepResults, &controlplanev1.StepResult{
-			StepName: "execute",
-			Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_SKIPPED,
-			Message:  fmt.Sprintf("Dry run: %d calls planned, execution skipped", len(execPlan.Calls)),
-			Details: map[string]string{
-				"plan_summary": execPlan.Summary(),
-			},
-		})
-		return response, nil
+		return h.buildDryRunResponse(response, execPlan, logger), nil
 	}
 
 	logger.Info("step 4: executing manifest apply")
@@ -182,19 +185,63 @@ func (h *ApplyManifestHandler) ApplyManifest(
 	response.JobId = execResult.jobID
 
 	if execResult.err != nil {
-		logger.Error("execution failed", "error", execResult.err)
-
-		// Determine if this is a partial failure (some phases succeeded)
-		applyStatus, responseStatus := classifyFailure(execResult.phaseStatus)
-		response.Status = responseStatus
-		response.PhaseStatus = phaseStatusMapToResponseProto(execResult.phaseStatus)
-
-		// Record history with phase status
-		_, _ = h.recordHistoryWithPhaseStatus(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, applyStatus, nil, 0, execResult.phaseStatus)
-		return response, nil //nolint:nilerr // error conveyed via response status, not gRPC error
+		return h.buildExecutionFailureResponse(ctx, req, execResult, response, logger), nil
 	}
 
 	// Step 5: Record history (with optimistic locking check)
+	return h.recordAndFinalize(ctx, req, execResult, validationResult, response, tenantID, logger)
+}
+
+// buildDryRunResponse constructs the response for a dry-run apply.
+func (h *ApplyManifestHandler) buildDryRunResponse(
+	response *controlplanev1.ApplyManifestResponse,
+	execPlan *planner.ExecutionPlan,
+	logger *slog.Logger,
+) *controlplanev1.ApplyManifestResponse {
+	logger.Info("step 4: dry run - skipping execution",
+		"planned_calls", len(execPlan.Calls))
+	response.Status = controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN
+	response.StepResults = append(response.StepResults, &controlplanev1.StepResult{
+		StepName: "execute",
+		Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_SKIPPED,
+		Message:  fmt.Sprintf("Dry run: %d calls planned, execution skipped", len(execPlan.Calls)),
+		Details: map[string]string{
+			"plan_summary": execPlan.Summary(),
+		},
+	})
+	return response
+}
+
+// buildExecutionFailureResponse constructs the response when execution fails.
+func (h *ApplyManifestHandler) buildExecutionFailureResponse(
+	ctx context.Context,
+	req *controlplanev1.ApplyManifestRequest,
+	execResult executeOutput,
+	response *controlplanev1.ApplyManifestResponse,
+	logger *slog.Logger,
+) *controlplanev1.ApplyManifestResponse {
+	logger.Error("execution failed", "error", execResult.err)
+
+	// Determine if this is a partial failure (some phases succeeded)
+	applyStatus, responseStatus := classifyFailure(execResult.phaseStatus)
+	response.Status = responseStatus
+	response.PhaseStatus = phaseStatusMapToResponseProto(execResult.phaseStatus)
+
+	// Record history with phase status
+	_, _ = h.recordHistoryWithPhaseStatus(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, applyStatus, nil, 0, execResult.phaseStatus)
+	return response
+}
+
+// recordAndFinalize records manifest history and finalizes the success response.
+func (h *ApplyManifestHandler) recordAndFinalize(
+	ctx context.Context,
+	req *controlplanev1.ApplyManifestRequest,
+	execResult executeOutput,
+	validationResult validationOutput,
+	response *controlplanev1.ApplyManifestResponse,
+	tenantID tenant.TenantID,
+	logger *slog.Logger,
+) (*controlplanev1.ApplyManifestResponse, error) {
 	logger.Info("step 5: recording manifest history")
 	expectedSeq := req.GetExpectedSequenceNumber()
 	snapshot, seqErr := h.recordHistory(ctx, req.GetManifest(), req.GetAppliedBy(), execResult.jobID, manifest.ApplyStatusApplied, validationResult.graph, expectedSeq)

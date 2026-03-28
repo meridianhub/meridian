@@ -101,31 +101,9 @@ func (s *Service) GetGenerationContext(
 		IncludeCurrentEconomy: req.GetIncludeCurrentEconomy(),
 	}
 
-	var currentManifest *controlplanev1.Manifest
-	var currentEconomyYAML string
-
-	if req.GetIncludeCurrentEconomy() {
-		if s.manifestHistory == nil {
-			return nil, status.Error(codes.FailedPrecondition, "manifest history is not available")
-		}
-
-		manifest, err := s.manifestHistory.GetCurrentManifest(ctx)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to get current manifest", "error", err)
-			return nil, status.Error(codes.Internal, "failed to load current manifest")
-		}
-
-		currentManifest = manifest
-		opts.CurrentManifest = currentManifest
-
-		// Serialize manifest for the response field.
-		marshaler := protojson.MarshalOptions{Multiline: true, Indent: "  ", EmitUnpopulated: false}
-		data, err := marshaler.Marshal(currentManifest)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to serialize current manifest", "error", err)
-			return nil, status.Error(codes.Internal, "failed to serialize current manifest")
-		}
-		currentEconomyYAML = string(data)
+	currentEconomyYAML, err := s.loadCurrentEconomyForContext(ctx, req, &opts)
+	if err != nil {
+		return nil, err
 	}
 
 	assembled, err := AssembleContext(opts, s.schemaRegistry, s.cookbookFS)
@@ -134,16 +112,7 @@ func (s *Service) GetGenerationContext(
 		return nil, status.Error(codes.Internal, "failed to assemble generation context")
 	}
 
-	matchedPatterns := make([]*controlplanev1.PatternContext, 0, len(assembled.MatchedPatterns))
-	for _, p := range assembled.MatchedPatterns {
-		matchedPatterns = append(matchedPatterns, &controlplanev1.PatternContext{
-			Name:             p.Name,
-			Title:            p.Title,
-			Score:            p.Score,
-			ManifestFragment: p.ManifestFragment,
-			SagaScript:       p.SagaScript,
-		})
-	}
+	matchedPatterns := toProtoPatterns(assembled.MatchedPatterns)
 
 	return &controlplanev1.GetGenerationContextResponse{
 		HandlerReferenceCard:  BuildHandlerReferenceCard(s.schemaRegistry),
@@ -152,6 +121,53 @@ func (s *Service) GetGenerationContext(
 		MatchedPatterns:       matchedPatterns,
 		CurrentEconomyYaml:    currentEconomyYAML,
 	}, nil
+}
+
+// loadCurrentEconomyForContext loads the current manifest when requested and
+// updates the assembler options. Returns the serialized YAML for the response.
+func (s *Service) loadCurrentEconomyForContext(
+	ctx context.Context,
+	req *controlplanev1.GetGenerationContextRequest,
+	opts *ContextAssemblerOptions,
+) (string, error) {
+	if !req.GetIncludeCurrentEconomy() {
+		return "", nil
+	}
+
+	if s.manifestHistory == nil {
+		return "", status.Error(codes.FailedPrecondition, "manifest history is not available")
+	}
+
+	manifest, err := s.manifestHistory.GetCurrentManifest(ctx)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to get current manifest", "error", err)
+		return "", status.Error(codes.Internal, "failed to load current manifest")
+	}
+
+	opts.CurrentManifest = manifest
+
+	marshaler := protojson.MarshalOptions{Multiline: true, Indent: "  ", EmitUnpopulated: false}
+	data, err := marshaler.Marshal(manifest)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to serialize current manifest", "error", err)
+		return "", status.Error(codes.Internal, "failed to serialize current manifest")
+	}
+	return string(data), nil
+}
+
+// toProtoPatterns converts internal PatternMatch slices to proto PatternContext slices.
+func toProtoPatterns(patterns []PatternMatch) []*controlplanev1.PatternContext {
+	result := make([]*controlplanev1.PatternContext, 0, len(patterns))
+	for _, p := range patterns {
+		result = append(result, &controlplanev1.PatternContext{
+			Name:             p.Name,
+			Title:            p.Title,
+			Score:            p.Score,
+			ManifestFragment: p.ManifestFragment,
+			SagaScript:       p.SagaScript,
+		})
+	}
+	return result
 }
 
 // amendContext holds the state loaded for amend mode generation.
@@ -228,13 +244,28 @@ func (s *Service) GenerateManifest(
 		}
 	}
 
-	// Determine max fix iterations.
 	maxIter := int(req.GetMaxFixIterations())
 	if maxIter == 0 {
 		maxIter = defaultMaxFixIterations
 	}
 
-	// Assemble the generation context / prompt.
+	// Assemble context, generate, and validate-fix.
+	assembled, fixResult, err := s.assembleAndGenerate(ctx, req, ac, maxIter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the response with metadata and validation findings.
+	return s.buildGenerateResponse(ctx, assembled, fixResult, ac)
+}
+
+// assembleAndGenerate assembles the generation context, calls the LLM, and runs the validate-fix loop.
+func (s *Service) assembleAndGenerate(
+	ctx context.Context,
+	req *controlplanev1.GenerateManifestRequest,
+	ac *amendContext,
+	maxIter int,
+) (*AssembledContext, *ValidateFixResult, error) {
 	assembleOpts := ContextAssemblerOptions{
 		Description:     req.GetDescription(),
 		IncludePatterns: true,
@@ -251,17 +282,15 @@ func (s *Service) GenerateManifest(
 	assembled, err := AssembleContext(assembleOpts, s.schemaRegistry, s.cookbookFS)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to assemble generation context", "error", err)
-		return nil, status.Errorf(codes.Internal, "assemble context: %v", err)
+		return nil, nil, status.Errorf(codes.Internal, "assemble context: %v", err)
 	}
 
-	// Call the LLM to generate the initial manifest YAML.
 	generatedYAML, err := s.llmClient.Generate(ctx, assembled.Prompt)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "LLM generation failed", "error", err)
-		return nil, status.Errorf(codes.Internal, "generate manifest: %v", err)
+		return nil, nil, status.Errorf(codes.Internal, "generate manifest: %v", err)
 	}
 
-	// Run the validate-fix loop.
 	fixResult, err := ValidateAndFix(ctx, generatedYAML, ValidateFixOptions{
 		MaxIterations:  maxIter,
 		LLMClient:      s.llmClient,
@@ -270,10 +299,19 @@ func (s *Service) GenerateManifest(
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "validate-fix loop failed", "error", err)
-		return nil, status.Errorf(codes.Internal, "validate and fix manifest: %v", err)
+		return nil, nil, status.Errorf(codes.Internal, "validate and fix manifest: %v", err)
 	}
 
-	// Extract metadata from the final manifest YAML.
+	return assembled, fixResult, nil
+}
+
+// buildGenerateResponse constructs the GenerateManifestResponse with metadata and validation findings.
+func (s *Service) buildGenerateResponse(
+	ctx context.Context,
+	assembled *AssembledContext,
+	fixResult *ValidateFixResult,
+	ac *amendContext,
+) (*controlplanev1.GenerateManifestResponse, error) {
 	meta, extractErr := extractManifestMetadata(fixResult.FinalManifest)
 	if extractErr != nil {
 		s.logger.WarnContext(ctx, "failed to extract manifest metadata", "error", extractErr)
@@ -282,11 +320,9 @@ func (s *Service) GenerateManifest(
 	meta.FixIterations = int32(fixResult.IterationsUsed)
 	meta.PatternsUsed = patternNames(assembled.MatchedPatterns)
 
-	// Convert validation findings to proto.
 	protoErrors := toProtoValidationErrors(fixResult.Errors)
 	protoWarnings := toProtoValidationErrors(fixResult.Warnings)
 
-	// For amend mode, compute impact analysis and flag removals as warnings.
 	if ac != nil {
 		protoWarnings = append(protoWarnings, applyAmendImpact(ac.originalYAML, fixResult.FinalManifest, meta)...)
 	}

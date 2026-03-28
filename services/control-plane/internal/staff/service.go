@@ -235,60 +235,16 @@ func (s *Service) ListStaff(ctx context.Context) ([]User, error) {
 // CreateAPIKey generates a new API key for a staff user.
 // The plaintext key is returned only once and must not be stored by the service.
 func (s *Service) CreateAPIKey(ctx context.Context, staffUserID uuid.UUID, tenantSlug, name string, scopes []string, ttl time.Duration) (*APIKeyResult, error) {
-	// Verify staff user exists and is not suspended
-	var staffEntity UserEntity
-	err := db.WithGormTenantTransaction(ctx, s.gormDB, func(tx *gorm.DB) error {
-		if err := tx.Where("id = ?", staffUserID).First(&staffEntity).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrStaffNotFound
-			}
-			return err
-		}
-		return nil
-	})
+	if err := s.verifyStaffNotSuspended(ctx, staffUserID); err != nil {
+		return nil, err
+	}
+
+	plaintextKey, keyPrefix, keyHash, err := generateAPIKeyMaterial(tenantSlug)
 	if err != nil {
 		return nil, err
 	}
 
-	if staffEntity.Status == StatusSuspended {
-		return nil, ErrStaffSuspended
-	}
-
-	// Generate cryptographically random key material (32 bytes = 256 bits)
-	keyBytes := make([]byte, 32)
-	if _, err := rand.Read(keyBytes); err != nil {
-		return nil, fmt.Errorf("generate key entropy: %w", err)
-	}
-	entropy := base64.RawURLEncoding.EncodeToString(keyBytes)
-
-	// Build prefixed key: pk_{slug}_{entropy}
-	plaintextKey := fmt.Sprintf("pk_%s_%s", tenantSlug, entropy)
-
-	// Extract prefix for routing: pk_{slug}_{first8}
-	keyPrefix := fmt.Sprintf("pk_%s_%s", tenantSlug, entropy[:8])
-
-	// Hash with SHA-256 (high-entropy keys don't need argon2id)
-	hash := sha256.Sum256([]byte(plaintextKey))
-
-	now := time.Now()
-	entity := &APIKeyEntity{
-		ID:           uuid.New(),
-		StaffUserID:  staffUserID,
-		KeyPrefix:    keyPrefix,
-		KeyHash:      hash[:],
-		RateLimitRPS: 100,
-		CreatedAt:    now,
-	}
-	if name != "" {
-		entity.Name = &name
-	}
-	if len(scopes) > 0 {
-		entity.Scopes = pq.StringArray(scopes)
-	}
-	if ttl > 0 {
-		expiresAt := now.Add(ttl)
-		entity.ExpiresAt = &expiresAt
-	}
+	entity := buildAPIKeyEntity(staffUserID, keyPrefix, keyHash, name, scopes, ttl)
 
 	err = db.WithGormTenantTransaction(ctx, s.gormDB, func(tx *gorm.DB) error {
 		return tx.Create(entity).Error
@@ -312,6 +268,67 @@ func (s *Service) CreateAPIKey(ctx context.Context, staffUserID uuid.UUID, tenan
 		ExpiresAt:    entity.ExpiresAt,
 		CreatedAt:    entity.CreatedAt,
 	}, nil
+}
+
+// verifyStaffNotSuspended checks that the staff user exists and is not suspended.
+func (s *Service) verifyStaffNotSuspended(ctx context.Context, staffUserID uuid.UUID) error {
+	var staffEntity UserEntity
+	err := db.WithGormTenantTransaction(ctx, s.gormDB, func(tx *gorm.DB) error {
+		if err := tx.Where("id = ?", staffUserID).First(&staffEntity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrStaffNotFound
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if staffEntity.Status == StatusSuspended {
+		return ErrStaffSuspended
+	}
+	return nil
+}
+
+// generateAPIKeyMaterial generates the cryptographic key material for an API key.
+// Returns the plaintext key, prefix for routing, and SHA-256 hash.
+func generateAPIKeyMaterial(tenantSlug string) (plaintextKey, keyPrefix string, keyHash [32]byte, err error) {
+	keyBytes := make([]byte, 32)
+	if _, err = rand.Read(keyBytes); err != nil {
+		return "", "", [32]byte{}, fmt.Errorf("generate key entropy: %w", err)
+	}
+	entropy := base64.RawURLEncoding.EncodeToString(keyBytes)
+
+	plaintextKey = fmt.Sprintf("pk_%s_%s", tenantSlug, entropy)
+	keyPrefix = fmt.Sprintf("pk_%s_%s", tenantSlug, entropy[:8])
+	keyHash = sha256.Sum256([]byte(plaintextKey))
+
+	return plaintextKey, keyPrefix, keyHash, nil
+}
+
+// buildAPIKeyEntity constructs an APIKeyEntity from the given parameters.
+func buildAPIKeyEntity(staffUserID uuid.UUID, keyPrefix string, keyHash [32]byte, name string, scopes []string, ttl time.Duration) *APIKeyEntity {
+	now := time.Now()
+	entity := &APIKeyEntity{
+		ID:           uuid.New(),
+		StaffUserID:  staffUserID,
+		KeyPrefix:    keyPrefix,
+		KeyHash:      keyHash[:],
+		RateLimitRPS: 100,
+		CreatedAt:    now,
+	}
+	if name != "" {
+		entity.Name = &name
+	}
+	if len(scopes) > 0 {
+		entity.Scopes = pq.StringArray(scopes)
+	}
+	if ttl > 0 {
+		expiresAt := now.Add(ttl)
+		entity.ExpiresAt = &expiresAt
+	}
+	return entity
 }
 
 // RevokeAPIKey marks an API key as revoked by its prefix.

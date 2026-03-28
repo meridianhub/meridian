@@ -17,7 +17,9 @@ import (
 	"github.com/meridianhub/meridian/services/control-plane/service"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/ports"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -70,40 +72,71 @@ func run(logger *slog.Logger) error {
 	}
 	defer bootstrap.ShutdownTracer(tracer, logger)
 
-	// Initialize pgxpool connection (control-plane uses pgxpool directly, not GORM)
+	// Initialize database connection
+	pool, err := initDatabase(ctx, logger)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	// Build gRPC server with auth and RBAC interceptors
+	grpcServer, err := buildGRPCServer(ctx, tracer, logger)
+	if err != nil {
+		return err
+	}
+
+	// Register services
+	if err := registerServices(grpcServer, pool, logger); err != nil {
+		return err
+	}
+
+	// Start listener and wait for shutdown
+	return startAndServe(grpcServer, pool, logger)
+}
+
+// initDatabase creates and validates the pgxpool database connection.
+func initDatabase(ctx context.Context, logger *slog.Logger) (*pgxpool.Pool, error) {
 	dbURL := env.GetEnvOrDefault("DATABASE_URL", "")
 	if dbURL == "" {
-		return bootstrap.Permanent(ErrMissingDatabaseURL)
+		return nil, bootstrap.Permanent(ErrMissingDatabaseURL)
 	}
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer pool.Close()
 
 	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("failed to ping database: %w", err)
+		pool.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 	logger.Info("database connection established")
 
-	// Initialize auth interceptor (optional)
+	return pool, nil
+}
+
+// buildGRPCServer creates the gRPC server with auth and RBAC interceptors.
+func buildGRPCServer(ctx context.Context, tracer *observability.Tracer, logger *slog.Logger) (*grpc.Server, error) {
 	authConfig := bootstrap.DefaultAuthConfig(logger)
 	authInterceptor, err := bootstrap.NewAuthInterceptor(ctx, authConfig)
 	if err != nil {
-		return fmt.Errorf("failed to initialize auth: %w", err)
+		return nil, fmt.Errorf("failed to initialize auth: %w", err)
 	}
 
-	// Create gRPC server with RBAC interceptor for manifest operations
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithAuthInterceptor(authInterceptor).
 		WithUnaryInterceptor(server.ManifestRBACUnaryInterceptor()).
 		WithStreamInterceptor(server.ManifestRBACStreamInterceptor()).
 		Build()
 	if err != nil {
-		return fmt.Errorf("failed to build grpc server: %w", err)
+		return nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
 
+	return grpcServer, nil
+}
+
+// registerServices registers gRPC services including control-plane, health, and reflection.
+func registerServices(grpcServer *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
 	// Register ApplyManifestService.
 	// HandlerDeps is nil here: this binary validates, diffs, and plans manifests
 	// but defers saga execution to the unified binary which has access to downstream
@@ -125,18 +158,19 @@ func run(logger *slog.Logger) error {
 	reflection.Register(grpcServer)
 
 	logger.Info("gRPC services registered")
+	return nil
+}
 
-	// Get port from environment
+// startAndServe creates a listener, starts the gRPC server, and waits for shutdown.
+func startAndServe(grpcServer *grpc.Server, pool *pgxpool.Pool, logger *slog.Logger) error {
 	port := env.GetEnvOrDefault("GRPC_PORT", strconv.Itoa(ports.ControlPlane))
 	address := fmt.Sprintf(":%s", port)
 
-	// Create listener
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", address, err)
 	}
 
-	// Start gRPC server in background
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("starting gRPC server", "address", address)
@@ -145,9 +179,7 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
-	// Wait for shutdown signal
 	orchestrator := bootstrap.NewShutdownOrchestrator(grpcServer, logger)
-
 	orchestrator.AddCleanup(func() error {
 		pool.Close()
 		logger.Info("database connection closed")

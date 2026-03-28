@@ -205,28 +205,46 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 	var buf strings.Builder
 	w := csv.NewWriter(&buf)
 
-	// Write metadata header
-	if err := w.Write([]string{"# Balance Sheet Export"}); err != nil {
-		return "", fmt.Errorf("write metadata: %w", err)
-	}
-	if err := w.Write([]string{"# Tenant", sanitizeCSVCell(bs.TenantID)}); err != nil {
-		return "", fmt.Errorf("write tenant: %w", err)
-	}
-	if err := w.Write([]string{"# Generated At", bs.AsOf.Format(time.RFC3339)}); err != nil {
-		return "", fmt.Errorf("write timestamp: %w", err)
-	}
-	if err := w.Write([]string{""}); err != nil {
-		return "", fmt.Errorf("write separator: %w", err)
+	if err := writeCSVMetadataHeader(w, bs); err != nil {
+		return "", err
 	}
 
-	// Write column headers
+	if err := writeCSVSectionRows(w, bs); err != nil {
+		return "", err
+	}
+
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return "", fmt.Errorf("flush CSV: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// writeCSVMetadataHeader writes the metadata header and column headers to the CSV writer.
+func writeCSVMetadataHeader(w *csv.Writer, bs *BalanceSheet) error {
+	if err := w.Write([]string{"# Balance Sheet Export"}); err != nil {
+		return fmt.Errorf("write metadata: %w", err)
+	}
+	if err := w.Write([]string{"# Tenant", sanitizeCSVCell(bs.TenantID)}); err != nil {
+		return fmt.Errorf("write tenant: %w", err)
+	}
+	if err := w.Write([]string{"# Generated At", bs.AsOf.Format(time.RFC3339)}); err != nil {
+		return fmt.Errorf("write timestamp: %w", err)
+	}
+	if err := w.Write([]string{""}); err != nil {
+		return fmt.Errorf("write separator: %w", err)
+	}
 	if err := w.Write([]string{
 		"classification", "account_type", "instrument", "quantity", "normal_balance", "account_count",
 	}); err != nil {
-		return "", fmt.Errorf("write header: %w", err)
+		return fmt.Errorf("write header: %w", err)
 	}
+	return nil
+}
 
-	// Write line items
+// writeCSVSectionRows writes line items and section totals for all sections.
+func writeCSVSectionRows(w *csv.Writer, bs *BalanceSheet) error {
 	for _, section := range bs.Sections {
 		for _, item := range section.LineItems {
 			if err := w.Write([]string{
@@ -237,11 +255,10 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 				sanitizeCSVCell(string(item.NormalBalance)),
 				fmt.Sprintf("%d", item.AccountCount),
 			}); err != nil {
-				return "", fmt.Errorf("write line item: %w", err)
+				return fmt.Errorf("write line item: %w", err)
 			}
 		}
 
-		// Write section totals in sorted instrument order for deterministic output.
 		instruments := make([]string, 0, len(section.Totals))
 		for instrument := range section.Totals {
 			instruments = append(instruments, instrument)
@@ -257,17 +274,11 @@ func (s *BalanceSheetService) ExportBalanceSheetCSV(ctx context.Context, tenantI
 				"",
 				"",
 			}); err != nil {
-				return "", fmt.Errorf("write total: %w", err)
+				return fmt.Errorf("write total: %w", err)
 			}
 		}
 	}
-
-	w.Flush()
-	if err := w.Error(); err != nil {
-		return "", fmt.Errorf("flush CSV: %w", err)
-	}
-
-	return buf.String(), nil
+	return nil
 }
 
 // fetchPositionLogs retrieves all position logs for a tenant from position-keeping,
@@ -322,17 +333,25 @@ func (s *BalanceSheetService) fetchPositionLogs(ctx context.Context, tenantID st
 
 // aggregateAndClassify groups position logs by account type and instrument,
 // then classifies them into balance sheet sections.
+// aggregateKey identifies a unique account type + instrument combination.
+type aggregateKey struct {
+	accountType string
+	instrument  string
+}
+
+// aggregateValue holds the running totals for an aggregate key.
+type aggregateValue struct {
+	quantity   decimal.Decimal
+	accountIDs map[string]bool
+}
+
 func (s *BalanceSheetService) aggregateAndClassify(logs []*positionkeepingv1.FinancialPositionLog) []BalanceSheetSection {
-	type aggregateKey struct {
-		accountType string
-		instrument  string
-	}
+	aggregates := s.aggregatePositionLogs(logs)
+	return buildBalanceSheetSections(aggregates)
+}
 
-	type aggregateValue struct {
-		quantity   decimal.Decimal
-		accountIDs map[string]bool
-	}
-
+// aggregatePositionLogs groups position logs by account type and instrument.
+func (s *BalanceSheetService) aggregatePositionLogs(logs []*positionkeepingv1.FinancialPositionLog) map[aggregateKey]*aggregateValue {
 	aggregates := make(map[aggregateKey]*aggregateValue)
 
 	for _, log := range logs {
@@ -352,7 +371,11 @@ func (s *BalanceSheetService) aggregateAndClassify(logs []*positionkeepingv1.Fin
 		}
 	}
 
-	// Build sections
+	return aggregates
+}
+
+// buildBalanceSheetSections classifies aggregated positions into balance sheet sections.
+func buildBalanceSheetSections(aggregates map[aggregateKey]*aggregateValue) []BalanceSheetSection {
 	sectionMap := map[BalanceSheetClassification]*BalanceSheetSection{
 		ClassificationAssets: {
 			Classification: ClassificationAssets,
@@ -397,7 +420,6 @@ func (s *BalanceSheetService) aggregateAndClassify(logs []*positionkeepingv1.Fin
 		})
 	}
 
-	// Return sections in standard order: ASSETS, LIABILITIES, EQUITY
 	return []BalanceSheetSection{
 		*sectionMap[ClassificationAssets],
 		*sectionMap[ClassificationLiabilities],

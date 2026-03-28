@@ -183,6 +183,24 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 		return nil
 	}
 
+	execErr := v.executeStarlarkScript(fileOpts, sagaName, script, predeclared)
+	if execErr != nil {
+		v.handleStarlarkExecError(execErr, path, sagaName, result)
+		return nil
+	}
+
+	v.propagateDeprecationWarnings(deprecationWarnings, path, sagaName, result)
+
+	return *callLog
+}
+
+// executeStarlarkScript runs a Starlark script in a sandboxed thread.
+func (v *ManifestValidator) executeStarlarkScript(
+	fileOpts *syntax.FileOptions,
+	sagaName string,
+	script string,
+	predeclared starlark.StringDict,
+) error {
 	thread := &starlark.Thread{
 		Name:  sagaName,
 		Print: func(_ *starlark.Thread, _ string) {},
@@ -190,38 +208,44 @@ func (v *ManifestValidator) validateSingleStarlarkScript(
 	sandbox.HardenThread(thread, sandbox.DefaultConfig())
 
 	_, execErr := starlark.ExecFileOptions(fileOpts, thread, sagaName+".star", script, predeclared)
-	if execErr != nil {
-		ve := parseStarlarkError(execErr, path)
-		ve.ResourceType = "saga"
-		ve.ResourceID = sagaName
+	return execErr
+}
 
-		// Enrich with structured error codes from handler validation failures
-		if v.enrichHandlerValidationError(execErr, &ve) {
-			addError(result, ve)
-			return nil
-		}
+// handleStarlarkExecError enriches and reports a Starlark execution error.
+func (v *ManifestValidator) handleStarlarkExecError(execErr error, path, sagaName string, result *ValidationResult) {
+	ve := parseStarlarkError(execErr, path)
+	ve.ResourceType = "saga"
+	ve.ResourceID = sagaName
 
-		addStarlarkUndefinedSuggestion(execErr, &ve)
+	if v.enrichHandlerValidationError(execErr, &ve) {
 		addError(result, ve)
-		return nil
+		return
 	}
 
-	// Propagate deprecation warnings from handler evolution
-	if deprecationWarnings != nil {
-		for _, w := range *deprecationWarnings {
-			addError(result, ValidationError{
-				Severity:     SeverityWarning,
-				Path:         path,
-				Code:         w.Code,
-				Message:      w.Message,
-				Suggestion:   w.Suggestion,
-				ResourceType: "saga",
-				ResourceID:   sagaName,
-			})
-		}
-	}
+	addStarlarkUndefinedSuggestion(execErr, &ve)
+	addError(result, ve)
+}
 
-	return *callLog
+// propagateDeprecationWarnings adds deprecation warnings from handler evolution to the result.
+func (v *ManifestValidator) propagateDeprecationWarnings(
+	warnings *[]schema.ValidationWarning,
+	path, sagaName string,
+	result *ValidationResult,
+) {
+	if warnings == nil {
+		return
+	}
+	for _, w := range *warnings {
+		addError(result, ValidationError{
+			Severity:     SeverityWarning,
+			Path:         path,
+			Code:         w.Code,
+			Message:      w.Message,
+			Suggestion:   w.Suggestion,
+			ResourceType: "saga",
+			ResourceID:   sagaName,
+		})
+	}
 }
 
 // addStarlarkUndefinedSuggestion enriches a validation error with a "Did you mean?" suggestion
