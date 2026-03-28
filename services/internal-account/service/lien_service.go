@@ -145,61 +145,28 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	}
 
 	// Redis idempotency guard: check/mark-pending/store-result cycle.
-	// Placed before lienRepo nil check so cached responses are returned without DB access.
 	var idempKey idempotency.Key
-	var idempotencyKeyStr string
 	var idempotencyLockAcquired bool
 	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" && s.idempotencyService != nil {
-		idempotencyKeyStr = req.IdempotencyKey.Key
-		tenantID, tenantOk := tenant.FromContext(ctx)
-		if !tenantOk {
-			s.logger.Warn("tenant context missing for idempotency key, using empty tenant")
+		var cachedResp pb.ExecuteLienResponse
+		key, lockAcquired, cachedResult, guardErr := s.acquireIdempotencyGuard(ctx, "execute_lien", req.LienId, req.IdempotencyKey.Key, &cachedResp)
+		if guardErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, guardErr
 		}
-		idempKey = idempotency.Key{
-			TenantID:  string(tenantID),
-			Namespace: idempotencyNamespace,
-			Operation: "execute_lien",
-			EntityID:  req.LienId,
-			RequestID: idempotencyKeyStr,
-		}
-
-		// Check Redis for a cached result from a prior successful execution.
-		result, checkErr := s.idempotencyService.Check(ctx, idempKey)
-		if errors.Is(checkErr, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
-			var cachedResp pb.ExecuteLienResponse
-			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
-			if unmarshalErr == nil {
-				s.logger.Info("returning cached execute lien response",
-					"lien_id", req.LienId,
-					"idempotency_key", idempotencyKeyStr)
-				operationStatus = opStatusIdempotent
-				return &cachedResp, nil
-			}
-			s.logger.Warn("failed to unmarshal cached idempotency result", "error", unmarshalErr)
-		} else if checkErr != nil && !errors.Is(checkErr, idempotency.ErrResultNotFound) {
-			s.logger.Error("idempotency check failed", "error", checkErr)
-			return nil, status.Error(codes.Internal, "failed to check idempotency")
+		idempKey = key
+		idempotencyLockAcquired = lockAcquired
+		if cachedResult != nil {
+			operationStatus = opStatusIdempotent
+			return cachedResult.(*pb.ExecuteLienResponse), nil
 		}
 
-		// Mark operation as pending to block concurrent duplicate requests.
-		if markErr := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); markErr != nil {
-			if errors.Is(markErr, idempotency.ErrOperationAlreadyProcessed) {
-				s.logger.Info("operation already in progress, please retry",
-					"idempotency_key", idempotencyKeyStr)
-				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
-			}
-			s.logger.Error("failed to mark operation pending", "error", markErr)
-			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
-		}
-		idempotencyLockAcquired = true
-
-		// On failure, clean up the pending key so retries are not blocked.
 		defer func() {
 			if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
 				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
 					s.logger.Warn("failed to clean up pending idempotency state",
 						"error", delErr,
-						"idempotency_key", idempotencyKeyStr)
+						"idempotency_key", req.IdempotencyKey.Key)
 				}
 			}
 		}()
@@ -315,51 +282,20 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	// Redis idempotency guard: check/mark-pending/store-result cycle.
 	// Placed before lienRepo nil check so cached responses are returned without DB access.
 	var idempKey idempotency.Key
-	var idempotencyKeyStr string
 	var idempotencyLockAcquired bool
 	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" && s.idempotencyService != nil {
-		idempotencyKeyStr = req.IdempotencyKey.Key
-		tenantID, tenantOk := tenant.FromContext(ctx)
-		if !tenantOk {
-			s.logger.Warn("tenant context missing for idempotency key, using empty tenant")
+		var cachedResp pb.TerminateLienResponse
+		key, lockAcquired, cachedResult, guardErr := s.acquireIdempotencyGuard(ctx, "terminate_lien", req.LienId, req.IdempotencyKey.Key, &cachedResp)
+		if guardErr != nil {
+			operationStatus = operationStatusFailed
+			return nil, guardErr
 		}
-		idempKey = idempotency.Key{
-			TenantID:  string(tenantID),
-			Namespace: idempotencyNamespace,
-			Operation: "terminate_lien",
-			EntityID:  req.LienId,
-			RequestID: idempotencyKeyStr,
+		idempKey = key
+		idempotencyLockAcquired = lockAcquired
+		if cachedResult != nil {
+			operationStatus = opStatusIdempotent
+			return cachedResult.(*pb.TerminateLienResponse), nil
 		}
-
-		// Check Redis for a cached result from a prior successful termination.
-		result, checkErr := s.idempotencyService.Check(ctx, idempKey)
-		if errors.Is(checkErr, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
-			var cachedResp pb.TerminateLienResponse
-			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
-			if unmarshalErr == nil {
-				s.logger.Info("returning cached terminate lien response",
-					"lien_id", req.LienId,
-					"idempotency_key", idempotencyKeyStr)
-				operationStatus = opStatusIdempotent
-				return &cachedResp, nil
-			}
-			s.logger.Warn("failed to unmarshal cached idempotency result", "error", unmarshalErr)
-		} else if checkErr != nil && !errors.Is(checkErr, idempotency.ErrResultNotFound) {
-			s.logger.Error("idempotency check failed", "error", checkErr)
-			return nil, status.Error(codes.Internal, "failed to check idempotency")
-		}
-
-		// Mark operation as pending to block concurrent duplicate requests.
-		if markErr := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); markErr != nil {
-			if errors.Is(markErr, idempotency.ErrOperationAlreadyProcessed) {
-				s.logger.Info("operation already in progress, please retry",
-					"idempotency_key", idempotencyKeyStr)
-				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
-			}
-			s.logger.Error("failed to mark operation pending", "error", markErr)
-			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
-		}
-		idempotencyLockAcquired = true
 
 		// On failure, clean up the pending key so retries are not blocked.
 		defer func() {
@@ -367,7 +303,7 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
 					s.logger.Warn("failed to clean up pending idempotency state",
 						"error", delErr,
-						"idempotency_key", idempotencyKeyStr)
+						"idempotency_key", req.IdempotencyKey.Key)
 				}
 			}
 		}()
@@ -527,6 +463,54 @@ func (s *Service) storeIdempotencyResultOrCleanup(ctx context.Context, idempKey 
 			s.logger.Warn(logPrefix+": failed to clear pending idempotency state after cache error", "error", delErr)
 		}
 	}
+}
+
+// acquireIdempotencyGuard performs the Redis idempotency check/mark-pending cycle.
+// It returns the built key, whether a pending lock was acquired, a cached result
+// (non-nil only when a prior completed response exists), or an error.
+// cachedResp must be a pointer to the proto message type to unmarshal into.
+func (s *Service) acquireIdempotencyGuard(ctx context.Context, operation, entityID, requestID string, cachedResp proto.Message) (idempotency.Key, bool, proto.Message, error) {
+	tenantID, tenantOk := tenant.FromContext(ctx)
+	if !tenantOk {
+		s.logger.Warn("tenant context missing for idempotency key, using empty tenant")
+	}
+	key := idempotency.Key{
+		TenantID:  string(tenantID),
+		Namespace: idempotencyNamespace,
+		Operation: operation,
+		EntityID:  entityID,
+		RequestID: requestID,
+	}
+
+	// Check Redis for a cached result from a prior successful operation.
+	result, checkErr := s.idempotencyService.Check(ctx, key)
+	if errors.Is(checkErr, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
+		unmarshalErr := proto.Unmarshal(result.Data, cachedResp)
+		if unmarshalErr == nil {
+			s.logger.Info("returning cached response",
+				"entity_id", entityID,
+				"operation", operation,
+				"idempotency_key", requestID)
+			return key, false, cachedResp, nil
+		}
+		s.logger.Warn("failed to unmarshal cached idempotency result", "error", unmarshalErr)
+	} else if checkErr != nil && !errors.Is(checkErr, idempotency.ErrResultNotFound) {
+		s.logger.Error("idempotency check failed", "error", checkErr)
+		return key, false, nil, status.Error(codes.Internal, "failed to check idempotency")
+	}
+
+	// Mark operation as pending to block concurrent duplicate requests.
+	if markErr := s.idempotencyService.MarkPending(ctx, key, idempotencyPendingTTL); markErr != nil {
+		if errors.Is(markErr, idempotency.ErrOperationAlreadyProcessed) {
+			s.logger.Info("operation already in progress, please retry",
+				"idempotency_key", requestID)
+			return key, false, nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
+		s.logger.Error("failed to mark operation pending", "error", markErr)
+		return key, false, nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
+	}
+
+	return key, true, nil, nil
 }
 
 // buildInitiateLienResponse constructs a consistent InitiateLienResponse

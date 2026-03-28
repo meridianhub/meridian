@@ -52,7 +52,17 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 		return nil, status.Error(codes.Unimplemented, "position keeping service not configured")
 	}
 
-	// Query Position Keeping service (source of truth for balance) with timeout
+	balanceResp, err := s.queryPositionKeepingBalance(ctx, account, req.AccountId)
+	if err != nil {
+		operationStatus = opStatusPositionKeepingError
+		return nil, err
+	}
+
+	return buildGetBalanceResponse(req.AccountId, balanceResp), nil
+}
+
+// queryPositionKeepingBalance calls the Position Keeping service to fetch account balances.
+func (s *Service) queryPositionKeepingBalance(ctx context.Context, account domain.InternalAccount, accountID string) (*positionkeepingv1.GetAccountBalancesResponse, error) {
 	pkCtx, pkCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer pkCancel()
 
@@ -64,26 +74,25 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 	pkDuration := time.Since(pkStart)
 
 	if err != nil {
-		operationStatus = opStatusPositionKeepingError
 		ibaobservability.RecordBalanceQueryDuration(operationStatusFailed, pkDuration)
 		s.logger.Error("failed to query balance from Position Keeping",
-			"account_id", req.AccountId,
+			"account_id", accountID,
 			"duration_ms", pkDuration.Milliseconds(),
 			"error", err)
-		// Map Position Keeping errors to appropriate gRPC codes
 		return nil, mapPositionKeepingErrorToGRPC(err)
 	}
 
-	// Record successful balance query duration (target <50ms p99)
 	ibaobservability.RecordBalanceQueryDuration(operationStatusSuccess, pkDuration)
+	return balanceResp, nil
+}
 
-	// Resolve as_of: use Position Keeping's timestamp, fall back to current time
+// buildGetBalanceResponse constructs a GetBalanceResponse from a Position Keeping balance response.
+func buildGetBalanceResponse(accountID string, balanceResp *positionkeepingv1.GetAccountBalancesResponse) *pb.GetBalanceResponse {
 	asOf := balanceResp.GetAsOf()
 	if asOf == nil {
 		asOf = timestamppb.Now()
 	}
 
-	// Find the current balance from the response.
 	var currentBalance *quantityv1.InstrumentAmount
 	for _, entry := range balanceResp.GetBalances() {
 		if entry.GetBalanceType() == positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT {
@@ -93,10 +102,10 @@ func (s *Service) GetBalance(ctx context.Context, req *pb.GetBalanceRequest) (*p
 	}
 
 	return &pb.GetBalanceResponse{
-		AccountId:      req.AccountId,
+		AccountId:      accountID,
 		CurrentBalance: currentBalance,
 		AsOf:           asOf,
-	}, nil
+	}
 }
 
 // mapPositionKeepingErrorToGRPC maps Position Keeping service errors to appropriate gRPC status codes.

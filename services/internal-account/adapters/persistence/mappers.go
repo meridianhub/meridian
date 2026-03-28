@@ -11,44 +11,10 @@ import (
 // toEntity converts a domain InternalAccount to a persistence entity.
 func toEntity(ctx context.Context, account domain.InternalAccount) *InternalAccountEntity {
 	auditUser := audit.GetUserFromContext(ctx)
-
-	// Handle nullable counterparty fields
-	var counterpartyID, counterpartyName, counterpartyExternalRef *string
-	if counterparty := account.Counterparty(); counterparty != nil {
-		id := counterparty.CounterpartyID()
-		name := counterparty.CounterpartyName()
-		externalRef := counterparty.ExternalRef()
-		counterpartyID = &id
-		counterpartyName = &name
-		counterpartyExternalRef = &externalRef
-	}
-
-	// Convert attributes map
-	var attributes AttributesJSON
-	if attrs := account.Attributes(); attrs != nil {
-		attributes = make(AttributesJSON, len(attrs))
-		for k, v := range attrs {
-			attributes[k] = v
-		}
-	} else {
-		attributes = make(AttributesJSON)
-	}
-
-	// Handle nullable clearing_purpose field
-	var clearingPurpose *string
-	if cp := account.ClearingPurpose(); cp != "" && cp != domain.ClearingPurposeUnspecified {
-		cpStr := string(cp)
-		clearingPurpose = &cpStr
-	}
-
-	// Handle nullable product type fields
-	var productTypeCode *string
-	var productTypeVersion *int
-	if ptc := account.ProductTypeCode(); ptc != "" {
-		productTypeCode = &ptc
-		ptv := account.ProductTypeVersion()
-		productTypeVersion = &ptv
-	}
+	counterpartyID, counterpartyName, counterpartyExternalRef := mapCounterpartyFields(account)
+	attributes := mapAttributes(account)
+	clearingPurpose := mapClearingPurpose(account)
+	productTypeCode, productTypeVersion := mapProductTypeFields(account)
 
 	return &InternalAccountEntity{
 		ID:                      account.ID(),
@@ -73,6 +39,47 @@ func toEntity(ctx context.Context, account domain.InternalAccount) *InternalAcco
 		CreatedBy:               auditUser,
 		UpdatedBy:               auditUser,
 	}
+}
+
+// mapCounterpartyFields extracts nullable counterparty fields from the domain account.
+func mapCounterpartyFields(account domain.InternalAccount) (*string, *string, *string) {
+	if counterparty := account.Counterparty(); counterparty != nil {
+		id := counterparty.CounterpartyID()
+		name := counterparty.CounterpartyName()
+		externalRef := counterparty.ExternalRef()
+		return &id, &name, &externalRef
+	}
+	return nil, nil, nil
+}
+
+// mapAttributes converts the domain attributes map to persistence AttributesJSON.
+func mapAttributes(account domain.InternalAccount) AttributesJSON {
+	if attrs := account.Attributes(); attrs != nil {
+		attributes := make(AttributesJSON, len(attrs))
+		for k, v := range attrs {
+			attributes[k] = v
+		}
+		return attributes
+	}
+	return make(AttributesJSON)
+}
+
+// mapClearingPurpose converts the domain clearing purpose to a nullable string.
+func mapClearingPurpose(account domain.InternalAccount) *string {
+	if cp := account.ClearingPurpose(); cp != "" && cp != domain.ClearingPurposeUnspecified {
+		cpStr := string(cp)
+		return &cpStr
+	}
+	return nil
+}
+
+// mapProductTypeFields extracts nullable product type fields from the domain account.
+func mapProductTypeFields(account domain.InternalAccount) (*string, *int) {
+	if ptc := account.ProductTypeCode(); ptc != "" {
+		ptv := account.ProductTypeVersion()
+		return &ptc, &ptv
+	}
+	return nil, nil
 }
 
 // toDomain converts a persistence entity to a domain InternalAccount.
