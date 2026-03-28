@@ -116,29 +116,16 @@ create_account_with_deposit() {
         metadata_args="-H x-tenant-id:${org_id}"
     fi
 
-    # Determine if this is a fiat currency (CURRENCY_ prefix) or non-fiat instrument
-    local is_fiat=false
-    local instrument_code="${instrument}"
-    if [[ "${instrument}" == CURRENCY_* ]]; then
-        is_fiat=true
-        instrument_code="${instrument#CURRENCY_}"
-    fi
+    # Strip CURRENCY_ prefix if present (legacy convention from fiat-only era)
+    local instrument_code="${instrument#CURRENCY_}"
 
     # Try to create account (will fail if exists - that's OK, idempotent)
-    local create_payload
-    if [ "$is_fiat" = true ]; then
-        create_payload="{
-            \"party_id\": \"${party_id}\",
-            \"account_identification\": \"${iban}\",
-            \"base_currency\": \"${instrument}\"
-        }"
-    else
-        create_payload="{
-            \"party_id\": \"${party_id}\",
-            \"account_identification\": \"${iban}\",
-            \"instrument_code\": \"${instrument_code}\"
-        }"
-    fi
+    # Proto field is instrument_code for all asset types (fiat and non-fiat)
+    local create_payload="{
+        \"party_id\": \"${party_id}\",
+        \"account_identification\": \"${iban}\",
+        \"instrument_code\": \"${instrument_code}\"
+    }"
 
     local create_result
     # shellcheck disable=SC2086 # metadata_args must word-split for grpcurl -H flag
@@ -171,32 +158,16 @@ create_account_with_deposit() {
             target_account_id="${account_id}"
         fi
 
-        # Build deposit payload - use input field for non-fiat, legacy amount for fiat
-        local deposit_payload
-        if [ "$is_fiat" = true ]; then
-            deposit_payload="{
-                \"account_id\": \"${target_account_id}\",
-                \"amount\": {
-                    \"amount\": {
-                        \"currency_code\": \"${instrument_code}\",
-                        \"units\": ${deposit_amount},
-                        \"nanos\": 0
-                    }
-                },
-                \"description\": \"${description}\",
-                \"reference\": \"DEMO-SEED-${org_id}-${RANDOM}\"
-            }"
-        else
-            deposit_payload="{
-                \"account_id\": \"${target_account_id}\",
-                \"input\": {
-                    \"amount\": \"${deposit_amount}\",
-                    \"instrument_code\": \"${instrument_code}\"
-                },
-                \"description\": \"${description}\",
-                \"reference\": \"DEMO-SEED-${org_id}-${RANDOM}\"
-            }"
-        fi
+        # Use input (InstrumentAmount) for all asset types - works for both fiat and non-fiat
+        local deposit_payload="{
+            \"account_id\": \"${target_account_id}\",
+            \"input\": {
+                \"amount\": \"${deposit_amount}\",
+                \"instrument_code\": \"${instrument_code}\"
+            },
+            \"description\": \"${description}\",
+            \"reference\": \"DEMO-SEED-${org_id}-${RANDOM}\"
+        }"
 
         local deposit_result
         # shellcheck disable=SC2086 # metadata_args must word-split for grpcurl -H flag
