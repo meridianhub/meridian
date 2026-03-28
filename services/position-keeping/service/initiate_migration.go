@@ -194,7 +194,7 @@ func (s *PositionKeepingService) checkMigrationIdempotencyAndAcquireLock(
 // Returns (response, nil) for completed, (nil, error) for pending, (nil, nil) for failed (retry allowed).
 func (s *PositionKeepingService) handleMigrationIdempotencyResult(
 	ctx context.Context,
-	key idempotency.Key,
+	_ idempotency.Key,
 	result *idempotency.Result,
 ) (*positionkeepingv1.InitiateWithOpeningBalanceResponse, error) {
 	switch result.Status {

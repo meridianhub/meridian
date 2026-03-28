@@ -180,7 +180,7 @@ func resolveOrCreateAccountResolver(cfg PaymentOrchestratorConfig) (*AccountReso
 		return cfg.AccountResolver, nil
 	}
 	if cfg.InternalAccountClient == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil resolver is valid when no internal account client configured
 	}
 	resolver, err := NewAccountResolver(AccountResolverConfig{
 		Client: cfg.InternalAccountClient,

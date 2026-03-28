@@ -122,7 +122,7 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// Validate credentials and sign JWT.
 	tokenStr, identity, err := h.authenticateAndSign(ctx, tenantID, req)
 	if err != nil {
-		h.handleLoginError(w, ctx, tenantID, err)
+		h.handleLoginError(ctx, w, tenantID, err)
 		return
 	}
 
@@ -166,7 +166,7 @@ func (h *AuthHandler) authenticateAndSign(ctx context.Context, tenantID tenant.T
 var errInvalidCredentials = errors.New("invalid credentials")
 
 // handleLoginError maps authenticateAndSign errors to HTTP responses.
-func (h *AuthHandler) handleLoginError(w http.ResponseWriter, ctx context.Context, tenantID tenant.TenantID, err error) {
+func (h *AuthHandler) handleLoginError(ctx context.Context, w http.ResponseWriter, tenantID tenant.TenantID, err error) {
 	if errors.Is(err, errInvalidCredentials) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{
 			"error": "invalid email or password",

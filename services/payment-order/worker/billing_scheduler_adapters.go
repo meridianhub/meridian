@@ -130,7 +130,7 @@ func (e *BillingExecutor) createBillingRunIfNew(ctx context.Context, tenantID st
 	if duplicate {
 		e.logger.Info("billing run already exists for this period, skipping",
 			"idempotency_key", idempotencyKey)
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil run signals idempotent skip
 	}
 
 	run, err := domain.NewBillingRun(tenantID, periodStart, periodEnd)
@@ -145,7 +145,7 @@ func (e *BillingExecutor) createBillingRunIfNew(ctx context.Context, tenantID st
 			e.logger.Info("billing run already exists in database, skipping",
 				"idempotency_key", idempotencyKey)
 			e.markIdempotency(ctx, idempotencyKey)
-			return nil, nil
+			return nil, nil //nolint:nilnil // nil run signals duplicate skip
 		}
 		e.logger.Error("failed to persist billing run", "error", err)
 		e.metrics.RecordError("persist_billing_run")
