@@ -4,24 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
-	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
-	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/db"
-	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
 
@@ -70,87 +65,16 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	var valuationResult *valuateInternalResult
 
 	if useValuation {
-		// Multi-asset mode: parse input and run atomic valuation
-		inputAmount, err := decimal.NewFromString(req.Input.Amount)
+		var err error
+		lienAmount, valuationResult, operationStatus, err = s.computeMultiAssetLienAmount(ctx, req, prefetchedAccount)
 		if err != nil {
-			operationStatus = opStatusInvalidInputAmount
-			return nil, status.Errorf(codes.InvalidArgument, "invalid input amount: %v", err)
-		}
-		if !inputAmount.IsPositive() {
-			operationStatus = opStatusInputAmountNonPositive
-			return nil, status.Error(codes.InvalidArgument, "input amount must be positive")
-		}
-
-		knowledgeAt := time.Now()
-		if req.KnowledgeAt != nil {
-			knowledgeAt = req.KnowledgeAt.AsTime()
-		}
-
-		// Run shared valuation function (same logic as EvaluateAssetValuation - Ghost Pricing prevention)
-		valuationResult, err = s.valuateInternal(ctx, req.AccountId, inputAmount, req.Input.InstrumentCode, knowledgeAt)
-		if err != nil {
-			switch {
-			case errors.Is(err, ErrValuationAccountNotFound):
-				operationStatus = opStatusAccountNotFound
-				return nil, status.Errorf(codes.NotFound, "%v", err)
-			case errors.Is(err, ErrNoActiveValuationFeature):
-				operationStatus = opStatusNoValuationFeature
-				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-			case errors.Is(err, ErrValuationFeatureNotActive):
-				operationStatus = opStatusFeatureNotActive
-				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-			case errors.Is(err, ErrValuationRepoNotConfigured):
-				operationStatus = opStatusValuationFeatureRepoNil
-				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-			case errors.Is(err, ErrValuationEngineFailed):
-				operationStatus = opStatusValuationFailed
-				return nil, status.Errorf(codes.Internal, "%v", err)
-			default:
-				operationStatus = opStatusValuationFailed
-				return nil, status.Errorf(codes.Internal, "valuation failed: %v", err)
-			}
-		}
-
-		// Convert valued output to domain Amount for lien amount (the actual reservation).
-		// Use the account's instrument precision so non-2-decimal instruments work correctly.
-		precision := prefetchedAccount.Balance().Instrument().Precision
-		// #nosec G115 - precision is bounded by instrument definition (0-9 in practice)
-		scale := decimal.NewFromInt(1).Shift(int32(precision))
-		valuedMinor := valuationResult.OutputAmount.Mul(scale).RoundBank(0)
-		maxInt64 := decimal.NewFromInt(math.MaxInt64)
-		minInt64 := decimal.NewFromInt(math.MinInt64)
-		if valuedMinor.GreaterThan(maxInt64) || valuedMinor.LessThan(minInt64) {
-			operationStatus = opStatusInvalidAmount
-			return nil, status.Error(codes.InvalidArgument, ErrAmountOverflow.Error())
-		}
-		lienAmount, err = domain.NewAmountFromInstrument(
-			valuationResult.OutputCode,
-			prefetchedAccount.Dimension(),
-			precision,
-			valuedMinor.IntPart(),
-		)
-		if err != nil {
-			operationStatus = opStatusInvalidAmount
-			return nil, status.Errorf(codes.Internal, "failed to create valued amount: %v", err)
+			return nil, err
 		}
 	} else {
-		// Legacy mode: validate instrument match and convert MoneyAmount using the account's
-		// instrument for dimension-agnostic support.
-		if req.Amount == nil || req.Amount.Amount == nil {
-			operationStatus = opStatusInvalidAmount
-			return nil, status.Error(codes.InvalidArgument, "amount is required")
-		}
-		if req.Amount.Amount.CurrencyCode != prefetchedAccount.InstrumentCode() {
-			operationStatus = opStatusCurrencyMismatch
-			return nil, status.Errorf(codes.InvalidArgument,
-				"currency mismatch: lien currency %s does not match account currency %s",
-				req.Amount.Amount.CurrencyCode, prefetchedAccount.InstrumentCode())
-		}
 		var err error
-		lienAmount, err = protoMoneyToAmount(req.Amount, prefetchedAccount)
+		lienAmount, operationStatus, err = computeLegacyLienAmount(req, prefetchedAccount)
 		if err != nil {
-			operationStatus = opStatusInvalidAmount
-			return nil, status.Errorf(codes.InvalidArgument, "invalid amount: %v", err)
+			return nil, err
 		}
 	}
 
@@ -245,29 +169,8 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 	})
 
 	if txErr != nil {
-		switch {
-		case errors.Is(txErr, persistence.ErrAccountNotFound):
-			operationStatus = opStatusAccountNotFound
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.AccountId)
-		case errors.Is(txErr, errTxAccountNotActive):
-			operationStatus = opStatusAccountNotActive
-			return nil, status.Errorf(codes.FailedPrecondition, "account is not active")
-		case errors.Is(txErr, errTxCurrencyMismatch):
-			operationStatus = opStatusCurrencyMismatch
-			return nil, status.Errorf(codes.InvalidArgument, "lien currency must match account currency")
-		case errors.Is(txErr, errTxInsufficientFunds):
-			operationStatus = opStatusInsufficientFunds
-			return nil, status.Errorf(codes.FailedPrecondition, "insufficient available balance")
-		case errors.Is(txErr, errTxDomainError):
-			operationStatus = opStatusDomainError
-			return nil, status.Errorf(codes.InvalidArgument, "failed to create lien: %v", txErr)
-		case errors.Is(txErr, errTxSaveLien):
-			operationStatus = opStatusSaveFailed
-			return nil, status.Errorf(codes.Internal, "failed to save lien: %v", txErr)
-		default:
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to create lien: %v", txErr)
-		}
+		operationStatus, err = mapInitiateLienTxError(txErr, req.AccountId)
+		return nil, err
 	}
 
 	s.logger.Info("lien created",
@@ -277,36 +180,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		"has_valuation", lien.HasValuation(),
 		"payment_order_ref", req.PaymentOrderReference)
 
-	// Calculate new available balance after this lien
-	newAvailableBalance := availableBalance - lienAmount.ToMinorUnitsUnchecked()
-	availableMoney, err := domain.NewAmountFromInstrument(
-		account.Balance().InstrumentCode(),
-		account.Balance().Dimension(),
-		account.Balance().Instrument().Precision,
-		newAvailableBalance,
-	)
-	if err != nil {
-		s.logger.Error("failed to create available balance amount", "error", err)
-		// Fall back to the pre-lien available balance so the response is not zero.
-		availableMoney = account.AvailableBalance()
-	}
-
-	resp := &pb.InitiateLienResponse{
-		Lien:             toLienProto(lien),
-		AvailableBalance: toMoneyAmount(availableMoney),
-	}
-
-	// Add valuation fields to response when atomic valuation was performed
-	if useValuation && valuationResult != nil {
-		resp.ValuedAmount = &quantityv1.InstrumentAmount{
-			Amount:         valuationResult.OutputAmount.String(),
-			InstrumentCode: valuationResult.OutputCode,
-			Version:        1,
-		}
-		resp.Basis = valuationResult.Analysis
-	}
-
-	return resp, nil
+	return s.buildInitiateLienResponse(account, lien, lienAmount, availableBalance, useValuation, valuationResult), nil
 }
 
 // ExecuteLien converts a reservation to an actual debit atomically with Redis idempotency
@@ -330,73 +204,27 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "invalid lien ID: %v", err)
 	}
 
-	// Get idempotency key if provided
-	var idempotencyKeyStr string
-	if req.IdempotencyKey != nil && req.IdempotencyKey.Key != "" {
-		idempotencyKeyStr = req.IdempotencyKey.Key
+	// Idempotency: check Redis cache, acquire distributed lock
+	idempotencyKeyStr, idempKey, idempotencyLockAcquired, cachedResp, err := s.acquireExecuteLienIdempotency(ctx, req)
+	if err != nil {
+		operationStatus = opStatusRetrieveFailed
+		return nil, err
+	}
+	if cachedResp != nil {
+		operationStatus = opStatusIdempotent
+		return cachedResp, nil
 	}
 
-	// Build idempotency key structure for Redis
-	var idempKey idempotency.Key
-	var idempotencyLockAcquired bool
-	if idempotencyKeyStr != "" && s.idempotencyService != nil {
-		tenantID, ok := tenant.FromContext(ctx)
-		if !ok {
-			s.logger.Debug("tenant not found in context for idempotency key",
-				"lien_id", req.LienId)
-		}
-		idempKey = idempotency.Key{
-			TenantID:  string(tenantID),
-			Namespace: idempotencyNamespace,
-			Operation: "execute_lien",
-			EntityID:  req.LienId,
-			RequestID: idempotencyKeyStr,
-		}
-
-		// Check Redis for existing result
-		result, err := s.idempotencyService.Check(ctx, idempKey)
-		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && result != nil && result.Data != nil {
-			var cachedResp pb.ExecuteLienResponse
-			unmarshalErr := proto.Unmarshal(result.Data, &cachedResp)
-			if unmarshalErr == nil {
-				s.logger.Info("returning cached execute lien response from Redis",
-					"lien_id", req.LienId,
-					"transaction_id", cachedResp.TransactionId,
+	// Cleanup pending state on failure - ensures retries aren't blocked for 5 minutes
+	defer func() {
+		if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
+			if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
+				s.logger.Warn("failed to cleanup pending idempotency state",
+					"error", delErr,
 					"idempotency_key", idempotencyKeyStr)
-				operationStatus = opStatusIdempotent
-				return &cachedResp, nil
 			}
-			s.logger.Warn("failed to unmarshal cached idempotency result",
-				"error", unmarshalErr)
-		} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-			s.logger.Error("idempotency check failed", "error", err)
-			return nil, status.Error(codes.Internal, "failed to check idempotency")
 		}
-
-		// Mark operation as pending (distributed lock)
-		if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
-			// Check if another request is already processing this operation
-			if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
-				s.logger.Info("operation already in progress, please retry",
-					"idempotency_key", idempotencyKeyStr)
-				return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
-			}
-			s.logger.Error("failed to mark operation pending", "error", err)
-			return nil, status.Error(codes.Aborted, "failed to acquire idempotency lock, please retry")
-		}
-		idempotencyLockAcquired = true
-
-		// Cleanup pending state on failure - ensures retries aren't blocked for 5 minutes
-		defer func() {
-			if idempotencyLockAcquired && operationStatus != operationStatusSuccess {
-				if delErr := s.idempotencyService.Delete(ctx, idempKey); delErr != nil {
-					s.logger.Warn("failed to cleanup pending idempotency state",
-						"error", delErr,
-						"idempotency_key", idempotencyKeyStr)
-				}
-			}
-		}()
-	}
+	}()
 
 	// First, check for idempotency without locking (read-only check)
 	// Note: Context is passed to enable organization scoping in multi-org mode
@@ -510,36 +338,8 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 	})
 
 	if txErr != nil {
-		// Determine which operation failed for proper error reporting
-		switch {
-		case errors.Is(txErr, persistence.ErrLienNotFound):
-			operationStatus = opStatusLienNotFound
-			return nil, status.Errorf(codes.NotFound, "lien not found: %s", req.LienId)
-		case errors.Is(txErr, persistence.ErrLienVersionConflict):
-			operationStatus = opStatusVersionConflict
-			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
-		case errors.Is(txErr, persistence.ErrVersionConflict):
-			operationStatus = opStatusVersionConflict
-			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
-		case errors.Is(txErr, errTxInvalidLienStatus):
-			operationStatus = opStatusInvalidLienStatus
-			return nil, status.Errorf(codes.FailedPrecondition, "lien cannot be executed: status=%s, expired=%v", lien.Status, lien.IsExpired())
-		case errors.Is(txErr, errTxSaveAccount):
-			operationStatus = opStatusSaveAccountFailed
-			return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
-		case errors.Is(txErr, errTxUpdateLien):
-			operationStatus = opStatusUpdateLienFailed
-			return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
-		case errors.Is(txErr, errTxExecuteFailed):
-			operationStatus = opStatusExecuteFailed
-			return nil, status.Errorf(codes.FailedPrecondition, "failed to execute lien: %v", txErr)
-		case errors.Is(txErr, errTxWithdrawFailed):
-			operationStatus = opStatusWithdrawFailed
-			return nil, status.Errorf(codes.FailedPrecondition, "failed to debit account: %v", txErr)
-		default:
-			operationStatus = opStatusRetrieveAccountFailed
-			return nil, status.Errorf(codes.Internal, "failed to execute lien transaction: %v", txErr)
-		}
+		operationStatus, err = mapExecuteLienTxError(txErr, req.LienId, lien)
+		return nil, err
 	}
 
 	// Handle case where lien was already executed by concurrent request
@@ -580,25 +380,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 		TransactionId:    transactionID,
 	}
 
-	// Store successful result in Redis for future idempotency checks
-	if idempotencyKeyStr != "" && s.idempotencyService != nil {
-		responseData, marshalErr := proto.Marshal(resp)
-		if marshalErr == nil {
-			storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-				Key:         idempKey,
-				Status:      idempotency.StatusCompleted,
-				Data:        responseData,
-				CompletedAt: time.Now(),
-				TTL:         idempotencyResultTTL,
-			})
-			if storeErr != nil {
-				s.logger.Error("failed to store idempotency result", "error", storeErr)
-				// Continue - operation succeeded, caching is optimization
-			}
-		} else {
-			s.logger.Error("failed to marshal response for idempotency cache", "error", marshalErr)
-		}
-	}
+	s.storeIdempotencyResult(ctx, idempotencyKeyStr, idempKey, resp)
 
 	return resp, nil
 }
@@ -702,26 +484,8 @@ func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienReques
 	})
 
 	if txErr != nil {
-		switch {
-		case errors.Is(txErr, persistence.ErrLienNotFound):
-			operationStatus = opStatusLienNotFound
-			return nil, status.Errorf(codes.NotFound, "lien not found: %s", req.LienId)
-		case errors.Is(txErr, persistence.ErrLienVersionConflict):
-			operationStatus = opStatusVersionConflict
-			return nil, status.Error(codes.Aborted, "concurrent modification detected, please retry")
-		case errors.Is(txErr, errTxInvalidLienStatus):
-			operationStatus = opStatusInvalidLienStatus
-			return nil, status.Errorf(codes.FailedPrecondition, "lien cannot be terminated: status=%s", lien.Status)
-		case errors.Is(txErr, errTxTerminateFailed):
-			operationStatus = opStatusTerminateFailed
-			return nil, status.Errorf(codes.FailedPrecondition, "failed to terminate lien: %v", txErr)
-		case errors.Is(txErr, errTxUpdateLien):
-			operationStatus = opStatusUpdateFailed
-			return nil, status.Errorf(codes.Internal, "failed to update lien: %v", txErr)
-		default:
-			operationStatus = opStatusRetrieveFailed
-			return nil, status.Errorf(codes.Internal, "failed to terminate lien: %v", txErr)
-		}
+		operationStatus, err = mapTerminateLienTxError(txErr, req.LienId, lien)
+		return nil, err
 	}
 
 	// Handle case where lien was already terminated by concurrent request
