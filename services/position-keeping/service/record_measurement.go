@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,7 +16,6 @@ import (
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/audit"
-	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -27,18 +25,15 @@ func (s *PositionKeepingService) RecordMeasurement(
 	ctx context.Context,
 	req *positionkeepingv1.RecordMeasurementRequest,
 ) (resp *positionkeepingv1.RecordMeasurementResponse, err error) {
-	// Validate request
 	if err := validateRecordMeasurementRequest(req); err != nil {
 		return nil, err
 	}
 
-	// Parse position_state_id (which maps to log_id in our domain)
 	positionStateID, err := parseUUID(req.GetPositionStateId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid position_state_id: %v", err)
 	}
 
-	// Check idempotency and acquire lock if key provided
 	idempotencyKey, cachedResponse, err := s.checkMeasurementIdempotencyAndAcquireLock(ctx, req, positionStateID)
 	if err != nil {
 		return nil, err
@@ -47,7 +42,6 @@ func (s *PositionKeepingService) RecordMeasurement(
 		return cachedResponse, nil
 	}
 
-	// Clean up pending idempotency key on error
 	if idempotencyKey != nil {
 		defer func() {
 			if err != nil {
@@ -56,12 +50,39 @@ func (s *PositionKeepingService) RecordMeasurement(
 		}()
 	}
 
-	// Check for context cancellation after potentially slow idempotency check
 	if err := ctx.Err(); err != nil {
 		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
 	}
 
-	// Verify position state exists and belongs to the tenant (if multi-tenant)
+	positionLog, err := s.loadPositionLog(ctx, positionStateID)
+	if err != nil {
+		return nil, err
+	}
+
+	measurement, err := s.buildAndValidateMeasurement(ctx, req, positionLog)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.persistMeasurement(ctx, measurement); err != nil {
+		return nil, err
+	}
+
+	if idempotencyKey != nil {
+		if err := storeMeasurementIdempotencyResult(ctx, s.idempotency, *idempotencyKey, measurement.ID, positionStateID); err != nil {
+			return nil, err
+		}
+	}
+
+	return &positionkeepingv1.RecordMeasurementResponse{
+		MeasurementId:   measurement.ID.String(),
+		PositionStateId: positionStateID.String(),
+		RecordedAt:      timestamppb.New(measurement.CreatedAt),
+	}, nil
+}
+
+// loadPositionLog retrieves a position log, returning gRPC status errors.
+func (s *PositionKeepingService) loadPositionLog(ctx context.Context, positionStateID uuid.UUID) (*domain.FinancialPositionLog, error) {
 	positionLog, err := s.repository.FindByID(ctx, positionStateID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -70,111 +91,104 @@ func (s *PositionKeepingService) RecordMeasurement(
 		return nil, status.Errorf(codes.Internal, "failed to retrieve position state: %v", err)
 	}
 
-	// For multi-tenant mode: verify tenant ownership
-	// Note: In multi-tenant mode, the repository already scopes queries by tenant.
-	// If we get here, the position log exists and is accessible to this tenant.
-	// This is an additional verification for explicit security.
+	// In multi-tenant mode, the repository already scopes queries by tenant schema.
 	if tenantID, ok := tenant.FromContext(ctx); ok {
-		// The tenant context is set, which means we're in multi-tenant mode.
-		// The repository will have already scoped the query to this tenant's schema.
-		// If we found a record, it belongs to this tenant.
-		_ = tenantID // Explicitly acknowledge the tenant for clarity
+		_ = tenantID
 	}
 
-	// Parse and validate measurement value
+	return positionLog, nil
+}
+
+// buildAndValidateMeasurement parses request fields, runs CEL validation, and creates the domain measurement.
+func (s *PositionKeepingService) buildAndValidateMeasurement(
+	ctx context.Context,
+	req *positionkeepingv1.RecordMeasurementRequest,
+	positionLog *domain.FinancialPositionLog,
+) (*domain.Measurement, error) {
 	measurementValue, err := decimal.NewFromString(req.GetValue())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid measurement value: %v", err)
 	}
 
-	// Parse measurement type
-	measurementType := domain.ParseMeasurementType(req.GetMeasurementType())
-
-	// Parse timestamp
-	measurementTimestamp := req.GetTimestamp().AsTime()
-
-	// Convert metadata
 	metadata := make(map[string]string)
 	for k, v := range req.GetMetadata() {
 		metadata[k] = v
 	}
 
-	// Perform CEL validation and bucket key generation if instrument cache is configured
-	// The measurement_type field maps to the instrument code
 	instrumentCode := req.GetMeasurementType()
 	validationResult, err := s.validateMeasurementWithCEL(ctx, instrumentCode, req.GetValue(), metadata, positionLog.AccountID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get user from context for audit
 	userID := audit.GetUserFromContext(ctx)
-
-	// Create measurement domain object with bucket_id from CEL validation
-	// The bucket_id enables fungibility-based position aggregation
 	measurement, err := domain.NewMeasurement(
 		positionLog.LogID,
-		measurementType,
+		domain.ParseMeasurementType(req.GetMeasurementType()),
 		measurementValue,
 		req.GetUnit(),
-		measurementTimestamp,
+		req.GetTimestamp().AsTime(),
 		metadata,
 		validationResult.BucketID,
 		userID,
 	)
 	if err != nil {
-		switch {
-		case errors.Is(err, domain.ErrNegativeMeasurementValue):
-			return nil, status.Error(codes.InvalidArgument, "measurement value must be positive")
-		case errors.Is(err, domain.ErrFutureTimestamp):
-			return nil, status.Error(codes.InvalidArgument, "measurement timestamp cannot be in the future")
-		case errors.Is(err, domain.ErrInvalidMeasurementType):
-			return nil, status.Error(codes.InvalidArgument, "invalid measurement type")
-		case errors.Is(err, domain.ErrInvalidUnit):
-			return nil, status.Error(codes.InvalidArgument, "measurement unit is required")
-		default:
-			return nil, status.Errorf(codes.InvalidArgument, "failed to create measurement: %v", err)
-		}
+		return nil, mapMeasurementCreationError(err)
 	}
 
-	// Persist measurement to repository
+	return measurement, nil
+}
+
+// mapMeasurementCreationError maps domain measurement errors to gRPC status errors.
+func mapMeasurementCreationError(err error) error {
+	switch {
+	case errors.Is(err, domain.ErrNegativeMeasurementValue):
+		return status.Error(codes.InvalidArgument, "measurement value must be positive")
+	case errors.Is(err, domain.ErrFutureTimestamp):
+		return status.Error(codes.InvalidArgument, "measurement timestamp cannot be in the future")
+	case errors.Is(err, domain.ErrInvalidMeasurementType):
+		return status.Error(codes.InvalidArgument, "invalid measurement type")
+	case errors.Is(err, domain.ErrInvalidUnit):
+		return status.Error(codes.InvalidArgument, "measurement unit is required")
+	default:
+		return status.Errorf(codes.InvalidArgument, "failed to create measurement: %v", err)
+	}
+}
+
+// persistMeasurement saves a measurement to the repository, mapping errors to gRPC status.
+func (s *PositionKeepingService) persistMeasurement(ctx context.Context, measurement *domain.Measurement) error {
 	if err := s.measurementRepo.Create(ctx, measurement); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
-			return nil, status.Error(codes.AlreadyExists, "measurement already exists")
+			return status.Error(codes.AlreadyExists, "measurement already exists")
 		}
 		if errors.Is(err, domain.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "position state not found")
+			return status.Error(codes.NotFound, "position state not found")
 		}
-		return nil, status.Errorf(codes.Internal, "failed to save measurement: %v", err)
+		return status.Errorf(codes.Internal, "failed to save measurement: %v", err)
+	}
+	return nil
+}
+
+// storeMeasurementIdempotencyResult stores the idempotency result for a measurement operation.
+func storeMeasurementIdempotencyResult(ctx context.Context, svc idempotency.Service, key idempotency.Key, measurementID, positionStateID uuid.UUID) error {
+	resultData, err := json.Marshal(map[string]string{
+		"measurement_id":    measurementID.String(),
+		"position_state_id": positionStateID.String(),
+	})
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
 	}
 
-	// Store idempotency result if key was provided
-	if idempotencyKey != nil {
-		resultData, err := json.Marshal(map[string]string{
-			"measurement_id":    measurement.ID.String(),
-			"position_state_id": positionStateID.String(),
-		})
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
-		}
-
-		if err := s.idempotency.StoreResult(ctx, idempotency.Result{
-			Key:         *idempotencyKey,
-			Status:      idempotency.StatusCompleted,
-			Data:        resultData,
-			CompletedAt: time.Now(),
-			TTL:         24 * time.Hour,
-		}); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to store idempotency result: %v", err)
-		}
+	if err := svc.StoreResult(ctx, idempotency.Result{
+		Key:         key,
+		Status:      idempotency.StatusCompleted,
+		Data:        resultData,
+		CompletedAt: time.Now(),
+		TTL:         24 * time.Hour,
+	}); err != nil {
+		return status.Errorf(codes.Internal, "failed to store idempotency result: %v", err)
 	}
-
-	resp = &positionkeepingv1.RecordMeasurementResponse{
-		MeasurementId:   measurement.ID.String(),
-		PositionStateId: positionStateID.String(),
-		RecordedAt:      timestamppb.New(measurement.CreatedAt),
-	}
-	return resp, nil
+	return nil
 }
 
 // validateRecordMeasurementRequest validates the RecordMeasurement request.
@@ -286,118 +300,87 @@ func (s *PositionKeepingService) validateMeasurementWithCEL(
 		return &MeasurementValidationResult{}, nil
 	}
 
-	// Acquire an AttributeBag from pool for efficient memory reuse
-	bag := quantity.AcquireAttributeBag()
-	defer quantity.ReleaseAttributeBag(bag)
-
-	// Populate AttributeBag from metadata
-	for k, v := range metadata {
-		bag.Set(k, v)
-	}
-
-	// Look up instrument from cache using measurement_type as the code
-	// Use version=1 for now; could be made configurable in the future
-	const instrumentVersion = 1
-	instrument, err := s.instrumentCache.GetOrLoad(ctx, instrumentCode, instrumentVersion, func() (*CachedInstrument, error) {
-		// The loadFn should never be called if the cache is properly configured
-		// with a backing repository. For now, return not found to trigger the error path.
-		return nil, fmt.Errorf("%w: %s", ErrInstrumentNotFound, instrumentCode)
-	})
+	instrument, err := s.loadInstrument(ctx, instrumentCode)
 	if err != nil {
-		// Instrument not found - record metric and return error
 		RecordValidationFailure(instrumentCode, ValidationFailureReasonInstrumentNotFound)
 		return nil, status.Errorf(codes.NotFound,
 			"instrument definition not found for measurement type '%s': %v", instrumentCode, err)
 	}
 
-	// Build the activation context for CEL evaluation
-	// The CEL program expects these specific variable names
-	source := metadata["source"]
-	attributesMap := bag.ToMap()
-	activation := map[string]any{
-		"attributes": attributesMap,
-		"amount":     amount,
-		"valid_from": time.Time{}, // Zero time for now
-		"valid_to":   time.Time{}, // Zero time for now
-		"source":     source,
+	activation := buildCELActivation(metadata, amount)
+
+	if err := evalValidationProgram(instrument, instrumentCode, activation, func(code string, reason string) {
+		RecordValidationFailure(code, reason)
+	}); err != nil {
+		return nil, err
 	}
 
-	// Run validation if instrument has a validation program
-	if instrument.ValidationProgram != nil {
-		result, _, err := instrument.ValidationProgram.Eval(activation)
-		if err != nil {
-			// CEL evaluation error - record metric and return error
-			RecordValidationFailure(instrumentCode, ValidationFailureReasonCELError)
-			return nil, status.Errorf(codes.InvalidArgument,
-				"validation error for measurement type '%s': %v", instrumentCode, err)
-		}
-
-		// The validation program should return a boolean
-		valid, ok := result.Value().(bool)
-		if !ok {
-			// Unexpected return type from CEL - treat as error
-			RecordValidationFailure(instrumentCode, ValidationFailureReasonCELError)
-			return nil, status.Errorf(codes.InvalidArgument,
-				"validation error for measurement type '%s': expression did not return boolean", instrumentCode)
-		}
-
-		if !valid {
-			// Validation rejected the measurement - record metric and return error
-			RecordValidationFailure(instrumentCode, ValidationFailureReasonCELRejected)
-			return nil, status.Errorf(codes.InvalidArgument,
-				"measurement validation failed for type '%s': attributes do not satisfy validation rules", instrumentCode)
-		}
-	}
-
-	// Generate bucket key if instrument has a bucket key program
-	var bucketID string
-	if instrument.BucketKeyProgram != nil {
-		// Bucket key program only needs the attributes map
-		bucketActivation := map[string]any{
-			"attributes": attributesMap,
-		}
-
-		result, _, err := instrument.BucketKeyProgram.Eval(bucketActivation)
-		if err != nil {
-			// CEL evaluation error - record metric and return error
-			RecordValidationFailure(instrumentCode, ValidationFailureReasonBucketKeyError)
-			return nil, status.Errorf(codes.InvalidArgument,
-				"bucket key generation error for measurement type '%s': %v", instrumentCode, err)
-		}
-
-		// The bucket key program should return a string (SHA256 hex)
-		key, ok := result.Value().(string)
-		if !ok {
-			RecordValidationFailure(instrumentCode, ValidationFailureReasonBucketKeyError)
-			return nil, status.Errorf(codes.InvalidArgument,
-				"bucket key generation error for measurement type '%s': expression did not return string", instrumentCode)
-		}
-
-		bucketID = key
-
-		// Check cardinality limit if bucket counter is configured
-		if s.bucketCounter != nil && bucketID != "" {
-			count, err := s.bucketCounter.CountBuckets(ctx, accountID, instrumentCode)
-			if err != nil {
-				// Log the error but don't fail the request - cardinality check is defensive
-				// The system should still work if the counter is unavailable
-				// However, for strict enforcement, we could return an error here
-				return nil, status.Errorf(codes.Internal,
-					"failed to check bucket cardinality for account '%s' instrument '%s': %v",
-					accountID, instrumentCode, err)
-			}
-
-			if count >= MaxBucketsPerAccountInstrument {
-				// Cardinality limit exceeded - record metric and return error
-				RecordCardinalityViolation(instrumentCode)
-				return nil, status.Errorf(codes.ResourceExhausted,
-					"bucket cardinality limit exceeded for account/instrument: %d buckets (limit: %d)",
-					count, MaxBucketsPerAccountInstrument)
-			}
-		}
+	bucketID, err := s.evalBucketKeyProgram(ctx, instrument, instrumentCode, activation["attributes"].(map[string]string), accountID)
+	if err != nil {
+		return nil, err
 	}
 
 	return &MeasurementValidationResult{
 		BucketID: bucketID,
 	}, nil
+}
+
+// evalBucketKeyProgram generates a bucket key using the instrument's CEL program and checks cardinality.
+func (s *PositionKeepingService) evalBucketKeyProgram(
+	ctx context.Context,
+	instrument *CachedInstrument,
+	instrumentCode string,
+	attributesMap map[string]string,
+	accountID string,
+) (string, error) {
+	if instrument.BucketKeyProgram == nil {
+		return "", nil
+	}
+
+	bucketActivation := map[string]any{
+		"attributes": attributesMap,
+	}
+
+	result, _, err := instrument.BucketKeyProgram.Eval(bucketActivation)
+	if err != nil {
+		RecordValidationFailure(instrumentCode, ValidationFailureReasonBucketKeyError)
+		return "", status.Errorf(codes.InvalidArgument,
+			"bucket key generation error for measurement type '%s': %v", instrumentCode, err)
+	}
+
+	key, ok := result.Value().(string)
+	if !ok {
+		RecordValidationFailure(instrumentCode, ValidationFailureReasonBucketKeyError)
+		return "", status.Errorf(codes.InvalidArgument,
+			"bucket key generation error for measurement type '%s': expression did not return string", instrumentCode)
+	}
+
+	if err := s.checkBucketCardinality(ctx, accountID, instrumentCode, key); err != nil {
+		return "", err
+	}
+
+	return key, nil
+}
+
+// checkBucketCardinality checks whether adding a new bucket would exceed the cardinality limit.
+func (s *PositionKeepingService) checkBucketCardinality(ctx context.Context, accountID, instrumentCode, bucketID string) error {
+	if s.bucketCounter == nil || bucketID == "" {
+		return nil
+	}
+
+	count, err := s.bucketCounter.CountBuckets(ctx, accountID, instrumentCode)
+	if err != nil {
+		return status.Errorf(codes.Internal,
+			"failed to check bucket cardinality for account '%s' instrument '%s': %v",
+			accountID, instrumentCode, err)
+	}
+
+	if count >= MaxBucketsPerAccountInstrument {
+		RecordCardinalityViolation(instrumentCode)
+		return status.Errorf(codes.ResourceExhausted,
+			"bucket cardinality limit exceeded for account/instrument: %d buckets (limit: %d)",
+			count, MaxBucketsPerAccountInstrument)
+	}
+
+	return nil
 }

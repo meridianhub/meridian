@@ -31,12 +31,10 @@ func (s *PositionKeepingService) GetAccountBalance(
 	ctx context.Context,
 	req *positionkeepingv1.GetAccountBalanceRequest,
 ) (*positionkeepingv1.GetAccountBalanceResponse, error) {
-	// Validate request
 	if req.GetAccountId() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "account_id is required")
 	}
 
-	// Convert proto balance type to domain
 	balanceType, err := adapters.ToDomainBalanceType(req.GetBalanceType())
 	if err != nil {
 		if errors.Is(err, adapters.ErrUnspecifiedBalanceType) {
@@ -45,63 +43,24 @@ func (s *PositionKeepingService) GetAccountBalance(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid balance_type: %v", err)
 	}
 
-	// Load position logs for the account
-	logs, err := s.repository.FindByAccountID(ctx, req.GetAccountId())
+	log, openingBalance, currency, err := s.loadLogForBalance(ctx, req.GetAccountId())
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.GetAccountId())
-		}
-		return nil, status.Errorf(codes.Internal, "failed to retrieve position logs: %v", err)
+		return nil, err
 	}
 
-	if len(logs) == 0 {
-		return nil, status.Errorf(codes.NotFound, "no position logs found for account: %s", req.GetAccountId())
-	}
-
-	// Use the first log for balance computation
-	// In a real scenario, you might aggregate across all logs or use the most recent one
-	log := logs[0]
-
-	// Determine opening balance and currency for balance computation.
-	// IMPORTANT: If the log was created with NewFinancialPositionLogWithOpeningBalance,
-	// the opening balance is already represented by a transaction entry, so we pass ZERO
-	// to the LogBalanceComputer to avoid double-counting.
-	var openingBalance domain.Money
-	var currency domain.Instrument
-
-	if log.HasOpeningBalance() {
-		// Log was created with opening balance - the transaction entry already includes it
-		// Pass zero to LogBalanceComputer, but use the instrument for currency
-		currency = log.OpeningBalance.Instrument
-		openingBalance = domain.NewQty[domain.Monetary](decimal.Zero, currency)
-	} else if len(log.TransactionLogEntries) > 0 {
-		// No opening balance set - infer currency from first transaction
-		currency = log.TransactionLogEntries[0].Amount.Instrument
-		openingBalance = domain.NewQty[domain.Monetary](decimal.Zero, currency)
-	} else {
-		// No transactions and no opening balance - default to GBP
-		openingBalance = domain.MustNewMoney(decimal.Zero, domain.CurrencyGBP)
-		currency = openingBalance.Instrument
-	}
-
-	// Apply instrument filter if specified (supports both currency codes and extended asset codes)
 	if req.GetInstrumentCode() != "" {
 		if currency.Code != req.GetInstrumentCode() {
 			return nil, status.Errorf(codes.NotFound, "no balance found for instrument: %s", req.GetInstrumentCode())
 		}
 	}
 
-	// Create LogBalanceComputer for balance calculation
-	// Note: currentAccountClient may be nil if lien queries are not supported
 	lbc, err := domain.NewLogBalanceComputer(log, openingBalance, s.currentAccountClient)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create balance computer: %v", err)
 	}
 
-	// Compute the requested balance type
 	balance, err := s.computeBalance(ctx, lbc, balanceType)
 	if err != nil {
-		// Check for specific errors that should return different status codes
 		if errors.Is(err, domain.ErrNilCurrentAccountClient) {
 			return nil, status.Errorf(codes.FailedPrecondition, "reserve/available/free balance requires current account client configuration")
 		}
@@ -121,62 +80,26 @@ func (s *PositionKeepingService) GetAccountBalances(
 	ctx context.Context,
 	req *positionkeepingv1.GetAccountBalancesRequest,
 ) (*positionkeepingv1.GetAccountBalancesResponse, error) {
-	// Validate request
 	if req.GetAccountId() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "account_id is required")
 	}
 
-	// Load position logs for the account
-	logs, err := s.repository.FindByAccountID(ctx, req.GetAccountId())
+	log, openingBalance, currency, err := s.loadLogForBalance(ctx, req.GetAccountId())
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, status.Errorf(codes.NotFound, "account not found: %s", req.GetAccountId())
-		}
-		return nil, status.Errorf(codes.Internal, "failed to retrieve position logs: %v", err)
+		return nil, err
 	}
 
-	if len(logs) == 0 {
-		return nil, status.Errorf(codes.NotFound, "no position logs found for account: %s", req.GetAccountId())
-	}
-
-	// Use the first log for balance computation
-	log := logs[0]
-
-	// Determine opening balance and currency for balance computation.
-	// IMPORTANT: If the log was created with NewFinancialPositionLogWithOpeningBalance,
-	// the opening balance is already represented by a transaction entry, so we pass ZERO
-	// to the LogBalanceComputer to avoid double-counting.
-	var openingBalance domain.Money
-	var currency domain.Instrument
-
-	if log.HasOpeningBalance() {
-		// Log was created with opening balance - the transaction entry already includes it
-		currency = log.OpeningBalance.Instrument
-		openingBalance = domain.NewQty[domain.Monetary](decimal.Zero, currency)
-	} else if len(log.TransactionLogEntries) > 0 {
-		// No opening balance set - infer currency from first transaction
-		currency = log.TransactionLogEntries[0].Amount.Instrument
-		openingBalance = domain.NewQty[domain.Monetary](decimal.Zero, currency)
-	} else {
-		// No transactions and no opening balance - default to GBP
-		openingBalance = domain.MustNewMoney(decimal.Zero, domain.CurrencyGBP)
-		currency = openingBalance.Instrument
-	}
-
-	// Apply instrument filter if specified (supports both currency codes and extended asset codes)
 	if req.GetInstrumentCode() != "" {
 		if currency.Code != req.GetInstrumentCode() {
 			return nil, status.Errorf(codes.NotFound, "no balances found for instrument: %s", req.GetInstrumentCode())
 		}
 	}
 
-	// Create LogBalanceComputer for balance calculation
 	lbc, err := domain.NewLogBalanceComputer(log, openingBalance, s.currentAccountClient)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create balance computer: %v", err)
 	}
 
-	// Compute all balance types
 	asOf := time.Now().UTC()
 	balanceEntries := make([]*positionkeepingv1.BalanceEntry, 0, len(allBalanceTypes))
 
@@ -184,11 +107,6 @@ func (s *PositionKeepingService) GetAccountBalances(
 		balance, err := s.computeBalance(ctx, lbc, balanceType)
 		if err != nil {
 			// Skip balance types that cannot be computed (e.g., no CurrentAccountClient)
-			// Log the error but continue with other balance types
-			if errors.Is(err, domain.ErrNilCurrentAccountClient) {
-				continue
-			}
-			// For other errors, skip this balance type
 			continue
 		}
 
@@ -203,6 +121,45 @@ func (s *PositionKeepingService) GetAccountBalances(
 		Balances:  balanceEntries,
 		AsOf:      timestamppb.New(asOf),
 	}, nil
+}
+
+// loadLogForBalance loads the first position log for an account and resolves
+// the opening balance for balance computation. Returns a gRPC status error on failure.
+func (s *PositionKeepingService) loadLogForBalance(
+	ctx context.Context,
+	accountID string,
+) (*domain.FinancialPositionLog, domain.Money, domain.Instrument, error) {
+	logs, err := s.repository.FindByAccountID(ctx, accountID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, domain.Money{}, domain.Instrument{}, status.Errorf(codes.NotFound, "account not found: %s", accountID)
+		}
+		return nil, domain.Money{}, domain.Instrument{}, status.Errorf(codes.Internal, "failed to retrieve position logs: %v", err)
+	}
+
+	if len(logs) == 0 {
+		return nil, domain.Money{}, domain.Instrument{}, status.Errorf(codes.NotFound, "no position logs found for account: %s", accountID)
+	}
+
+	log := logs[0]
+	openingBalance, currency := resolveOpeningBalance(log)
+	return log, openingBalance, currency, nil
+}
+
+// resolveOpeningBalance determines the opening balance and currency for balance computation.
+// If the log was created with NewFinancialPositionLogWithOpeningBalance, the opening balance
+// is already represented by a transaction entry, so we return ZERO to avoid double-counting.
+func resolveOpeningBalance(log *domain.FinancialPositionLog) (domain.Money, domain.Instrument) {
+	if log.HasOpeningBalance() {
+		currency := log.OpeningBalance.Instrument
+		return domain.NewQty[domain.Monetary](decimal.Zero, currency), currency
+	}
+	if len(log.TransactionLogEntries) > 0 {
+		currency := log.TransactionLogEntries[0].Amount.Instrument
+		return domain.NewQty[domain.Monetary](decimal.Zero, currency), currency
+	}
+	openingBalance := domain.MustNewMoney(decimal.Zero, domain.CurrencyGBP)
+	return openingBalance, openingBalance.Instrument
 }
 
 // computeBalance computes the specified balance type using the LogBalanceComputer.

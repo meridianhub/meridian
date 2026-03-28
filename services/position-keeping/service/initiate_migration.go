@@ -25,12 +25,10 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateWithOpeningBalanceRequest,
 ) (resp *positionkeepingv1.InitiateWithOpeningBalanceResponse, err error) {
-	// Validate request
 	if err := validateMigrationRequest(req); err != nil {
 		return nil, err
 	}
 
-	// Check idempotency and acquire lock if key provided
 	idempotencyKey, cachedResponse, err := s.checkMigrationIdempotencyAndAcquireLock(ctx, req)
 	if err != nil {
 		return nil, err
@@ -39,7 +37,6 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 		return cachedResponse, nil
 	}
 
-	// Clean up pending idempotency key on error to prevent 5-minute lockout
 	if idempotencyKey != nil {
 		defer func() {
 			if err != nil {
@@ -48,36 +45,51 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 		}()
 	}
 
-	// Check for context cancellation after potentially slow idempotency check
 	if err := ctx.Err(); err != nil {
 		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
 	}
 
-	// Convert opening balance from proto to domain Money
 	openingBalance, err := protoMoneyAmountToDomain(req.OpeningBalance)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid opening_balance: %v", err)
 	}
 
-	// Validate instrument and attributes using CEL (if instrument_code provided)
 	if req.InstrumentCode != "" {
-		// Reuse the already-converted domain amount for string formatting.
-		// This uses the battle-tested decimal library and handles all edge cases correctly.
 		amountStr := openingBalance.Amount.String()
 		if err := s.validateOpeningBalanceWithCEL(ctx, req.InstrumentCode, amountStr, req.Attributes); err != nil {
-			return nil, err // Already a gRPC status error
+			return nil, err
 		}
 	}
 
-	// Extract effective date from proto timestamp
+	log, err := s.createMigrationLog(req, openingBalance)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.persistMigrationLog(ctx, req, log, openingBalance); err != nil {
+		return nil, err
+	}
+
+	if idempotencyKey != nil {
+		if err := storeLogIdempotencyResult(ctx, s.idempotency, *idempotencyKey, log.LogID); err != nil {
+			return nil, err
+		}
+	}
+
+	return &positionkeepingv1.InitiateWithOpeningBalanceResponse{
+		Log: toProtoFinancialPositionLog(log),
+	}, nil
+}
+
+// createMigrationLog creates a new financial position log with opening balance from the request.
+func (s *PositionKeepingService) createMigrationLog(
+	req *positionkeepingv1.InitiateWithOpeningBalanceRequest,
+	openingBalance domain.Money,
+) (*domain.FinancialPositionLog, error) {
 	effectiveDate := req.EffectiveDate.AsTime()
 
-	// Create new financial position log with opening balance
 	log, err := domain.NewFinancialPositionLogWithOpeningBalance(
-		req.AccountId,
-		openingBalance,
-		effectiveDate,
-		req.MigrationReference,
+		req.AccountId, openingBalance, effectiveDate, req.MigrationReference,
 	)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidEffectiveDate) {
@@ -85,20 +97,26 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 		}
 		return nil, status.Errorf(codes.InvalidArgument, "failed to create financial position log: %v", err)
 	}
+	return log, nil
+}
 
-	// Extract correlation ID from context for end-to-end request tracing,
-	// falling back to log ID if not present in request metadata
+// persistMigrationLog builds the opening balance event and persists the log atomically.
+func (s *PositionKeepingService) persistMigrationLog(
+	ctx context.Context,
+	req *positionkeepingv1.InitiateWithOpeningBalanceRequest,
+	log *domain.FinancialPositionLog,
+	openingBalance domain.Money,
+) error {
 	correlationID := clients.ExtractCorrelationID(ctx)
 	if correlationID == "" {
 		correlationID = log.LogID.String()
 	}
 
-	// Build the OpeningBalanceRecorded event and persist it atomically with the position log.
 	event := &domain.OpeningBalanceRecorded{
 		LogID:              log.LogID,
 		AccountID:          log.AccountID,
 		OpeningBalance:     openingBalance,
-		EffectiveDate:      effectiveDate,
+		EffectiveDate:      req.EffectiveDate.AsTime(),
 		MigrationReference: req.MigrationReference,
 		CorrelationID:      correlationID,
 		Timestamp:          time.Now().UTC(),
@@ -106,33 +124,9 @@ func (s *PositionKeepingService) InitiateWithOpeningBalance(
 	}
 	outboxFn := s.outboxPublisher.BuildOutboxFn(ctx, []domain.DomainEvent{event})
 	if err := s.repository.CreateWithOutbox(ctx, log, outboxFn); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
+		return status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
 	}
-
-	// Store idempotency result if key was provided
-	if idempotencyKey != nil {
-		resultData, err := json.Marshal(map[string]string{
-			"log_id": log.LogID.String(),
-		})
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
-		}
-
-		if err := s.idempotency.StoreResult(ctx, idempotency.Result{
-			Key:         *idempotencyKey,
-			Status:      idempotency.StatusCompleted,
-			Data:        resultData,
-			CompletedAt: time.Now(),
-			TTL:         24 * time.Hour,
-		}); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to store idempotency result: %v", err)
-		}
-	}
-
-	resp = &positionkeepingv1.InitiateWithOpeningBalanceResponse{
-		Log: toProtoFinancialPositionLog(log),
-	}
-	return resp, nil
+	return nil
 }
 
 // validateMigrationRequest validates the InitiateWithOpeningBalanceRequest.
@@ -231,13 +225,6 @@ func (s *PositionKeepingService) checkMigrationIdempotencyAndAcquireLock(
 // This is optional - if instrumentCache is nil or instrumentCode is empty, validation is skipped
 // for backwards compatibility.
 //
-// The CEL program receives the following variables:
-//   - attributes: map[string]string of opening balance attributes
-//   - amount: string representation of the opening balance amount
-//   - valid_from: zero time (for future use)
-//   - valid_to: zero time (for future use)
-//   - source: extracted from attributes["source"] or empty string
-//
 // Returns nil if validation passes or is skipped.
 // Returns gRPC INVALID_ARGUMENT error if validation fails.
 // Returns gRPC NOT_FOUND error if instrument is not found.
@@ -248,84 +235,81 @@ func (s *PositionKeepingService) validateOpeningBalanceWithCEL(
 	amount string,
 	attributes map[string]string,
 ) error {
-	// Skip validation if instrument cache is not configured (backwards compatibility)
-	if s.instrumentCache == nil {
+	if s.instrumentCache == nil || instrumentCode == "" {
 		return nil
 	}
 
-	// Skip validation if no instrument code provided (backwards compatibility)
-	if instrumentCode == "" {
-		return nil
-	}
-
-	// Acquire an AttributeBag from pool for efficient memory reuse
-	bag := quantity.AcquireAttributeBag()
-	defer quantity.ReleaseAttributeBag(bag)
-
-	// Populate AttributeBag from attributes
-	for k, v := range attributes {
-		bag.Set(k, v)
-	}
-
-	// Look up instrument from cache using instrument_code
-	// Use version=1 for now; could be made configurable in the future
-	const instrumentVersion = 1
-	instrument, err := s.instrumentCache.GetOrLoad(ctx, instrumentCode, instrumentVersion, func() (*CachedInstrument, error) {
-		// The loadFn should never be called if the cache is properly configured
-		// with a backing repository. For now, return not found to trigger the error path.
-		return nil, fmt.Errorf("%w: %s", ErrInstrumentNotFound, instrumentCode)
-	})
+	instrument, err := s.loadInstrument(ctx, instrumentCode)
 	if err != nil {
-		// Distinguish instrument-not-found from other cache/backend errors
 		if errors.Is(err, ErrInstrumentNotFound) {
 			RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonInstrumentNotFound)
 			return status.Errorf(codes.NotFound,
 				"instrument definition not found for instrument code '%s': %v", instrumentCode, err)
 		}
-		// Other errors (cache failures, backend timeouts, etc.) are internal errors
 		RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonCELError)
 		return status.Errorf(codes.Internal,
 			"failed to load instrument definition for instrument code '%s': %v", instrumentCode, err)
 	}
 
-	// Build the activation context for CEL evaluation
-	// The CEL program expects these specific variable names
-	// Note: Go map access on nil returns zero value, so no nil check needed
-	source := attributes["source"]
-	attributesMap := bag.ToMap()
-	activation := map[string]any{
-		"attributes": attributesMap,
-		"amount":     amount,
-		"valid_from": time.Time{}, // Zero time for now
-		"valid_to":   time.Time{}, // Zero time for now
-		"source":     source,
+	activation := buildCELActivation(attributes, amount)
+
+	return evalValidationProgram(instrument, instrumentCode, activation, func(code string, reason string) {
+		RecordOpeningBalanceValidationFailure(code, reason)
+	})
+}
+
+// loadInstrument loads a cached instrument by code from the instrument cache.
+func (s *PositionKeepingService) loadInstrument(ctx context.Context, instrumentCode string) (*CachedInstrument, error) {
+	const instrumentVersion = 1
+	return s.instrumentCache.GetOrLoad(ctx, instrumentCode, instrumentVersion, func() (*CachedInstrument, error) {
+		return nil, fmt.Errorf("%w: %s", ErrInstrumentNotFound, instrumentCode)
+	})
+}
+
+// buildCELActivation builds the CEL activation context from attributes and amount.
+func buildCELActivation(attributes map[string]string, amount string) map[string]any {
+	bag := quantity.AcquireAttributeBag()
+	defer quantity.ReleaseAttributeBag(bag)
+
+	for k, v := range attributes {
+		bag.Set(k, v)
 	}
 
-	// Run validation if instrument has a validation program
-	if instrument.ValidationProgram != nil {
-		result, _, err := instrument.ValidationProgram.Eval(activation)
-		if err != nil {
-			// CEL evaluation error - record metric and return error
-			RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonCELError)
-			return status.Errorf(codes.InvalidArgument,
-				"validation error for instrument '%s': %v", instrumentCode, err)
-		}
+	source := attributes["source"]
+	return map[string]any{
+		"attributes": bag.ToMap(),
+		"amount":     amount,
+		"valid_from": time.Time{},
+		"valid_to":   time.Time{},
+		"source":     source,
+	}
+}
 
-		// The validation program should return a boolean
-		valid, ok := result.Value().(bool)
-		if !ok {
-			// Unexpected return type from CEL - treat as error
-			RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonCELError)
-			return status.Errorf(codes.InvalidArgument,
-				"validation error for instrument '%s': expression did not return boolean", instrumentCode)
-		}
+// evalValidationProgram runs the instrument's CEL validation program against the activation.
+// The recordFailure callback is called with (instrumentCode, reason) on failure.
+func evalValidationProgram(instrument *CachedInstrument, instrumentCode string, activation map[string]any, recordFailure func(string, string)) error {
+	if instrument.ValidationProgram == nil {
+		return nil
+	}
 
-		if !valid {
-			// Validation rejected the opening balance - record metric and return error
-			RecordOpeningBalanceValidationFailure(instrumentCode, ValidationFailureReasonCELRejected)
-			return status.Errorf(codes.InvalidArgument,
-				"opening balance validation failed for instrument '%s': attributes do not satisfy validation rules", instrumentCode)
-		}
+	result, _, err := instrument.ValidationProgram.Eval(activation)
+	if err != nil {
+		recordFailure(instrumentCode, ValidationFailureReasonCELError)
+		return status.Errorf(codes.InvalidArgument,
+			"validation error for instrument '%s': %v", instrumentCode, err)
+	}
+
+	valid, ok := result.Value().(bool)
+	if !ok {
+		recordFailure(instrumentCode, ValidationFailureReasonCELError)
+		return status.Errorf(codes.InvalidArgument,
+			"validation error for instrument '%s': expression did not return boolean", instrumentCode)
+	}
+
+	if !valid {
+		recordFailure(instrumentCode, ValidationFailureReasonCELRejected)
+		return status.Errorf(codes.InvalidArgument,
+			"validation failed for instrument '%s': attributes do not satisfy validation rules", instrumentCode)
 	}
 
 	return nil

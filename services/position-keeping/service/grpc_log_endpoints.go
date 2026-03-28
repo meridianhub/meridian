@@ -45,75 +45,14 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 	ctx context.Context,
 	req *positionkeepingv1.ListFinancialPositionLogsRequest,
 ) (*positionkeepingv1.ListFinancialPositionLogsResponse, error) {
-	// Validate and extract pagination parameters
-	pageSize := int32(50) // Default page size
-	offset := 0
-
-	if req.Pagination != nil {
-		if req.Pagination.PageSize < 0 {
-			return nil, status.Error(codes.InvalidArgument, "page_size must be positive")
-		} else if req.Pagination.PageSize > 1000 {
-			return nil, status.Error(codes.InvalidArgument, "page_size exceeds maximum of 1000")
-		} else if req.Pagination.PageSize > 0 {
-			pageSize = req.Pagination.PageSize
-		}
-		// PageSize == 0 uses the default (50)
-
-		// Parse page token as offset
-		if req.Pagination.PageToken != "" {
-			parsedOffset, err := strconv.Atoi(req.Pagination.PageToken)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
-			}
-			if parsedOffset < 0 {
-				return nil, status.Error(codes.InvalidArgument, "page_token cannot be negative")
-			}
-			offset = parsedOffset
-		}
+	pageSize, offset, err := validatePagination(req.Pagination)
+	if err != nil {
+		return nil, err
 	}
 
-	// Build filter
-	filter := domain.PositionLogFilter{
-		Limit:  int(pageSize),
-		Offset: offset,
-	}
-
-	// Add account ID filter - account_ids takes precedence over account_id
-	if len(req.AccountIds) > 0 {
-		if len(req.AccountIds) > 100 {
-			return nil, status.Error(codes.InvalidArgument, "account_ids must not exceed 100 items")
-		}
-		filter.AccountIDs = req.AccountIds
-	} else if req.AccountId != "" {
-		filter.AccountID = &req.AccountId
-	}
-
-	// Add status filter
-	if req.Status != commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED {
-		domainStatus := fromProtoTransactionStatus(req.Status)
-		filter.Status = &domainStatus
-	}
-
-	// Add date range filter
-	if req.DateRange != nil {
-		if req.DateRange.StartDate != "" {
-			fromDate, err := time.Parse("2006-01-02", req.DateRange.StartDate)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid start_date format: %v", err)
-			}
-			filter.FromDate = &fromDate
-		}
-
-		if req.DateRange.EndDate != "" {
-			toDate, err := time.Parse("2006-01-02", req.DateRange.EndDate)
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "invalid end_date format: %v", err)
-			}
-			// Set to start of next day (exclusive upper bound)
-			// This ensures records on end_date are included (< next day midnight)
-			toDate = toDate.AddDate(0, 0, 1)
-			filter.ToDate = &toDate
-		}
+	filter, err := buildPositionLogFilter(req, pageSize, offset)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check for context cancellation before potentially expensive query
@@ -121,7 +60,6 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
 	}
 
-	// Query repository
 	logs, err := s.repository.List(ctx, filter)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -133,27 +71,101 @@ func (s *PositionKeepingService) ListFinancialPositionLogs(
 		return nil, status.Errorf(codes.Internal, "failed to list financial position logs: %v", err)
 	}
 
-	// Convert to protobuf
 	protoLogs := make([]*positionkeepingv1.FinancialPositionLog, 0, len(logs))
 	for _, log := range logs {
 		protoLogs = append(protoLogs, toProtoFinancialPositionLog(log))
 	}
 
-	// Build pagination response
-	// TotalCount is -1 (unknown) as counting all matching records would be expensive.
-	// Clients should paginate using NextPageToken until no more results are returned.
-	paginationResp := &commonv1.PaginationResponse{
+	return &positionkeepingv1.ListFinancialPositionLogsResponse{
+		Logs:       protoLogs,
+		Pagination: buildPaginationResponse(len(protoLogs), pageSize, offset),
+	}, nil
+}
+
+// validatePagination extracts and validates pagination parameters from the request.
+func validatePagination(pagination *commonv1.Pagination) (int32, int, error) {
+	pageSize := int32(50) // Default page size
+	offset := 0
+
+	if pagination == nil {
+		return pageSize, offset, nil
+	}
+
+	if pagination.PageSize < 0 {
+		return 0, 0, status.Error(codes.InvalidArgument, "page_size must be positive")
+	} else if pagination.PageSize > 1000 {
+		return 0, 0, status.Error(codes.InvalidArgument, "page_size exceeds maximum of 1000")
+	} else if pagination.PageSize > 0 {
+		pageSize = pagination.PageSize
+	}
+
+	if pagination.PageToken != "" {
+		parsedOffset, err := strconv.Atoi(pagination.PageToken)
+		if err != nil {
+			return 0, 0, status.Errorf(codes.InvalidArgument, "invalid page_token: %v", err)
+		}
+		if parsedOffset < 0 {
+			return 0, 0, status.Error(codes.InvalidArgument, "page_token cannot be negative")
+		}
+		offset = parsedOffset
+	}
+
+	return pageSize, offset, nil
+}
+
+// buildPositionLogFilter constructs the domain filter from the list request.
+func buildPositionLogFilter(req *positionkeepingv1.ListFinancialPositionLogsRequest, pageSize int32, offset int) (domain.PositionLogFilter, error) {
+	filter := domain.PositionLogFilter{
+		Limit:  int(pageSize),
+		Offset: offset,
+	}
+
+	if len(req.AccountIds) > 0 {
+		if len(req.AccountIds) > 100 {
+			return filter, status.Error(codes.InvalidArgument, "account_ids must not exceed 100 items")
+		}
+		filter.AccountIDs = req.AccountIds
+	} else if req.AccountId != "" {
+		filter.AccountID = &req.AccountId
+	}
+
+	if req.Status != commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED {
+		domainStatus := fromProtoTransactionStatus(req.Status)
+		filter.Status = &domainStatus
+	}
+
+	if req.DateRange != nil {
+		if req.DateRange.StartDate != "" {
+			fromDate, err := time.Parse("2006-01-02", req.DateRange.StartDate)
+			if err != nil {
+				return filter, status.Errorf(codes.InvalidArgument, "invalid start_date format: %v", err)
+			}
+			filter.FromDate = &fromDate
+		}
+
+		if req.DateRange.EndDate != "" {
+			toDate, err := time.Parse("2006-01-02", req.DateRange.EndDate)
+			if err != nil {
+				return filter, status.Errorf(codes.InvalidArgument, "invalid end_date format: %v", err)
+			}
+			toDate = toDate.AddDate(0, 0, 1)
+			filter.ToDate = &toDate
+		}
+	}
+
+	return filter, nil
+}
+
+// buildPaginationResponse creates the pagination response with next page token.
+func buildPaginationResponse(resultCount int, pageSize int32, offset int) *commonv1.PaginationResponse {
+	resp := &commonv1.PaginationResponse{
 		TotalCount: -1, // Unknown - would require separate COUNT query
 	}
 
-	// If we got a full page, there might be more
-	if len(protoLogs) == int(pageSize) {
+	if resultCount == int(pageSize) {
 		nextOffset := offset + int(pageSize)
-		paginationResp.NextPageToken = strconv.Itoa(nextOffset)
+		resp.NextPageToken = strconv.Itoa(nextOffset)
 	}
 
-	return &positionkeepingv1.ListFinancialPositionLogsResponse{
-		Logs:       protoLogs,
-		Pagination: paginationResp,
-	}, nil
+	return resp
 }

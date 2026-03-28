@@ -22,12 +22,10 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 	ctx context.Context,
 	req *positionkeepingv1.InitiateFinancialPositionLogRequest,
 ) (resp *positionkeepingv1.InitiateFinancialPositionLogResponse, err error) {
-	// Validate request
 	if err := validateInitiateRequest(req); err != nil {
 		return nil, err
 	}
 
-	// Check idempotency and acquire lock if key provided
 	idempotencyKey, cachedResponse, err := s.checkIdempotencyAndAcquireLock(ctx, req)
 	if err != nil {
 		return nil, err
@@ -36,112 +34,126 @@ func (s *PositionKeepingService) InitiateFinancialPositionLog(
 		return cachedResponse, nil
 	}
 
-	// Clean up pending idempotency key on error to prevent 5-minute lockout
-	// If the operation fails after MarkPending, release the key so retries can proceed
 	if idempotencyKey != nil {
 		defer func() {
 			if err != nil {
-				// Best-effort cleanup; ignore delete errors as TTL will eventually expire
 				_ = s.idempotency.Delete(ctx, *idempotencyKey)
 			}
 		}()
 	}
 
-	// Check for context cancellation after potentially slow idempotency check
 	if err := ctx.Err(); err != nil {
 		return nil, status.Errorf(codes.Canceled, "request cancelled: %v", err)
 	}
 
-	// Validate account exists if validation is enabled
-	// This check ensures we don't create position logs for non-existent accounts.
-	// The validator uses graceful degradation: if Current Account service is unavailable,
-	// validation is skipped to avoid blocking operations during service outages.
-	var accountServiceDomain AccountServiceDomain
-	if s.accountValidationEnabled && s.accountValidator != nil {
-		if err := s.accountValidator.ValidateExists(ctx, req.AccountId); err != nil {
-			return nil, err // Returns codes.InvalidArgument if account not found
-		}
-		// Resolve which service domain manages this account (captured during validation)
-		if resolver, ok := s.accountValidator.(AccountResolver); ok {
-			accountServiceDomain = resolver.ResolveServiceDomain(ctx, req.AccountId)
-		}
+	accountServiceDomain := s.resolveAccountDomain(ctx, req.AccountId)
+
+	initialEntry, lineage, err := convertInitiateProtoToDomain(req)
+	if err != nil {
+		return nil, err
 	}
 
-	// Convert initial entry from proto to domain if provided
-	var initialEntry *domain.TransactionLogEntry
-	if req.InitialEntry != nil {
-		entry, err := protoEntryToDomain(req.InitialEntry)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid initial entry: %v", err)
-		}
-		initialEntry = entry
-	}
-
-	// Convert lineage from proto to domain if provided
-	var lineage *domain.TransactionLineage
-	if req.TransactionLineage != nil {
-		lin, err := protoLineageToDomain(req.TransactionLineage)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid transaction lineage: %v", err)
-		}
-		lineage = lin
-	}
-
-	// Create new financial position log
 	log, err := domain.NewFinancialPositionLog(req.AccountId, initialEntry, lineage)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to create financial position log: %v", err)
 	}
 	log.AccountServiceDomain = string(accountServiceDomain)
 
-	// Build the domain event (if applicable) before persisting, then write both
-	// the position log and the outbox entry atomically in a single transaction.
-	var events []domain.DomainEvent
-	if initialEntry != nil {
-		events = append(events, &domain.TransactionCaptured{
-			LogID:         log.LogID,
-			AccountID:     log.AccountID,
-			TransactionID: initialEntry.TransactionID,
-			Amount:        initialEntry.Amount,
-			Direction:     initialEntry.Direction,
-			Source:        initialEntry.Source,
-			Description:   initialEntry.Description,
-			Reference:     initialEntry.Reference,
-			Timestamp:     initialEntry.Timestamp,
-			Version:       log.Version,
-		})
-	}
+	events := buildTransactionCapturedEvents(log, initialEntry)
 
-	// Persist to repository atomically with outbox event write.
 	outboxFn := s.outboxPublisher.BuildOutboxFn(ctx, events)
 	if err := s.repository.CreateWithOutbox(ctx, log, outboxFn); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to save financial position log: %v", err)
 	}
 
-	// Store idempotency result if key was provided
 	if idempotencyKey != nil {
-		resultData, err := json.Marshal(map[string]string{
-			"log_id": log.LogID.String(),
-		})
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
-		}
-
-		if err := s.idempotency.StoreResult(ctx, idempotency.Result{
-			Key:         *idempotencyKey,
-			Status:      idempotency.StatusCompleted,
-			Data:        resultData,
-			CompletedAt: time.Now(),
-			TTL:         24 * time.Hour,
-		}); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to store idempotency result: %v", err)
+		if err := storeLogIdempotencyResult(ctx, s.idempotency, *idempotencyKey, log.LogID); err != nil {
+			return nil, err
 		}
 	}
 
-	resp = &positionkeepingv1.InitiateFinancialPositionLogResponse{
+	return &positionkeepingv1.InitiateFinancialPositionLogResponse{
 		Log: toProtoFinancialPositionLog(log),
+	}, nil
+}
+
+// resolveAccountDomain validates the account and resolves its service domain.
+// Returns empty string if validation is disabled or the account cannot be resolved.
+func (s *PositionKeepingService) resolveAccountDomain(ctx context.Context, accountID string) AccountServiceDomain {
+	if !s.accountValidationEnabled || s.accountValidator == nil {
+		return ""
 	}
-	return resp, nil
+	if err := s.accountValidator.ValidateExists(ctx, accountID); err != nil {
+		return ""
+	}
+	if resolver, ok := s.accountValidator.(AccountResolver); ok {
+		return resolver.ResolveServiceDomain(ctx, accountID)
+	}
+	return ""
+}
+
+// convertInitiateProtoToDomain converts proto initial entry and lineage to domain types.
+func convertInitiateProtoToDomain(req *positionkeepingv1.InitiateFinancialPositionLogRequest) (*domain.TransactionLogEntry, *domain.TransactionLineage, error) {
+	var initialEntry *domain.TransactionLogEntry
+	if req.InitialEntry != nil {
+		entry, err := protoEntryToDomain(req.InitialEntry)
+		if err != nil {
+			return nil, nil, status.Errorf(codes.InvalidArgument, "invalid initial entry: %v", err)
+		}
+		initialEntry = entry
+	}
+
+	var lineage *domain.TransactionLineage
+	if req.TransactionLineage != nil {
+		lin, err := protoLineageToDomain(req.TransactionLineage)
+		if err != nil {
+			return nil, nil, status.Errorf(codes.InvalidArgument, "invalid transaction lineage: %v", err)
+		}
+		lineage = lin
+	}
+
+	return initialEntry, lineage, nil
+}
+
+// buildTransactionCapturedEvents builds domain events for a newly created log with an initial entry.
+func buildTransactionCapturedEvents(log *domain.FinancialPositionLog, initialEntry *domain.TransactionLogEntry) []domain.DomainEvent {
+	if initialEntry == nil {
+		return nil
+	}
+	return []domain.DomainEvent{&domain.TransactionCaptured{
+		LogID:         log.LogID,
+		AccountID:     log.AccountID,
+		TransactionID: initialEntry.TransactionID,
+		Amount:        initialEntry.Amount,
+		Direction:     initialEntry.Direction,
+		Source:        initialEntry.Source,
+		Description:   initialEntry.Description,
+		Reference:     initialEntry.Reference,
+		Timestamp:     initialEntry.Timestamp,
+		Version:       log.Version,
+	}}
+}
+
+// storeLogIdempotencyResult stores an idempotency result keyed by log ID.
+func storeLogIdempotencyResult(ctx context.Context, svc idempotency.Service, key idempotency.Key, logID uuid.UUID) error {
+	resultData, err := json.Marshal(map[string]string{
+		"log_id": logID.String(),
+	})
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to marshal idempotency result: %v", err)
+	}
+
+	if err := svc.StoreResult(ctx, idempotency.Result{
+		Key:         key,
+		Status:      idempotency.StatusCompleted,
+		Data:        resultData,
+		CompletedAt: time.Now(),
+		TTL:         24 * time.Hour,
+	}); err != nil {
+		return status.Errorf(codes.Internal, "failed to store idempotency result: %v", err)
+	}
+
+	return nil
 }
 
 // validateInitiateRequest validates the initiate request

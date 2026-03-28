@@ -29,12 +29,27 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 		_ = tx.Rollback(ctx)
 	}()
 
-	// Set tenant scope if in multi-tenant mode
 	if err := r.setSearchPath(ctx, tx); err != nil {
 		return err
 	}
 
-	// Use COPY for bulk insert of financial_position_log
+	if err := r.bulkInsertLogs(ctx, tx, logs); err != nil {
+		return err
+	}
+
+	if err := r.insertRelatedEntitiesForBatch(ctx, tx, logs); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit batch transaction: %w", err)
+	}
+
+	return nil
+}
+
+// bulkInsertLogs uses COPY to bulk insert financial_position_log rows.
+func (r *PostgresRepository) bulkInsertLogs(ctx context.Context, tx pgx.Tx, logs []*domain.FinancialPositionLog) error {
 	userID := audit.GetUserFromContext(ctx)
 	copyCount, err := tx.CopyFrom(
 		ctx,
@@ -49,7 +64,7 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 		pgx.CopyFromSlice(len(logs), func(i int) ([]any, error) {
 			log := logs[i]
 			return []any{
-				uuid.New(), // Generate new DB ID
+				uuid.New(),
 				log.CreatedAt, userID, log.UpdatedAt, userID,
 				log.LogID, log.AccountID, log.AccountServiceDomain, log.Version,
 				log.StatusTracking.CurrentStatus.String(), nullString(log.StatusTracking.PreviousStatus),
@@ -62,7 +77,7 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return domain.ErrConflict
 		}
 		return fmt.Errorf("failed to bulk insert financial position logs: %w", err)
@@ -72,14 +87,16 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 		return fmt.Errorf("%w: expected %d logs but inserted %d", ErrBulkInsertMismatch, len(logs), copyCount)
 	}
 
-	// Now insert related entities for each log
-	// First, we need to map LogID to database ID
+	return nil
+}
+
+// insertRelatedEntitiesForBatch maps LogIDs to database IDs and inserts related entities.
+func (r *PostgresRepository) insertRelatedEntitiesForBatch(ctx context.Context, tx pgx.Tx, logs []*domain.FinancialPositionLog) error {
 	logIDMap, err := r.getLogIDMap(ctx, tx, logs)
 	if err != nil {
 		return err
 	}
 
-	// Insert all transaction log entries
 	for _, log := range logs {
 		dbID, ok := logIDMap[log.LogID]
 		if !ok {
@@ -99,10 +116,6 @@ func (r *PostgresRepository) CreateBatch(ctx context.Context, logs []*domain.Fin
 		if err := r.insertAuditTrailEntries(ctx, tx, dbID, log.AuditTrail); err != nil {
 			return err
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}
 
 	return nil
