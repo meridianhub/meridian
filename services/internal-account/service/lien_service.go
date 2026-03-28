@@ -63,28 +63,11 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		return nil, status.Error(codes.FailedPrecondition, "lien operations not configured")
 	}
 
-	// Validate input
-	if req.Input == nil || req.Input.Amount == "" {
-		operationStatus = opStatusInvalidRequest
-		return nil, status.Error(codes.InvalidArgument, "input amount is required")
-	}
-	if req.Input.InstrumentCode == "" {
-		operationStatus = opStatusInvalidRequest
-		return nil, status.Error(codes.InvalidArgument, "input instrument_code is required")
-	}
-	if strings.TrimSpace(req.PaymentOrderReference) == "" {
-		operationStatus = opStatusInvalidRequest
-		return nil, status.Error(codes.InvalidArgument, "payment_order_reference is required")
-	}
-
-	inputAmount, err := decimal.NewFromString(req.Input.Amount)
+	// Validate input fields and parse amount
+	inputAmount, opStatus, err := validateInitiateLienInput(req)
 	if err != nil {
-		operationStatus = opStatusInvalidInputAmount
-		return nil, status.Errorf(codes.InvalidArgument, "invalid input amount: %v", err)
-	}
-	if !inputAmount.IsPositive() {
-		operationStatus = opStatusInputAmountNonPositive
-		return nil, status.Error(codes.InvalidArgument, "input amount must be positive")
+		operationStatus = opStatus
+		return nil, err
 	}
 
 	// Resolve account
@@ -94,27 +77,13 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		return nil, err
 	}
 
-	nativeInstrument := account.InstrumentCode()
-
 	// Check idempotency: if a lien already exists for this payment order reference, return it
-	existingLien, err := s.lienRepo.FindByPaymentOrderReference(ctx, req.PaymentOrderReference)
-	if err == nil {
-		if existingLien.AccountID != account.ID() {
-			operationStatus = opStatusInvalidRequest
-			return nil, status.Errorf(codes.InvalidArgument,
-				"payment_order_reference already used for a different account")
-		}
-		operationStatus = opStatusLienAlreadyExists
-		resp, buildErr := s.buildInitiateLienResponse(ctx, existingLien)
-		if buildErr != nil {
-			operationStatus = operationStatusFailed
-			return nil, buildErr
-		}
+	if resp, opStatus, err := s.checkInitiateLienIdempotency(ctx, req.PaymentOrderReference, account); err != nil {
+		operationStatus = opStatus
+		return nil, err
+	} else if resp != nil {
+		operationStatus = opStatus
 		return resp, nil
-	}
-	if !errors.Is(err, persistence.ErrLienNotFound) {
-		operationStatus = operationStatusFailed
-		return nil, status.Errorf(codes.Internal, "failed to check lien idempotency: %v", err)
 	}
 
 	// Determine knowledge_at for valuation
@@ -130,114 +99,25 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		expiresAt = &t
 	}
 
+	// Create lien (same-instrument or cross-instrument with valuation)
 	var lien *domain.Lien
-
+	nativeInstrument := account.InstrumentCode()
 	if req.Input.InstrumentCode == nativeInstrument {
-		// Same-instrument lien: no valuation needed.
-		// Store the amount in minor units using instrument precision from reference data.
-		precision, precisionErr := s.getInstrumentPrecision(ctx, nativeInstrument)
-		if precisionErr != nil {
-			operationStatus = operationStatusFailed
-			return nil, precisionErr
-		}
-		if !inputAmount.Equal(inputAmount.Truncate(precision)) {
-			operationStatus = opStatusInvalidInputAmount
-			return nil, status.Errorf(codes.InvalidArgument, "input amount has more than %d decimal places for instrument %s", precision, nativeInstrument)
-		}
-		amountCents := inputAmount.Shift(precision).IntPart()
-
-		lien, err = domain.NewLien(account.ID(), amountCents, nativeInstrument, req.BucketId, req.PaymentOrderReference, expiresAt)
-		if err != nil {
-			operationStatus = opStatusInvalidRequest
-			return nil, status.Errorf(codes.InvalidArgument, "failed to create lien: %v", err)
-		}
+		lien, opStatus, err = s.createSameInstrumentLien(ctx, account, inputAmount, nativeInstrument, req, expiresAt)
 	} else {
-		// Cross-instrument lien: perform atomic valuation via valuateInternal()
-		result, err := s.valuateInternal(ctx, req.AccountId, inputAmount, req.Input.InstrumentCode, knowledgeAt)
-		if err != nil {
-			switch {
-			case errors.Is(err, ErrValuationAccountNotFound):
-				operationStatus = opStatusAccountNotFound
-				return nil, status.Errorf(codes.NotFound, "%v", err)
-			case errors.Is(err, ErrNoActiveValuationFeature):
-				operationStatus = opStatusNoValuationFeature
-				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-			case errors.Is(err, ErrValuationFeatureNotActive):
-				operationStatus = opStatusFeatureNotActive
-				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-			case errors.Is(err, ErrValuationRepoNotConfigured):
-				operationStatus = opStatusValuationFeatureRepoNil
-				return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
-			case errors.Is(err, ErrValuationEngineFailed):
-				operationStatus = opStatusValuationFailed
-				return nil, status.Errorf(codes.Internal, "%v", err)
-			default:
-				operationStatus = opStatusValuationFailed
-				return nil, status.Errorf(codes.Internal, "valuation failed: %v", err)
-			}
-		}
-
-		// Build valued lien: convert output amount to minor units using instrument precision.
-		precision, precisionErr := s.getInstrumentPrecision(ctx, nativeInstrument)
-		if precisionErr != nil {
-			operationStatus = operationStatusFailed
-			return nil, precisionErr
-		}
-		if !result.OutputAmount.Equal(result.OutputAmount.Truncate(precision)) {
-			operationStatus = opStatusValuationFailed
-			return nil, status.Errorf(codes.Internal, "valued amount has more than %d decimal places for instrument %s", precision, nativeInstrument)
-		}
-		amountCents := result.OutputAmount.Shift(precision).IntPart()
-
-		reservedQuantity := &domain.InstrumentAmount{
-			Amount:         inputAmount,
-			InstrumentCode: req.Input.InstrumentCode,
-		}
-		valuedAmount := &domain.InstrumentAmount{
-			Amount:         result.OutputAmount,
-			InstrumentCode: result.OutputCode,
-		}
-
-		var analysisJSON json.RawMessage
-		if result.Analysis != nil {
-			data, marshalErr := json.Marshal(result.Analysis)
-			if marshalErr != nil {
-				s.logger.Warn("failed to marshal valuation analysis", "error", marshalErr)
-			} else {
-				analysisJSON = data
-			}
-		}
-
-		lien, err = domain.NewValuedLien(
-			account.ID(), amountCents, nativeInstrument, req.BucketId,
-			req.PaymentOrderReference, expiresAt,
-			reservedQuantity, valuedAmount, analysisJSON,
-		)
-		if err != nil {
-			operationStatus = opStatusInvalidRequest
-			return nil, status.Errorf(codes.InvalidArgument, "failed to create valued lien: %v", err)
-		}
+		lien, opStatus, err = s.createCrossInstrumentLien(ctx, account, inputAmount, nativeInstrument, req, knowledgeAt, expiresAt)
+	}
+	if err != nil {
+		operationStatus = opStatus
+		return nil, err
 	}
 
-	// Persist the lien
-	if err := s.lienRepo.Create(ctx, lien); err != nil {
-		if isDuplicatePaymentOrderRef(err) {
-			// Race condition: another request created the lien between our check and create.
-			// Return the existing lien for idempotency.
-			existingLien, findErr := s.lienRepo.FindByPaymentOrderReference(ctx, req.PaymentOrderReference)
-			if findErr != nil {
-				operationStatus = opStatusLienCreateFailed
-				return nil, status.Errorf(codes.Internal, "lien creation race condition: %v", err)
-			}
-			resp, buildErr := s.buildInitiateLienResponse(ctx, existingLien)
-			if buildErr != nil {
-				operationStatus = opStatusLienCreateFailed
-				return nil, buildErr
-			}
-			return resp, nil
-		}
-		operationStatus = opStatusLienCreateFailed
-		return nil, status.Errorf(codes.Internal, "failed to create lien: %v", err)
+	// Persist the lien (with race condition handling for idempotency)
+	if resp, opStatus, err := s.persistLienWithRaceHandling(ctx, lien, req.PaymentOrderReference); err != nil {
+		operationStatus = opStatus
+		return nil, err
+	} else if resp != nil {
+		return resp, nil
 	}
 
 	s.logger.Info("created lien",
@@ -248,6 +128,166 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 		"has_valuation", lien.HasValuation())
 
 	return s.buildInitiateLienResponse(ctx, lien)
+}
+
+// validateInitiateLienInput validates the request fields and parses the input amount.
+func validateInitiateLienInput(req *pb.InitiateLienRequest) (decimal.Decimal, string, error) {
+	if req.Input == nil || req.Input.Amount == "" {
+		return decimal.Zero, opStatusInvalidRequest, status.Error(codes.InvalidArgument, "input amount is required")
+	}
+	if req.Input.InstrumentCode == "" {
+		return decimal.Zero, opStatusInvalidRequest, status.Error(codes.InvalidArgument, "input instrument_code is required")
+	}
+	if strings.TrimSpace(req.PaymentOrderReference) == "" {
+		return decimal.Zero, opStatusInvalidRequest, status.Error(codes.InvalidArgument, "payment_order_reference is required")
+	}
+
+	inputAmount, err := decimal.NewFromString(req.Input.Amount)
+	if err != nil {
+		return decimal.Zero, opStatusInvalidInputAmount, status.Errorf(codes.InvalidArgument, "invalid input amount: %v", err)
+	}
+	if !inputAmount.IsPositive() {
+		return decimal.Zero, opStatusInputAmountNonPositive, status.Error(codes.InvalidArgument, "input amount must be positive")
+	}
+
+	return inputAmount, "", nil
+}
+
+// checkInitiateLienIdempotency checks if a lien already exists for the payment order reference.
+func (s *Service) checkInitiateLienIdempotency(ctx context.Context, paymentOrderRef string, account domain.InternalAccount) (*pb.InitiateLienResponse, string, error) {
+	existingLien, err := s.lienRepo.FindByPaymentOrderReference(ctx, paymentOrderRef)
+	if err == nil {
+		if existingLien.AccountID != account.ID() {
+			return nil, opStatusInvalidRequest, status.Errorf(codes.InvalidArgument,
+				"payment_order_reference already used for a different account")
+		}
+		resp, buildErr := s.buildInitiateLienResponse(ctx, existingLien)
+		if buildErr != nil {
+			return nil, operationStatusFailed, buildErr
+		}
+		return resp, opStatusLienAlreadyExists, nil
+	}
+	if !errors.Is(err, persistence.ErrLienNotFound) {
+		return nil, operationStatusFailed, status.Errorf(codes.Internal, "failed to check lien idempotency: %v", err)
+	}
+	return nil, "", nil
+}
+
+// createSameInstrumentLien creates a lien when the input instrument matches the account's native instrument.
+func (s *Service) createSameInstrumentLien(ctx context.Context, account domain.InternalAccount, inputAmount decimal.Decimal, nativeInstrument string, req *pb.InitiateLienRequest, expiresAt *time.Time) (*domain.Lien, string, error) {
+	precision, precisionErr := s.getInstrumentPrecision(ctx, nativeInstrument)
+	if precisionErr != nil {
+		return nil, operationStatusFailed, precisionErr
+	}
+	if !inputAmount.Equal(inputAmount.Truncate(precision)) {
+		return nil, opStatusInvalidInputAmount, status.Errorf(codes.InvalidArgument, "input amount has more than %d decimal places for instrument %s", precision, nativeInstrument)
+	}
+	amountCents := inputAmount.Shift(precision).IntPart()
+
+	lien, err := domain.NewLien(account.ID(), amountCents, nativeInstrument, req.BucketId, req.PaymentOrderReference, expiresAt)
+	if err != nil {
+		return nil, opStatusInvalidRequest, status.Errorf(codes.InvalidArgument, "failed to create lien: %v", err)
+	}
+	return lien, "", nil
+}
+
+// createCrossInstrumentLien creates a lien with atomic valuation when the input instrument differs from the account's native instrument.
+func (s *Service) createCrossInstrumentLien(ctx context.Context, account domain.InternalAccount, inputAmount decimal.Decimal, nativeInstrument string, req *pb.InitiateLienRequest, knowledgeAt time.Time, expiresAt *time.Time) (*domain.Lien, string, error) {
+	result, err := s.valuateInternal(ctx, req.AccountId, inputAmount, req.Input.InstrumentCode, knowledgeAt)
+	if err != nil {
+		opStatus := mapValuationError(err)
+		return nil, opStatus, mapValuationErrorToGRPC(err)
+	}
+
+	precision, precisionErr := s.getInstrumentPrecision(ctx, nativeInstrument)
+	if precisionErr != nil {
+		return nil, operationStatusFailed, precisionErr
+	}
+	if !result.OutputAmount.Equal(result.OutputAmount.Truncate(precision)) {
+		return nil, opStatusValuationFailed, status.Errorf(codes.Internal, "valued amount has more than %d decimal places for instrument %s", precision, nativeInstrument)
+	}
+	amountCents := result.OutputAmount.Shift(precision).IntPart()
+
+	reservedQuantity := &domain.InstrumentAmount{
+		Amount:         inputAmount,
+		InstrumentCode: req.Input.InstrumentCode,
+	}
+	valuedAmount := &domain.InstrumentAmount{
+		Amount:         result.OutputAmount,
+		InstrumentCode: result.OutputCode,
+	}
+
+	var analysisJSON json.RawMessage
+	if result.Analysis != nil {
+		data, marshalErr := json.Marshal(result.Analysis)
+		if marshalErr != nil {
+			s.logger.Warn("failed to marshal valuation analysis", "error", marshalErr)
+		} else {
+			analysisJSON = data
+		}
+	}
+
+	lien, err := domain.NewValuedLien(
+		account.ID(), amountCents, nativeInstrument, req.BucketId,
+		req.PaymentOrderReference, expiresAt,
+		reservedQuantity, valuedAmount, analysisJSON,
+	)
+	if err != nil {
+		return nil, opStatusInvalidRequest, status.Errorf(codes.InvalidArgument, "failed to create valued lien: %v", err)
+	}
+	return lien, "", nil
+}
+
+// mapValuationError maps a valuation error to an operation status string.
+func mapValuationError(err error) string {
+	switch {
+	case errors.Is(err, ErrValuationAccountNotFound):
+		return opStatusAccountNotFound
+	case errors.Is(err, ErrNoActiveValuationFeature):
+		return opStatusNoValuationFeature
+	case errors.Is(err, ErrValuationFeatureNotActive):
+		return opStatusFeatureNotActive
+	case errors.Is(err, ErrValuationRepoNotConfigured):
+		return opStatusValuationFeatureRepoNil
+	default:
+		return opStatusValuationFailed
+	}
+}
+
+// mapValuationErrorToGRPC maps a valuation error to a gRPC status error.
+func mapValuationErrorToGRPC(err error) error {
+	switch {
+	case errors.Is(err, ErrValuationAccountNotFound):
+		return status.Errorf(codes.NotFound, "%v", err)
+	case errors.Is(err, ErrNoActiveValuationFeature),
+		errors.Is(err, ErrValuationFeatureNotActive),
+		errors.Is(err, ErrValuationRepoNotConfigured):
+		return status.Errorf(codes.FailedPrecondition, "%v", err)
+	case errors.Is(err, ErrValuationEngineFailed):
+		return status.Errorf(codes.Internal, "%v", err)
+	default:
+		return status.Errorf(codes.Internal, "valuation failed: %v", err)
+	}
+}
+
+// persistLienWithRaceHandling persists the lien, handling duplicate payment order reference race conditions.
+func (s *Service) persistLienWithRaceHandling(ctx context.Context, lien *domain.Lien, paymentOrderRef string) (*pb.InitiateLienResponse, string, error) {
+	if err := s.lienRepo.Create(ctx, lien); err != nil {
+		if isDuplicatePaymentOrderRef(err) {
+			// Race condition: another request created the lien between our check and create.
+			existingLien, findErr := s.lienRepo.FindByPaymentOrderReference(ctx, paymentOrderRef)
+			if findErr != nil {
+				return nil, opStatusLienCreateFailed, status.Errorf(codes.Internal, "lien creation race condition: %v", err)
+			}
+			resp, buildErr := s.buildInitiateLienResponse(ctx, existingLien)
+			if buildErr != nil {
+				return nil, opStatusLienCreateFailed, buildErr
+			}
+			return resp, "", nil
+		}
+		return nil, opStatusLienCreateFailed, status.Errorf(codes.Internal, "failed to create lien: %v", err)
+	}
+	return nil, "", nil
 }
 
 // ExecuteLien converts a lien reservation to an actual debit.

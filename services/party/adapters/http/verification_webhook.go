@@ -122,118 +122,151 @@ func NewVerificationWebhookHandler(cfg VerificationWebhookHandlerConfig) (*Verif
 // It validates the HMAC signature, parses the request, and calls UpdateVerification.
 // The provider name is extracted from the URL path: /webhooks/verification/{provider}
 func (h *VerificationWebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	// Only accept POST requests
 	if r.Method != http.MethodPost {
 		h.writeErrorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	// Extract provider from URL path
-	// Expected path: /webhooks/verification/{provider}
+	provider := resolveWebhookProvider(r)
+
+	secret, ok := h.resolveProviderSecret(provider)
+	if !ok {
+		h.writeErrorResponse(w, http.StatusUnauthorized, "unknown provider")
+		return
+	}
+
+	body, ok := h.readAndAuthenticateBody(w, r, provider, secret)
+	if !ok {
+		return
+	}
+
+	webhookReq, verStatus, ok := h.parseAndValidatePayload(w, body, provider)
+	if !ok {
+		return
+	}
+
+	if !h.checkTimestampFreshness(w, webhookReq, provider) {
+		return
+	}
+
+	h.processVerificationUpdate(r.Context(), w, provider, webhookReq, verStatus)
+}
+
+// resolveWebhookProvider extracts the provider from the URL path or header, defaulting to "default".
+func resolveWebhookProvider(r *http.Request) string {
 	provider := extractProvider(r.URL.Path)
 	if provider == "" {
-		// Try header as fallback
 		provider = r.Header.Get(ProviderHeader)
 	}
 	if provider == "" {
 		provider = "default"
 	}
-	provider = strings.ToLower(provider)
+	return strings.ToLower(provider)
+}
 
-	// Get the HMAC secret for this provider
+// resolveProviderSecret looks up the HMAC secret for a provider, falling back to "default".
+func (h *VerificationWebhookHandler) resolveProviderSecret(provider string) ([]byte, bool) {
 	secret, ok := h.hmacSecrets[provider]
 	if !ok {
-		// Try default secret if provider-specific not found
 		secret, ok = h.hmacSecrets["default"]
 		if !ok {
-			h.logger.Warn("no HMAC secret configured for provider",
-				"provider", provider)
-			h.writeErrorResponse(w, http.StatusUnauthorized, "unknown provider")
-			return
+			h.logger.Warn("no HMAC secret configured for provider", "provider", provider)
+			return nil, false
 		}
 	}
+	return secret, true
+}
 
-	// Ensure body is closed when we're done
+// readAndAuthenticateBody reads the request body and validates the HMAC signature.
+// Returns the body bytes and true on success, or writes an error response and returns false.
+func (h *VerificationWebhookHandler) readAndAuthenticateBody(w http.ResponseWriter, r *http.Request, provider string, secret []byte) ([]byte, bool) {
 	defer func() { _ = r.Body.Close() }()
 
-	// Read request body with size limit
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
 	if err != nil {
 		h.logger.Error("failed to read request body", "error", err)
 		h.writeErrorResponse(w, http.StatusBadRequest, ErrInvalidRequestBody.Error())
-		return
+		return nil, false
 	}
 
-	// Validate HMAC signature
 	signature := r.Header.Get(WebhookSignatureHeader)
 	if signature == "" {
 		h.logger.Warn("missing webhook signature", "provider", provider)
 		h.writeErrorResponse(w, http.StatusUnauthorized, ErrMissingSignature.Error())
-		return
+		return nil, false
 	}
 
 	if !h.validateSignature(body, signature, secret) {
 		h.logger.Warn("invalid webhook signature", "provider", provider)
 		h.writeErrorResponse(w, http.StatusUnauthorized, ErrInvalidSignature.Error())
-		return
+		return nil, false
 	}
 
-	// Parse webhook request
+	return body, true
+}
+
+// parseAndValidatePayload unmarshals the webhook body and validates required fields.
+func (h *VerificationWebhookHandler) parseAndValidatePayload(w http.ResponseWriter, body []byte, provider string) (*VerificationWebhookRequest, verification.Status, bool) {
 	var webhookReq VerificationWebhookRequest
 	if err := json.Unmarshal(body, &webhookReq); err != nil {
 		h.logger.Error("failed to parse webhook request", "error", err)
 		h.writeErrorResponse(w, http.StatusBadRequest, ErrInvalidRequestBody.Error())
-		return
+		return nil, "", false
 	}
 
-	// Validate required fields
 	if webhookReq.VerificationID == "" {
 		h.logger.Warn("missing verification_id in webhook", "provider", provider)
 		h.writeErrorResponse(w, http.StatusBadRequest, ErrMissingVerificationID.Error())
-		return
+		return nil, "", false
 	}
 
-	// Validate status
 	status := verification.Status(strings.ToUpper(webhookReq.Status))
 	if !status.IsValid() {
 		h.logger.Warn("invalid verification status",
 			"provider", provider,
 			"status", webhookReq.Status)
 		h.writeErrorResponse(w, http.StatusBadRequest, ErrInvalidVerificationStatus.Error())
-		return
+		return nil, "", false
 	}
 
-	// Validate timestamp freshness to prevent replay attacks
-	if !webhookReq.Timestamp.IsZero() {
-		now := time.Now()
-		age := now.Sub(webhookReq.Timestamp)
+	return &webhookReq, status, true
+}
 
-		// Reject timestamps too far in the past
-		if age > DefaultWebhookMaxAge {
-			h.logger.Warn("webhook timestamp too old",
-				"provider", provider,
-				"verification_id", webhookReq.VerificationID,
-				"timestamp", webhookReq.Timestamp,
-				"age", age)
-			h.writeErrorResponse(w, http.StatusBadRequest, "webhook timestamp expired")
-			return
-		}
-
-		// Reject timestamps too far in the future (with small tolerance for clock drift)
-		if age < -DefaultClockDriftTolerance {
-			h.logger.Warn("webhook timestamp too far in the future",
-				"provider", provider,
-				"verification_id", webhookReq.VerificationID,
-				"timestamp", webhookReq.Timestamp,
-				"offset", -age)
-			h.writeErrorResponse(w, http.StatusBadRequest, "webhook timestamp is in the future")
-			return
-		}
+// checkTimestampFreshness validates the webhook timestamp to prevent replay attacks.
+// Returns true if the timestamp is valid or zero, false if it should be rejected.
+func (h *VerificationWebhookHandler) checkTimestampFreshness(w http.ResponseWriter, webhookReq *VerificationWebhookRequest, provider string) bool {
+	if webhookReq.Timestamp.IsZero() {
+		return true
 	}
 
-	// Build UpdateVerification request
+	now := time.Now()
+	age := now.Sub(webhookReq.Timestamp)
+
+	if age > DefaultWebhookMaxAge {
+		h.logger.Warn("webhook timestamp too old",
+			"provider", provider,
+			"verification_id", webhookReq.VerificationID,
+			"timestamp", webhookReq.Timestamp,
+			"age", age)
+		h.writeErrorResponse(w, http.StatusBadRequest, "webhook timestamp expired")
+		return false
+	}
+
+	if age < -DefaultClockDriftTolerance {
+		h.logger.Warn("webhook timestamp too far in the future",
+			"provider", provider,
+			"verification_id", webhookReq.VerificationID,
+			"timestamp", webhookReq.Timestamp,
+			"offset", -age)
+		h.writeErrorResponse(w, http.StatusBadRequest, "webhook timestamp is in the future")
+		return false
+	}
+
+	return true
+}
+
+// processVerificationUpdate builds the update request and calls the verification service.
+func (h *VerificationWebhookHandler) processVerificationUpdate(ctx context.Context, w http.ResponseWriter, provider string, webhookReq *VerificationWebhookRequest, status verification.Status) {
 	completedAt := webhookReq.Timestamp
 	if completedAt.IsZero() {
 		completedAt = time.Now()
@@ -258,12 +291,9 @@ func (h *VerificationWebhookHandler) HandleWebhook(w http.ResponseWriter, r *htt
 		"verification_id", webhookReq.VerificationID,
 		"status", webhookReq.Status)
 
-	// Call UpdateVerification service
-	err = h.verificationService.UpdateVerification(ctx, updateReq)
+	err := h.verificationService.UpdateVerification(ctx, updateReq)
 	if err != nil {
-		// Handle specific errors
 		if errors.Is(err, service.ErrVerificationAlreadyCompleted) {
-			// Idempotent: already processed, return success
 			h.logger.Info("webhook already processed (idempotent)",
 				"provider", provider,
 				"verification_id", webhookReq.VerificationID)
@@ -271,7 +301,6 @@ func (h *VerificationWebhookHandler) HandleWebhook(w http.ResponseWriter, r *htt
 			return
 		}
 
-		// Check for not found error from repository
 		if strings.Contains(err.Error(), "not found") {
 			h.logger.Warn("verification not found",
 				"provider", provider,
@@ -284,7 +313,6 @@ func (h *VerificationWebhookHandler) HandleWebhook(w http.ResponseWriter, r *htt
 			"error", err,
 			"provider", provider,
 			"verification_id", webhookReq.VerificationID)
-		// Return 500 to trigger webhook retry from provider
 		h.writeErrorResponse(w, http.StatusInternalServerError, ErrVerificationServiceError.Error())
 		return
 	}
