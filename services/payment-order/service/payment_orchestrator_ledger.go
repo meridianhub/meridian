@@ -55,7 +55,7 @@ import (
 // Clearing account fallback: If internal clearing is enabled but the clearing account
 // lookup fails, the method falls back to the standard 2-posting flow gracefully.
 func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.PaymentOrder) (string, error) {
-	// Check required dependencies - these may be nil in minimal test configuration
+	// Check required dependencies
 	if o.gatewayAccountConfig == nil {
 		return "", ErrGatewayAccountConfigNotSet
 	}
@@ -63,25 +63,52 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 		return "", ErrFinancialAccountingClientNotSet
 	}
 
-	// Get the gateway contra-account from configuration
-	// Extract gateway ID from the GatewayReferenceID prefix (e.g., "GW-uuid" -> "mock" for mock gateway)
+	contraAccountID, currencyCode, err := o.resolvePostingAccounts(po)
+	if err != nil {
+		return "", err
+	}
+
+	bookingLogID, err := o.createBookingLog(ctx, po, currencyCode)
+	if err != nil {
+		return "", err
+	}
+
+	amountCents := domain.ToMinorUnits(po.Amount)
+	postingAmount := buildPostingAmount(currencyCode, amountCents)
+	valueDate := timestamppb.Now()
+
+	// Determine if we should use the 4-posting flow with internal clearing
+	clearingAccountID, useClearingFlow := o.resolveClearingFlow(ctx, po, currencyCode)
+
+	if useClearingFlow {
+		return o.postLedgerEntriesWithClearing(ctx, po, bookingLogID, postingAmount, valueDate,
+			clearingAccountID, contraAccountID, amountCents, currencyCode)
+	}
+
+	return o.postLedgerEntriesStandard(ctx, po, bookingLogID, postingAmount, valueDate,
+		contraAccountID, amountCents, currencyCode)
+}
+
+// resolvePostingAccounts resolves the contra-account and validates the currency.
+func (o *PaymentOrchestrator) resolvePostingAccounts(po *domain.PaymentOrder) (string, string, error) {
 	gatewayID := extractGatewayIDFromRef(po.GatewayReferenceID)
 	contraAccountID, err := o.gatewayAccountConfig.GetContraAccount(gatewayID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get contra-account for gateway %s: %w", gatewayID, err)
+		return "", "", fmt.Errorf("failed to get contra-account for gateway %s: %w", gatewayID, err)
 	}
 
-	// Extract instrument code from domain amount
 	currencyCode := domain.CurrencyCode(po.Amount)
 	if currencyCode == "" {
 		o.logger.Warn("unsupported currency for ledger posting - payment will be marked as failed",
-			"currency", currencyCode,
-			"payment_order_id", po.ID.String(),
-			"supported_currencies", "GBP, USD, EUR")
-		return "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, currencyCode)
+			"currency", currencyCode, "payment_order_id", po.ID.String(), "supported_currencies", "GBP, USD, EUR")
+		return "", "", fmt.Errorf("%w: %s", ErrUnsupportedCurrency, currencyCode)
 	}
 
-	// Step 1: Create a BookingLog in PENDING status
+	return contraAccountID, currencyCode, nil
+}
+
+// createBookingLog creates a BookingLog in PENDING status for a payment order.
+func (o *PaymentOrchestrator) createBookingLog(ctx context.Context, po *domain.PaymentOrder, currencyCode string) (string, error) {
 	bookingLogIDempKey := fmt.Sprintf("booking-log-%s", po.IdempotencyKey)
 	bookingLogResp, err := o.financialAccountingClient.InitiateFinancialBookingLog(ctx, &financialaccountingv1.InitiateFinancialBookingLogRequest{
 		FinancialAccountType:    "CURRENT",
@@ -89,9 +116,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 		BusinessUnitReference:   "payment-order-service",
 		ChartOfAccountsRules:    "outbound-payment",
 		BaseInstrumentCode:      currencyCode,
-		IdempotencyKey: &commonpb.IdempotencyKey{
-			Key: bookingLogIDempKey,
-		},
+		IdempotencyKey:          &commonpb.IdempotencyKey{Key: bookingLogIDempKey},
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create booking log: %w", err)
@@ -99,58 +124,43 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	if bookingLogResp.FinancialBookingLog == nil {
 		return "", fmt.Errorf("%w: payment order %s", ErrNilBookingLogResponse, po.ID.String())
 	}
-	bookingLogID := bookingLogResp.FinancialBookingLog.Id
 
 	o.logger.Debug("created booking log for ledger posting",
-		"booking_log_id", bookingLogID,
-		"payment_order_id", po.ID.String())
+		"booking_log_id", bookingLogResp.FinancialBookingLog.Id, "payment_order_id", po.ID.String())
 
-	// Convert amount from cents to google.type.Money format.
-	// google.type.Money uses Units (whole currency units) + Nanos (10^-9 fraction).
-	// Example: 199 cents = 1 unit + 990,000,000 nanos = 1.99 currency units.
-	// Formula: Units = cents / 100, Nanos = (cents % 100) * 10,000,000
-	amountCents := domain.ToMinorUnits(po.Amount)
-	postingAmount := &money.Money{
+	return bookingLogResp.FinancialBookingLog.Id, nil
+}
+
+// buildPostingAmount converts cents to google.type.Money format.
+func buildPostingAmount(currencyCode string, amountCents int64) *money.Money {
+	return &money.Money{
 		CurrencyCode: currencyCode,
 		Units:        amountCents / 100,
 		Nanos:        int32((amountCents % 100) * 10000000),
 	}
-	valueDate := timestamppb.Now()
+}
 
-	// Determine if we should use the 4-posting flow with internal clearing
-	var clearingAccountID string
-	useClearingFlow := false
-
-	if o.internalClearingEnabled && o.accountResolver != nil {
-		var resolveErr error
-		clearingAccountID, resolveErr = o.accountResolver.GetSettlementClearingAccount(ctx, currencyCode)
-		if resolveErr != nil {
-			// Log the fallback but continue with standard 2-posting flow
-			o.logger.Info("clearing account lookup failed, falling back to standard posting flow",
-				"payment_order_id", po.ID.String(),
-				"currency", currencyCode,
-				"reason", resolveErr.Error())
-		} else {
-			useClearingFlow = true
-			o.logger.Info("using internal clearing flow with 4 postings",
-				"payment_order_id", po.ID.String(),
-				"clearing_account_id", clearingAccountID,
-				"currency", currencyCode)
-		}
-	} else if o.internalClearingEnabled {
+// resolveClearingFlow determines whether to use the 4-posting clearing flow.
+func (o *PaymentOrchestrator) resolveClearingFlow(ctx context.Context, po *domain.PaymentOrder, currencyCode string) (string, bool) {
+	if !o.internalClearingEnabled {
+		return "", false
+	}
+	if o.accountResolver == nil {
 		o.logger.Debug("internal clearing enabled but account resolver not configured, using standard flow",
 			"payment_order_id", po.ID.String())
+		return "", false
 	}
 
-	if useClearingFlow {
-		// 4-posting flow: Customer DEBIT -> Clearing CREDIT -> Clearing DEBIT -> Gateway CREDIT
-		return o.postLedgerEntriesWithClearing(ctx, po, bookingLogID, postingAmount, valueDate,
-			clearingAccountID, contraAccountID, amountCents, currencyCode)
+	clearingAccountID, resolveErr := o.accountResolver.GetSettlementClearingAccount(ctx, currencyCode)
+	if resolveErr != nil {
+		o.logger.Info("clearing account lookup failed, falling back to standard posting flow",
+			"payment_order_id", po.ID.String(), "currency", currencyCode, "reason", resolveErr.Error())
+		return "", false
 	}
 
-	// Standard 2-posting flow: Customer DEBIT -> Gateway CREDIT
-	return o.postLedgerEntriesStandard(ctx, po, bookingLogID, postingAmount, valueDate,
-		contraAccountID, amountCents, currencyCode)
+	o.logger.Info("using internal clearing flow with 4 postings",
+		"payment_order_id", po.ID.String(), "clearing_account_id", clearingAccountID, "currency", currencyCode)
+	return clearingAccountID, true
 }
 
 // postLedgerEntriesStandard creates the standard 2-posting flow for ledger entries.
@@ -166,89 +176,22 @@ func (o *PaymentOrchestrator) postLedgerEntriesStandard(
 	currencyCode string,
 ) (string, error) {
 	// Step 2: Create DEBIT posting (customer account - funds leaving)
-	debitIdempKey := fmt.Sprintf("debit-customer-%s", po.IdempotencyKey)
-	_, err := o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
-		FinancialBookingLogId: bookingLogID,
-		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount:         postingAmount,
-		AccountId:             po.DebtorAccountID,
-		ValueDate:             valueDate,
-		IdempotencyKey: &commonpb.IdempotencyKey{
-			Key: debitIdempKey,
-		},
-	})
-	if err != nil {
-		// RECONCILIATION: BookingLog created but debit posting failed - requires manual cleanup
-		o.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after debit posting failure",
-			"booking_log_id", bookingLogID,
-			"booking_log_status", "PENDING",
-			"payment_order_id", po.ID.String(),
-			"failed_step", "debit_customer_posting",
-			"posting_flow", "standard",
-			"debtor_account", po.DebtorAccountID,
-			"error", err.Error())
-		return "", fmt.Errorf("failed to create debit posting for account %s: %w", po.DebtorAccountID, err)
+	if err := o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
+		po.DebtorAccountID, "debit-customer", commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
+		"debit_customer_posting", "standard", amountCents); err != nil {
+		return "", err
 	}
 
-	o.logger.Debug("created debit posting (customer)",
-		"booking_log_id", bookingLogID,
-		"account_id", po.DebtorAccountID,
-		"amount_cents", amountCents,
-		"payment_order_id", po.ID.String())
-
-	// Step 3: Create CREDIT posting (gateway contra-account - liability to processor)
-	creditIdempKey := fmt.Sprintf("credit-gateway-%s", po.IdempotencyKey)
-	_, err = o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
-		FinancialBookingLogId: bookingLogID,
-		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-		PostingAmount:         postingAmount,
-		AccountId:             contraAccountID,
-		ValueDate:             valueDate,
-		IdempotencyKey: &commonpb.IdempotencyKey{
-			Key: creditIdempKey,
-		},
-	})
-	if err != nil {
-		// RECONCILIATION: BookingLog has debit but no credit - unbalanced ledger requires cleanup
-		o.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after credit posting failure",
-			"booking_log_id", bookingLogID,
-			"booking_log_status", "PENDING",
-			"payment_order_id", po.ID.String(),
-			"failed_step", "credit_gateway_posting",
-			"posting_flow", "standard",
-			"debtor_account", po.DebtorAccountID,
-			"contra_account", contraAccountID,
-			"has_debit_customer_posting", true,
-			"error", err.Error())
-		return "", fmt.Errorf("failed to create credit posting for account %s: %w", contraAccountID, err)
+	// Step 3: Create CREDIT posting (gateway contra-account)
+	if err := o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
+		contraAccountID, "credit-gateway", commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+		"credit_gateway_posting", "standard", amountCents); err != nil {
+		return "", err
 	}
 
-	o.logger.Debug("created credit posting (gateway)",
-		"booking_log_id", bookingLogID,
-		"account_id", contraAccountID,
-		"amount_cents", amountCents,
-		"payment_order_id", po.ID.String())
-
-	// Step 4: Update BookingLog status to POSTED (balanced entries are now complete)
-	_, err = o.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
-		Id:     bookingLogID,
-		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
-	})
-	if err != nil {
-		// RECONCILIATION: BookingLog has balanced entries but status update failed
-		// The ledger entries exist and are balanced - just need status update
-		o.logger.Error("RECONCILIATION_REQUIRED: booking log status update failed after successful postings",
-			"booking_log_id", bookingLogID,
-			"booking_log_status", "PENDING",
-			"target_status", "POSTED",
-			"payment_order_id", po.ID.String(),
-			"failed_step", "status_update",
-			"posting_flow", "standard",
-			"has_debit_customer_posting", true,
-			"has_credit_gateway_posting", true,
-			"resolution", "manually update booking log status to POSTED",
-			"error", err.Error())
-		return "", fmt.Errorf("failed to update booking log to POSTED: %w", err)
+	// Step 4: Update BookingLog status to POSTED
+	if err := o.finalizeBookingLog(ctx, po, bookingLogID, "standard"); err != nil {
+		return "", err
 	}
 
 	o.logger.Info("ledger posting completed successfully (standard flow)",
@@ -261,6 +204,71 @@ func (o *PaymentOrchestrator) postLedgerEntriesStandard(
 		"currency", currencyCode)
 
 	return bookingLogID, nil
+}
+
+// capturePosting creates a single ledger posting entry with reconciliation-aware error logging.
+func (o *PaymentOrchestrator) capturePosting(
+	ctx context.Context,
+	po *domain.PaymentOrder,
+	bookingLogID string,
+	postingAmount *money.Money,
+	valueDate *timestamppb.Timestamp,
+	accountID string,
+	idempKeyPrefix string,
+	direction commonpb.PostingDirection,
+	failedStep string,
+	postingFlow string,
+	amountCents int64,
+) error {
+	idempKey := fmt.Sprintf("%s-%s", idempKeyPrefix, po.IdempotencyKey)
+	_, err := o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
+		FinancialBookingLogId: bookingLogID,
+		PostingDirection:      direction,
+		PostingAmount:         postingAmount,
+		AccountId:             accountID,
+		ValueDate:             valueDate,
+		IdempotencyKey:        &commonpb.IdempotencyKey{Key: idempKey},
+	})
+	if err != nil {
+		o.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after posting failure",
+			"booking_log_id", bookingLogID,
+			"booking_log_status", "PENDING",
+			"payment_order_id", po.ID.String(),
+			"failed_step", failedStep,
+			"posting_flow", postingFlow,
+			"account_id", accountID,
+			"error", err.Error())
+		return fmt.Errorf("failed to create posting for account %s: %w", accountID, err)
+	}
+
+	o.logger.Debug("created posting",
+		"booking_log_id", bookingLogID,
+		"account_id", accountID,
+		"direction", direction.String(),
+		"amount_cents", amountCents,
+		"payment_order_id", po.ID.String())
+	return nil
+}
+
+// finalizeBookingLog updates the booking log status to POSTED.
+func (o *PaymentOrchestrator) finalizeBookingLog(ctx context.Context, po *domain.PaymentOrder, bookingLogID, postingFlow string) error {
+	_, err := o.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
+		Id:     bookingLogID,
+		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	})
+	if err != nil {
+		o.logger.Error("RECONCILIATION_REQUIRED: booking log status update failed after successful postings",
+			"booking_log_id", bookingLogID,
+			"booking_log_status", "PENDING",
+			"target_status", "POSTED",
+			"payment_order_id", po.ID.String(),
+			"failed_step", "status_update",
+			"posting_flow", postingFlow,
+			"resolution", "manually update booking log status to POSTED",
+			"error", err.Error())
+		return fmt.Errorf("failed to update booking log to POSTED: %w", err)
+	}
+	return nil
 }
 
 // postLedgerEntriesWithClearing creates the 4-posting flow for ledger entries with internal clearing.
@@ -316,70 +324,15 @@ func (o *PaymentOrchestrator) postCustomerToClearingLeg(
 	clearingAccountID string,
 	amountCents int64,
 ) error {
-	// Step 2: Create DEBIT posting (customer account - funds leaving)
-	debitCustomerIdempKey := fmt.Sprintf("debit-customer-%s", po.IdempotencyKey)
-	_, err := o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
-		FinancialBookingLogId: bookingLogID,
-		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount:         postingAmount,
-		AccountId:             po.DebtorAccountID,
-		ValueDate:             valueDate,
-		IdempotencyKey: &commonpb.IdempotencyKey{
-			Key: debitCustomerIdempKey,
-		},
-	})
-	if err != nil {
-		o.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after debit posting failure",
-			"booking_log_id", bookingLogID,
-			"booking_log_status", "PENDING",
-			"payment_order_id", po.ID.String(),
-			"failed_step", "debit_customer_posting",
-			"posting_flow", "clearing",
-			"debtor_account", po.DebtorAccountID,
-			"clearing_account", clearingAccountID,
-			"error", err.Error())
-		return fmt.Errorf("failed to create debit posting for customer account %s: %w", po.DebtorAccountID, err)
+	if err := o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
+		po.DebtorAccountID, "debit-customer", commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
+		"debit_customer_posting", "clearing", amountCents); err != nil {
+		return err
 	}
 
-	o.logger.Debug("created debit posting (customer) in clearing flow",
-		"booking_log_id", bookingLogID,
-		"account_id", po.DebtorAccountID,
-		"amount_cents", amountCents,
-		"payment_order_id", po.ID.String())
-
-	// Step 3: Create CREDIT posting (clearing account - funds enter clearing)
-	creditClearingIdempKey := fmt.Sprintf("credit-clearing-%s", po.IdempotencyKey)
-	_, err = o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
-		FinancialBookingLogId: bookingLogID,
-		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-		PostingAmount:         postingAmount,
-		AccountId:             clearingAccountID,
-		ValueDate:             valueDate,
-		IdempotencyKey: &commonpb.IdempotencyKey{
-			Key: creditClearingIdempKey,
-		},
-	})
-	if err != nil {
-		o.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after credit clearing posting failure",
-			"booking_log_id", bookingLogID,
-			"booking_log_status", "PENDING",
-			"payment_order_id", po.ID.String(),
-			"failed_step", "credit_clearing_posting",
-			"posting_flow", "clearing",
-			"debtor_account", po.DebtorAccountID,
-			"clearing_account", clearingAccountID,
-			"has_debit_customer_posting", true,
-			"error", err.Error())
-		return fmt.Errorf("failed to create credit posting for clearing account %s: %w", clearingAccountID, err)
-	}
-
-	o.logger.Debug("created credit posting (clearing) in clearing flow",
-		"booking_log_id", bookingLogID,
-		"account_id", clearingAccountID,
-		"amount_cents", amountCents,
-		"payment_order_id", po.ID.String())
-
-	return nil
+	return o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
+		clearingAccountID, "credit-clearing", commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+		"credit_clearing_posting", "clearing", amountCents)
 }
 
 // postClearingToGatewayLeg creates the second two postings of the clearing flow:
@@ -394,75 +347,15 @@ func (o *PaymentOrchestrator) postClearingToGatewayLeg(
 	contraAccountID string,
 	amountCents int64,
 ) error {
-	// Step 4: Create DEBIT posting (clearing account - funds leave clearing)
-	debitClearingIdempKey := fmt.Sprintf("debit-clearing-%s", po.IdempotencyKey)
-	_, err := o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
-		FinancialBookingLogId: bookingLogID,
-		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount:         postingAmount,
-		AccountId:             clearingAccountID,
-		ValueDate:             valueDate,
-		IdempotencyKey: &commonpb.IdempotencyKey{
-			Key: debitClearingIdempKey,
-		},
-	})
-	if err != nil {
-		o.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after debit clearing posting failure",
-			"booking_log_id", bookingLogID,
-			"booking_log_status", "PENDING",
-			"payment_order_id", po.ID.String(),
-			"failed_step", "debit_clearing_posting",
-			"posting_flow", "clearing",
-			"debtor_account", po.DebtorAccountID,
-			"clearing_account", clearingAccountID,
-			"has_debit_customer_posting", true,
-			"has_credit_clearing_posting", true,
-			"error", err.Error())
-		return fmt.Errorf("failed to create debit posting for clearing account %s: %w", clearingAccountID, err)
+	if err := o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
+		clearingAccountID, "debit-clearing", commonpb.PostingDirection_POSTING_DIRECTION_DEBIT,
+		"debit_clearing_posting", "clearing", amountCents); err != nil {
+		return err
 	}
 
-	o.logger.Debug("created debit posting (clearing) in clearing flow",
-		"booking_log_id", bookingLogID,
-		"account_id", clearingAccountID,
-		"amount_cents", amountCents,
-		"payment_order_id", po.ID.String())
-
-	// Step 5: Create CREDIT posting (gateway contra-account - liability to processor)
-	creditGatewayIdempKey := fmt.Sprintf("credit-gateway-%s", po.IdempotencyKey)
-	_, err = o.financialAccountingClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
-		FinancialBookingLogId: bookingLogID,
-		PostingDirection:      commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
-		PostingAmount:         postingAmount,
-		AccountId:             contraAccountID,
-		ValueDate:             valueDate,
-		IdempotencyKey: &commonpb.IdempotencyKey{
-			Key: creditGatewayIdempKey,
-		},
-	})
-	if err != nil {
-		o.logger.Error("RECONCILIATION_REQUIRED: booking log orphaned after credit gateway posting failure",
-			"booking_log_id", bookingLogID,
-			"booking_log_status", "PENDING",
-			"payment_order_id", po.ID.String(),
-			"failed_step", "credit_gateway_posting",
-			"posting_flow", "clearing",
-			"debtor_account", po.DebtorAccountID,
-			"clearing_account", clearingAccountID,
-			"contra_account", contraAccountID,
-			"has_debit_customer_posting", true,
-			"has_credit_clearing_posting", true,
-			"has_debit_clearing_posting", true,
-			"error", err.Error())
-		return fmt.Errorf("failed to create credit posting for gateway account %s: %w", contraAccountID, err)
-	}
-
-	o.logger.Debug("created credit posting (gateway) in clearing flow",
-		"booking_log_id", bookingLogID,
-		"account_id", contraAccountID,
-		"amount_cents", amountCents,
-		"payment_order_id", po.ID.String())
-
-	return nil
+	return o.capturePosting(ctx, po, bookingLogID, postingAmount, valueDate,
+		contraAccountID, "credit-gateway", commonpb.PostingDirection_POSTING_DIRECTION_CREDIT,
+		"credit_gateway_posting", "clearing", amountCents)
 }
 
 // finalizeClearingBookingLog updates the booking log status to POSTED after all 4 postings complete.
@@ -471,27 +364,7 @@ func (o *PaymentOrchestrator) finalizeClearingBookingLog(
 	po *domain.PaymentOrder,
 	bookingLogID string,
 ) error {
-	_, err := o.financialAccountingClient.UpdateFinancialBookingLog(ctx, &financialaccountingv1.UpdateFinancialBookingLogRequest{
-		Id:     bookingLogID,
-		Status: commonpb.TransactionStatus_TRANSACTION_STATUS_POSTED,
-	})
-	if err != nil {
-		o.logger.Error("RECONCILIATION_REQUIRED: booking log status update failed after successful postings",
-			"booking_log_id", bookingLogID,
-			"booking_log_status", "PENDING",
-			"target_status", "POSTED",
-			"payment_order_id", po.ID.String(),
-			"failed_step", "status_update",
-			"posting_flow", "clearing",
-			"has_debit_customer_posting", true,
-			"has_credit_clearing_posting", true,
-			"has_debit_clearing_posting", true,
-			"has_credit_gateway_posting", true,
-			"resolution", "manually update booking log status to POSTED",
-			"error", err.Error())
-		return fmt.Errorf("failed to update booking log to POSTED: %w", err)
-	}
-	return nil
+	return o.finalizeBookingLog(ctx, po, bookingLogID, "clearing")
 }
 
 // PostLedgerEntriesFromParams creates double-entry bookkeeping entries using map params.

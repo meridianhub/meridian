@@ -43,55 +43,29 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 			"result", operationStatus)
 	}()
 
-	// Get idempotency key from webhook request (required per proto)
-	var webhookIdempotencyKey string
-	if req.IdempotencyKey != nil {
-		webhookIdempotencyKey = req.IdempotencyKey.Key
-	}
+	webhookIdempotencyKey := validateWebhookIdempotencyKey(req)
 	if webhookIdempotencyKey == "" {
 		operationStatus = opStatusError
 		return nil, status.Error(codes.InvalidArgument, "idempotency_key is required for webhook callbacks")
 	}
 
-	// Lookup payment order by ID or gateway reference ID
 	po, err := s.lookupPaymentOrder(ctx, req)
 	if err != nil {
 		operationStatus = opStatusError
 		return nil, err
 	}
 
+	idempKey := s.buildUpdateIdempotencyKey(ctx, po.ID.String(), webhookIdempotencyKey)
+
 	// Check Redis idempotency for webhook (prevents duplicate processing)
-	tenantID, _ := tenant.FromContext(ctx)
-	idempKey := idempotency.Key{
-		TenantID:  string(tenantID),
-		Namespace: idempotencyNamespace,
-		Operation: "update",
-		EntityID:  po.ID.String(), // Use payment order ID as entity
-		RequestID: webhookIdempotencyKey,
-	}
-
-	idempResult, err := s.idempotencyService.Check(ctx, idempKey)
-	// If operation already processed, return cached result
-	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
-		var cachedResp pb.UpdatePaymentOrderResponse
-		unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
-		if unmarshalErr == nil {
-			s.logger.Info("returning cached update result from Redis",
-				"payment_order_id", po.ID.String(),
-				"idempotency_key", webhookIdempotencyKey)
-			operationStatus = opStatusIdempotent
-			poobservability.RecordIdempotentRequest("update_payment_order_redis")
-			return &cachedResp, nil
-		}
-		s.logger.Warn("failed to unmarshal cached idempotency result, continuing with normal processing",
-			"error", unmarshalErr)
-	} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
-		s.logger.Error("idempotency check failed", "error", err)
+	if resp, checkErr := s.checkUpdateIdempotency(ctx, idempKey, po.ID.String(), webhookIdempotencyKey); checkErr != nil {
 		operationStatus = opStatusError
-		return nil, status.Error(codes.Internal, "failed to check idempotency")
+		return nil, checkErr
+	} else if resp != nil {
+		operationStatus = opStatusIdempotent
+		return resp, nil
 	}
 
-	// Mark operation as pending (distributed lock)
 	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
 		s.logger.Error("failed to mark webhook operation pending", "error", err)
 		operationStatus = opStatusError
@@ -105,85 +79,115 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 		"gateway_status", gatewayStatusStr,
 		"correlation_id", po.CorrelationID)
 
-	// Process based on gateway status
-	var response *pb.UpdatePaymentOrderResponse
+	response, statusResult, err := s.dispatchGatewayStatus(ctx, req, po, idempKey)
+	if err != nil {
+		operationStatus = opStatusError
+		return nil, err
+	}
+	if statusResult == opStatusIdempotent {
+		operationStatus = opStatusIdempotent
+	}
 
+	s.cacheIdempotencyResult(ctx, idempKey, response)
+
+	return response, nil
+}
+
+// validateWebhookIdempotencyKey extracts the idempotency key from a webhook request.
+func validateWebhookIdempotencyKey(req *pb.UpdatePaymentOrderRequest) string {
+	if req.IdempotencyKey != nil {
+		return req.IdempotencyKey.Key
+	}
+	return ""
+}
+
+// buildUpdateIdempotencyKey constructs the idempotency key for an update operation.
+func (s *Service) buildUpdateIdempotencyKey(ctx context.Context, entityID, requestID string) idempotency.Key {
+	tenantID, _ := tenant.FromContext(ctx)
+	return idempotency.Key{
+		TenantID:  string(tenantID),
+		Namespace: idempotencyNamespace,
+		Operation: "update",
+		EntityID:  entityID,
+		RequestID: requestID,
+	}
+}
+
+// checkUpdateIdempotency checks Redis for a cached update result.
+func (s *Service) checkUpdateIdempotency(ctx context.Context, idempKey idempotency.Key, paymentOrderID, webhookIdempotencyKey string) (*pb.UpdatePaymentOrderResponse, error) {
+	idempResult, err := s.idempotencyService.Check(ctx, idempKey)
+	if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) && idempResult != nil && idempResult.Data != nil {
+		var cachedResp pb.UpdatePaymentOrderResponse
+		unmarshalErr := proto.Unmarshal(idempResult.Data, &cachedResp)
+		if unmarshalErr == nil {
+			s.logger.Info("returning cached update result from Redis",
+				"payment_order_id", paymentOrderID,
+				"idempotency_key", webhookIdempotencyKey)
+			poobservability.RecordIdempotentRequest("update_payment_order_redis")
+			return &cachedResp, nil
+		}
+		s.logger.Warn("failed to unmarshal cached idempotency result, continuing with normal processing",
+			"error", unmarshalErr)
+	} else if err != nil && !errors.Is(err, idempotency.ErrResultNotFound) {
+		s.logger.Error("idempotency check failed", "error", err)
+		return nil, status.Error(codes.Internal, "failed to check idempotency")
+	}
+	return nil, nil //nolint:nilnil // nil,nil signals "no cached result, continue processing"
+}
+
+// dispatchGatewayStatus routes the gateway callback to the appropriate status handler.
+// Returns (response, operationStatus, error).
+func (s *Service) dispatchGatewayStatus(ctx context.Context, req *pb.UpdatePaymentOrderRequest, po *domain.PaymentOrder, idempKey idempotency.Key) (*pb.UpdatePaymentOrderResponse, string, error) {
 	switch req.GatewayStatus {
 	case pb.GatewayStatus_GATEWAY_STATUS_SETTLED:
 		result, err := s.handleSettledStatus(ctx, po)
 		if err != nil {
-			operationStatus = opStatusError
-			// Don't cache handler errors - may contain transient failures
-			return nil, err
+			return nil, opStatusError, err
 		}
+		opStatus := opStatusSuccess
 		if result.isIdempotent {
-			operationStatus = opStatusIdempotent
+			opStatus = opStatusIdempotent
 		}
-		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}
+		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}, opStatus, nil
 
 	case pb.GatewayStatus_GATEWAY_STATUS_REJECTED:
 		result, err := s.handleRejectedStatus(ctx, po, req.GatewayMessage)
 		if err != nil {
-			operationStatus = opStatusError
-			// Don't cache handler errors - may contain transient failures
-			return nil, err
+			return nil, opStatusError, err
 		}
+		opStatus := opStatusSuccess
 		if result.isIdempotent {
-			operationStatus = opStatusIdempotent
+			opStatus = opStatusIdempotent
 		}
-		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}
+		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(result.po)}, opStatus, nil
 
 	case pb.GatewayStatus_GATEWAY_STATUS_PENDING:
 		if err := s.handlePendingStatus(po, req.GatewayReferenceId); err != nil {
-			operationStatus = opStatusError
-			// Don't cache handler errors - may contain transient failures
-			return nil, err
+			return nil, opStatusError, err
 		}
-		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}
+		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}, opStatusSuccess, nil
 
 	case pb.GatewayStatus_GATEWAY_STATUS_REFUNDED:
 		s.logger.Info("refund webhook received, acknowledgment only",
 			"payment_order_id", po.ID,
 			"gateway_reference_id", req.GatewayReferenceId)
-		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}
+		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}, opStatusSuccess, nil
 
 	case pb.GatewayStatus_GATEWAY_STATUS_DISPUTED:
 		s.logger.Warn("dispute webhook received, acknowledgment only",
 			"payment_order_id", po.ID,
 			"gateway_reference_id", req.GatewayReferenceId,
 			"gateway_message", req.GatewayMessage)
-		response = &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}
+		return &pb.UpdatePaymentOrderResponse{PaymentOrder: toProto(po)}, opStatusSuccess, nil
 
 	case pb.GatewayStatus_GATEWAY_STATUS_UNSPECIFIED:
-		operationStatus = opStatusError
 		s.storeIdempotencyFailure(ctx, idempKey, "gateway status is required")
-		return nil, status.Error(codes.InvalidArgument, "gateway status is required")
+		return nil, opStatusError, status.Error(codes.InvalidArgument, "gateway status is required")
 
 	default:
-		operationStatus = opStatusError
 		s.storeIdempotencyFailure(ctx, idempKey, fmt.Sprintf("unknown gateway status: %v", req.GatewayStatus))
-		return nil, status.Errorf(codes.InvalidArgument, "unknown gateway status: %v", req.GatewayStatus)
+		return nil, opStatusError, status.Errorf(codes.InvalidArgument, "unknown gateway status: %v", req.GatewayStatus)
 	}
-
-	// Store successful result in Redis for future idempotency checks
-	responseData, marshalErr := proto.Marshal(response)
-	if marshalErr == nil {
-		storeErr := s.idempotencyService.StoreResult(ctx, idempotency.Result{
-			Key:         idempKey,
-			Status:      idempotency.StatusCompleted,
-			Data:        responseData,
-			CompletedAt: time.Now(),
-			TTL:         idempotencyResultTTL,
-		})
-		if storeErr != nil {
-			s.logger.Error("failed to store webhook idempotency result", "error", storeErr)
-			// Continue - operation succeeded, caching is optimization
-		}
-	} else {
-		s.logger.Error("failed to marshal webhook response for idempotency cache", "error", marshalErr)
-	}
-
-	return response, nil
 }
 
 // lookupPaymentOrder finds a payment order by ID or gateway reference ID.
@@ -228,41 +232,9 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 	}
 
 	// Post ledger entries BEFORE completing the payment order
-	// This ensures double-entry bookkeeping is recorded before the payment is marked complete
-	ledgerBookingID, err := s.orchestrator.PostLedgerEntries(ctx, po)
+	ledgerBookingID, err := s.postLedgerAndComplete(ctx, po)
 	if err != nil {
-		s.logger.Error("failed to post ledger entries",
-			"payment_order_id", po.ID.String(),
-			"error", err)
-		// Mark the payment as FAILED if ledger posting fails
-		if failErr := s.failPaymentOrder(ctx, po, fmt.Sprintf("ledger posting failed: %v", err), "LEDGER_POSTING_FAILED"); failErr != nil {
-			s.logger.Error("failed to mark payment as failed after ledger posting failure",
-				"payment_order_id", po.ID.String(),
-				"error", failErr)
-		}
-		return nil, status.Errorf(codes.Internal, "failed to post ledger entries: %v", err)
-	}
-
-	// Attempt state transition with the ledger booking ID
-	if err := po.Complete(ledgerBookingID); err != nil {
-		if errors.Is(err, domain.ErrInvalidPaymentOrderTransition) {
-			return nil, status.Errorf(codes.FailedPrecondition,
-				"cannot complete payment order in %s state: %v", po.Status, err)
-		}
-		return nil, status.Errorf(codes.Internal, "failed to complete payment: %v", err)
-	}
-
-	// Mark lien execution as pending before saving
-	if po.LienID != "" {
-		po.SetLienExecutionPending()
-	}
-
-	// Persist state change
-	if err := s.repo.Update(ctx, po); err != nil {
-		s.logger.Error("failed to update payment order to COMPLETED",
-			"error", err,
-			"payment_order_id", po.ID.String())
-		return nil, status.Error(codes.Internal, "failed to update payment order")
+		return nil, err
 	}
 
 	// Record metrics
@@ -270,19 +242,76 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 	poobservability.RecordPaymentAmount(domain.CurrencyCode(po.Amount), "completed", safeMinorUnits(po.Amount))
 
 	// Execute lien asynchronously with retry mechanism
-	// The lien execution status is tracked in the payment order for reconciliation
-	if s.currentAccountClient != nil && po.LienID != "" {
-		// Start async retry goroutine - this won't block the webhook response
-		// We create a new background context since the request context will be cancelled
-		// after the webhook response is sent
-		asyncCtx := context.Background()
-		if tenantID, hasTenant := tenant.FromContext(ctx); hasTenant {
-			asyncCtx = tenant.WithTenant(asyncCtx, tenantID)
-		}
-		go s.orchestrator.ExecuteLienWithRetry(asyncCtx, po.ID, po.LienID) //nolint:contextcheck // intentional background context for async retry after webhook response
-	}
+	s.startAsyncLienExecution(ctx, po)
 
 	// Publish PaymentOrderCompleted event
+	s.publishSettledEvent(ctx, po)
+
+	// Audit log for successful completion
+	s.logger.Info("payment order completed via gateway callback",
+		"payment_order_id", po.ID.String(),
+		"gateway_reference_id", po.GatewayReferenceID,
+		"ledger_booking_id", ledgerBookingID,
+		"amount_cents", safeMinorUnits(po.Amount),
+		"currency", domain.CurrencyCode(po.Amount),
+		"lien_id", po.LienID,
+		"idempotency_key", po.IdempotencyKey,
+		"correlation_id", po.CorrelationID)
+
+	return &updateResult{po: po, isIdempotent: false}, nil
+}
+
+// postLedgerAndComplete posts ledger entries and transitions the payment order to COMPLETED.
+func (s *Service) postLedgerAndComplete(ctx context.Context, po *domain.PaymentOrder) (string, error) {
+	ledgerBookingID, err := s.orchestrator.PostLedgerEntries(ctx, po)
+	if err != nil {
+		s.logger.Error("failed to post ledger entries",
+			"payment_order_id", po.ID.String(),
+			"error", err)
+		if failErr := s.failPaymentOrder(ctx, po, fmt.Sprintf("ledger posting failed: %v", err), "LEDGER_POSTING_FAILED"); failErr != nil {
+			s.logger.Error("failed to mark payment as failed after ledger posting failure",
+				"payment_order_id", po.ID.String(),
+				"error", failErr)
+		}
+		return "", status.Errorf(codes.Internal, "failed to post ledger entries: %v", err)
+	}
+
+	if err := po.Complete(ledgerBookingID); err != nil {
+		if errors.Is(err, domain.ErrInvalidPaymentOrderTransition) {
+			return "", status.Errorf(codes.FailedPrecondition,
+				"cannot complete payment order in %s state: %v", po.Status, err)
+		}
+		return "", status.Errorf(codes.Internal, "failed to complete payment: %v", err)
+	}
+
+	if po.LienID != "" {
+		po.SetLienExecutionPending()
+	}
+
+	if err := s.repo.Update(ctx, po); err != nil {
+		s.logger.Error("failed to update payment order to COMPLETED",
+			"error", err,
+			"payment_order_id", po.ID.String())
+		return "", status.Error(codes.Internal, "failed to update payment order")
+	}
+
+	return ledgerBookingID, nil
+}
+
+// startAsyncLienExecution starts lien execution in a background goroutine if needed.
+func (s *Service) startAsyncLienExecution(ctx context.Context, po *domain.PaymentOrder) {
+	if s.currentAccountClient == nil || po.LienID == "" {
+		return
+	}
+	asyncCtx := context.Background()
+	if tenantID, hasTenant := tenant.FromContext(ctx); hasTenant {
+		asyncCtx = tenant.WithTenant(asyncCtx, tenantID)
+	}
+	go s.orchestrator.ExecuteLienWithRetry(asyncCtx, po.ID, po.LienID) //nolint:contextcheck // intentional background context for async retry after webhook response
+}
+
+// publishSettledEvent publishes the PaymentOrderCompleted event to Kafka.
+func (s *Service) publishSettledEvent(ctx context.Context, po *domain.PaymentOrder) {
 	s.publishEvent(ctx, TopicPaymentOrderCompleted, po.ID.String(), &eventsv1.PaymentOrderCompletedEvent{
 		EventId:            uuid.New().String(),
 		PaymentOrderId:     po.ID.String(),
@@ -297,19 +326,6 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		Version:            int64(po.Version),
 		IdempotencyKey:     po.IdempotencyKey,
 	})
-
-	// Audit log for successful completion
-	s.logger.Info("payment order completed via gateway callback",
-		"payment_order_id", po.ID.String(),
-		"gateway_reference_id", po.GatewayReferenceID,
-		"ledger_booking_id", ledgerBookingID,
-		"amount_cents", safeMinorUnits(po.Amount),
-		"currency", domain.CurrencyCode(po.Amount),
-		"lien_id", po.LienID,
-		"idempotency_key", po.IdempotencyKey,
-		"correlation_id", po.CorrelationID)
-
-	return &updateResult{po: po, isIdempotent: false}, nil
 }
 
 // handleRejectedStatus processes a REJECTED gateway callback.

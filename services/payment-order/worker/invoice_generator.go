@@ -125,10 +125,7 @@ func (g *InvoiceGenerator) GenerateInvoices(ctx context.Context, billingRun *dom
 	}
 
 	// Group accounts by party for invoice aggregation
-	partyAccounts := make(map[string][]AccountInfo)
-	for _, acct := range accounts {
-		partyAccounts[acct.PartyID] = append(partyAccounts[acct.PartyID], acct)
-	}
+	partyAccounts := groupAccountsByParty(accounts)
 
 	// Get existing invoice count for sequence numbering
 	existingInvoices, err := g.repo.FindInvoicesByBillingRunID(ctx, billingRun.ID)
@@ -141,64 +138,14 @@ func (g *InvoiceGenerator) GenerateInvoices(ctx context.Context, billingRun *dom
 	var errCount int
 
 	for partyID, accts := range partyAccounts {
-		lineItems, currency, lineErr := g.buildLineItemsForParty(ctx, accts, billingRun.CycleStart, billingRun.CycleEnd)
-		if lineErr != nil {
-			g.logger.Error("failed to build line items for party",
-				"party_id", partyID,
-				"error", lineErr)
-			g.metrics.RecordError("build_line_items")
+		inv, invoiceErr := g.generatePartyInvoice(ctx, billingRun, partyID, accts, &sequenceNum)
+		if invoiceErr != nil {
 			errCount++
 			continue
 		}
-
-		if len(lineItems) == 0 {
-			continue
+		if inv != nil {
+			invoices = append(invoices, inv)
 		}
-
-		sequenceNum++
-		invoiceNumber := formatInvoiceNumber(billingRun.TenantID, billingRun.CycleEnd, sequenceNum)
-
-		inv, invErr := domain.NewInvoice(
-			billingRun.ID,
-			partyID,
-			accts[0].AccountID, // primary account
-			invoiceNumber,
-			billingRun.CycleStart,
-			billingRun.CycleEnd,
-			lineItems,
-			currency,
-		)
-		if invErr != nil {
-			g.logger.Error("failed to create invoice",
-				"party_id", partyID,
-				"error", invErr)
-			g.metrics.RecordError("create_invoice")
-			errCount++
-			continue
-		}
-
-		if persistErr := g.repo.CreateInvoice(ctx, inv); persistErr != nil {
-			g.logger.Error("failed to persist invoice",
-				"party_id", partyID,
-				"invoice_number", invoiceNumber,
-				"error", persistErr)
-			g.metrics.RecordError("persist_invoice")
-			errCount++
-			continue
-		}
-
-		g.metrics.RecordInvoiceCreated()
-		g.metrics.RecordAmountCollected(inv.SubtotalCents)
-		invoices = append(invoices, inv)
-
-		g.queueInvoiceEmail(ctx, inv)
-
-		g.logger.Info("invoice created",
-			"invoice_id", inv.ID,
-			"party_id", partyID,
-			"invoice_number", invoiceNumber,
-			"subtotal_cents", inv.SubtotalCents,
-			"line_items", len(lineItems))
 	}
 
 	g.logger.Info("invoice generation complete",
@@ -210,6 +157,82 @@ func (g *InvoiceGenerator) GenerateInvoices(ctx context.Context, billingRun *dom
 		return invoices, fmt.Errorf("%w: %d parties", ErrPartialInvoiceGeneration, errCount)
 	}
 	return invoices, nil
+}
+
+// groupAccountsByParty groups accounts by their party ID for invoice aggregation.
+func groupAccountsByParty(accounts []AccountInfo) map[string][]AccountInfo {
+	partyAccounts := make(map[string][]AccountInfo)
+	for _, acct := range accounts {
+		partyAccounts[acct.PartyID] = append(partyAccounts[acct.PartyID], acct)
+	}
+	return partyAccounts
+}
+
+// generatePartyInvoice builds line items, creates, and persists an invoice for a single party.
+// Returns nil invoice when no billable line items exist. Returns an error when any step fails.
+func (g *InvoiceGenerator) generatePartyInvoice(
+	ctx context.Context,
+	billingRun *domain.BillingRun,
+	partyID string,
+	accts []AccountInfo,
+	sequenceNum *int,
+) (*domain.Invoice, error) {
+	lineItems, currency, lineErr := g.buildLineItemsForParty(ctx, accts, billingRun.CycleStart, billingRun.CycleEnd)
+	if lineErr != nil {
+		g.logger.Error("failed to build line items for party",
+			"party_id", partyID,
+			"error", lineErr)
+		g.metrics.RecordError("build_line_items")
+		return nil, lineErr
+	}
+
+	if len(lineItems) == 0 {
+		return nil, nil
+	}
+
+	*sequenceNum++
+	invoiceNumber := formatInvoiceNumber(billingRun.TenantID, billingRun.CycleEnd, *sequenceNum)
+
+	inv, invErr := domain.NewInvoice(
+		billingRun.ID,
+		partyID,
+		accts[0].AccountID, // primary account
+		invoiceNumber,
+		billingRun.CycleStart,
+		billingRun.CycleEnd,
+		lineItems,
+		currency,
+	)
+	if invErr != nil {
+		g.logger.Error("failed to create invoice",
+			"party_id", partyID,
+			"error", invErr)
+		g.metrics.RecordError("create_invoice")
+		return nil, invErr
+	}
+
+	if persistErr := g.repo.CreateInvoice(ctx, inv); persistErr != nil {
+		g.logger.Error("failed to persist invoice",
+			"party_id", partyID,
+			"invoice_number", invoiceNumber,
+			"error", persistErr)
+		g.metrics.RecordError("persist_invoice")
+		return nil, persistErr
+	}
+
+	g.metrics.RecordInvoiceCreated()
+	g.metrics.RecordAmountCollected(inv.SubtotalCents)
+
+	g.queueInvoiceEmail(ctx, inv)
+
+	g.logger.Info("invoice created",
+		"invoice_id", inv.ID,
+		"party_id", partyID,
+		"invoice_number", invoiceNumber,
+		"subtotal_cents", inv.SubtotalCents,
+		"line_items", len(lineItems))
+
+	return inv, nil
 }
 
 // invoiceEmailDueIn is the payment due period shown on invoice emails.
