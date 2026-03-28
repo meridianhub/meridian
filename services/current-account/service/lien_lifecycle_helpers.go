@@ -224,7 +224,7 @@ func (s *Service) checkIdempotencyCache(
 		s.logger.Error("idempotency check failed", "error", err)
 		return nil, status.Error(codes.Internal, "failed to check idempotency")
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // nil,nil means no cache hit and no error
 }
 
 // mapExecuteLienTxError converts an ExecuteLien transaction error to operation status and gRPC error.

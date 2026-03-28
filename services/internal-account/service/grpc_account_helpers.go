@@ -159,7 +159,7 @@ func (s *Service) mapInstrumentValidationError(err error, instrumentCode string,
 	errCode := status.Code(err)
 	s.logger.Warn("instrument validation failed", "instrument_code", instrumentCode, "error", err)
 
-	switch errCode {
+	switch errCode { //nolint:exhaustive // only handling specific gRPC codes
 	case codes.NotFound:
 		ibaobservability.RecordInstrumentValidation("not_found", validationDuration)
 		return status.Errorf(codes.InvalidArgument, "instrument not found: %s", instrumentCode)

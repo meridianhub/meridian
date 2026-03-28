@@ -430,17 +430,17 @@ func (e *ManifestExecutor) resolveSagaScript(ctx context.Context) (string, error
 // format expected by the Starlark saga runner.
 func (e *ManifestExecutor) buildSagaInput(input *ApplyManifestInput) map[string]interface{} {
 	sagaInput := map[string]interface{}{
-		"manifest_version":    input.ManifestVersion,
-		"instruments":         convertInstruments(input.Instruments),
-		"account_types":       convertAccountTypes(input.AccountTypes),
-		"market_data_sources": convertMarketDataSources(input.MarketDataSources),
-		"market_data_sets":    convertMarketDataSets(input.MarketDataSets),
-		"valuation_rules":     convertValuationRules(input.ValuationRules),
-		"organizations":       convertOrganizations(input.Organizations),
-		"internal_accounts":   convertInternalAccounts(input.InternalAccounts),
-		"saga_definitions":    convertSagaDefinitions(input.SagaDefinitions),
+		"manifest_version":     input.ManifestVersion,
+		"instruments":          convertInstruments(input.Instruments),
+		"account_types":        convertAccountTypes(input.AccountTypes),
+		"market_data_sources":  convertMarketDataSources(input.MarketDataSources),
+		"market_data_sets":     convertMarketDataSets(input.MarketDataSets),
+		"valuation_rules":      convertValuationRules(input.ValuationRules),
+		"organizations":        convertOrganizations(input.Organizations),
+		"internal_accounts":    convertInternalAccounts(input.InternalAccounts),
+		"saga_definitions":     convertSagaDefinitions(input.SagaDefinitions),
 		"provider_connections": convertProviderConnections(input.ProviderConnections),
-		"instruction_routes":  convertInstructionRoutes(input.InstructionRoutes),
+		"instruction_routes":   convertInstructionRoutes(input.InstructionRoutes),
 	}
 	return sagaInput
 }
