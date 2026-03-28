@@ -188,7 +188,12 @@ func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, ten
 	if status != nil {
 		switch status.State {
 		case StateActive:
-			return nil, errAlreadyProvisioned // Idempotent: already provisioned
+			// Check if new services were added to the config since last provisioning.
+			// If so, re-provision to apply migrations for the new services.
+			if len(status.Services) >= len(p.config.Services) {
+				return nil, errAlreadyProvisioned // Idempotent: already provisioned
+			}
+			// New services added - fall through to re-provision
 		case StateInProgress:
 			return nil, ErrProvisioningInProgress
 		case StateDeprovisioned:
@@ -212,6 +217,19 @@ func (p *PostgresProvisioner) prepareProvisioningStatus(ctx context.Context, ten
 		status.State = StateInProgress
 		status.UpdatedAt = now
 		status.ErrorMessage = ""
+		// Reconcile services list if config has more services than stored status.
+		// This happens when a new service is added to DefaultConfig() after tenants
+		// were already provisioned. Append entries for the new services.
+		if len(status.Services) < len(p.config.Services) {
+			schemaName := tenantID.SchemaName()
+			for i := len(status.Services); i < len(p.config.Services); i++ {
+				status.Services = append(status.Services, ServiceSchemaStatus{
+					ServiceName: p.config.Services[i].Name,
+					SchemaName:  schemaName,
+					State:       ServiceStatePending,
+				})
+			}
+		}
 	}
 
 	if err := p.saveProvisioningStatus(ctx, status); err != nil {
