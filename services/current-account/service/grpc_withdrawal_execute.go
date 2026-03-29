@@ -317,6 +317,9 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 
 	// Create and marshal event payload
 	correlationID := observability.GetCorrelationID(ctx)
+	if correlationID == "" {
+		correlationID = uuid.New().String()
+	}
 	eventPayload, err := buildWithdrawalStatusEvent(withdrawal, accountID, correlationID)
 	if err != nil {
 		return err
