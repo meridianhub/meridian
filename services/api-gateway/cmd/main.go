@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"net/url"
 	"strings"
 	"time"
 
@@ -145,7 +146,11 @@ func initRedisAndHealth(config *gateway.Config, dbPool *db.PostgresPool, logger 
 	if config.RedisURL != "" {
 		opt, err := redis.ParseURL(config.RedisURL)
 		if err != nil {
-			logger.Warn("redis URL parse failed, falling back to direct addr", "url", config.RedisURL, "error", err)
+			redacted := config.RedisURL
+			if u, parseErr := url.Parse(config.RedisURL); parseErr == nil {
+				redacted = u.Redacted()
+			}
+			logger.Warn("redis URL parse failed, falling back to direct addr", "url", redacted, "error", err)
 			opt = &redis.Options{Addr: config.RedisURL}
 		}
 		redisClient = redis.NewClient(opt)
