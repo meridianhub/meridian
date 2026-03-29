@@ -395,7 +395,7 @@ func TestFinalizeSettlement_NilLockClient(t *testing.T) {
 	assert.Equal(t, domain.RunStatusFinalized, finalizedRun.Status)
 }
 
-func TestFinalizeSettlement_SnapshotMarkFailureNonFatal(t *testing.T) {
+func TestFinalizeSettlement_SnapshotMarkFailureBlocksFinalization(t *testing.T) {
 	runRepo := newMockRunRepo()
 	snapRepo := &mockFinalSnapshotRepo{markErr: errors.New("snapshot update failed")}
 	publisher := &mockFinalityPublisher{}
@@ -405,12 +405,13 @@ func TestFinalizeSettlement_SnapshotMarkFailureNonFatal(t *testing.T) {
 
 	finalizer := NewSettlementFinalizer(runRepo, snapRepo, nil, publisher, nil)
 	err := finalizer.FinalizeSettlement(serviceCtx(), run.RunID)
-	// Should succeed even if snapshot marking fails (non-fatal)
-	require.NoError(t, err)
+	// Should fail if snapshot marking fails - run must not be FINALIZED with non-FINAL snapshots
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "marking snapshots FINAL")
 
-	// Run should still be FINALIZED
-	finalizedRun, _ := runRepo.FindByID(context.Background(), run.RunID)
-	assert.Equal(t, domain.RunStatusFinalized, finalizedRun.Status)
+	// Run should NOT be FINALIZED since snapshots couldn't be marked FINAL
+	unchangedRun, _ := runRepo.FindByID(context.Background(), run.RunID)
+	assert.NotEqual(t, domain.RunStatusFinalized, unchangedRun.Status)
 }
 
 func TestFinalizeSettlement_PublisherFailureNonFatal(t *testing.T) {

@@ -166,9 +166,12 @@ func (ba *BalanceAssertor) handlePKFailure(ctx context.Context, assertion *domai
 	if failErr := assertion.Fail(decimal.Zero, failReason); failErr != nil {
 		ba.logger.Error("failed to mark assertion as failed", "error", failErr)
 	}
-	_ = ba.assertionRepo.Update(ctx, assertion)
+	retErr := fmt.Errorf("querying position keeping: %w", pkErr)
+	if updateErr := ba.assertionRepo.Update(ctx, assertion); updateErr != nil {
+		retErr = fmt.Errorf("%w; persisting FAILED assertion: %w", retErr, updateErr)
+	}
 	observability.BalanceAssertionTotal.WithLabelValues("FAILED", scope.String()).Inc()
-	return &AssertBalanceResult{Assertion: assertion}, fmt.Errorf("querying position keeping: %w", pkErr)
+	return &AssertBalanceResult{Assertion: assertion}, retErr
 }
 
 // handleBalanced records a PASSED assertion when debits equal credits.

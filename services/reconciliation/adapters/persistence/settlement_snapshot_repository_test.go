@@ -16,8 +16,23 @@ import (
 	"gorm.io/gorm"
 )
 
-// seedSettlementRun creates a settlement_run record and returns the surrogate ID.
+// seedRunIDs holds the two distinct identifiers for a seeded settlement_run row.
+type seedRunIDs struct {
+	// SurrogateID is the settlement_run.id (DB surrogate PK); used as the FK target in settlement_snapshot.run_id.
+	SurrogateID uuid.UUID
+	// BusinessID is the settlement_run.run_id (business identifier); passed to MarkRunSnapshotsFinal and similar methods.
+	BusinessID uuid.UUID
+}
+
+// seedSettlementRun creates a settlement_run record and returns the surrogate ID (settlement_run.id).
+// For tests that also need the business run_id, use seedSettlementRunFull.
 func seedSettlementRun(t *testing.T, ctx context.Context, db *gorm.DB) uuid.UUID {
+	t.Helper()
+	return seedSettlementRunFull(t, ctx, db).SurrogateID
+}
+
+// seedSettlementRunFull creates a settlement_run record and returns both the surrogate ID and the business run_id.
+func seedSettlementRunFull(t *testing.T, ctx context.Context, db *gorm.DB) seedRunIDs {
 	t.Helper()
 	tid := tenant.TenantID("test-tenant-01")
 	quoted := fmt.Sprintf("%q", tid.SchemaName())
@@ -30,7 +45,7 @@ func seedSettlementRun(t *testing.T, ctx context.Context, db *gorm.DB) uuid.UUID
 		surrogateID, runID,
 	).Error
 	require.NoError(t, err)
-	return surrogateID
+	return seedRunIDs{SurrogateID: surrogateID, BusinessID: runID}
 }
 
 func newTestSnapshot(t *testing.T, runID uuid.UUID) *domain.SettlementSnapshot {
@@ -234,29 +249,33 @@ func TestSettlementSnapshotRepository_MarkRunSnapshotsFinal(t *testing.T) {
 	repo := persistence.NewSettlementSnapshotRepository(db)
 	ctx := tenantCtx()
 
-	runID := seedSettlementRun(t, ctx, db)
+	// Use seedSettlementRunFull so we have both IDs:
+	//   SurrogateID → stored in settlement_snapshot.run_id (FK target)
+	//   BusinessID  → passed to MarkRunSnapshotsFinal (business identifier)
+	run := seedSettlementRunFull(t, ctx, db)
 
-	// Create snapshots with various attributes
-	s1 := newTestSnapshot(t, runID)
+	// Create snapshots with the surrogate ID so the FK constraint is satisfied.
+	s1 := newTestSnapshot(t, run.SurrogateID)
 	s1.Attributes = map[string]string{"bucket": "default"}
 	require.NoError(t, repo.Create(ctx, s1))
 
-	s2 := newTestSnapshot(t, runID)
+	s2 := newTestSnapshot(t, run.SurrogateID)
 	s2.AccountID = "ACC-002"
 	s2.Attributes = nil // Test nil attributes case
 	require.NoError(t, repo.Create(ctx, s2))
 
-	s3 := newTestSnapshot(t, runID)
+	s3 := newTestSnapshot(t, run.SurrogateID)
 	s3.AccountID = "ACC-003"
 	s3.Attributes = map[string]string{"region": "eu-west-1"}
 	require.NoError(t, repo.Create(ctx, s3))
 
-	// Mark all snapshots as FINAL
-	err := repo.MarkRunSnapshotsFinal(ctx, runID)
+	// Mark all snapshots as FINAL using the business run_id (not the surrogate PK).
+	// MarkRunSnapshotsFinal resolves the business ID to the surrogate PK internally.
+	err := repo.MarkRunSnapshotsFinal(ctx, run.BusinessID)
 	require.NoError(t, err)
 
 	// Verify all snapshots have settlement_type=FINAL
-	found, err := repo.FindByRunID(ctx, runID)
+	found, err := repo.FindByRunID(ctx, run.SurrogateID)
 	require.NoError(t, err)
 	assert.Len(t, found, 3)
 	for _, snap := range found {
