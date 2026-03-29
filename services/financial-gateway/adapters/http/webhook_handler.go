@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
@@ -122,12 +123,16 @@ func NewWebhookHandler(cfg WebhookHandlerConfig) *WebhookHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	eventChecker := cfg.EventChecker
+	if eventChecker == nil && cfg.DB != nil {
+		eventChecker = NewGormProcessedEventChecker(cfg.DB)
+	}
 	return &WebhookHandler{
 		clientFactory: cfg.ClientFactory,
 		publisher:     cfg.OutboxPublisher,
 		db:            cfg.DB,
 		logger:        logger,
-		eventChecker:  cfg.EventChecker,
+		eventChecker:  eventChecker,
 	}
 }
 
@@ -328,6 +333,14 @@ func (h *WebhookHandler) publishDomainEvent(
 		PartitionKey:  parsed.PaymentOrderID,
 		CausationID:   parsed.EventID,
 	}); err != nil {
+		if isDuplicateCausationError(err) {
+			h.logger.Info("skipping duplicate stripe webhook event (unique constraint)",
+				"event_id", parsed.EventID,
+				"tenant_id", tenantID.String(),
+			)
+			h.writeSuccess(w, "webhook already processed")
+			return
+		}
 		h.logger.Error("failed to publish domain event to outbox",
 			"event_id", parsed.EventID,
 			"topic", topic,
@@ -470,4 +483,16 @@ func (h *WebhookHandler) writeError(w http.ResponseWriter, statusCode int, messa
 	if err := json.NewEncoder(w).Encode(webhookResponse{Acknowledged: false, Error: message}); err != nil {
 		h.logger.Error("failed to encode error response", "error", err)
 	}
+}
+
+// isDuplicateCausationError returns true if err is a unique constraint violation on the
+// causation_id column, indicating the event was already published by a concurrent request.
+func isDuplicateCausationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "duplicate key") ||
+		strings.Contains(s, "unique constraint") ||
+		strings.Contains(s, "23505")
 }
