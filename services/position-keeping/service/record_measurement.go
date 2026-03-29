@@ -305,9 +305,14 @@ func (s *PositionKeepingService) validateMeasurementWithCEL(
 
 	instrument, err := s.loadInstrument(ctx, instrumentCode)
 	if err != nil {
-		RecordValidationFailure(instrumentCode, ValidationFailureReasonInstrumentNotFound)
-		return nil, status.Errorf(codes.NotFound,
-			"instrument definition not found for measurement type '%s': %v", instrumentCode, err)
+		if errors.Is(err, ErrInstrumentNotFound) {
+			RecordValidationFailure(instrumentCode, ValidationFailureReasonInstrumentNotFound)
+			return nil, status.Errorf(codes.NotFound,
+				"instrument definition not found for measurement type '%s': %v", instrumentCode, err)
+		}
+		RecordValidationFailure(instrumentCode, ValidationFailureReasonCELError)
+		return nil, status.Errorf(codes.Internal,
+			"failed to load instrument definition for measurement type '%s': %v", instrumentCode, err)
 	}
 
 	activation := buildCELActivation(metadata, amount)
@@ -370,8 +375,19 @@ func (s *PositionKeepingService) evalBucketKeyProgram(
 }
 
 // checkBucketCardinality checks whether adding a new bucket would exceed the cardinality limit.
+// Existing buckets are always allowed through - only truly new buckets are subject to the limit.
 func (s *PositionKeepingService) checkBucketCardinality(ctx context.Context, accountID, instrumentCode, bucketID string) error {
 	if s.bucketCounter == nil || bucketID == "" {
+		return nil
+	}
+
+	exists, err := s.bucketCounter.BucketExists(ctx, accountID, instrumentCode, bucketID)
+	if err != nil {
+		return status.Errorf(codes.Internal,
+			"failed to check bucket existence for account '%s' instrument '%s': %v",
+			accountID, instrumentCode, err)
+	}
+	if exists {
 		return nil
 	}
 
