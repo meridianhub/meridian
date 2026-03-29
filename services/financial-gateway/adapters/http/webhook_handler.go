@@ -54,12 +54,18 @@ func NewGormProcessedEventChecker(db *gorm.DB) *GormProcessedEventChecker {
 	return &GormProcessedEventChecker{db: db}
 }
 
-// IsProcessed returns true if an outbox entry with causation_id matching providerEventID exists.
+// IsProcessed returns true if an outbox entry with causation_id matching providerEventID exists
+// for the tenant in ctx. The query is scoped to the tenant's tenant_id to avoid cross-tenant
+// matches and is consistent with the project's multi-tenant outbox pattern.
 func (c *GormProcessedEventChecker) IsProcessed(ctx context.Context, providerEventID string) (bool, error) {
+	tid, ok := tenant.FromContext(ctx)
+	if !ok {
+		return false, tenant.ErrMissingTenantContext
+	}
 	var count int64
 	err := c.db.WithContext(ctx).
 		Model(&events.EventOutbox{}).
-		Where("causation_id = ?", providerEventID).
+		Where("tenant_id = ? AND causation_id = ?", string(tid), providerEventID).
 		Count(&count).Error
 	if err != nil {
 		return false, err
