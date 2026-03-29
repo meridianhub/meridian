@@ -32,6 +32,7 @@ var (
 	ErrCurrentAccountClientNil      = errors.New("current account client cannot be nil")
 	ErrFinancialAccountingClientNil = errors.New("financial accounting client cannot be nil")
 	ErrInternalAccountClientNil     = errors.New("internal account client cannot be nil when internal clearing is enabled")
+	ErrReferenceDataClientNil       = errors.New("reference data client cannot be nil when saga orchestration is enabled")
 	ErrPaymentGatewayNil            = errors.New("payment gateway cannot be nil")
 	ErrGatewayAccountConfigNil      = errors.New("gateway account config cannot be nil")
 	ErrIdempotencyServiceNil        = errors.New("idempotency service cannot be nil")
@@ -383,6 +384,9 @@ func validateServiceConfig(cfg Config) error {
 	}
 	if cfg.InternalClearingEnabled && cfg.InternalAccountClient == nil {
 		return ErrInternalAccountClientNil
+	}
+	if cfg.SagaOrchestrationEnabled && cfg.ReferenceDataClient == nil {
+		return ErrReferenceDataClientNil
 	}
 	return nil
 }
