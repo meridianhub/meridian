@@ -57,6 +57,10 @@ type BucketCounter interface {
 	// CountBuckets returns the number of distinct buckets for an account and instrument.
 	// Returns the count and any error encountered during the query.
 	CountBuckets(ctx context.Context, accountID string, instrumentCode string) (int, error)
+
+	// BucketExists checks whether a specific bucket already exists for the given account, instrument, and bucket ID.
+	// Used to distinguish new buckets from existing ones during cardinality enforcement.
+	BucketExists(ctx context.Context, accountID string, instrumentCode string, bucketID string) (bool, error)
 }
 
 // ErrEmptyUUID is returned when UUID string is empty
