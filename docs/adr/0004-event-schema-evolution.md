@@ -381,7 +381,6 @@ fields handle 90% of evolution needs. New event types handle the remaining 10% (
 ## Links
 
 - [ADR-0005: Adapter Pattern for Layer Translation](./0005-adapter-pattern-layer-translation.md)
-- [ADR-0005: Adapter Pattern for Layer Translation](./0005-adapter-pattern-layer-translation.md)
 - [Protocol Buffers Language Guide](https://protobuf.dev/programming-guides/proto3/)
 - [buf CLI Documentation](https://buf.build/docs/)
 - [BIAN Service Landscape 14.0.0](https://bian.org/servicelandscape-14-0-0/)

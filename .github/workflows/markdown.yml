@@ -92,6 +92,15 @@ jobs:
         run: |
           rm -f /tmp/broken_links
 
+          # Escape %, newline, CR for GitHub Actions workflow commands
+          escape_annotation() {
+            local s="$1"
+            s="${s//'%'/'%25'}"
+            s="${s//$'\n'/'%0A'}"
+            s="${s//$'\r'/'%0D'}"
+            printf '%s' "$s"
+          }
+
           while IFS= read -r file; do
             dir=$(dirname "$file")
 
@@ -108,7 +117,9 @@ jobs:
               # Resolve relative path
               resolved=$(cd "$dir" && realpath -q "$link" 2>/dev/null || echo "")
               if [ -z "$resolved" ] || [ ! -f "$resolved" ]; then
-                echo "::warning file=${file}::Broken link: ${link} (target not found)"
+                safe_file="$(escape_annotation "$file")"
+                safe_link="$(escape_annotation "$link")"
+                echo "::warning file=${safe_file}::Broken link: ${safe_link} (target not found)"
                 echo "$file -> $link" >> /tmp/broken_links
               fi
             done
