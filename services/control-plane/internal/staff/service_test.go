@@ -494,6 +494,21 @@ func TestCreateAPIKey_SuspendRaceCondition(t *testing.T) {
 			assert.ErrorIs(t, cErr, staff.ErrStaffSuspended,
 				"iteration %d: if CreateAPIKey fails, it must be due to suspension", i)
 		}
+
+		// Postcondition: verify that either:
+		// (a) CreateAPIKey won the row lock, created key, then suspend ran - both succeed
+		// (b) SuspendStaff won the row lock, then CreateAPIKey saw suspended status - cErr is ErrStaffSuspended
+		// With SELECT FOR UPDATE, these are the only two valid orderings.
+		// The old code (separate transactions) allowed a third invalid case:
+		// eligibility check passed in its own tx, suspend committed, then key
+		// insert succeeded in a new tx - creating a key for suspended staff
+		// without holding the lock. This test validates both orderings complete
+		// cleanly (no deadlocks, no unexpected errors) and the error shape is
+		// always correct.
+		u, err = svc.GetStaff(ctx, user.ID)
+		require.NoError(t, err, "iteration %d: GetStaff postcondition", i)
+		assert.Equal(t, staff.StatusSuspended, u.Status,
+			"iteration %d: staff should always be suspended after both ops complete", i)
 	}
 }
 
