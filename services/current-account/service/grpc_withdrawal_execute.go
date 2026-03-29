@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
@@ -73,6 +74,13 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 			}
 		}()
 	}
+
+	// Extract correlation ID from context/metadata and seed it so all downstream calls share the same trace
+	correlationID := sharedclients.ExtractCorrelationID(ctx)
+	if correlationID == "" {
+		correlationID = uuid.New().String()
+	}
+	ctx = observability.WithCorrelationID(ctx, correlationID)
 
 	// Retrieve and prepare account for withdrawal
 	account, amount, transactionID, opStatus, err := s.prepareAccountForWithdrawal(ctx, accountID, reqAmount)
@@ -315,12 +323,8 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 		return s.completeWithdrawalDirect(ctx, withdrawal)
 	}
 
-	// Create and marshal event payload
-	correlationID := observability.GetCorrelationID(ctx)
-	if correlationID == "" {
-		correlationID = uuid.New().String()
-	}
-	eventPayload, err := buildWithdrawalStatusEvent(withdrawal, accountID, correlationID)
+	// Create and marshal event payload (correlation ID is seeded at handler level)
+	eventPayload, err := buildWithdrawalStatusEvent(withdrawal, accountID, observability.GetCorrelationID(ctx))
 	if err != nil {
 		return err
 	}
