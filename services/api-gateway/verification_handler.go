@@ -199,6 +199,9 @@ func (h *VerificationHandler) issueResendVerificationToken(ctx context.Context, 
 
 	identity, err := h.identityRepo.FindByEmail(tenantCtx, req.Email)
 	if err != nil {
+		if !errors.Is(err, identitydomain.ErrIdentityNotFound) {
+			h.logger.ErrorContext(ctx, "verification: failed to find identity by email", "error", err)
+		}
 		return
 	}
 

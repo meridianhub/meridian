@@ -13,6 +13,7 @@ import (
 
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	"github.com/meridianhub/meridian/services/identity/connector"
+	identitydomain "github.com/meridianhub/meridian/services/identity/domain"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
@@ -226,4 +227,41 @@ func TestAuthHandler_MethodNotAllowed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.HandleLogin(rec, req)
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+}
+
+func TestAuthHandler_EmailNotVerified_Returns403(t *testing.T) {
+	signer := newTestSigner(t)
+
+	conn := &stubConnector{
+		loginFn: func(_ context.Context, _ []string, _, _ string) (connector.Identity, bool, error) {
+			return connector.Identity{}, true, identitydomain.ErrEmailNotVerified
+		},
+	}
+
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+		Connector: conn,
+		Signer:    signer,
+		Logger:    slog.Default(),
+	})
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]string{
+		"email":    "unverified@example.com",
+		"password": "correct",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	tid, _ := tenant.NewTenantID("volterra")
+	req = req.WithContext(tenant.WithTenant(req.Context(), tid))
+
+	rec := httptest.NewRecorder()
+	handler.HandleLogin(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+
+	var resp map[string]string
+	err = json.NewDecoder(rec.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, "email address has not been verified", resp["error"])
 }
