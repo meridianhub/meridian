@@ -414,6 +414,12 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Store OIDC flow state and redirect to Dex for authentication.
 	redirectURL, err := h.buildDexRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug)
 	if err != nil {
+		if errors.Is(err, errOIDCStateFull) {
+			h.logger.Warn("oidc: state store at capacity, rejecting new authorization request")
+			w.Header().Set("Retry-After", "30")
+			http.Error(w, "service temporarily unavailable, retry later", http.StatusServiceUnavailable)
+			return
+		}
 		h.logger.Error("oidc: failed to build Dex redirect", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
