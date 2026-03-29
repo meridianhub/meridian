@@ -363,6 +363,20 @@ func (h *OIDCHandler) validateAuthorizeClient(clientID, redirectURI string) (str
 	return registered, ""
 }
 
+// writeDexRedirectError writes the appropriate HTTP error for a buildDexRedirect failure.
+// errOIDCStateFull is transient backpressure and returns 503 with Retry-After: 30;
+// all other errors return 500.
+func (h *OIDCHandler) writeDexRedirectError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errOIDCStateFull) {
+		h.logger.Warn("oidc: state store at capacity, rejecting new authorization request")
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "service temporarily unavailable, retry later", http.StatusServiceUnavailable)
+		return
+	}
+	h.logger.Error("oidc: failed to build Dex redirect", "error", err)
+	http.Error(w, "internal server error", http.StatusInternalServerError)
+}
+
 // HandleAuthorize handles GET /oauth/authorize from the MCP client.
 // It stores the MCP client's PKCE state and redirects to Dex for authentication.
 func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
@@ -414,14 +428,7 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Store OIDC flow state and redirect to Dex for authentication.
 	redirectURL, err := h.buildDexRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug)
 	if err != nil {
-		if errors.Is(err, errOIDCStateFull) {
-			h.logger.Warn("oidc: state store at capacity, rejecting new authorization request")
-			w.Header().Set("Retry-After", "30")
-			http.Error(w, "service temporarily unavailable, retry later", http.StatusServiceUnavailable)
-			return
-		}
-		h.logger.Error("oidc: failed to build Dex redirect", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		h.writeDexRedirectError(w, err)
 		return
 	}
 
