@@ -300,9 +300,9 @@ X-RateLimit-Reset: 1704067200
 
 ## Related APIs
 
-- [POST /v1/sagas](./saga-registry.md#create-saga) - Deploy a validated saga
-- [PATCH /v1/sagas/{id}](./saga-registry.md#update-saga) - Update an existing saga
-- [POST /v1/sagas/{id}/activate](./saga-registry.md#activate-saga) - Activate a saga draft
+- POST /v1/sagas - Deploy a validated saga
+- PATCH /v1/sagas/{id} - Update an existing saga
+- POST /v1/sagas/{id}/activate - Activate a saga draft
 
 ## Support
 

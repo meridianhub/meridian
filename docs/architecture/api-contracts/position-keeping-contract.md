@@ -10,7 +10,7 @@
 
 - [BIAN Service Boundaries](../bian-service-boundaries.md)
 - [Service Coupling Analysis](../service-coupling-analysis.md)
-- [ADR-0023: Balance Delegation to Position Keeping](../adr/0023-balance-delegation-to-position-keeping.md)
+- [ADR-0023: Balance Delegation to Position Keeping](../../adr/0023-balance-delegation-to-position-keeping.md)
 
 ## Overview
 

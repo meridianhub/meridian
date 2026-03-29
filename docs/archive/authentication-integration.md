@@ -627,7 +627,7 @@ grpcurl -H "Authorization: Bearer $TOKEN" \
 For issues or questions:
 
 1. Check this documentation first
-2. Review the [Security Guidelines](../SECURITY.md)
+2. Review the [Security Guidelines](../../SECURITY.md)
 3. Search existing GitHub issues
 4. Create a new issue with:
    - Detailed error messages

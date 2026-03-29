@@ -179,7 +179,7 @@ local_resource(
 
 - [Tiltfile](../../Tiltfile) - Kafka cluster configuration
 - [ADR-0006](../../docs/adr/0006-tilt-local-development.md) - Tilt development environment
-- [Demo Guide](../../docs/demo/DEMO_GUIDE.md) - Kafka failover testing
+- [Demo Guide](../../docs/archive/DEMO_GUIDE.md) - Kafka failover testing
 
 ---
 

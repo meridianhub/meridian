@@ -1193,7 +1193,7 @@ The following Meridian concepts have no direct BIAN equivalent:
 ### Internal ADRs
 
 * [ADR-0013: Universal Quantity Type System](0013-generic-asset-quantity-types.md) - Quantity and rate types
-* [ADR-0014: Dynamic Asset Registry & Lifecycle](0014-dynamic-asset-registry.md) - Asset definitions and attributes
+* [ADR-0014: Financial Instrument Reference Data](0014-financial-instrument-reference-data.md) - Asset definitions and attributes
 * [ADR-0016: Tenant Isolation](0016-tenant-id-naming-strategy.md) - Multi-tenancy and schema separation
 * [ADR-0018: Settlement & Reconciliation](0018-settlement-reconciliation.md) - Settlement snapshots, temporal authority, reconciliation workflows
 

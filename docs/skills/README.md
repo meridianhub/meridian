@@ -90,7 +90,7 @@ Service documentation includes YAML frontmatter for Claude Code discovery:
 
 **Shared Modules:**
 
-- **[migrations](../../shared/migrations/README.md)** - Database migrations
+- **[migrations](../../shared/README.md)** - Database migrations
 - **[bootstrap](../../shared/platform/bootstrap/README.md)** - Service initialization
 - **[audit](../../shared/platform/audit/README.md)** - Audit hook helpers
 - **[observability](../../shared/platform/observability/README.md)** - OpenTelemetry tracing

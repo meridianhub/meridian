@@ -746,10 +746,10 @@ grpcurl -plaintext -d '{"account_id": "2rPxMVkj3tNmqPwT5Wk8Lc4M9xZ"}' \
 
 - [ADR-0002: Microservices per BIAN Domain](../../docs/adr/0002-microservices-per-bian-domain.md)
 - [ADR-0003: Database Schema Migrations](../../docs/adr/0003-database-schema-migrations.md)
-- [ADR-0013: Multi-Asset Instrument Support](../../docs/adr/0013-multi-asset-instrument-support.md)
-- [ADR-0015: Service Directory Structure](../../docs/adr/0015-service-directory-structure.md)
+- [ADR-0013: Generic Asset Quantity Types](../../docs/adr/0013-generic-asset-quantity-types.md)
+- [ADR-0015: Standard Service Directory Structure](../../docs/adr/0015-standard-service-directory-structure.md)
 - [ADR-0023: Balance Delegation to Position Keeping](../../docs/adr/0023-balance-delegation-to-position-keeping.md)
-- [ADR-0024: Internal Account Service](../../docs/adr/0024-internal-account-service.md)
+- [ADR-0024: Internal Bank Account Service](../../docs/adr/0024-internal-bank-account-service.md)
 - [ADR-0025: Clearing Purpose Specialization](../../docs/adr/0025-clearing-purpose-specialization.md)
 - [Proto Definitions](../../api/proto/meridian/internal_account/v1/)
 - [Position Keeping Service](../position-keeping/README.md)

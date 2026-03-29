@@ -741,7 +741,7 @@ Both are valid choices; Tilt won on developer experience.
 * [Tiltfile API Reference](https://docs.tilt.dev/api.html)
 * [Why Tilt? (Blog)](https://blog.tilt.dev/2019/04/09/designing-a-better-interface-for-microservices-development.html)
 * [Tilt vs Skaffold Comparison](https://docs.tilt.dev/choosing_a_local_dev_solution.html)
-* [Local Kubernetes Guide](../tilt.md)
+* [Local Kubernetes Guide](../skills/tilt.md)
 * [ADR-0001: Record Architecture Decisions](./0001-record-architecture-decisions.md)
 
 ## Notes

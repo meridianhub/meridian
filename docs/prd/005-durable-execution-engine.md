@@ -1538,4 +1538,4 @@ graph TD
 - [ADR-014: Financial Instrument Reference Data](../adr/0014-financial-instrument-reference-data.md)
 - [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation
 - [Starlark Language Spec](https://github.com/bazelbuild/starlark/blob/master/spec.md)
-- [Party Service](../adr/0003-party-management.md) - Party hierarchy and relationships
+- Party Service - Party hierarchy and relationships
