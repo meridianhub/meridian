@@ -12,6 +12,7 @@ import (
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	quantitypb "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/domain"
+	"github.com/meridianhub/meridian/services/reference-data/accounttype"
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/services/reference-data/registry"
 	"github.com/stretchr/testify/assert"
@@ -495,3 +496,30 @@ func (m *getPartyErrorClient) GetParty(_ context.Context, _ string) (*partyv1.Pa
 	return nil, m.err
 }
 func (m *getPartyErrorClient) Close() error { return nil }
+
+// ---------------------------------------------------------------------------
+// validateProductTypeConstraints
+// ---------------------------------------------------------------------------
+
+func TestValidateProductTypeConstraints_EligibilityCELWithNilProgram(t *testing.T) {
+	svc := &Service{
+		logger: validatorsTestLogger(),
+	}
+
+	def := &accounttype.Definition{
+		EligibilityCEL: `party.type == "PERSON"`,
+	}
+	cachedType := &CachedAccountType{
+		Definition:         def,
+		EligibilityProgram: nil,
+	}
+
+	opStatus, err := svc.validateProductTypeConstraints(context.Background(), cachedType, "party-1", nil, "SAVINGS", "test-account")
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok, "expected gRPC status error")
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "eligibility rule is configured but not compiled")
+	assert.Equal(t, "eligibility_not_compiled", opStatus)
+}

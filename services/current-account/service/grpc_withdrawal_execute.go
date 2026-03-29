@@ -16,6 +16,7 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -315,7 +316,8 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 	}
 
 	// Create and marshal event payload
-	eventPayload, err := buildWithdrawalStatusEvent(withdrawal, accountID)
+	correlationID := observability.GetCorrelationID(ctx)
+	eventPayload, err := buildWithdrawalStatusEvent(withdrawal, accountID, correlationID)
 	if err != nil {
 		return err
 	}
@@ -365,14 +367,14 @@ func (s *Service) completeWithdrawalDirect(ctx context.Context, withdrawal *doma
 }
 
 // buildWithdrawalStatusEvent creates and marshals a WithdrawalStatusUpdatedEvent.
-func buildWithdrawalStatusEvent(withdrawal *domain.Withdrawal, accountID uuid.UUID) ([]byte, error) {
+func buildWithdrawalStatusEvent(withdrawal *domain.Withdrawal, accountID uuid.UUID, correlationID string) ([]byte, error) {
 	now := time.Now().UTC()
 	event := &eventsv1.WithdrawalStatusUpdatedEvent{
 		EventId:       uuid.New().String(),
 		WithdrawalId:  withdrawal.Reference,
 		AccountId:     accountID.String(),
 		Status:        "COMPLETED",
-		CorrelationId: uuid.New().String(),
+		CorrelationId: correlationID,
 		CausationId:   withdrawal.Reference,
 		Timestamp:     timestamppb.New(now),
 		Version:       int64(withdrawal.Version),
