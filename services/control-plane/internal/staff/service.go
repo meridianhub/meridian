@@ -23,6 +23,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Status constants for staff user lifecycle.
@@ -235,10 +236,6 @@ func (s *Service) ListStaff(ctx context.Context) ([]User, error) {
 // CreateAPIKey generates a new API key for a staff user.
 // The plaintext key is returned only once and must not be stored by the service.
 func (s *Service) CreateAPIKey(ctx context.Context, staffUserID uuid.UUID, tenantSlug, name string, scopes []string, ttl time.Duration) (*APIKeyResult, error) {
-	if err := s.verifyStaffNotSuspended(ctx, staffUserID); err != nil {
-		return nil, err
-	}
-
 	plaintextKey, keyPrefix, keyHash, err := generateAPIKeyMaterial(tenantSlug)
 	if err != nil {
 		return nil, err
@@ -247,6 +244,9 @@ func (s *Service) CreateAPIKey(ctx context.Context, staffUserID uuid.UUID, tenan
 	entity := buildAPIKeyEntity(staffUserID, keyPrefix, keyHash, name, scopes, ttl)
 
 	err = db.WithGormTenantTransaction(ctx, s.gormDB, func(tx *gorm.DB) error {
+		if err := verifyStaffEligible(tx, staffUserID); err != nil {
+			return err
+		}
 		return tx.Create(entity).Error
 	})
 	if err != nil {
@@ -270,19 +270,16 @@ func (s *Service) CreateAPIKey(ctx context.Context, staffUserID uuid.UUID, tenan
 	}, nil
 }
 
-// verifyStaffNotSuspended checks that the staff user exists and is not suspended.
-func (s *Service) verifyStaffNotSuspended(ctx context.Context, staffUserID uuid.UUID) error {
+// verifyStaffEligible checks within an existing transaction that the staff user
+// exists and is not suspended. Uses SELECT FOR UPDATE to prevent concurrent
+// status changes (TOCTOU race) during the transaction.
+func verifyStaffEligible(tx *gorm.DB, staffUserID uuid.UUID) error {
 	var staffEntity UserEntity
-	err := db.WithGormTenantTransaction(ctx, s.gormDB, func(tx *gorm.DB) error {
-		if err := tx.Where("id = ?", staffUserID).First(&staffEntity).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrStaffNotFound
-			}
-			return err
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", staffUserID).First(&staffEntity).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrStaffNotFound
 		}
-		return nil
-	})
-	if err != nil {
 		return err
 	}
 	if staffEntity.Status == StatusSuspended {
