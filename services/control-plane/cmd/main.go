@@ -77,7 +77,6 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
 
 	// Build gRPC server with auth and RBAC interceptors
 	grpcServer, err := buildGRPCServer(ctx, tracer, logger)
