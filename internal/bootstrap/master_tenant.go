@@ -91,6 +91,11 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 // provisionSchemas creates org_meridian_master schemas in all service databases.
+//
+// The provisioner's idempotency gate trusts the stored provisioning status,
+// which can be stale if schemas were partially created or if the database was
+// reset. To guarantee all schemas exist, we reset the status to pending before
+// invoking the provisioner. CREATE SCHEMA IF NOT EXISTS makes this safe.
 func provisionSchemas(ctx context.Context, cfg Config, logger *slog.Logger) error {
 	logger.Info("provisioning master tenant schemas")
 
@@ -106,16 +111,12 @@ func provisionSchemas(ctx context.Context, cfg Config, logger *slog.Logger) erro
 
 	tenantID := tenant.TenantID(MasterTenantID)
 
-	// Check if already provisioned
-	status, err := prov.GetProvisioningStatus(ctx, tenantID)
-	if err == nil && status.State == provisioner.StateActive {
-		logger.Info("master tenant schemas already provisioned")
-		return nil
-	}
-
-	// Initialize provisioning status if needed
-	if err := prov.InitializeProvisioningStatus(ctx, tenantID); err != nil {
-		logger.Warn("failed to initialize provisioning status (may already exist)", "error", err)
+	// Reset provisioning status to pending so the provisioner always runs.
+	// The provisioner's idempotency gate trusts the stored status, which can
+	// be stale if schemas were partially created or if the database was reset.
+	// CREATE SCHEMA IF NOT EXISTS and idempotent migrations make this safe.
+	if err := resetProvisioningToPending(ctx, cfg.PlatformDB, tenantID, logger); err != nil {
+		logger.Debug("could not reset provisioning status (may not exist yet)", "error", err)
 	}
 
 	// Provision schemas
@@ -201,6 +202,25 @@ func seedPlatformManifest(ctx context.Context, db *gorm.DB, logger *slog.Logger)
 	logger.Info("platform manifest seeded successfully",
 		"tenant_id", MasterTenantID,
 		"version", mf.Version)
+	return nil
+}
+
+// resetProvisioningToPending updates the provisioning status to "pending" so the
+// provisioner re-runs schema creation and migrations. This is necessary because
+// the provisioner skips tenants with "active" status, but the actual schemas may
+// be missing (partial provisioning, DB reset, or new service added).
+func resetProvisioningToPending(ctx context.Context, db *gorm.DB, tenantID tenant.TenantID, logger *slog.Logger) error {
+	result := db.WithContext(ctx).Exec(
+		`UPDATE tenant_provisioning SET state = 'pending', updated_at = NOW() WHERE tenant_id = ?`,
+		tenantID.String(),
+	)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		logger.Info("reset provisioning status to pending for re-provisioning",
+			"tenant_id", tenantID.String())
+	}
 	return nil
 }
 
