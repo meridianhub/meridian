@@ -90,8 +90,7 @@ jobs:
 
       - name: Check internal markdown links resolve
         run: |
-          broken=0
-          total=0
+          rm -f /tmp/broken_links
 
           while IFS= read -r file; do
             dir=$(dirname "$file")
@@ -106,12 +105,10 @@ jobs:
               # Skip URLs
               case "$link" in http://*|https://*) continue ;; esac
 
-              total=$((total + 1))
-
               # Resolve relative path
               resolved=$(cd "$dir" && realpath -q "$link" 2>/dev/null || echo "")
               if [ -z "$resolved" ] || [ ! -f "$resolved" ]; then
-                echo "::warning file=$file::Broken link: $link (target not found)"
+                echo "::warning file=${file}::Broken link: ${link} (target not found)"
                 echo "$file -> $link" >> /tmp/broken_links
               fi
             done
