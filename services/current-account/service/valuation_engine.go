@@ -81,7 +81,6 @@ var (
 
 // Valuation operation status constants for metrics
 const (
-	opStatusValuationEngineNil     = "valuation_engine_nil"
 	opStatusNoValuationFeature     = "no_valuation_feature"
 	opStatusValuationFailed        = "valuation_failed"
 	opStatusInvalidInputAmount     = "invalid_input_amount"
