@@ -234,7 +234,7 @@ func TestAuthHandler_EmailNotVerified_Returns403(t *testing.T) {
 
 	conn := &stubConnector{
 		loginFn: func(_ context.Context, _ []string, _, _ string) (connector.Identity, bool, error) {
-			return connector.Identity{}, true, identitydomain.ErrEmailNotVerified
+			return connector.Identity{}, false, identitydomain.ErrEmailNotVerified
 		},
 	}
 

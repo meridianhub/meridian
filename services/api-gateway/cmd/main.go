@@ -146,7 +146,7 @@ func initRedisAndHealth(config *gateway.Config, dbPool *db.PostgresPool, logger 
 	if config.RedisURL != "" {
 		opt, err := redis.ParseURL(config.RedisURL)
 		if err != nil {
-			redacted := config.RedisURL
+			redacted := "<unparseable>"
 			if u, parseErr := url.Parse(config.RedisURL); parseErr == nil {
 				redacted = u.Redacted()
 			}
