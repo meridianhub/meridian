@@ -6,10 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"net/url"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	"github.com/meridianhub/meridian/services/api-gateway/eventstream"
@@ -22,9 +26,6 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/env"
-	"github.com/redis/go-redis/v9"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 // ErrRedisURLRequired is returned when Redis fan-out is enabled but no REDIS_URL is configured.
