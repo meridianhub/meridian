@@ -380,6 +380,9 @@ func (s *Server) buildDataSetFilters(req *pb.ListDataSetsRequest) (domain.DataSe
 	}
 
 	pageSize := int(req.PageSize)
+	if pageSize < 0 {
+		return filters, status.Errorf(codes.InvalidArgument, "page_size must not be negative")
+	}
 	if pageSize == 0 {
 		pageSize = 50
 	}
@@ -494,6 +497,8 @@ func mapDataSetValidationError(err error) error {
 		return status.Errorf(codes.InvalidArgument, "resolution_key_expression is required")
 	case errors.Is(err, domain.ErrInvalidDataCategory):
 		return status.Errorf(codes.InvalidArgument, "invalid data category")
+	case errors.Is(err, domain.ErrInvalidDataSetStatus):
+		return status.Errorf(codes.InvalidArgument, "invalid dataset status")
 	default:
 		return nil
 	}

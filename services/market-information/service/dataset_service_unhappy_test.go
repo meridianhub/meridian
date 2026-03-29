@@ -311,6 +311,20 @@ func TestListDataSets_Pagination(t *testing.T) {
 
 	ctx := context.Background()
 
+	t.Run("rejects negative page size", func(t *testing.T) {
+		listReq := &pb.ListDataSetsRequest{
+			PageSize: -1,
+		}
+
+		_, err := server.ListDataSets(ctx, listReq)
+		require.Error(t, err)
+
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.InvalidArgument, st.Code())
+		assert.Contains(t, st.Message(), "page_size")
+	})
+
 	t.Run("caps page size at maximum", func(t *testing.T) {
 		listReq := &pb.ListDataSetsRequest{
 			PageSize: 500, // Exceeds max of 100
@@ -366,6 +380,7 @@ func TestMapDataSetDomainError(t *testing.T) {
 		{"validation expr required", domain.ErrValidationExpressionRequired, codes.InvalidArgument},
 		{"resolution key expr required", domain.ErrResolutionKeyExpressionRequired, codes.InvalidArgument},
 		{"invalid category", domain.ErrInvalidDataCategory, codes.InvalidArgument},
+		{"invalid status", domain.ErrInvalidDataSetStatus, codes.InvalidArgument},
 		{"unknown error", errors.New("some unknown error"), codes.Internal},
 	}
 
