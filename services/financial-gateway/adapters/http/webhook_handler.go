@@ -34,7 +34,38 @@ var (
 	ErrNilClientFactory     = errors.New("stripe client factory cannot be nil")
 	ErrNilOutboxPublisher   = errors.New("outbox publisher cannot be nil")
 	ErrMissingTenantContext = errors.New("missing tenant context for stripe webhook")
+	ErrMissingWebhookSecret = errors.New("missing webhook secret configured for tenant")
 )
+
+// ProcessedEventChecker checks whether a provider webhook event has already been processed.
+// Implementations should return (true, nil) if the event was already published to the outbox.
+type ProcessedEventChecker interface {
+	IsProcessed(ctx context.Context, providerEventID string) (bool, error)
+}
+
+// GormProcessedEventChecker implements ProcessedEventChecker by querying the event_outbox
+// table for an existing entry with a matching causation_id.
+type GormProcessedEventChecker struct {
+	db *gorm.DB
+}
+
+// NewGormProcessedEventChecker creates a GormProcessedEventChecker backed by the given DB.
+func NewGormProcessedEventChecker(db *gorm.DB) *GormProcessedEventChecker {
+	return &GormProcessedEventChecker{db: db}
+}
+
+// IsProcessed returns true if an outbox entry with causation_id matching providerEventID exists.
+func (c *GormProcessedEventChecker) IsProcessed(ctx context.Context, providerEventID string) (bool, error) {
+	var count int64
+	err := c.db.WithContext(ctx).
+		Model(&events.EventOutbox{}).
+		Where("causation_id = ?", providerEventID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
 
 // OutboxEventPublisher is the interface for publishing domain events to the transactional outbox.
 // This abstraction allows for test doubles without requiring a real *gorm.DB.
@@ -49,6 +80,7 @@ type WebhookHandler struct {
 	publisher     OutboxEventPublisher
 	db            *gorm.DB
 	logger        *slog.Logger
+	eventChecker  ProcessedEventChecker
 }
 
 // WebhookHandlerConfig contains configuration for creating a WebhookHandler.
@@ -66,6 +98,10 @@ type WebhookHandlerConfig struct {
 
 	// Logger is the structured logger. Defaults to slog.Default() if nil.
 	Logger *slog.Logger
+
+	// EventChecker optionally checks whether a provider event has already been processed.
+	// If nil, idempotency checking is skipped. For production, use NewGormProcessedEventChecker.
+	EventChecker ProcessedEventChecker
 }
 
 // NewWebhookHandler creates a new WebhookHandler.
@@ -86,6 +122,7 @@ func NewWebhookHandler(cfg WebhookHandlerConfig) *WebhookHandler {
 		publisher:     cfg.OutboxPublisher,
 		db:            cfg.DB,
 		logger:        logger,
+		eventChecker:  cfg.EventChecker,
 	}
 }
 
@@ -206,7 +243,7 @@ func (h *WebhookHandler) validateAndParseWebhook(
 	if client.WebhookEndpointSecret == "" {
 		h.logger.Error("no webhook secret for tenant", "tenant_id", tenantID.String())
 		h.writeError(w, http.StatusInternalServerError, "no webhook secret configured for tenant")
-		return stripeadapter.ParsedWebhookEvent{}, ErrMissingTenantContext
+		return stripeadapter.ParsedWebhookEvent{}, ErrMissingWebhookSecret
 	}
 
 	adapter, err := stripeadapter.NewWebhookAdapter(client.WebhookEndpointSecret)
@@ -252,6 +289,24 @@ func (h *WebhookHandler) publishDomainEvent(
 	topic string,
 	tenantID tenant.TenantID,
 ) {
+	if h.eventChecker != nil {
+		already, err := h.eventChecker.IsProcessed(ctx, parsed.EventID)
+		if err != nil {
+			h.logger.Error("failed to check event idempotency",
+				"event_id", parsed.EventID,
+				"error", err,
+			)
+			// Fall through and publish - safer than silently dropping on a check failure.
+		} else if already {
+			h.logger.Info("skipping duplicate stripe webhook event",
+				"event_id", parsed.EventID,
+				"tenant_id", tenantID.String(),
+			)
+			h.writeSuccess(w, "webhook already processed")
+			return
+		}
+	}
+
 	h.logger.Info("publishing stripe webhook domain event",
 		"event_id", parsed.EventID,
 		"gateway_reference_id", parsed.GatewayReferenceID,
@@ -266,6 +321,7 @@ func (h *WebhookHandler) publishDomainEvent(
 		AggregateID:   parsed.PaymentOrderID,
 		AggregateType: "PaymentOrder",
 		PartitionKey:  parsed.PaymentOrderID,
+		CausationID:   parsed.EventID,
 	}); err != nil {
 		h.logger.Error("failed to publish domain event to outbox",
 			"event_id", parsed.EventID,
