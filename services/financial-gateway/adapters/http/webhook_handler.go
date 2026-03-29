@@ -21,6 +21,7 @@ import (
 
 	financialgatewayeventsv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway_events/v1"
 	stripeadapter "github.com/meridianhub/meridian/services/financial-gateway/adapters/stripe"
+	db "github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
@@ -55,18 +56,16 @@ func NewGormProcessedEventChecker(db *gorm.DB) *GormProcessedEventChecker {
 }
 
 // IsProcessed returns true if an outbox entry with causation_id matching providerEventID exists
-// for the tenant in ctx. The query is scoped to the tenant's tenant_id to avoid cross-tenant
-// matches and is consistent with the project's multi-tenant outbox pattern.
+// for the tenant in ctx. The query runs inside a tenant-scoped transaction (WithGormTenantTransaction)
+// so the search_path targets the correct tenant schema, consistent with the project's multi-tenant
+// outbox pattern.
 func (c *GormProcessedEventChecker) IsProcessed(ctx context.Context, providerEventID string) (bool, error) {
-	tid, ok := tenant.FromContext(ctx)
-	if !ok {
-		return false, tenant.ErrMissingTenantContext
-	}
 	var count int64
-	err := c.db.WithContext(ctx).
-		Model(&events.EventOutbox{}).
-		Where("tenant_id = ? AND causation_id = ?", string(tid), providerEventID).
-		Count(&count).Error
+	err := db.WithGormTenantTransaction(ctx, c.db, func(tx *gorm.DB) error {
+		return tx.Model(&events.EventOutbox{}).
+			Where("causation_id = ?", providerEventID).
+			Count(&count).Error
+	})
 	if err != nil {
 		return false, err
 	}
