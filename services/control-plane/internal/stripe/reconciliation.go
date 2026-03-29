@@ -159,7 +159,9 @@ func buildChargeIndex(charges []ChargeRecord) (map[string]*ChargeRecord, []strin
 }
 
 // fetchAndIndexLedgerEntries fetches ledger entries matching chargeIDs and builds a lookup map.
-// Returns the map, raw entry count (pre-deduplication), total cents, and any error.
+// Returns the map, deduplicated entry count (len of map), total cents summed from deduplicated
+// entries, and any error. If the ledger source returns multiple entries with the same
+// ExternalReferenceID, only the last is retained and only one amount is counted.
 func (s *ReconciliationService) fetchAndIndexLedgerEntries(ctx context.Context, chargeIDs []string) (map[string]*LedgerRecord, int, int64, error) {
 	if len(chargeIDs) == 0 {
 		return make(map[string]*LedgerRecord), 0, 0, nil
@@ -169,12 +171,14 @@ func (s *ReconciliationService) fetchAndIndexLedgerEntries(ctx context.Context, 
 		return nil, 0, 0, fmt.Errorf("failed to fetch ledger entries: %w", err)
 	}
 	ledgerMap := make(map[string]*LedgerRecord, len(ledgerEntries))
-	var totalCents int64
 	for i := range ledgerEntries {
 		ledgerMap[ledgerEntries[i].ExternalReferenceID] = &ledgerEntries[i]
-		totalCents += ledgerEntries[i].AmountCents
 	}
-	return ledgerMap, len(ledgerEntries), totalCents, nil
+	var totalCents int64
+	for _, entry := range ledgerMap {
+		totalCents += entry.AmountCents
+	}
+	return ledgerMap, len(ledgerMap), totalCents, nil
 }
 
 // findMissingEntries identifies charges missing in ledger and ledger entries missing in Stripe.
