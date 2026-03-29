@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/meridianhub/meridian/services/identity/connector"
+	identitydomain "github.com/meridianhub/meridian/services/identity/domain"
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
@@ -170,6 +171,12 @@ func (h *AuthHandler) handleLoginError(ctx context.Context, w http.ResponseWrite
 	if errors.Is(err, errInvalidCredentials) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{
 			"error": "invalid email or password",
+		})
+		return
+	}
+	if errors.Is(err, identitydomain.ErrEmailNotVerified) {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "email address has not been verified",
 		})
 		return
 	}

@@ -256,6 +256,35 @@ func TestReconciliation_BothThresholdsExceeded(t *testing.T) {
 	assert.Contains(t, report.AlertMessage, "relative variance")
 }
 
+func TestReconciliation_DuplicateLedgerEntries(t *testing.T) {
+	// If ListEntriesByExternalRef returns duplicate ExternalReferenceIDs, the map
+	// deduplicates them. Both LedgerEntryCount and LedgerTotalCents must reflect
+	// the deduplicated view to avoid phantom variance.
+	svc, err := NewReconciliationService(
+		&mockStripeSource{
+			charges: []ChargeRecord{
+				{ChargeID: "ch_1", AmountCents: 10000, Currency: "gbp"},
+			},
+		},
+		&mockLedgerSource{
+			entries: []LedgerRecord{
+				{LogID: "log-1", ExternalReferenceID: "ch_1", AmountCents: 10000, Currency: "gbp"},
+				{LogID: "log-2", ExternalReferenceID: "ch_1", AmountCents: 10000, Currency: "gbp"}, // duplicate ref
+			},
+		},
+		nil,
+	)
+	require.NoError(t, err)
+
+	report, err := svc.RunDailyReconciliation(context.Background(), time.Now())
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, report.LedgerEntryCount, "deduplicated count should be 1")
+	assert.Equal(t, int64(10000), report.LedgerTotalCents, "total must not double-count duplicate entries")
+	assert.Equal(t, int64(0), report.VarianceCents)
+	assert.Empty(t, report.MissingInLedger)
+}
+
 func TestAbs(t *testing.T) {
 	assert.Equal(t, int64(5), abs(5))
 	assert.Equal(t, int64(5), abs(-5))

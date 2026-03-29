@@ -151,6 +151,10 @@ func (s *Service) validateProductTypeConstraints(
 	attributes map[string]string,
 	productTypeCode, accountID string,
 ) (string, error) {
+	if cachedType.Definition.EligibilityCEL != "" && cachedType.EligibilityProgram == nil {
+		return "eligibility_not_compiled",
+			status.Errorf(codes.Internal, "eligibility rule is configured but not compiled for product type %s", productTypeCode)
+	}
 	if cachedType.EligibilityProgram != nil {
 		if opStatus, err := s.checkEligibility(ctx, cachedType, partyID, attributes, productTypeCode, accountID); err != nil {
 			return opStatus, err

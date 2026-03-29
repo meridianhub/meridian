@@ -632,6 +632,20 @@ func TestNewServiceWithConfig(t *testing.T) {
 			},
 			wantErr: ErrIdempotencyServiceNil,
 		},
+		{
+			name: "saga orchestration enabled with nil reference data client returns error",
+			config: Config{
+				Repository:                NewMockRepository(),
+				CurrentAccountClient:      &MockCurrentAccountClient{},
+				FinancialAccountingClient: &MockFinancialAccountingClient{},
+				PaymentGateway:            &MockPaymentGateway{},
+				GatewayAccountConfig:      testGatewayAccountConfig(),
+				IdempotencyService:        NewMockIdempotencyService(),
+				SagaOrchestrationEnabled:  true,
+				ReferenceDataClient:       nil,
+			},
+			wantErr: ErrReferenceDataClientNil,
+		},
 	}
 
 	for _, tt := range tests {

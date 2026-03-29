@@ -214,17 +214,18 @@ func (f *SettlementFinalizer) checkPendingOperations(ctx context.Context, run *d
 }
 
 // markFinalized transitions the run to FINALIZED and marks snapshots as FINAL.
+// Snapshots are marked FINAL before the run is persisted as FINALIZED to prevent
+// a state where the run appears FINALIZED but its snapshots are not yet FINAL.
 func (f *SettlementFinalizer) markFinalized(ctx context.Context, run *domain.SettlementRun) error {
+	if err := f.snapRepo.MarkRunSnapshotsFinal(ctx, run.RunID); err != nil {
+		return fmt.Errorf("marking snapshots FINAL for run %s: %w", run.RunID, err)
+	}
+
 	if err := run.Finalize(); err != nil {
 		return fmt.Errorf("transitioning run %s to FINALIZED: %w", run.RunID, err)
 	}
 	if err := f.runRepo.Update(ctx, run); err != nil {
 		return fmt.Errorf("persisting FINALIZED state for run %s: %w", run.RunID, err)
-	}
-
-	if err := f.snapRepo.MarkRunSnapshotsFinal(ctx, run.RunID); err != nil {
-		f.logger.WarnContext(ctx, "failed to mark snapshots as FINAL",
-			"run_id", run.RunID, "error", err)
 	}
 
 	return nil

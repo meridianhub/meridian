@@ -470,6 +470,160 @@ func TestWebhookHandler_MissingPaymentOrderID_AcknowledgesOnly(t *testing.T) {
 	assert.Len(t, stub.published, 0, "should not publish when payment_order_id is missing")
 }
 
+// stubProcessedEventChecker implements ProcessedEventChecker for testing.
+type stubProcessedEventChecker struct {
+	processed map[string]bool
+	err       error
+}
+
+func (s *stubProcessedEventChecker) IsProcessed(_ context.Context, providerEventID string) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
+	return s.processed[providerEventID], nil
+}
+
+func TestWebhookHandler_EmptyWebhookSecret_ReturnsCorrectError(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	provider := &testTenantConfigProvider{
+		configs: map[string]stripeadapter.TenantConfig{
+			"no-secret-tenant": {
+				ConnectedAccountID:    "acct_test",
+				WebhookEndpointSecret: "",
+			},
+		},
+	}
+	factory, err := stripeadapter.NewClientFactory(stripeadapter.Config{
+		APIKey:             "sk_test_key",
+		TenantCacheSize:    10,
+		TenantCacheTTL:     time.Minute,
+		CircuitBreakerName: "test-cb",
+	}, provider, nil)
+	require.NoError(t, err)
+
+	h := fghttp.NewWebhookHandler(fghttp.WebhookHandlerConfig{
+		ClientFactory:   factory,
+		OutboxPublisher: stub,
+	})
+
+	payload := buildStripePayload(t, "evt_1", "payment_intent.succeeded", map[string]any{})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/no-secret-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "no-secret-tenant")
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, "no webhook secret configured for tenant", resp["error"])
+}
+
+func TestWebhookHandler_DuplicateEvent_SkipsPublish(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	checker := &stubProcessedEventChecker{
+		processed: map[string]bool{"evt_dup_1": true},
+	}
+
+	provider := &testTenantConfigProvider{
+		configs: map[string]stripeadapter.TenantConfig{
+			"test-tenant": {
+				ConnectedAccountID:    "acct_test",
+				WebhookEndpointSecret: testWebhookSecret,
+			},
+		},
+	}
+	factory, err := stripeadapter.NewClientFactory(stripeadapter.Config{
+		APIKey:             "sk_test_key",
+		TenantCacheSize:    10,
+		TenantCacheTTL:     time.Minute,
+		CircuitBreakerName: "test-cb",
+	}, provider, nil)
+	require.NoError(t, err)
+
+	h := fghttp.NewWebhookHandler(fghttp.WebhookHandlerConfig{
+		ClientFactory:   factory,
+		OutboxPublisher: stub,
+		EventChecker:    checker,
+	})
+
+	payload := buildStripePayload(t, "evt_dup_1", "payment_intent.succeeded", map[string]any{
+		"id":       "pi_dup_123",
+		"object":   "payment_intent",
+		"amount":   5000,
+		"currency": "gbp",
+		"metadata": map[string]string{"payment_order_id": "po-dup-123"},
+		"status":   "succeeded",
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Len(t, stub.published, 0, "duplicate event should not be re-published")
+	var resp map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, true, resp["acknowledged"])
+}
+
+func TestWebhookHandler_IdempotencyCheckError_FallsThroughToPublish(t *testing.T) {
+	stub := &stubOutboxPublisher{}
+	checker := &stubProcessedEventChecker{
+		err: errors.New("db unavailable"),
+	}
+
+	provider := &testTenantConfigProvider{
+		configs: map[string]stripeadapter.TenantConfig{
+			"test-tenant": {
+				ConnectedAccountID:    "acct_test",
+				WebhookEndpointSecret: testWebhookSecret,
+			},
+		},
+	}
+	factory, err := stripeadapter.NewClientFactory(stripeadapter.Config{
+		APIKey:             "sk_test_key",
+		TenantCacheSize:    10,
+		TenantCacheTTL:     time.Minute,
+		CircuitBreakerName: "test-cb",
+	}, provider, nil)
+	require.NoError(t, err)
+
+	h := fghttp.NewWebhookHandler(fghttp.WebhookHandlerConfig{
+		ClientFactory:   factory,
+		OutboxPublisher: stub,
+		EventChecker:    checker,
+	})
+
+	payload := buildStripePayload(t, "evt_fallthrough_1", "payment_intent.succeeded", map[string]any{
+		"id":       "pi_fallthrough_123",
+		"object":   "payment_intent",
+		"amount":   2000,
+		"currency": "usd",
+		"metadata": map[string]string{"payment_order_id": "po-fallthrough-123"},
+		"status":   "succeeded",
+	})
+	sig := signPayload(t, payload, testWebhookSecret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/stripe/test-tenant", bytes.NewReader(payload))
+	req.SetPathValue("tenantID", "test-tenant")
+	req.Header.Set("Stripe-Signature", sig)
+
+	rr := httptest.NewRecorder()
+	h.HandleStripeWebhook(rr, req)
+
+	// On idempotency check failure, handler falls through and publishes the event.
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Len(t, stub.published, 1, "event should be published when idempotency check fails")
+}
+
 func TestWebhookHandler_NewWebhookHandler_PanicsOnNilClientFactory(t *testing.T) {
 	stub := &stubOutboxPublisher{}
 	assert.PanicsWithValue(t, fghttp.ErrNilClientFactory.Error(), func() {

@@ -13,9 +13,11 @@ import (
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
+	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
+	"github.com/meridianhub/meridian/shared/platform/observability"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -72,6 +74,13 @@ func (s *Service) ExecuteWithdrawal(ctx context.Context, req *pb.ExecuteWithdraw
 			}
 		}()
 	}
+
+	// Extract correlation ID from context/metadata and seed it so all downstream calls share the same trace
+	correlationID := sharedclients.ExtractCorrelationID(ctx)
+	if correlationID == "" {
+		correlationID = uuid.New().String()
+	}
+	ctx = observability.WithCorrelationID(ctx, correlationID)
 
 	// Retrieve and prepare account for withdrawal
 	account, amount, transactionID, opStatus, err := s.prepareAccountForWithdrawal(ctx, accountID, reqAmount)
@@ -314,8 +323,8 @@ func (s *Service) completeWithdrawalWithOutbox(ctx context.Context, withdrawal *
 		return s.completeWithdrawalDirect(ctx, withdrawal)
 	}
 
-	// Create and marshal event payload
-	eventPayload, err := buildWithdrawalStatusEvent(withdrawal, accountID)
+	// Create and marshal event payload (correlation ID is seeded at handler level)
+	eventPayload, err := buildWithdrawalStatusEvent(withdrawal, accountID, observability.GetCorrelationID(ctx))
 	if err != nil {
 		return err
 	}
@@ -365,14 +374,14 @@ func (s *Service) completeWithdrawalDirect(ctx context.Context, withdrawal *doma
 }
 
 // buildWithdrawalStatusEvent creates and marshals a WithdrawalStatusUpdatedEvent.
-func buildWithdrawalStatusEvent(withdrawal *domain.Withdrawal, accountID uuid.UUID) ([]byte, error) {
+func buildWithdrawalStatusEvent(withdrawal *domain.Withdrawal, accountID uuid.UUID, correlationID string) ([]byte, error) {
 	now := time.Now().UTC()
 	event := &eventsv1.WithdrawalStatusUpdatedEvent{
 		EventId:       uuid.New().String(),
 		WithdrawalId:  withdrawal.Reference,
 		AccountId:     accountID.String(),
 		Status:        "COMPLETED",
-		CorrelationId: uuid.New().String(),
+		CorrelationId: correlationID,
 		CausationId:   withdrawal.Reference,
 		Timestamp:     timestamppb.New(now),
 		Version:       int64(withdrawal.Version),

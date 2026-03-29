@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"net/url"
 	"strings"
 	"time"
 
@@ -89,14 +90,16 @@ func run(logger *slog.Logger) error {
 
 	// Build server options
 	serverOpts, eventRouter, optCleanups, err := buildServerOptions(config, logger, healthChecker, redisClient)
-	if err != nil {
-		return err
-	}
+	// Defer cleanups before checking err: buildServerOptions may return partial
+	// cleanups (e.g., ssoCleanup) even when it fails midway through wiring.
 	defer func() {
 		for _, cleanup := range optCleanups {
 			cleanup()
 		}
 	}()
+	if err != nil {
+		return err
+	}
 
 	// Create server
 	server := gateway.NewServer(config, logger, nil, serverOpts...)
@@ -141,9 +144,16 @@ func initRedisAndHealth(config *gateway.Config, dbPool *db.PostgresPool, logger 
 	var redisClient *redis.Client
 	var cleanup func()
 	if config.RedisURL != "" {
-		redisClient = redis.NewClient(&redis.Options{
-			Addr: config.RedisURL,
-		})
+		opt, err := redis.ParseURL(config.RedisURL)
+		if err != nil {
+			redacted := "<unparseable>"
+			if u, parseErr := url.Parse(config.RedisURL); parseErr == nil {
+				redacted = u.Redacted()
+			}
+			logger.Warn("redis URL parse failed, falling back to direct addr", "url", redacted, "error", err)
+			opt = &redis.Options{Addr: config.RedisURL}
+		}
+		redisClient = redis.NewClient(opt)
 		cleanup = func() { _ = redisClient.Close() }
 
 		if err := redisClient.Ping(context.Background()).Err(); err != nil {

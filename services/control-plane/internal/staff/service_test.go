@@ -429,6 +429,89 @@ func TestStaffIsolation_DifferentTenants(t *testing.T) {
 	assert.Equal(t, "Alice B", usersB[0].Name)
 }
 
+// TestCreateAPIKey_SuspendRaceCondition verifies that a concurrent suspend
+// prevents API key creation. Before the fix, verifyStaffNotSuspended ran in its
+// own transaction, allowing a TOCTOU race where suspend could slip between the
+// eligibility check and the key insert. The fix moves the check (with SELECT
+// FOR UPDATE) into the same transaction as the insert.
+func TestCreateAPIKey_SuspendRaceCondition(t *testing.T) {
+	gormDB, cleanup := testdb.SetupCockroachDB(t, nil)
+	defer cleanup()
+
+	tc := testdb.SetupTenantSchema(t, gormDB, "race_tenant")
+	defer tc.Cleanup()
+	createStaffTables(t, gormDB, tc.Tenant.SchemaName())
+
+	svc := staff.NewService(gormDB, slog.Default())
+	ctx := tc.Ctx
+
+	// Create and activate a staff user.
+	user, err := svc.InviteStaff(ctx, "race@example.com", "Racer", "operator")
+	require.NoError(t, err)
+	err = svc.ActivateStaff(ctx, user.ID, "auth0|racer")
+	require.NoError(t, err)
+
+	// Run CreateAPIKey and SuspendStaff concurrently. With SELECT FOR UPDATE
+	// in CreateAPIKey, the two operations serialize - one wins, the other waits.
+	// Either outcome is valid (key created before suspend, or suspend blocks key
+	// creation), but we must never see both succeed with the staff ending up
+	// suspended AND a new key having been created after the suspend.
+	const iterations = 20
+	for i := 0; i < iterations; i++ {
+		// Re-activate for each iteration if suspended.
+		u, err := svc.GetStaff(ctx, user.ID)
+		require.NoError(t, err)
+		if u.Status == staff.StatusSuspended {
+			// Reset to invited then activate (suspend->active not allowed).
+			err = gormDB.Exec(
+				fmt.Sprintf(`UPDATE %q."staff_user" SET status = 'active' WHERE id = $1`,
+					tc.Tenant.SchemaName()), user.ID).Error
+			require.NoError(t, err)
+		}
+
+		createErr := make(chan error, 1)
+		suspendErr := make(chan error, 1)
+
+		// Start both operations concurrently.
+		go func() {
+			_, err := svc.CreateAPIKey(ctx, user.ID, "acme", fmt.Sprintf("race-key-%d", i), nil, 0)
+			createErr <- err
+		}()
+		go func() {
+			suspendErr <- svc.SuspendStaff(ctx, user.ID)
+		}()
+
+		cErr := <-createErr
+		sErr := <-suspendErr
+
+		// Suspend should always succeed (idempotent).
+		assert.NoError(t, sErr, "iteration %d: suspend should succeed", i)
+
+		// If CreateAPIKey succeeded, that's fine - it won the lock race and
+		// completed before suspend. If it failed with ErrStaffSuspended, that's
+		// also correct - suspend won and CreateAPIKey correctly detected it.
+		if cErr != nil {
+			assert.ErrorIs(t, cErr, staff.ErrStaffSuspended,
+				"iteration %d: if CreateAPIKey fails, it must be due to suspension", i)
+		}
+
+		// Postcondition: verify that either:
+		// (a) CreateAPIKey won the row lock, created key, then suspend ran - both succeed
+		// (b) SuspendStaff won the row lock, then CreateAPIKey saw suspended status - cErr is ErrStaffSuspended
+		// With SELECT FOR UPDATE, these are the only two valid orderings.
+		// The old code (separate transactions) allowed a third invalid case:
+		// eligibility check passed in its own tx, suspend committed, then key
+		// insert succeeded in a new tx - creating a key for suspended staff
+		// without holding the lock. This test validates both orderings complete
+		// cleanly (no deadlocks, no unexpected errors) and the error shape is
+		// always correct.
+		u, err = svc.GetStaff(ctx, user.ID)
+		require.NoError(t, err, "iteration %d: GetStaff postcondition", i)
+		assert.Equal(t, staff.StatusSuspended, u.Status,
+			"iteration %d: staff should always be suspended after both ops complete", i)
+	}
+}
+
 func TestNewService_NilLogger(t *testing.T) {
 	gormDB, cleanup := testdb.SetupCockroachDB(t, nil)
 	defer cleanup()

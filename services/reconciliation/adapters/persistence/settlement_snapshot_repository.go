@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -138,14 +139,20 @@ func (r *SettlementSnapshotRepository) DeleteByRunID(ctx context.Context, runID 
 }
 
 // MarkRunSnapshotsFinal updates all snapshots for a run to include settlement_type=FINAL in their attributes.
+// runID is the business identifier (settlement_run.run_id); this method resolves it to the surrogate PK
+// (settlement_run.id) before updating, since settlement_snapshot.run_id is a FK to settlement_run.id.
 func (r *SettlementSnapshotRepository) MarkRunSnapshotsFinal(ctx context.Context, runID uuid.UUID) error {
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		var runEntity SettlementRunEntity
+		if err := tx.Select("id").Where("run_id = ?", runID).First(&runEntity).Error; err != nil {
+			return fmt.Errorf("resolving surrogate ID for run %s: %w", runID, err)
+		}
 		// Use CASE to handle NULL/JSON-null attributes vs existing JSONB objects.
 		// CockroachDB's || operator requires both operands to be JSONB objects,
 		// so we must replace NULL/json-null with an empty object before merging.
 		return tx.Exec(
 			`UPDATE "settlement_snapshot" SET "attributes" = CASE WHEN "attributes" IS NULL OR "attributes"::text = 'null' THEN '{"settlement_type":"FINAL"}'::jsonb ELSE "attributes" || '{"settlement_type":"FINAL"}'::jsonb END WHERE "run_id" = ?`,
-			runID,
+			runEntity.ID,
 		).Error
 	})
 }

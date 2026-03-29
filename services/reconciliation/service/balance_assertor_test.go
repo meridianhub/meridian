@@ -360,6 +360,33 @@ func TestExecuteBalanceAssertion_PKClientError(t *testing.T) {
 	assert.Equal(t, domain.AssertionStatusFailed, result.Assertion.Status)
 }
 
+func TestExecuteBalanceAssertion_PKClientError_WithRepoUpdateError(t *testing.T) {
+	repo := newMockAssertionRepo()
+	repo.updateErr = errors.New("db write failed")
+	pkClient := &mockPKClient{
+		err: errors.New("connection refused"),
+	}
+
+	assertor := NewBalanceAssertor(repo, nil, pkClient, nil, nil, testLogger())
+
+	result, err := assertor.ExecuteBalanceAssertion(context.Background(), AssertBalanceRequest{
+		AccountID:       "ACC-001",
+		InstrumentCode:  "GBP",
+		Expression:      "total_debits == total_credits",
+		ExpectedBalance: decimal.Zero,
+		Scope:           domain.AssertionScopePositionLedger,
+		CallerRole:      CallerRoleTenantAdmin,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "querying position keeping")
+	assert.Contains(t, err.Error(), "persisting FAILED assertion")
+
+	// Result is still returned with the failed assertion
+	require.NotNil(t, result)
+	assert.Equal(t, domain.AssertionStatusFailed, result.Assertion.Status)
+}
+
 func TestExecuteBalanceAssertion_TrendTracking(t *testing.T) {
 	trendRepo := newMockTrendRepo()
 	publisher := &mockEventPublisher{}

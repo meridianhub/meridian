@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -353,6 +354,24 @@ func TestResendVerification_RateLimited(t *testing.T) {
 		"tenant_id": "test_tenant",
 	})
 	// Timing-safe: returns 200 even when rate limited to avoid email enumeration.
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, or.entries)
+}
+
+func TestResendVerification_InternalFindByEmailError_StillReturns200(t *testing.T) {
+	ir := &stubIdentityRepo{
+		findByEmailFn: func(_ context.Context, _ string) (*identitydomain.Identity, error) {
+			return nil, errors.New("db connection lost")
+		},
+	}
+	or := &stubOutboxRepo{}
+	h := newVerificationHandler(t, ir, or)
+
+	w := postResendVerification(h, map[string]string{
+		"email":     "user@test.com",
+		"tenant_id": "test_tenant",
+	})
+	// Timing-safe: always returns 200 to prevent email enumeration.
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Empty(t, or.entries)
 }

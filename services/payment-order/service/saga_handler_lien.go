@@ -127,15 +127,16 @@ func buildInitiateLienRequest(p createLienParams, bucketID string, logger *slog.
 
 // buildCreateLienResult constructs the handler result map from a successful lien response.
 func buildCreateLienResult(resp *currentaccountv1.InitiateLienResponse, bucketID string) map[string]any {
-	result := map[string]any{
-		"lien_id":   resp.Lien.LienId,
-		"bucket_id": bucketID,
-		"status":    "ACTIVE",
-	}
+	var valuationAnalysis any
 	if basis := resp.GetBasis(); basis != nil {
-		result["valuation_analysis"] = currentaccountclient.ConvertValuationAnalysisToMap(basis)
+		valuationAnalysis = currentaccountclient.ConvertValuationAnalysisToMap(basis)
 	}
-	return result
+	return map[string]any{
+		"lien_id":            resp.Lien.LienId,
+		"bucket_id":          bucketID,
+		"status":             "ACTIVE",
+		"valuation_analysis": valuationAnalysis,
+	}
 }
 
 // executeLienHandler creates a handler for the payment_order.execute_lien step.

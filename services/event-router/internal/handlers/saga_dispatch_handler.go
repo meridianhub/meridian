@@ -210,7 +210,7 @@ func (h *SagaDispatchHandler) evaluateFilter(
 
 	if evalErr != nil {
 		observability.RecordFilterEvaluationError(sagaName)
-		h.logger.ErrorContext(ctx, "CEL filter evaluation error, skipping saga",
+		h.logger.WarnContext(ctx, "CEL filter evaluation error, skipping saga",
 			"saga_name", sagaName,
 			"channel", channel,
 			"correlation_id", correlationID,

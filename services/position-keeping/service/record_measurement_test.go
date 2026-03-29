@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -865,6 +866,65 @@ func TestRecordMeasurement_CEL_InstrumentNotFound(t *testing.T) {
 	mockMeasurementRepo.AssertNotCalled(t, "Create")
 }
 
+// TestRecordMeasurement_CEL_InstrumentBackendError tests that non-NotFound errors from
+// loadInstrument are returned as Internal, not collapsed to NotFound.
+func TestRecordMeasurement_CEL_InstrumentBackendError(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		newTestOutboxPublisher(t),
+		service.WithInstrumentCache(mockCache),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	// Cache returns a backend error (e.g., connection failure), NOT ErrInstrumentNotFound
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(nil, errors.New("connection refused"))
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.Error(t, err)
+	require.Nil(t, resp)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Internal, st.Code())
+	assert.Contains(t, st.Message(), "failed to load instrument definition")
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockMeasurementRepo.AssertNotCalled(t, "Create")
+}
+
 // =============================================================================
 // Bucket Key Generation Tests
 // =============================================================================
@@ -878,6 +938,12 @@ type MockBucketCounter struct {
 func (m *MockBucketCounter) CountBuckets(ctx context.Context, accountID string, instrumentCode string) (int, error) {
 	args := m.Called(ctx, accountID, instrumentCode)
 	return args.Int(0), args.Error(1)
+}
+
+// BucketExists implements service.BucketCounter.
+func (m *MockBucketCounter) BucketExists(ctx context.Context, accountID string, instrumentCode string, bucketID string) (bool, error) {
+	args := m.Called(ctx, accountID, instrumentCode, bucketID)
+	return args.Bool(0), args.Error(1)
 }
 
 // createTestBucketKeyProgram creates a CEL program for testing bucket key generation.
@@ -1160,7 +1226,8 @@ func TestRecordMeasurement_Cardinality_RejectsWhenLimitExceeded(t *testing.T) {
 
 	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
 	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
-	// Return count at limit
+	// New bucket (does not exist yet) and count at limit
+	mockBucketCounter.On("BucketExists", ctx, "test-account-123", "kWh", "new-meter-999").Return(false, nil)
 	mockBucketCounter.On("CountBuckets", ctx, "test-account-123", "kWh").Return(service.MaxBucketsPerAccountInstrument, nil)
 
 	req := &positionkeepingv1.RecordMeasurementRequest{
@@ -1186,6 +1253,79 @@ func TestRecordMeasurement_Cardinality_RejectsWhenLimitExceeded(t *testing.T) {
 	mockCache.AssertExpectations(t)
 	mockBucketCounter.AssertExpectations(t)
 	mockMeasurementRepo.AssertNotCalled(t, "Create")
+}
+
+// TestRecordMeasurement_Cardinality_AllowsExistingBucketAtLimit tests that existing buckets
+// are allowed through even when the cardinality limit has been reached.
+func TestRecordMeasurement_Cardinality_AllowsExistingBucketAtLimit(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockRepository)
+	mockMeasurementRepo := new(MockMeasurementRepository)
+	mockEventPublisher := domain.NewInMemoryEventPublisher()
+	mockIdempotency := new(MockIdempotencyService)
+	mockCache := new(MockInstrumentCache)
+	mockBucketCounter := new(MockBucketCounter)
+
+	svc, err := service.NewPositionKeepingService(
+		mockRepo,
+		mockMeasurementRepo,
+		mockEventPublisher,
+		mockIdempotency,
+		newTestOutboxPublisher(t),
+		service.WithInstrumentCache(mockCache),
+		service.WithBucketCounter(mockBucketCounter),
+	)
+	require.NoError(t, err)
+
+	logID := uuid.New()
+	now := time.Now().UTC()
+
+	positionLog := &domain.FinancialPositionLog{
+		LogID:     logID,
+		AccountID: "test-account-123",
+		StatusTracking: &domain.StatusTracking{
+			CurrentStatus: domain.TransactionStatusPending,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Version:   1,
+	}
+
+	bucketKeyProgram := createTestBucketKeyProgram(t, `attributes["meter_id"]`)
+
+	cachedInstrument := &service.CachedInstrument{
+		InstrumentCode:   "kWh",
+		BucketKeyProgram: bucketKeyProgram,
+	}
+
+	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
+	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
+	// Bucket already exists - should skip cardinality count entirely
+	mockBucketCounter.On("BucketExists", ctx, "test-account-123", "kWh", "existing-meter").Return(true, nil)
+	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
+
+	req := &positionkeepingv1.RecordMeasurementRequest{
+		PositionStateId: logID.String(),
+		MeasurementType: "kWh",
+		Value:           "100.5",
+		Unit:            "kWh",
+		Timestamp:       timestamppb.New(now.Add(-1 * time.Hour)),
+		Metadata: map[string]string{
+			"meter_id": "existing-meter",
+		},
+	}
+
+	resp, err := svc.RecordMeasurement(ctx, req)
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.NotEmpty(t, resp.MeasurementId)
+	mockRepo.AssertExpectations(t)
+	mockCache.AssertExpectations(t)
+	mockBucketCounter.AssertExpectations(t)
+	mockMeasurementRepo.AssertExpectations(t)
+	// CountBuckets should NOT be called since bucket already exists
+	mockBucketCounter.AssertNotCalled(t, "CountBuckets")
 }
 
 // TestRecordMeasurement_Cardinality_AllowsUnderLimit tests requests under limit succeed.
@@ -1232,7 +1372,8 @@ func TestRecordMeasurement_Cardinality_AllowsUnderLimit(t *testing.T) {
 
 	mockRepo.On("FindByID", ctx, logID).Return(positionLog, nil)
 	mockCache.On("GetOrLoad", ctx, "kWh", 1).Return(cachedInstrument, nil)
-	// Return count well under limit
+	// New bucket (does not exist yet) but count well under limit
+	mockBucketCounter.On("BucketExists", ctx, "test-account-123", "kWh", "meter-001").Return(false, nil)
 	mockBucketCounter.On("CountBuckets", ctx, "test-account-123", "kWh").Return(100, nil)
 	mockMeasurementRepo.On("Create", ctx, mock.AnythingOfType("*domain.Measurement")).Return(nil)
 
