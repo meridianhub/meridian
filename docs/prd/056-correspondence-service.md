@@ -134,7 +134,7 @@ message InitiateOutboundWithResponseRequest {
   string channel = 1;
   string recipient_party_id = 2;
   string template_name = 3;
-  map<string, string> template_data = 4;
+  google.protobuf.Struct template_data = 4;
   string idempotency_key = 5;
   string priority = 6;
   string category = 7;
@@ -241,10 +241,11 @@ message UpdateCommunicationPreferencesResponse {
    webhook handler logic
 4. **Register Starlark bindings** - `correspondence.initiate_outbound`
    registered with the saga handler registry
-5. **Update handlers.yaml** - replace `notification.send` (inline) with
-   `correspondence.initiate_outbound` (proto_ref)
-6. **Migrate saga scripts** - update dunning_escalation and
-   dunning_unfreeze to use `correspondence.initiate_outbound`
+5. **Update handlers.yaml and saga scripts atomically** - add
+   `correspondence.initiate_outbound` (proto_ref) to handlers.yaml,
+   update dunning_escalation and dunning_unfreeze saga scripts, and
+   remove `notification.send` in a single commit. This prevents a
+   window where scripts reference a handler that doesn't exist.
 7. **Proxy webhook** - API gateway's `/api/v1/webhooks/resend` route
    calls Correspondence service's `RecordDeliveryStatus` gRPC endpoint
    instead of writing directly to the audit table
@@ -296,21 +297,55 @@ as a follow-up.
 ```text
 1. Resolve party preferences
 2. If global_unsubscribe AND category != TRANSACTIONAL → SUPPRESSED
-3. If channel+category opted out → SUPPRESSED
-4. If no preference record AND category == TRANSACTIONAL → allow (legally required)
-5. If no preference record AND category != TRANSACTIONAL → SUPPRESSED (GDPR Art. 7: no consent, no send)
-6. Otherwise → queue to outbox
+3. If channel+category explicitly opted out → SUPPRESSED
+4. If category == TRANSACTIONAL → allow (legally required, bypasses all prefs)
+5. If category == OPERATIONAL AND no preference record → allow (legitimate
+   interest - welcome emails, service updates, account notifications)
+6. If category == MARKETING AND no preference record → SUPPRESSED (GDPR
+   Art. 7: explicit consent required for marketing)
+7. Otherwise → queue to outbox
 ```
+
+**Category definitions:**
+- `TRANSACTIONAL`: Legally required communications (invoices, account
+  freezes, dunning notices, password resets). Cannot be suppressed.
+- `OPERATIONAL`: Service-related communications sent under legitimate
+  interest (Art. 6(1)(f)) - welcome emails, service updates, account
+  notifications. Allowed by default, party can opt out.
+- `MARKETING`: Promotional communications requiring explicit opt-in
+  consent (Art. 7). Suppressed by default, party must opt in.
 
 Suppressed correspondence is still recorded in the audit trail (proof
 that the system respected the preference).
 
+### Consent Provenance
+
+GDPR Art. 7(1) requires demonstrating that consent existed. The
+`ChannelPreference` proto is extended with provenance fields:
+
+```protobuf
+message ChannelPreference {
+  string channel = 1;
+  string category = 2;
+  bool opted_in = 3;
+  string updated_at = 4;
+  // Provenance: how and when consent was obtained
+  string consent_source = 5;   // SELF_SERVICE, ADMIN, API, SIGNUP_FLOW
+  string consent_granted_at = 6;
+  string consent_text = 7;     // The specific text the party agreed to
+}
+```
+
+Every preference change is recorded as an immutable audit event with
+the previous value, new value, source, and timestamp.
+
 ### Unsubscribe Mechanism
 
-Every non-transactional email includes an unsubscribe link. The link
-calls `UpdateCommunicationPreferences` via the API gateway. One-click
-unsubscribe uses the `List-Unsubscribe-Post` header (RFC 8058) for
-email client native support.
+Every non-transactional email includes unsubscribe headers per RFC 2369
+and RFC 8058. Both headers are required - `List-Unsubscribe` (RFC 2369)
+provides the URL, `List-Unsubscribe-Post` (RFC 8058) enables one-click
+native unsubscribe in email clients. Gmail and Yahoo's 2024 sender
+requirements mandate both headers for bulk/marketing email.
 
 ## 6. Integration with PRD 052
 
@@ -369,19 +404,20 @@ it defined becomes the implementation of the Correspondence service domain.
 
 ## 9. Complexity Estimate
 
-8 story points (tasks sum to 9 but proto + scaffold parallelize).
-The main effort is moving code without breaking existing functionality
-and wiring the preference checks.
+13 story points. The code move (26 Go files, GORM models, metric
+namespaces, 29+ import sites) is larger than a simple refactor. The
+preference system with GDPR consent provenance adds meaningful schema
+and logic.
 
 | Task | Points | Deps |
 |---|---|---|
 | Proto + buf generate | 1 | - |
-| Service scaffold + migrations | 1 | Proto |
-| Move email internals + gRPC implementation | 2 | Scaffold |
-| handlers.yaml + saga script migration | 1 | gRPC impl |
+| Service scaffold + migrations | 2 | Proto |
+| Move email internals + gRPC implementation | 3 | Scaffold |
+| handlers.yaml + saga script migration (atomic) | 1 | gRPC impl |
 | Webhook proxy refactor | 1 | gRPC impl |
-| Communication preferences + GDPR | 2 | gRPC impl |
-| Starlark bindings + integration tests | 1 | All above |
+| Communication preferences + GDPR + consent provenance | 3 | gRPC impl |
+| Starlark bindings + integration tests | 2 | All above |
 
 **Note:** Some tasks parallelize. Proto + scaffold can run with preference
 table design. Webhook proxy is independent of saga migration.
