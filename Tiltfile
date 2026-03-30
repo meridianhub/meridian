@@ -1054,6 +1054,7 @@ Database Migrations:
     9. reconciliation → meridian_reconciliation (reconciliation processes)
     10. forecasting → meridian_forecasting (forecasting strategies)
     11. reference_data → meridian_reference_data (instrument definitions, nodes, saga definitions)
+    12. control_plane → meridian_control_plane (manifests, saga definitions, staff identity)
   • Parallel execution: current_account + financial_accounting + party + tenant + control_plane + internal_account + market_information + reconciliation + forecasting + reference_data
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
