@@ -47,7 +47,7 @@ env "ci" {
 
 env "production" {
   // Production environment - apply only, never diff
-  // URL points to shared platform database (meridian_platform)
+  // URL points to service-specific database (meridian_control_plane)
   url = getenv("DATABASE_URL")
 
   migration {

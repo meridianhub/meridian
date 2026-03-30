@@ -1042,7 +1042,7 @@ Database Architecture (database-per-service):
   • See ADR-0003 for architecture details
 
 Database Migrations:
-  • Migrations run automatically on startup (11 resources):
+  • Migrations run automatically on startup (12 resources):
     1. current_account → meridian_current_account (account, lien, audit tables)
     2. financial_accounting → meridian_financial_accounting (ledger, booking)
     3. position_keeping → meridian_position_keeping (positions, transactions)
