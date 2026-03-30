@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
 	"github.com/meridianhub/meridian/services/operational-gateway/ports"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -212,12 +213,22 @@ func TestInstructionRepository_FetchDispatchable_RespectsScheduledAt(t *testing.
 	ready := makeInstruction(t, tenantID, connID.String(), domain.PriorityNormal)
 	require.NoError(t, repo.Save(ctx, ready, fmt.Sprintf("idem-%s", ready.ID)))
 
-	results, err := repo.FetchDispatchable(ctx, ports.FetchDispatchableParams{
-		Limit: 10,
-		AsOf:  time.Now(),
-	})
-	require.NoError(t, err)
-	require.Len(t, results, 1)
+	// CockroachDB's FOR UPDATE SKIP LOCKED under READ COMMITTED may skip rows
+	// with unresolved write intents from recently-committed transactions.
+	// Retry until the intent is resolved and the row becomes visible.
+	var results []*domain.Instruction
+	err = await.New().
+		AtMost(5 * time.Second).
+		PollInterval(50 * time.Millisecond).
+		Until(func() bool {
+			var fetchErr error
+			results, fetchErr = repo.FetchDispatchable(ctx, ports.FetchDispatchableParams{
+				Limit: 10,
+				AsOf:  time.Now(),
+			})
+			return fetchErr == nil && len(results) == 1
+		})
+	require.NoError(t, err, "expected 1 dispatchable instruction within timeout")
 	assert.Equal(t, ready.ID, results[0].ID)
 }
 
