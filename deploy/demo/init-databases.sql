@@ -16,3 +16,4 @@ CREATE DATABASE meridian_reference_data;
 CREATE DATABASE meridian_identity;
 CREATE DATABASE meridian_operational_gateway;
 CREATE DATABASE meridian_financial_gateway;
+CREATE DATABASE meridian_control_plane;

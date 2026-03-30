@@ -59,6 +59,19 @@ COPY --from=builder /build/mcp-server /mcp-server
 # Copy manifest files for seed-dev
 COPY --from=builder /build/examples/manifests/ /app/examples/manifests/
 
+# Copy service migrations for tenant provisioning (read from /migrations/ by provisioner)
+COPY --from=builder /build/services/party/migrations /migrations/party
+COPY --from=builder /build/services/current-account/migrations /migrations/current-account
+COPY --from=builder /build/services/position-keeping/migrations /migrations/position-keeping
+COPY --from=builder /build/services/financial-accounting/migrations /migrations/financial-accounting
+COPY --from=builder /build/services/payment-order/migrations /migrations/payment-order
+COPY --from=builder /build/services/market-information/migrations /migrations/market-information
+COPY --from=builder /build/services/reference-data/migrations /migrations/reference-data
+COPY --from=builder /build/services/internal-account/migrations /migrations/internal-account
+COPY --from=builder /build/services/reconciliation/migrations /migrations/reconciliation
+COPY --from=builder /build/services/identity/migrations /migrations/identity
+COPY --from=builder /build/services/control-plane/migrations /migrations/control-plane
+
 # Copy saga assets for Starlark saga execution (deposit, withdrawal scripts + handlers schema)
 COPY --from=builder /build/services/reference-data/saga/defaults/ /app/services/reference-data/saga/defaults/
 COPY --from=builder /build/shared/pkg/saga/schema/handlers.yaml /app/shared/pkg/saga/schema/handlers.yaml
