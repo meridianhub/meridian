@@ -248,7 +248,12 @@ message UpdateCommunicationPreferencesResponse {
 7. **Proxy webhook** - API gateway's `/api/v1/webhooks/resend` route
    calls Correspondence service's `RecordDeliveryStatus` gRPC endpoint
    instead of writing directly to the audit table
-8. **Add communication preferences** - new table, preference check in
+8. **Migrate operational gateway routes** - persisted routes in the
+   operational gateway reference `notification.send` as an instruction
+   type. Add a data migration to update these to
+   `correspondence.initiate_outbound`. Also update test fixtures that
+   use `notification.send` as example instruction types.
+9. **Add communication preferences** - new table, preference check in
    InitiateOutbound before queuing
 
 ### Backward Compatibility
