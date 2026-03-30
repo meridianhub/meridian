@@ -253,7 +253,19 @@ atlas migrate apply --env production \
   --url "postgres://user:pass@<cockroachdb-host>:26257/meridian_platform?sslmode=verify-full"
 
 # 2. Apply per-service migrations
+# db_for_service maps service slugs to database names.
+# Most follow the convention meridian_<slug with - replaced by _>,
+# but tenant and control-plane have non-obvious mappings.
+db_for_service() {
+  case "$1" in
+    tenant)        echo "meridian_platform" ;;
+    control-plane) echo "meridian_control_plane" ;;
+    *)             echo "meridian_$(echo "$1" | tr '-' '_')" ;;
+  esac
+}
+
 SERVICES_WITH_DB=(
+  "control-plane"
   "tenant"
   "party"
   "reference-data"
@@ -266,7 +278,7 @@ SERVICES_WITH_DB=(
 )
 
 for svc in "${SERVICES_WITH_DB[@]}"; do
-  DB_NAME="meridian_$(echo $svc | tr '-' '_')"
+  DB_NAME="$(db_for_service "$svc")"
   atlas migrate apply --env production \
     --config "file://services/${svc}/atlas/atlas.hcl" \
     --url "postgres://user:pass@<cockroachdb-host>:26257/${DB_NAME}?sslmode=verify-full"
@@ -277,7 +289,7 @@ done
 
 ```bash
 for svc in "${SERVICES_WITH_DB[@]}"; do
-  DB_NAME="meridian_$(echo $svc | tr '-' '_')"
+  DB_NAME="$(db_for_service "$svc")"
   echo "=== ${svc} ==="
   atlas migrate status --env production \
     --config "file://services/${svc}/atlas/atlas.hcl" \
@@ -294,6 +306,7 @@ never commit real credentials to version control.
 # Per-service database secrets
 # Each service needs a DATABASE_URL pointing to its dedicated database
 SERVICES_WITH_DB=(
+  "control-plane"
   "tenant"
   "party"
   "reference-data"
@@ -307,7 +320,7 @@ SERVICES_WITH_DB=(
 )
 
 for svc in "${SERVICES_WITH_DB[@]}"; do
-  DB_NAME="meridian_$(echo $svc | tr '-' '_')"
+  DB_NAME="$(db_for_service "$svc")"
   kubectl create secret generic "${svc}-db" \
     --namespace=production \
     --from-literal=DATABASE_URL="postgres://user:pass@cockroachdb:26257/${DB_NAME}?sslmode=verify-full"
@@ -320,7 +333,7 @@ kubectl create secret generic gateway-db \
 
 # Audit consumer secrets (one per domain service, each pointing to that service's database)
 for svc in current-account financial-accounting position-keeping party payment-order tenant; do
-  DB_NAME="meridian_$(echo $svc | tr '-' '_')"
+  DB_NAME="$(db_for_service "$svc")"
   kubectl create secret generic "${svc}-audit-consumer-db" \
     --namespace=production \
     --from-literal=DATABASE_URL="postgres://user:pass@cockroachdb:26257/${DB_NAME}?sslmode=verify-full"
