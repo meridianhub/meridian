@@ -6,7 +6,7 @@
 **Companion PRDs:** [052 - Email Platform](./052-email-platform.md),
 [053 - Auth Email Flows](./053-auth-email-flows.md)
 **ADR Reference:** [ADR-002](../adr/0002-microservices-per-bian-domain.md)
-**Saga Contract:** [docs/spec/saga-contract.md](../spec/saga-contract.md)
+**Saga Contract:** Saga Contract Specification (PR #2051)
 
 ---
 
@@ -57,7 +57,7 @@ qualifiers:
 |---|---|---|
 | `Initiate` | Create new outbound correspondence | `InitiateOutbound` |
 | `Retrieve` | Get correspondence status/details | `RetrieveOutbound` |
-| `Update` | Modify pending correspondence | `UpdateOutbound` |
+| `Update` | Modify pending correspondence | Future (out of scope) |
 | `Execute` | Run automated task (e.g., batch send) | `ExecuteBlockMailing` |
 
 ### Service Domain Naming
@@ -74,6 +74,8 @@ Following Meridian's convention (ADR-002: microservices per BIAN domain):
 ```protobuf
 syntax = "proto3";
 package meridian.correspondence.v1;
+
+import "google/protobuf/struct.proto";
 
 service CorrespondenceService {
   // Initiate outbound correspondence (fire-and-forget)
@@ -108,8 +110,8 @@ message InitiateOutboundRequest {
   string recipient_party_id = 2;
   // Template name (e.g., "invoice_delivery", "dunning_notice")
   string template_name = 3;
-  // Template data (key-value pairs for template rendering)
-  map<string, string> template_data = 4;
+  // Template data (key-value pairs for template rendering, supports mixed types)
+  google.protobuf.Struct template_data = 4;
   // Idempotency key (auto-generated from saga execution if omitted)
   string idempotency_key = 5;
   // Priority: NORMAL, HIGH, LOW
@@ -262,6 +264,7 @@ correspondence.initiate_outbound:
       recipient_party_id: recipient
       channel: type
       template_name: template
+      template_data: data
 ```
 
 Existing saga scripts using `notification.send(type="EMAIL", recipient=party_id)`
@@ -285,12 +288,13 @@ as a follow-up.
 
 `InitiateOutbound` checks preferences before queuing:
 
-```
+```text
 1. Resolve party preferences
 2. If global_unsubscribe AND category != TRANSACTIONAL → SUPPRESSED
 3. If channel+category opted out → SUPPRESSED
-4. If no preference record → default opted-in (implied consent)
-5. Otherwise → queue to outbox
+4. If no preference record AND category == TRANSACTIONAL → allow (legally required)
+5. If no preference record AND category != TRANSACTIONAL → SUPPRESSED (GDPR Art. 7: no consent, no send)
+6. Otherwise → queue to outbox
 ```
 
 Suppressed correspondence is still recorded in the audit trail (proof
@@ -360,7 +364,7 @@ it defined becomes the implementation of the Correspondence service domain.
 
 ## 9. Complexity Estimate
 
-5 story points. The proto and service scaffold are straightforward.
+8 story points (tasks sum to 9 but proto + scaffold parallelize).
 The main effort is moving code without breaking existing functionality
 and wiring the preference checks.
 
