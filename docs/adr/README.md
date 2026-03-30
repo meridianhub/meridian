@@ -67,7 +67,7 @@ Architectural Decision Records) format.
 | [ADR-0022](0022-instrument-successor-lineage.md) | Instrument Successor Lineage | Proposed | 2025-12-28 |
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0023](0023-balance-delegation-to-position-keeping.md) | Balance Delegation to Position Keeping | Accepted | 2026-01-08 |
-| [ADR-0024](0024-internal-account-service.md) | Internal Account Service Domain | Accepted | 2026-01-15 |
+| [ADR-0024](0024-internal-bank-account-service.md) | Internal Account Service Domain | Accepted | 2026-01-15 |
 <!-- markdownlint-disable-next-line MD013 -->
 | [ADR-0025](0025-clearing-purpose-specialization.md) | Clearing Purpose Specialization | Accepted | 2026-01-16 |
 <!-- markdownlint-disable-next-line MD013 -->
@@ -131,7 +131,7 @@ graph LR
 - [ADR-0017](0017-temporal-quality-ladder.md) - Temporal Quality Ledger (Data Physics)
 - [ADR-0018](0018-settlement-reconciliation.md) - Settlement & Reconciliation (Lifecycle)
 - [ADR-0023](0023-balance-delegation-to-position-keeping.md) - Balance Delegation to Position Keeping
-- [ADR-0024](0024-internal-account-service.md) - Internal Account Service Domain
+- [ADR-0024](0024-internal-bank-account-service.md) - Internal Account Service Domain
 - [ADR-0025](0025-clearing-purpose-specialization.md) - Clearing Purpose Specialization
 - [ADR-0026](0026-canonical-ingestion-contract.md) - Canonical Ingestion Contract
 

@@ -262,6 +262,6 @@ If the image is larger than expected:
 
 ## Related Documentation
 
-- [Kubernetes Deployment](./kubernetes.md)
+- Kubernetes Deployment
 - [Security Best Practices](./security.md)
-- [Development Setup](./development.md)
+- Development Setup

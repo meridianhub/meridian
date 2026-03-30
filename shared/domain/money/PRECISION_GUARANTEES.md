@@ -619,7 +619,7 @@ WHERE CAST(amount AS TEXT) != CAST(CAST(amount AS FLOAT) AS TEXT);
 
 ### Related Documentation
 
-- [ADR-0013: ISO Standards Alignment](../../../docs/adr/0013-iso-standards-alignment.md) - Money type design decisions
+- [ADR-0013: Generic Asset Quantity Types](../../../docs/adr/0013-generic-asset-quantity-types.md) - Money type design decisions
 - [shopspring/decimal documentation](https://pkg.go.dev/github.com/shopspring/decimal) - Underlying decimal library
 - [Google Protobuf Money](https://github.com/googleapis/googleapis/blob/master/google/type/money.proto) - Wire format
 

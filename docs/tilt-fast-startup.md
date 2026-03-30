@@ -194,4 +194,4 @@ TILT_FAST_STARTUP=false tilt up
 
 - [Tilt Local Resources](https://docs.tilt.dev/local_resource.html)
 - [Tilt Trigger Mode](https://docs.tilt.dev/manual_update_control.html)
-- [ADR-0006: Tilt Local Development](../adr/0006-tilt-local-development.md)
+- [ADR-0006: Tilt Local Development](./adr/0006-tilt-local-development.md)

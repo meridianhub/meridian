@@ -22,7 +22,7 @@ Date: 2025-10-25
 
 Accepted
 
-Implements the separated concerns architecture from [ADR-0004](0004-separated-schema-management.md).
+Implements the separated concerns architecture from [ADR-0004](0004-event-schema-evolution.md).
 
 ## Context
 
