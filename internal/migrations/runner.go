@@ -62,10 +62,10 @@ type ServiceDatabase struct {
 // ServiceDatabases defines the mapping from service directory names to
 // CockroachDB database names, users, and passwords.
 //
-// Two services (tenant, control-plane) share meridian_platform.
-// Their migrations are applied in service-name order (control-plane before tenant).
+// Control-plane has its own database (meridian_control_plane).
+// Tenant uses meridian_platform.
 var ServiceDatabases = map[string]ServiceDatabase{
-	"control-plane":        {Database: "meridian_platform", User: "meridian_platform_user", Password: ""},
+	"control-plane":        {Database: "meridian_control_plane", User: "meridian_control_plane_user", Password: ""},
 	"tenant":               {Database: "meridian_platform", User: "meridian_platform_user", Password: ""},
 	"current-account":      {Database: "meridian_current_account", User: "meridian_current_account_user", Password: ""},
 	"financial-accounting": {Database: "meridian_financial_accounting", User: "meridian_financial_accounting_user", Password: ""},

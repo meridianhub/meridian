@@ -59,8 +59,8 @@ func replaceDSNDatabase(baseDSN, database string) (string, error) {
 }
 
 // serviceConns holds per-database connections for the unified binary.
-// Services sharing the same database (e.g., tenant and control-plane both use
-// meridian_platform) share the same connection object.
+// Services are mapped to their own databases via ServiceDatabases.
+// If two services share a database, they share the same connection object.
 type serviceConns struct {
 	gormDBs  map[string]*gorm.DB
 	pgxPools map[string]*pgxpool.Pool
@@ -109,7 +109,7 @@ func newServiceConns(ctx context.Context, baseDSN string, logger *slog.Logger) (
 
 	// Services requiring GORM connections.
 	gormServices := []string{
-		"party", "tenant", "internal-account",
+		"party", "tenant", "control-plane", "internal-account",
 		"financial-accounting", "current-account",
 		"payment-order", "reconciliation", "identity",
 	}

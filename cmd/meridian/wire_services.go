@@ -73,7 +73,7 @@ func registerServices(
 			return wireInternalAccount(grpcServer, conns.gormDB("internal-account"), refDataComps, logger)
 		}},
 		{"control-plane", func() error {
-			return wireControlPlane(ctx, grpcServer, conns.pgxPool("control-plane"), conns.gormDB("tenant"), loopback, logger)
+			return wireControlPlane(ctx, grpcServer, conns.pgxPool("control-plane"), conns.gormDB("control-plane"), loopback, logger)
 		}},
 		{"audit", func() error {
 			var err error

@@ -1,6 +1,6 @@
 // Atlas configuration for Control Plane Service
 // Manages manifest application, validation, diffing, and staff identity
-// Shares meridian_platform database with tenant service
+// Uses dedicated meridian_control_plane database
 
 env "local" {
   // Service-specific migration directory

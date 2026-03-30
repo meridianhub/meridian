@@ -63,7 +63,7 @@ env "ci" {
 
 env "production" {
   // Production environment - apply only, never diff
-  // URL points to service-specific database (meridian_internal_account)
+  // URL points to service-specific database (meridian_internal_bank_account)
   url = getenv("DATABASE_URL")
 
   migration {
