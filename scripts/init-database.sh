@@ -19,6 +19,7 @@ TIMEOUT="${TIMEOUT:-60}"
 # Format: database_name:user_name
 DATABASES=(
   "meridian_platform:meridian_platform_user"
+  "meridian_control_plane:meridian_control_plane_user"
   "meridian_current_account:meridian_current_account_user"
   "meridian_financial_accounting:meridian_financial_accounting_user"
   "meridian_position_keeping:meridian_position_keeping_user"

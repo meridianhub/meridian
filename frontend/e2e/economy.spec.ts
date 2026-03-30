@@ -17,7 +17,7 @@ test.describe('Economy Overview', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/economy')
     // Wait for lazy-loaded component to mount (any component-specific state)
-    await page.waitForSelector('[data-testid="overview-loading"], [data-testid="overview-empty"], [data-testid="overview-error"]', { timeout: 15_000 })
+    await page.waitForSelector('[data-testid="overview-loading"], [data-testid="overview-empty"], [data-testid="overview-error"], h1', { timeout: 15_000 })
     // Wait for loading to finish so tests start in a terminal state
     await expect(page.getByTestId('overview-loading')).toHaveCount(0, { timeout: 15_000 })
   })
@@ -70,7 +70,7 @@ test.describe('Economy Explorer', () => {
   test.beforeEach(async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/economy/explore')
     // Wait for component to mount (any component-specific state)
-    await page.waitForSelector('[data-testid="explorer-loading"], [data-testid="explorer-empty"], [data-testid="explorer-error"]', { timeout: 15_000 })
+    await page.waitForSelector('[data-testid="explorer-loading"], [data-testid="explorer-empty"], [data-testid="explorer-error"], h1', { timeout: 15_000 })
     // Wait for loading to finish so tests start in a terminal state
     await expect(page.getByTestId('explorer-loading')).toHaveCount(0, { timeout: 15_000 })
   })
@@ -196,7 +196,7 @@ test.describe('Economy navigation flow', () => {
 test.describe('Economy as platform-admin', () => {
   test('can access /economy as platform-admin', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/economy')
-    await page.waitForSelector('[data-testid="overview-loading"], [data-testid="overview-empty"], [data-testid="overview-error"]', { timeout: 15_000 })
+    await page.waitForSelector('[data-testid="overview-loading"], [data-testid="overview-empty"], [data-testid="overview-error"], h1', { timeout: 15_000 })
     await expect(page.getByTestId('overview-loading')).toHaveCount(0, { timeout: 15_000 })
 
     await expect(page.getByText(/Something went wrong/i)).not.toBeVisible()
@@ -211,7 +211,7 @@ test.describe('Economy as platform-admin', () => {
 
   test('can access /economy/explore as platform-admin', async ({ platformAdminPage: page }) => {
     await navigateTo(page, '/economy/explore')
-    await page.waitForSelector('[data-testid="explorer-loading"], [data-testid="explorer-empty"], [data-testid="explorer-error"]', { timeout: 15_000 })
+    await page.waitForSelector('[data-testid="explorer-loading"], [data-testid="explorer-empty"], [data-testid="explorer-error"], h1', { timeout: 15_000 })
     await expect(page.getByTestId('explorer-loading')).toHaveCount(0, { timeout: 15_000 })
 
     await expect(page.getByText(/Something went wrong/i)).not.toBeVisible()

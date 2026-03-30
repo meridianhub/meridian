@@ -183,7 +183,7 @@ func TestRunMigrations_SharedDatabase(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	ctx := context.Background()
 
-	// Both tenant and control-plane target meridian_platform.
+	// Control-plane targets meridian_control_plane; tenant targets meridian_platform.
 	testFS := fstest.MapFS{
 		"control-plane/migrations/20240101000001_staff.sql": &fstest.MapFile{
 			Data: []byte(`CREATE TABLE IF NOT EXISTS staff_user (
@@ -203,39 +203,63 @@ func TestRunMigrations_SharedDatabase(t *testing.T) {
 		t.Fatalf("RunMigrations: %v", err)
 	}
 
-	// Both tables should exist in meridian_platform.
+	// staff_user should exist in meridian_control_plane.
+	controlPlaneDSN := replaceDSNDatabase(t, dsn, "meridian_control_plane")
+	cpConn, err := pgx.Connect(ctx, controlPlaneDSN)
+	if err != nil {
+		t.Fatalf("connect to meridian_control_plane: %v", err)
+	}
+	defer cpConn.Close(ctx)
+
+	var staffExists bool
+	err = cpConn.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)`,
+		"staff_user",
+	).Scan(&staffExists)
+	if err != nil {
+		t.Fatalf("check staff_user: %v", err)
+	}
+	if !staffExists {
+		t.Errorf("table staff_user not found in meridian_control_plane")
+	}
+
+	// tenant_registry should exist in meridian_platform.
 	platformDSN := replaceDSNDatabase(t, dsn, "meridian_platform")
-	conn, err := pgx.Connect(ctx, platformDSN)
+	pConn, err := pgx.Connect(ctx, platformDSN)
 	if err != nil {
 		t.Fatalf("connect to meridian_platform: %v", err)
 	}
-	defer conn.Close(ctx)
+	defer pConn.Close(ctx)
 
-	for _, table := range []string{"staff_user", "tenant_registry"} {
-		var exists bool
-		err := conn.QueryRow(ctx,
-			`SELECT EXISTS(
-				SELECT 1 FROM information_schema.tables
-				WHERE table_name = $1
-			)`,
-			table,
-		).Scan(&exists)
-		if err != nil {
-			t.Fatalf("check table %s: %v", table, err)
-		}
-		if !exists {
-			t.Errorf("table %s not found in meridian_platform", table)
-		}
-	}
-
-	// Verify migration tracking records both services.
-	var count int
-	err = conn.QueryRow(ctx, `SELECT count(DISTINCT service) FROM _meridian_migrations`).Scan(&count)
+	var tenantExists bool
+	err = pConn.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)`,
+		"tenant_registry",
+	).Scan(&tenantExists)
 	if err != nil {
-		t.Fatalf("count services: %v", err)
+		t.Fatalf("check tenant_registry: %v", err)
 	}
-	if count != 2 {
-		t.Errorf("expected 2 distinct services in migration tracking, got %d", count)
+	if !tenantExists {
+		t.Errorf("table tenant_registry not found in meridian_platform")
+	}
+
+	// Verify each database tracks its own service migration.
+	var cpCount int
+	err = cpConn.QueryRow(ctx, `SELECT count(DISTINCT service) FROM _meridian_migrations`).Scan(&cpCount)
+	if err != nil {
+		t.Fatalf("count services in control_plane: %v", err)
+	}
+	if cpCount != 1 {
+		t.Errorf("expected 1 distinct service in meridian_control_plane migration tracking, got %d", cpCount)
+	}
+
+	var pCount int
+	err = pConn.QueryRow(ctx, `SELECT count(DISTINCT service) FROM _meridian_migrations`).Scan(&pCount)
+	if err != nil {
+		t.Fatalf("count services in platform: %v", err)
+	}
+	if pCount != 1 {
+		t.Errorf("expected 1 distinct service in meridian_platform migration tracking, got %d", pCount)
 	}
 }
 

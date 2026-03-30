@@ -81,6 +81,7 @@ k8s_namespace = 'default'
 # run inside the cluster (migrations run as Kubernetes Jobs, not local_resource).
 db_urls = {
   'platform': os.getenv('PLATFORM_DATABASE_URL', 'postgres://meridian_platform_user@cockroachdb:26257/meridian_platform?sslmode=disable'),
+  'control_plane': os.getenv('CONTROL_PLANE_DATABASE_URL', 'postgres://meridian_control_plane_user@cockroachdb:26257/meridian_control_plane?sslmode=disable'),
   'current_account': os.getenv('CURRENT_ACCOUNT_DATABASE_URL', 'postgres://meridian_current_account_user@cockroachdb:26257/meridian_current_account?sslmode=disable'),
   'financial_accounting': os.getenv('FINANCIAL_ACCOUNTING_DATABASE_URL', 'postgres://meridian_financial_accounting_user@cockroachdb:26257/meridian_financial_accounting?sslmode=disable'),
   'position_keeping': os.getenv('POSITION_KEEPING_DATABASE_URL', 'postgres://meridian_position_keeping_user@cockroachdb:26257/meridian_position_keeping?sslmode=disable'),
@@ -810,15 +811,15 @@ migration_job(
 migration_job(
   'migrate-control-plane',
   'control-plane',
-  'platform',
-  resource_deps=['migrate-payment-order'],  # Shares meridian_platform DB with tenant - must run before tenant
+  'control_plane',
+  resource_deps=['migrate-payment-order'],
 )
 
 migration_job(
   'migrate-tenant',
   'tenant',
   'platform',
-  resource_deps=['migrate-control-plane'],  # Same DB as control-plane - must not run concurrently
+  resource_deps=['migrate-control-plane'],
 )
 
 migration_job(
@@ -1025,6 +1026,7 @@ Hot reload: Edit Go code and see changes in ~3 seconds
 Database Architecture (database-per-service):
   • Each service has its own database with dedicated user:
     - meridian_platform       (tenant service)
+    - meridian_control_plane  (control-plane service)
     - meridian_current_account
     - meridian_financial_accounting
     - meridian_position_keeping
@@ -1040,7 +1042,7 @@ Database Architecture (database-per-service):
   • See ADR-0003 for architecture details
 
 Database Migrations:
-  • Migrations run automatically on startup (11 resources):
+  • Migrations run automatically on startup (12 resources):
     1. current_account → meridian_current_account (account, lien, audit tables)
     2. financial_accounting → meridian_financial_accounting (ledger, booking)
     3. position_keeping → meridian_position_keeping (positions, transactions)
@@ -1052,7 +1054,8 @@ Database Migrations:
     9. reconciliation → meridian_reconciliation (reconciliation processes)
     10. forecasting → meridian_forecasting (forecasting strategies)
     11. reference_data → meridian_reference_data (instrument definitions, nodes, saga definitions)
-  • Parallel execution: current_account + financial_accounting + party + tenant + internal_account + market_information + reconciliation + forecasting + reference_data
+    12. control_plane → meridian_control_plane (manifests, saga definitions, staff identity)
+  • Parallel execution: current_account + financial_accounting + party + tenant + control_plane + internal_account + market_information + reconciliation + forecasting + reference_data
   • Sequential dependencies:
     - position_keeping waits for current_account (Account FK)
     - payment_order waits for current_account (Account FK)
