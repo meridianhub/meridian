@@ -87,7 +87,7 @@ db_urls = {
   'position_keeping': os.getenv('POSITION_KEEPING_DATABASE_URL', 'postgres://meridian_position_keeping_user@cockroachdb:26257/meridian_position_keeping?sslmode=disable'),
   'payment_order': os.getenv('PAYMENT_ORDER_DATABASE_URL', 'postgres://meridian_payment_order_user@cockroachdb:26257/meridian_payment_order?sslmode=disable'),
   'party': os.getenv('PARTY_DATABASE_URL', 'postgres://meridian_party_user@cockroachdb:26257/meridian_party?sslmode=disable'),
-  'internal_account': os.getenv('INTERNAL_ACCOUNT_DATABASE_URL', 'postgres://meridian_internal_bank_account_user@cockroachdb:26257/meridian_internal_bank_account?sslmode=disable'),
+  'internal_account': os.getenv('INTERNAL_ACCOUNT_DATABASE_URL', 'postgres://meridian_internal_account_user@cockroachdb:26257/meridian_internal_account?sslmode=disable'),
   'market_information': os.getenv('MARKET_INFORMATION_DATABASE_URL', 'postgres://meridian_market_information_user@cockroachdb:26257/meridian_market_information?sslmode=disable'),
   'reconciliation': os.getenv('RECONCILIATION_DATABASE_URL', 'postgres://meridian_reconciliation_user@cockroachdb:26257/meridian_reconciliation?sslmode=disable'),
   'forecasting': os.getenv('FORECASTING_DATABASE_URL', 'postgres://meridian_forecasting_user@cockroachdb:26257/meridian_forecasting?sslmode=disable'),
@@ -1032,7 +1032,7 @@ Database Architecture (database-per-service):
     - meridian_position_keeping
     - meridian_payment_order
     - meridian_party
-    - meridian_internal_bank_account
+    - meridian_internal_account
     - meridian_market_information
     - meridian_reconciliation
     - meridian_forecasting
@@ -1049,7 +1049,7 @@ Database Migrations:
     4. payment_order → meridian_payment_order (payment orders, saga state)
     5. party → meridian_party (party reference data)
     6. tenant → meridian_platform (tenant registry)
-    7. internal_account → meridian_internal_bank_account (internal accounts)
+    7. internal_account → meridian_internal_account (internal accounts)
     8. market_information → meridian_market_information (price benchmarks, market data)
     9. reconciliation → meridian_reconciliation (reconciliation processes)
     10. forecasting → meridian_forecasting (forecasting strategies)

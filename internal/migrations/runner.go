@@ -73,7 +73,7 @@ var ServiceDatabases = map[string]ServiceDatabase{
 	"position-keeping":     {Database: "meridian_position_keeping", User: "meridian_position_keeping_user", Password: ""},
 	"payment-order":        {Database: "meridian_payment_order", User: "meridian_payment_order_user", Password: ""},
 	"party":                {Database: "meridian_party", User: "meridian_party_user", Password: ""},
-	"internal-account":     {Database: "meridian_internal_bank_account", User: "meridian_internal_bank_account_user", Password: ""},
+	"internal-account":     {Database: "meridian_internal_account", User: "meridian_internal_account_user", Password: ""},
 	"market-information":   {Database: "meridian_market_information", User: "meridian_market_information_user", Password: ""},
 	"reconciliation":       {Database: "meridian_reconciliation", User: "meridian_reconciliation_user", Password: ""},
 	"forecasting":          {Database: "meridian_forecasting", User: "meridian_forecasting_user", Password: ""},

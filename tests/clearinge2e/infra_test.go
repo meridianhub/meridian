@@ -74,7 +74,7 @@ func setupE2EInfra(t *testing.T) *e2eTestInfra {
 		infra.currentAccountDB = setupServiceDB(ctx, t, "meridian_current_account")
 
 		// Internal Account database
-		infra.internalAccountDB = setupServiceDB(ctx, t, "meridian_internal_bank_account")
+		infra.internalAccountDB = setupServiceDB(ctx, t, "meridian_internal_account")
 
 		// Position Keeping database
 		infra.positionKeepingDB = setupServiceDB(ctx, t, "meridian_position_keeping")

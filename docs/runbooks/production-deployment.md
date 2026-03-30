@@ -52,7 +52,7 @@ CockroachDB is the primary database for all Meridian services.
 | `meridian_party` | Party service |
 | `meridian_reference_data` | Reference Data service |
 | `meridian_market_information` | Market Information service |
-| `meridian_internal_bank_account` | Internal Account service |
+| `meridian_internal_account` | Internal Account service |
 
 ```bash
 # Create databases (run from CockroachDB SQL shell)
@@ -66,7 +66,7 @@ CREATE DATABASE IF NOT EXISTS meridian_payment_order;
 CREATE DATABASE IF NOT EXISTS meridian_party;
 CREATE DATABASE IF NOT EXISTS meridian_reference_data;
 CREATE DATABASE IF NOT EXISTS meridian_market_information;
-CREATE DATABASE IF NOT EXISTS meridian_internal_bank_account;
+CREATE DATABASE IF NOT EXISTS meridian_internal_account;
 SQL
 ```
 

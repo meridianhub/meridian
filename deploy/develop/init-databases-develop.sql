@@ -11,7 +11,7 @@ CREATE DATABASE meridian_financial_accounting;
 CREATE DATABASE meridian_position_keeping;
 CREATE DATABASE meridian_payment_order;
 CREATE DATABASE meridian_party;
-CREATE DATABASE meridian_internal_bank_account;
+CREATE DATABASE meridian_internal_account;
 CREATE DATABASE meridian_market_information;
 CREATE DATABASE meridian_reconciliation;
 CREATE DATABASE meridian_forecasting;

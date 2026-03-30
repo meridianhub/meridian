@@ -170,7 +170,7 @@ jobs:
           # WithGormTenantScope validates schema existence (fail-fast), so
           # we must create org schemas in each service database before use.
           COCKROACH="docker exec cockroachdb cockroach sql --insecure"
-          SERVICE_DBS="meridian_party meridian_current_account meridian_position_keeping meridian_financial_accounting meridian_payment_order meridian_market_information meridian_reference_data meridian_internal_bank_account meridian_reconciliation meridian_forecasting meridian_operational_gateway meridian_financial_gateway meridian_control_plane"
+          SERVICE_DBS="meridian_party meridian_current_account meridian_position_keeping meridian_financial_accounting meridian_payment_order meridian_market_information meridian_reference_data meridian_internal_account meridian_reconciliation meridian_forecasting meridian_operational_gateway meridian_financial_gateway meridian_control_plane"
           for TENANT in dev_tenant acme_corp energy_co; do
             SCHEMA="org_${TENANT}"
             for DB in $SERVICE_DBS; do
