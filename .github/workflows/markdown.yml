@@ -119,12 +119,12 @@ jobs:
               if [ -z "$resolved" ] || [ ! -f "$resolved" ]; then
                 safe_file="$(escape_annotation "$file")"
                 safe_link="$(escape_annotation "$link")"
-                echo "::warning file=${safe_file}::Broken link: ${safe_link} (target not found)"
+                echo "::error file=${safe_file}::Broken link: ${safe_link} (target not found)"
                 echo "$file -> $link" >> /tmp/broken_links
               fi
             done
           done < <(find . -name '*.md' \
-            -not -path './node_modules/*' \
+            -not -path '*/node_modules/*' \
             -not -path './.git/*' \
             -not -path './.taskmaster/*' \
             -not -path './.claude/*')
@@ -134,8 +134,7 @@ jobs:
             echo ""
             echo "Found $count broken link(s):"
             cat /tmp/broken_links
-            echo ""
-            echo "These are warnings for now. Fix broken links to keep docs navigable."
+            exit 1
           else
             echo "All internal markdown links resolve."
           fi
