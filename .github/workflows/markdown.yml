@@ -79,3 +79,63 @@ jobs:
                 body: body
               });
             }
+
+  link-integrity:
+    name: Link Integrity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check internal markdown links resolve
+        run: |
+          rm -f /tmp/broken_links
+
+          # Escape %, newline, CR for GitHub Actions workflow commands
+          escape_annotation() {
+            local s="$1"
+            s="${s//'%'/'%25'}"
+            s="${s//$'\n'/'%0A'}"
+            s="${s//$'\r'/'%0D'}"
+            printf '%s' "$s"
+          }
+
+          while IFS= read -r file; do
+            dir=$(dirname "$file")
+
+            # Extract markdown links [text](path.md) or [text](path.md#anchor)
+            grep -oE '\[[^]]*\]\([^)]+\.md(#[^)]*)?\)' "$file" 2>/dev/null \
+              | grep -oE '\([^)]+\.md' \
+              | sed 's/^(//' \
+              | sed 's/#.*//' \
+              | while IFS= read -r link; do
+
+              # Skip URLs
+              case "$link" in http://*|https://*) continue ;; esac
+
+              # Resolve relative path
+              resolved=$(cd "$dir" && realpath -q "$link" 2>/dev/null || echo "")
+              if [ -z "$resolved" ] || [ ! -f "$resolved" ]; then
+                safe_file="$(escape_annotation "$file")"
+                safe_link="$(escape_annotation "$link")"
+                echo "::warning file=${safe_file}::Broken link: ${safe_link} (target not found)"
+                echo "$file -> $link" >> /tmp/broken_links
+              fi
+            done
+          done < <(find . -name '*.md' \
+            -not -path './node_modules/*' \
+            -not -path './.git/*' \
+            -not -path './.taskmaster/*' \
+            -not -path './.claude/*')
+
+          if [ -f /tmp/broken_links ]; then
+            count=$(wc -l < /tmp/broken_links)
+            echo ""
+            echo "Found $count broken link(s):"
+            cat /tmp/broken_links
+            echo ""
+            echo "These are warnings for now. Fix broken links to keep docs navigable."
+          else
+            echo "All internal markdown links resolve."
+          fi

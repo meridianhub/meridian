@@ -308,5 +308,5 @@ After running the demo:
 ## Related Documentation
 
 - [ADR-0006: Tilt Local Development](../adr/0006-tilt-local-development.md)
-- [Architecture Overview](ARCHITECTURE.md)
-- [Demo Guide](DEMO_GUIDE.md)
+- [Architecture Overview](../archive/ARCHITECTURE.md)
+- [Demo Guide](../archive/DEMO_GUIDE.md)

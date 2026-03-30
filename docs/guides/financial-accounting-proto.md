@@ -276,8 +276,8 @@ func FromProtoFinancialBookingLog(proto *financialaccountingv1.FinancialBookingL
 
 ## References
 
-- [ADR-0004: Event Schema Evolution Strategy](../../../../docs/adr/0004-event-schema-evolution.md)
-- [ADR-0005: Adapter Pattern for Layer Translation](../../../../docs/adr/0005-adapter-pattern-layer-translation.md)
+- [ADR-0004: Event Schema Evolution Strategy](../adr/0004-event-schema-evolution.md)
+- [ADR-0005: Adapter Pattern for Layer Translation](../adr/0005-adapter-pattern-layer-translation.md)
 - [BIAN Financial Accounting Service Domain](https://bian.org/servicedomain/financialaccounting/)
 - [Protocol Buffers Documentation](https://protobuf.dev/)
 - [buf Documentation](https://buf.build/docs/)

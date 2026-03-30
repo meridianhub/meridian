@@ -27,7 +27,7 @@ instructions: |
 > **Status**: Not Started
 > **Task Master Tag**: `asset-agnostic-accounts`
 > **Last Updated**: 2026-02-25
-> **Related PRDs**: [Internal Account](002-internal-account.md),
+> **Related PRDs**: [Internal Account](002-internal-bank-account.md),
 > [Universal Asset System](001-universal-asset-system.md),
 > [Product Directory](023-product-directory.md)
 

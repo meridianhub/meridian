@@ -311,4 +311,4 @@ FROM outbox_stats;
 - [ADR-0009: Application-Level Audit Logging](../adr/0009-application-level-audit-logging.md)
 - [ADR-0020: Per-Service Audit Workers](../adr/0020-per-service-audit-workers.md)
 - [Audit Package README](../../shared/platform/audit/README.md)
-- [Incident Response Runbook](./incident-response.md)
+- [Incident Response Runbook](../runbooks/incident-response.md)

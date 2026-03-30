@@ -1016,7 +1016,7 @@ The following Meridian concepts extend or have no direct BIAN equivalent:
 
 * [ADR-0004: Event-Driven Architecture](0004-event-schema-evolution.md) - Event contracts and publishing patterns
 * [ADR-0013: Universal Quantity Type System](0013-generic-asset-quantity-types.md) - Quantity and rate types
-* [ADR-0014: Dynamic Asset Registry & Lifecycle](0014-dynamic-asset-registry.md) - Asset definitions and attributes
+* [ADR-0014: Financial Instrument Reference Data](0014-financial-instrument-reference-data.md) - Asset definitions and attributes
 * [ADR-0016: Tenant Isolation](0016-tenant-id-naming-strategy.md) - Multi-tenancy and schema separation
 * [ADR-0017: Temporal Quality Ledger](0017-temporal-quality-ladder.md) - Measurement log, quality ladder, supersession, corrections
 

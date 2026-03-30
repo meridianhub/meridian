@@ -34,7 +34,7 @@ instructions: |
 
 **Related PRDs:**
 
-- [Internal Account Service](002-internal-account.md) -
+- [Internal Account Service](002-internal-bank-account.md) -
   Parent service PRD (FR-3: Balance Retrieval via Position Keeping)
 - [Reconciliation gRPC Wiring](017-reconciliation-grpc-wiring.md) -
   Appendix: Cross-Service Unimplemented RPC Audit (source of this work)

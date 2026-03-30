@@ -625,5 +625,5 @@ go test -tags=integration ./adapters/persistence/...
 - [Service Architecture](../README.md)
 - [Proto Definitions](../../api/proto/meridian/market_information/v1/)
 - [ADR-0002: Microservices per BIAN Domain](../../docs/adr/0002-microservices-per-bian-domain.md)
-- [ADR-0020: Bi-Temporal Data Patterns](../../docs/adr/0020-bitemporal-data-patterns.md)
+- [ADR-0020: Per-Service Audit Workers](../../docs/adr/0020-per-service-audit-workers.md)
 - [CEL Language Specification](https://github.com/google/cel-spec)

@@ -2099,4 +2099,4 @@ For tenant communication:
 - [go.starlark.net](https://pkg.go.dev/go.starlark.net/starlark) - Starlark Go implementation
 - [Starlark Language Spec](https://github.com/bazelbuild/starlark/blob/master/spec.md)
 - [google/cel-go](https://github.com/google/cel-go) - CEL Go implementation
-- [Party Service](../adr/0003-party-management.md) - Party hierarchy and relationships (cross-party authorization)
+- Party Service - Party hierarchy and relationships (cross-party authorization)

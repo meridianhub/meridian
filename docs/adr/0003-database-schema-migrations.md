@@ -471,7 +471,7 @@ Edit the generated file with custom SQL, then Atlas manages it like any other mi
 * [Atlas GORM Integration](https://atlasgo.io/guides/orms/gorm)
 * [CockroachDB with Atlas](https://atlasgo.io/guides/databases/cockroachdb)
 * [GitHub Issue #3: Platform Services](https://github.com/meridianhub/meridian/issues/3)
-* [ADR-0004: Separated Schema Management](./0004-separated-schema-management.md)
+* [ADR-0004: Event Schema Evolution](./0004-event-schema-evolution.md)
 * [ADR-0005: Adapter Pattern for Layer Translation](./0005-adapter-pattern-layer-translation.md)
 
 ## Notes

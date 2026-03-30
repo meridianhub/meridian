@@ -1065,7 +1065,7 @@ while the bug ships to production.
 ## 10. References
 
 - [Starlark Service Bindings PRD](./008-starlark-service-bindings.md) - Covers Starlark saga e2e testing
-- [CLAUDE.md Testing Guidelines](../../CLAUDE.md#testing-guidelines) - Use `await` instead of `time.Sleep`
+- CLAUDE.md Testing Guidelines - Use `await` instead of `time.Sleep`
 - [ADR 0028: Starlark Saga CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
 - Existing E2E Tests:
   - `services/reference-data/e2e/e2e_test.go`

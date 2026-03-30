@@ -1437,8 +1437,8 @@ Create a dedicated **"Saga Causation Safety"** PRD that:
 ## References
 
 - **Related ADRs:**
-  - [ADR-019: Starlark for Saga Orchestration](../adr/019-starlark-saga-orchestration.md)
-  - [ADR-025: Service Client Patterns](../adr/025-service-client-patterns.md) (if exists)
+  - [ADR-028: Starlark Saga Orchestration with CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)
+  - [ADR-019: Resilient Client Patterns](../adr/0019-resilient-client-patterns.md)
 
 - **Related PRDs:**
   - [Starlark Typed Service Clients](./007-starlark-typed-service-clients.md) - Predecessor work
