@@ -17,6 +17,7 @@ import (
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	controlplaneservice "github.com/meridianhub/meridian/services/control-plane/service"
 	"github.com/meridianhub/meridian/services/tenant/provisioner"
+	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gorm.io/gorm"
@@ -209,8 +210,11 @@ func seedPlatformManifest(ctx context.Context, db *gorm.DB, logger *slog.Logger)
 // provisioner re-runs schema creation and migrations. This is necessary because
 // the provisioner skips tenants with "active" status, but the actual schemas may
 // be missing (partial provisioning, DB reset, or new service added).
-func resetProvisioningToPending(ctx context.Context, db *gorm.DB, tenantID tenant.TenantID, logger *slog.Logger) error {
-	result := db.WithContext(ctx).Exec(
+func resetProvisioningToPending(ctx context.Context, gormDB *gorm.DB, tenantID tenant.TenantID, logger *slog.Logger) error {
+	// Bypass tenant guard - this is a platform-level operation on the
+	// tenant_provisioning table in public schema, not tenant-scoped data.
+	bypassCtx := db.WithTenantGuardBypass(ctx)
+	result := gormDB.WithContext(bypassCtx).Exec(
 		`UPDATE tenant_provisioning SET state = 'pending', updated_at = NOW() WHERE tenant_id = ?`,
 		tenantID.String(),
 	)
