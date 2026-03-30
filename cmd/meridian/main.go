@@ -459,7 +459,7 @@ func startEmailWorker(ctx context.Context, paymentOrderDB *gorm.DB, logger *slog
 func runBootstrap(baseDSN string, logger *slog.Logger) error {
 	ctx := context.Background()
 
-	// Both tenant and control-plane share meridian_platform database.
+	// Platform database (tenant service)
 	platformDSN, err := replaceDSNDatabase(baseDSN, "meridian_platform")
 	if err != nil {
 		return fmt.Errorf("platform DSN: %w", err)
@@ -478,12 +478,30 @@ func runBootstrap(baseDSN string, logger *slog.Logger) error {
 	}
 	defer bootstrap.CloseDatabase(platformDB, logger)
 
-	// Control-plane also uses meridian_platform (see internal/migrations/runner.go)
-	platformPool, err := connectPgxPool(ctx, platformDSN, logger)
+	// Control-plane has its own database (meridian_control_plane)
+	controlPlaneDSN, err := replaceDSNDatabase(baseDSN, "meridian_control_plane")
 	if err != nil {
-		return fmt.Errorf("platform pgxpool: %w", err)
+		return fmt.Errorf("control-plane DSN: %w", err)
 	}
-	defer platformPool.Close()
+	controlPlanePool, err := connectPgxPool(ctx, controlPlaneDSN, logger)
+	if err != nil {
+		return fmt.Errorf("control-plane pgxpool: %w", err)
+	}
+	defer controlPlanePool.Close()
+
+	controlPlaneCfg := bootstrap.DatabaseConfig{
+		DSN:             controlPlaneDSN,
+		MaxOpenConns:    5,
+		MaxIdleConns:    2,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 10 * time.Minute,
+		Logger:          logger,
+	}
+	controlPlaneDB, err := bootstrap.NewDatabase(ctx, controlPlaneCfg)
+	if err != nil {
+		return fmt.Errorf("control-plane database: %w", err)
+	}
+	defer bootstrap.CloseDatabase(controlPlaneDB, logger)
 
 	provConfig, err := DeriveProvisionerConfig(baseDSN)
 	if err != nil {
@@ -492,7 +510,8 @@ func runBootstrap(baseDSN string, logger *slog.Logger) error {
 
 	return masterbootstrap.Run(ctx, masterbootstrap.Config{
 		PlatformDB:        platformDB,
-		ControlPlanePool:  platformPool,
+		ControlPlaneDB:    controlPlaneDB,
+		ControlPlanePool:  controlPlanePool,
 		ProvisionerConfig: provConfig,
 		Logger:            logger,
 	})
