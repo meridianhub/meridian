@@ -116,7 +116,7 @@ handlers:
       exposed_params: [<field-names>]
       exposed_returns: [<field-names>]
       param_aliases: {<proto-field>: <starlark-name>}
-    params:  # legacy inline format, used when no proto_ref
+    params:  # inline format, for composite handlers or services without proto
       <param-name>:
         type: string | int | decimal | bool | enum | map | uuid
         required: true | false
