@@ -116,7 +116,7 @@ func provisionSchemas(ctx context.Context, cfg Config, logger *slog.Logger) erro
 	// be stale if schemas were partially created or if the database was reset.
 	// CREATE SCHEMA IF NOT EXISTS and idempotent migrations make this safe.
 	if err := resetProvisioningToPending(ctx, cfg.PlatformDB, tenantID, logger); err != nil {
-		logger.Debug("could not reset provisioning status (may not exist yet)", "error", err)
+		return fmt.Errorf("reset provisioning status: %w", err)
 	}
 
 	// Provision schemas
