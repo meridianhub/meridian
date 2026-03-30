@@ -1,3 +1,20 @@
+---
+name: saga-contract-specification
+description: Formal specification for how distributed services transact together using declarative saga patterns
+triggers:
+  - Designing new saga workflows or cookbook patterns
+  - Defining handler schemas or compensation strategies
+  - Evaluating Meridian's saga system against alternatives (Temporal, Step Functions)
+  - Understanding the Saga Contract model for sales or technical positioning
+instructions: |
+  The Saga Contract defines how services declare capabilities,
+  compose into transactions, and recover from failure.
+  handlers.yaml is the contract. Starlark scripts express the
+  happy path. Compensation is a service schema property, not a
+  workflow concern. All execution is forward-only and append-only.
+  See docs/spec/saga-contract.md for the full specification.
+---
+
 # The Saga Contract Specification
 
 **Version:** 0.1.0-draft
@@ -7,11 +24,25 @@
 
 ## Abstract
 
-The Saga Contract defines a declarative model for expressing distributed transactions across service boundaries. It specifies how services declare their capabilities, how workflows compose those capabilities into transactional sequences, and how failure recovery is handled automatically through bounded, deterministic, forward-only execution.
+The Saga Contract defines a declarative model for expressing distributed
+transactions across service boundaries. It specifies how services declare
+their capabilities, how workflows compose those capabilities into
+transactional sequences, and how failure recovery is handled automatically
+through bounded, deterministic, forward-only execution.
 
-The Saga Contract occupies a layer above API interface specifications (OpenAPI, AsyncAPI) and below application business logic. Where OpenAPI describes *how to call a service* and AsyncAPI describes *how to listen to events*, the Saga Contract describes *how services transact together* - including forward execution, failure classification, compensation, and composition of reusable patterns.
+The Saga Contract occupies a layer above API specifications (OpenAPI,
+AsyncAPI) and below application business logic. Where OpenAPI describes
+*how to call a service* and AsyncAPI describes *how to listen to events*,
+the Saga Contract describes *how services transact together* - including
+forward execution, failure classification, compensation, and composition
+of reusable patterns.
 
-**The Saga Contract is what makes an Economy Runtime possible.** By defining a formal agreement between services about how they participate in distributed transactions, the contract enables entire economic models - billing, settlement, reconciliation, multi-asset accounting - to be expressed declaratively and operated continuously, rather than hand-wired in imperative code.
+**The Saga Contract is what makes an Economy Runtime possible.** By
+defining a formal agreement between services about how they participate
+in distributed transactions, the contract enables entire economic models
+- billing, settlement, reconciliation, multi-asset accounting - to be
+expressed declaratively and operated continuously, rather than hand-wired
+in imperative code.
 
 For implementation details, see:
 - [Starlark Saga Architecture](../architecture/starlark-saga-architecture.md) - component diagrams, data flow, dependency injection
@@ -21,9 +52,16 @@ For implementation details, see:
 
 ### 1.1 Forward-Only Immutable Execution
 
-All state changes in a Saga Contract system are append-only. Transactions are never mutated or deleted - they are compensated by appending new records that represent the reversal. This is not a design choice for auditability alone; it is the mechanism that makes data consistency achievable in high-latency, distributed environments where traditional locking is impossible.
+All state changes in a Saga Contract system are append-only. Transactions
+are never mutated or deleted - they are compensated by appending new
+records that represent the reversal. This is not a design choice for
+auditability alone; it is the mechanism that makes data consistency
+achievable in high-latency, distributed environments where traditional
+locking is impossible.
 
-The orchestration language is constrained to Starlark (a non-Turing-complete subset of Python) and the expression language to CEL (a side-effect-free expression evaluator), guaranteeing that every workflow terminates:
+The orchestration language is constrained to Starlark (a non-Turing-complete
+subset of Python) and the expression language to CEL (a side-effect-free
+expression evaluator), guaranteeing that every workflow terminates:
 
 - No `while` loops (only `for` over finite iterables)
 - No recursion
@@ -34,15 +72,28 @@ The orchestration language is constrained to Starlark (a non-Turing-complete sub
 
 ### 1.2 Schema-Driven Safety
 
-Workflows can only invoke operations declared in the Handler Schema. The schema is the single source of truth for what operations exist, what parameters they accept, what they return, and how they compensate. Code generation from the schema produces type-safe clients that make invalid calls unrepresentable.
+Workflows can only invoke operations declared in the Handler Schema.
+The schema is the single source of truth for what operations exist,
+what parameters they accept, what they return, and how they compensate.
+Code generation from the schema produces type-safe clients that make
+invalid calls unrepresentable.
 
 ### 1.3 Separation of Concerns in Failure Recovery
 
-Compensation is a property of the **service schema**, not the **workflow**. Service owners declare how their operations are undone. Saga authors write only the happy path. The runtime assembles compensation automatically from schema declarations. This separation eliminates the class of bugs where a developer forgets to register a compensation step.
+Compensation is a property of the **service schema**, not the
+**workflow**. Service owners declare how their operations are undone.
+Saga authors write only the happy path. The runtime assembles
+compensation automatically from schema declarations. This separation
+eliminates the class of bugs where a developer forgets to register a
+compensation step.
 
 ### 1.4 Fail-Safe by Default
 
-Unknown errors are classified as FATAL (non-retryable). The system compensates rather than retrying indefinitely. This is a deliberate choice: retrying an unknown error wastes resources and delays recovery. Known transient conditions (timeouts, connection resets) are explicitly enumerated for retry.
+Unknown errors are classified as FATAL (non-retryable). The system
+compensates rather than retrying indefinitely. This is a deliberate
+choice: retrying an unknown error wastes resources and delays recovery.
+Known transient conditions (timeouts, connection resets) are explicitly
+enumerated for retry.
 
 ## 2. Handler Schema
 
@@ -58,7 +109,7 @@ handlers:
   <namespace>.<operation>:
     description: "<human-readable purpose>"
     compensate: "<namespace>.<compensation-operation>"  # OR
-    compensation_strategy: none | saga_managed
+    compensation_strategy: auto | none | saga_managed
     external: true | false  # default: false
     proto_ref:
       proto_rpc: "<package>.<Service>/<Method>"
@@ -92,9 +143,10 @@ Every handler MUST declare one of:
 
 | Declaration | Meaning |
 |---|---|
-| `compensate: <handler>` | Named handler is invoked automatically on rollback. The compensation handler receives the original step's result as input. |
-| `compensation_strategy: none` | Operation requires no compensation. Either read-only, idempotent, or itself a compensation handler. |
-| `compensation_strategy: saga_managed` | Compensation logic is defined in the saga script, not the schema. Used when rollback requires context the schema cannot express. |
+| `compensate: <handler>` | Named handler is invoked automatically on rollback. Implicitly sets `compensation_strategy: auto`. |
+| `compensation_strategy: auto` | Compensation is wired automatically via the `compensate` field. Implicit default when `compensate` is present. |
+| `compensation_strategy: none` | No compensation needed. Read-only, idempotent, or itself a compensation handler. |
+| `compensation_strategy: saga_managed` | Compensation defined in the saga script, not the schema. For rollback requiring workflow context. |
 
 ### 2.4 External Handlers
 
@@ -129,7 +181,7 @@ Sagas bind to execution triggers. The trigger determines *when* a saga runs.
 
 ### 3.1 Trigger Syntax
 
-```
+```ebnf
 trigger := trigger-type ":" trigger-value
 trigger-type := "scheduled" | "event" | "api" | "webhook"
 ```
@@ -196,6 +248,7 @@ The following functions are available in the saga execution environment:
 | `cel_eval()` | `cel_eval(expression: str, variables: dict) -> any` | Evaluate a CEL expression with the given variable bindings. |
 | `resolve_account()` | `resolve_account(reference: str) -> str` | Resolve an account reference to an account ID. |
 | `resolve_instrument()` | `resolve_instrument(code: str) -> dict` | Resolve an instrument code to its full definition. |
+| `build_org_account_ref()` | `build_org_account_ref(party_id, org_id, currency) -> str` | Build an organization-scoped account reference from party, org, and currency. |
 | `invoke_saga()` | `invoke_saga(name: str, input: dict) -> dict` | Invoke a child saga. Circular invocation is detected and rejected. |
 | `fail()` | `fail(reason: str) -> never` | Explicitly fail the saga with a reason. Triggers compensation. |
 | `log()` | `log(message: str) -> None` | Emit an audit log entry (routed to the audit trail, not stdout). |
@@ -304,8 +357,14 @@ The following conditions are always classified as TRANSIENT:
 
 ### 5.5 Saga State Machine
 
-```
+```text
 PENDING --> RUNNING --> COMPLETED
+                |
+                +--> WAITING_FOR_EVENT --> RUNNING (on resume)
+                |         |
+                |         +--> FAILED (on timeout)
+                |
+                +--> SUSPENDED --> RUNNING (on resume)
                 |
                 +--> COMPENSATING --> COMPENSATED
                 |         |
@@ -317,11 +376,13 @@ PENDING --> RUNNING --> COMPLETED
 | State | Description | Transitions |
 |---|---|---|
 | `PENDING` | Created, not yet executing | -> `RUNNING` |
-| `RUNNING` | Executing forward steps | -> `COMPLETED`, `COMPENSATING`, `FAILED_MANUAL_INTERVENTION` |
+| `RUNNING` | Executing forward steps | -> `COMPLETED`, `WAITING_FOR_EVENT`, `SUSPENDED`, `COMPENSATING`, `FAILED_MANUAL_INTERVENTION` |
+| `WAITING_FOR_EVENT` | Suspended awaiting external callback (Section 6.5) | -> `RUNNING` (on resume), `FAILED` (on timeout) |
+| `SUSPENDED` | Temporarily paused for async processing | -> `RUNNING` (on resume), `FAILED` (on timeout) |
 | `COMPLETED` | All steps succeeded | Terminal |
 | `COMPENSATING` | Executing compensation (LIFO order) | -> `COMPENSATED`, `FAILED` |
 | `COMPENSATED` | All compensation steps succeeded | Terminal |
-| `FAILED` | Compensation itself failed | Terminal (requires manual intervention) |
+| `FAILED` | Compensation itself failed or suspended saga timed out | Terminal (requires manual intervention) |
 | `FAILED_MANUAL_INTERVENTION` | Max retries exceeded on transient errors | Terminal (requires operator review) |
 
 ### 5.6 Compensation Order
@@ -414,7 +475,7 @@ CEL (Common Expression Language) is used for stateless evaluation in two context
 
 Saga definitions MAY include a `preconditions_expression` that is evaluated before execution begins. If the expression returns `false`, the saga is not executed.
 
-```
+```yaml
 preconditions_expression: "input.amount > 0 && input.currency in ['GBP', 'USD', 'EUR']"
 ```
 
@@ -453,7 +514,7 @@ Every handler invocation carries metadata through the execution context:
 | Field | Source | Purpose |
 |---|---|---|
 | `correlation_id` | Generated at saga creation | Links all operations in a saga for distributed tracing |
-| `idempotency_key` | `{saga_execution_id}-step-{step_number}-retry-{retry_count}` | Prevents duplicate operations on retry |
+| `idempotency_key` | `saga_{instance_id}_step_{index}` | Prevents duplicate operations on retry. Key is stable across retries to ensure exactly-once semantics. |
 | `knowledge_at` | Set at saga start | Bi-temporal timestamp ensuring consistent reads across all steps |
 | `tenant_id` | Extracted from request context | Multi-tenant isolation |
 | `party_id` | Extracted from input_data or request context | Party-level visibility scope |
@@ -605,7 +666,13 @@ An implementation conforms to this specification if it:
 
 ### A.1 The Saga Pattern (Garcia-Molina & Salem, 1987)
 
-The original saga pattern proposed decomposing long-lived transactions into sequences of sub-transactions, each with a compensating transaction. The Saga Contract builds on this foundation but addresses gaps that the original paper and subsequent implementations left open: how to *declare* compensation rather than code it, how to *guarantee termination* rather than hope for it, and how to *compose* saga patterns rather than writing each from scratch.
+The original saga pattern proposed decomposing long-lived transactions
+into sequences of sub-transactions, each with a compensating
+transaction. The Saga Contract builds on this foundation but addresses
+gaps that the original paper and subsequent implementations left open:
+how to *declare* compensation rather than code it, how to *guarantee
+termination* rather than hope for it, and how to *compose* saga
+patterns rather than writing each from scratch.
 
 ### A.2 Comparison with Existing Frameworks
 
@@ -625,13 +692,26 @@ The original saga pattern proposed decomposing long-lived transactions into sequ
 
 ### A.3 Temporal IO - Detailed Comparison
 
-Temporal is the closest prior art. Both systems provide durable execution of distributed workflows with failure recovery. The architectural difference is philosophical:
+Temporal is the closest prior art. Both systems provide durable
+execution of distributed workflows with failure recovery. The
+architectural difference is philosophical:
 
-**Temporal gives developers full Turing-complete power and enforces correctness at runtime.** If a workflow is non-deterministic, replay fails. If a developer forgets to register a compensation step, the saga is incomplete. If a workflow enters an infinite loop, it eventually hits a timeout. The developer is responsible for correctness; the platform provides durability.
+**Temporal gives developers full Turing-complete power and enforces
+correctness at runtime.** If a workflow is non-deterministic, replay
+fails. If a developer forgets to register a compensation step, the
+saga is incomplete. If a workflow enters an infinite loop, it eventually
+hits a timeout. The developer is responsible for correctness; the
+platform provides durability.
 
-**The Saga Contract constrains the language to make incorrect programs inexpressible.** Non-determinism is blocked at the language level, not detected at runtime. Compensation is declared in the schema, not coded in the workflow. Termination is guaranteed by the grammar, not enforced by timeouts. The schema is responsible for correctness; the developer is responsible for business logic.
+**The Saga Contract constrains the language to make incorrect programs
+inexpressible.** Non-determinism is blocked at the language level, not
+detected at runtime. Compensation is declared in the schema, not coded
+in the workflow. Termination is guaranteed by the grammar, not enforced
+by timeouts. The schema is responsible for correctness; the developer
+is responsible for business logic.
 
-This is the difference between a runtime safety net and compile-time correctness. Temporal catches mistakes. The Saga Contract prevents them.
+This is the difference between a runtime safety net and compile-time
+correctness. Temporal catches mistakes. The Saga Contract prevents them.
 
 **Where Temporal is stronger:**
 - Language ecosystem - developers use their existing language (Go, Java, TypeScript)

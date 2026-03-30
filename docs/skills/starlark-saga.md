@@ -19,7 +19,8 @@ Generate type-safe Starlark saga scripts for Meridian's distributed transaction 
 **Related:**
 
 - **[Saga Contract Specification](../spec/saga-contract.md)** - Formal specification for how services transact together
-- **[Starlark Saga Architecture](../architecture/starlark-saga-architecture.md)** - Component diagrams, data flow, dependency injection
+- **[Starlark Saga Architecture](../architecture/starlark-saga-architecture.md)** -
+  Component diagrams, data flow, dependency injection
 - **[Starlark Style Guide](../guides/starlark-style-guide.md)** - Comprehensive syntax and conventions
 
 ---
