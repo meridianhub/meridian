@@ -446,7 +446,7 @@ A background watcher periodically scans for orphaned sagas - executions whose ow
 
 Sagas can suspend execution while waiting for external events (e.g., payment confirmations, meter readings, webhook callbacks):
 
-- The saga transitions to `SUSPENDED` with a reason and context data
+- The saga transitions to `WAITING_FOR_EVENT` (awaiting a specific external callback) or `SUSPENDED` (general async pause) with a reason and context data
 - A configurable timeout auto-fails suspended sagas that are never resumed
 - External systems resume the saga by matching the idempotency key
 - The timeout worker polls for expired suspensions (default: 1 minute interval)
@@ -628,7 +628,7 @@ A conforming implementation provides the following guarantees:
 | **Crash recovery** | Lease-based ownership + orphan detection | 6.3, 6.4 |
 | **Event consistency** | Transactional outbox pattern | 6.6 |
 | **Deterministic replay** | Lookup result caching + blocked non-determinism | 4.6, 6.7 |
-| **Idempotency** | Deterministic key generation per step/retry | 8 |
+| **Idempotency** | Deterministic key generation per step (stable across retries) | 8 |
 | **Tenant isolation** | Metadata propagation of tenant_id and party_id | 8 |
 | **Audit trail** | All handler invocations recorded with correlation context | 8 |
 | **Bounded expression evaluation** | CEL < 10ms, no side effects | 7.4 |
