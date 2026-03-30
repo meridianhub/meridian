@@ -1,7 +1,7 @@
 # Correspondence Service (BIAN-Aligned)
 
 **Status:** Draft
-**Version:** 1.0
+**Version:** 1.1
 **Author:** Platform Team
 **Companion PRDs:** [052 - Email Platform](./052-email-platform.md),
 [053 - Auth Email Flows](./053-auth-email-flows.md)
@@ -12,30 +12,37 @@
 
 ## 1. Problem Statement
 
-Meridian's `notification.send` saga handler uses inline parameter definitions
-in `handlers.yaml` because no proto service exists for it. This is the last
-non-composite handler without a `proto_ref`, breaking the Saga Contract's
-principle that handler types are resolved from proto at schema load time.
+Meridian's email and notification capabilities are scattered across three
+locations with no single service owning the domain:
 
-PRD 052 defines the email infrastructure (outbox, worker, Resend integration)
-but does not define the BIAN-aligned service boundary. The handler is called
-`notification.send` - a generic name that doesn't align with BIAN's service
-domain taxonomy.
+| Component | Current Location | Problem |
+|---|---|---|
+| `notification.send` saga handler | `shared/pkg/email/notification_handler.go` | Inline params in handlers.yaml (no proto_ref), registered as a local handler in current-account service |
+| Resend webhook handler | `services/api-gateway/resend_webhook_handler.go` | Delivery status callbacks owned by the API gateway, not the correspondence domain |
+| Email outbox + worker + sender | `shared/pkg/email/` | Shared package with no gRPC service boundary, no BIAN alignment |
+| Audit trail | `shared/pkg/email/audit_postgres.go` | Delivery audit lives in shared package, not owned by a service |
 
-BIAN v14 defines **Correspondence** as the service domain responsible for
-outbound communication. This PRD creates a Correspondence service that:
+This creates several issues:
 
-1. Provides the proto-referenced handler for saga orchestration
-2. Aligns with BIAN's Correspondence service domain taxonomy
-3. Replaces the last non-composite inline handler in handlers.yaml
-4. Supports multiple channel types (email initially, SMS/webhook later)
+1. **No Saga Contract compliance** - `notification.send` is the last
+   non-composite handler using inline params instead of proto_ref
+2. **No service boundary** - email logic is a shared package injected
+   into current-account, not a service that can be independently
+   deployed, scaled, or monitored
+3. **No BIAN alignment** - BIAN v14 defines Correspondence as a service
+   domain; we're using ad-hoc naming
+4. **No communication preferences** - no consent management, unsubscribe
+   capability, or GDPR right-to-erasure support for party communications
+5. **Webhook misownership** - Resend delivery callbacks are handled by
+   the API gateway, which has no domain knowledge of correspondence
 
 ## 2. BIAN Alignment
 
 ### BIAN Correspondence Service Domain (v14)
 
-The Correspondence service domain orchestrates the production and delivery of
-formatted correspondence. BIAN defines the following behaviour qualifiers:
+The Correspondence service domain orchestrates the production and delivery
+of formatted correspondence. BIAN defines the following behaviour
+qualifiers:
 
 | Behaviour Qualifier | BIAN Purpose | Meridian Mapping |
 |---|---|---|
@@ -80,6 +87,18 @@ service CorrespondenceService {
   // Retrieve correspondence status
   rpc RetrieveOutbound(RetrieveOutboundRequest)
       returns (RetrieveOutboundResponse);
+
+  // Record delivery status from provider webhook
+  rpc RecordDeliveryStatus(RecordDeliveryStatusRequest)
+      returns (RecordDeliveryStatusResponse);
+
+  // Check communication preferences for a party
+  rpc GetCommunicationPreferences(GetCommunicationPreferencesRequest)
+      returns (GetCommunicationPreferencesResponse);
+
+  // Update communication preferences (subscribe/unsubscribe)
+  rpc UpdateCommunicationPreferences(UpdateCommunicationPreferencesRequest)
+      returns (UpdateCommunicationPreferencesResponse);
 }
 
 message InitiateOutboundRequest {
@@ -95,11 +114,18 @@ message InitiateOutboundRequest {
   string idempotency_key = 5;
   // Priority: NORMAL, HIGH, LOW
   string priority = 6;
+  // Category for preference checking: TRANSACTIONAL, MARKETING, OPERATIONAL
+  // TRANSACTIONAL bypasses unsubscribe (legally required comms)
+  // MARKETING and OPERATIONAL respect party preferences
+  string category = 7;
 }
 
 message InitiateOutboundResponse {
   string correspondence_id = 1;
-  string status = 2;  // QUEUED, SENT, FAILED
+  // QUEUED, SENT, SUPPRESSED (party opted out), FAILED
+  string status = 2;
+  // When suppressed, explains why (e.g., "party_unsubscribed")
+  string suppression_reason = 3;
 }
 
 message InitiateOutboundWithResponseRequest {
@@ -109,14 +135,16 @@ message InitiateOutboundWithResponseRequest {
   map<string, string> template_data = 4;
   string idempotency_key = 5;
   string priority = 6;
+  string category = 7;
   // Expected response deadline (e.g., "P7D" for 7 days)
-  string response_deadline = 7;
+  string response_deadline = 8;
 }
 
 message InitiateOutboundWithResponseResponse {
   string correspondence_id = 1;
   string status = 2;
-  string tracking_id = 3;  // For response matching
+  string suppression_reason = 3;
+  string tracking_id = 4;
 }
 
 message RetrieveOutboundRequest {
@@ -133,132 +161,218 @@ message RetrieveOutboundResponse {
   string sent_at = 7;
   string delivered_at = 8;
 }
+
+message RecordDeliveryStatusRequest {
+  string provider_id = 1;
+  // DELIVERED, BOUNCED, COMPLAINED
+  string status = 2;
+  map<string, string> provider_metadata = 3;
+}
+
+message RecordDeliveryStatusResponse {
+  string correspondence_id = 1;
+  string status = 2;
+}
+
+message GetCommunicationPreferencesRequest {
+  string party_id = 1;
+}
+
+message GetCommunicationPreferencesResponse {
+  string party_id = 1;
+  // Per-channel, per-category preferences
+  repeated ChannelPreference preferences = 2;
+  // GDPR: if true, all non-transactional comms are suppressed
+  bool global_unsubscribe = 3;
+}
+
+message ChannelPreference {
+  string channel = 1;    // EMAIL, SMS, WEBHOOK
+  string category = 2;   // MARKETING, OPERATIONAL, TRANSACTIONAL
+  bool opted_in = 3;
+  string updated_at = 4;
+}
+
+message UpdateCommunicationPreferencesRequest {
+  string party_id = 1;
+  // Set global unsubscribe (GDPR right to object)
+  optional bool global_unsubscribe = 2;
+  // Per-channel, per-category opt-in/opt-out
+  repeated ChannelPreference preferences = 3;
+}
+
+message UpdateCommunicationPreferencesResponse {
+  string party_id = 1;
+  bool global_unsubscribe = 2;
+}
 ```
 
-## 4. Handler Schema Migration
+## 4. Refactoring Plan
 
-### Current (inline params)
+### What Moves
 
-```yaml
-notification.send:
-  description: "Send a notification (email) to a party"
-  compensation_strategy: none
-  params:
-    type:
-      type: string
-      required: true
-    recipient:
-      type: string
-      required: true
-    template:
-      type: string
-      required: false
-    data:
-      type: map
-      required: false
-    idempotency_key:
-      type: string
-      required: false
-```
+| From | To | Notes |
+|---|---|---|
+| `shared/pkg/email/notification_handler.go` | `services/correspondence/handler/` | Saga handler becomes a gRPC client call instead of local function |
+| `shared/pkg/email/outbox_*.go` | `services/correspondence/adapters/persistence/` | Outbox is now owned by the service |
+| `shared/pkg/email/audit_*.go` | `services/correspondence/adapters/persistence/` | Audit trail owned by the service |
+| `shared/pkg/email/resend.go` | `services/correspondence/adapters/provider/` | Resend adapter behind a `Sender` interface |
+| `shared/pkg/email/sender*.go` | `services/correspondence/adapters/provider/` | Sender interface + factory |
+| `shared/pkg/email/template*.go` | `services/correspondence/templates/` | Template rendering |
+| `shared/pkg/email/worker/` | `services/correspondence/worker/` | Email dispatch worker |
+| `services/api-gateway/resend_webhook_handler.go` | `services/correspondence/webhook/` | API gateway proxies to Correspondence service via gRPC `RecordDeliveryStatus` |
 
-### Target (proto-referenced)
+### What Stays
+
+| Component | Why |
+|---|---|
+| `shared/pkg/email/` package | Becomes thin - just the `Message` type and `Sender` interface for any service that needs to send email directly (e.g., auth verification in identity service). The interface stays shared; the implementation moves. |
+
+### Migration Strategy
+
+1. **Create service scaffold** - standard Meridian service directory
+   structure with gRPC server, migrations, Atlas config
+2. **Move email package internals** - outbox, audit, sender, templates,
+   worker into the new service
+3. **Implement gRPC endpoints** - `InitiateOutbound` wraps the existing
+   notification handler logic, `RecordDeliveryStatus` wraps the existing
+   webhook handler logic
+4. **Register Starlark bindings** - `correspondence.initiate_outbound`
+   registered with the saga handler registry
+5. **Update handlers.yaml** - replace `notification.send` (inline) with
+   `correspondence.initiate_outbound` (proto_ref)
+6. **Migrate saga scripts** - update dunning_escalation and
+   dunning_unfreeze to use `correspondence.initiate_outbound`
+7. **Proxy webhook** - API gateway's `/api/v1/webhooks/resend` route
+   calls Correspondence service's `RecordDeliveryStatus` gRPC endpoint
+   instead of writing directly to the audit table
+8. **Add communication preferences** - new table, preference check in
+   InitiateOutbound before queuing
+
+### Backward Compatibility
+
+The `param_aliases` mechanism in handlers.yaml maps old saga parameter
+names to new proto fields:
 
 ```yaml
 correspondence.initiate_outbound:
-  description: "Initiate outbound correspondence (email, SMS, webhook)"
-  compensation_strategy: none
   proto_ref:
     proto_rpc: "meridian.correspondence.v1.CorrespondenceService/InitiateOutbound"
-    exposed_params:
-      - channel
-      - recipient_party_id
-      - template_name
-      - template_data
-      - idempotency_key
-      - priority
     param_aliases:
       recipient_party_id: recipient
       channel: type
       template_name: template
-
-correspondence.initiate_outbound_with_response:
-  description: "Initiate outbound correspondence with tracked response"
-  compensation_strategy: none
-  proto_ref:
-    proto_rpc: "meridian.correspondence.v1.CorrespondenceService/InitiateOutboundWithResponse"
-
-correspondence.retrieve_outbound:
-  description: "Retrieve correspondence status"
-  compensation_strategy: none
-  proto_ref:
-    proto_rpc: "meridian.correspondence.v1.CorrespondenceService/RetrieveOutbound"
 ```
 
-### Backward Compatibility
+Existing saga scripts using `notification.send(type="EMAIL", recipient=party_id)`
+work unchanged via aliases during migration. Scripts are updated to use
+`correspondence.initiate_outbound(channel="EMAIL", recipient_party_id=party_id)`
+as a follow-up.
 
-The `param_aliases` section maps new proto field names to old saga parameter
-names (`recipient` -> `recipient_party_id`, `type` -> `channel`,
-`template` -> `template_name`). Existing saga scripts using
-`notification.send(type="EMAIL", recipient=party_id, template="invoice")`
-continue to work unchanged via the alias mechanism.
+## 5. Communication Preferences (GDPR)
 
-Saga scripts referencing `notification.send` will need to be updated to
-`correspondence.initiate_outbound`. This is a search-and-replace in
-cookbook patterns and default saga definitions.
+### Requirements
 
-## 5. Integration with PRD 052
+| Requirement | Implementation |
+|---|---|
+| **Right to object (Art. 21)** | `global_unsubscribe` flag on party preferences. When set, all non-transactional comms suppressed. |
+| **Unsubscribe per channel/category** | `ChannelPreference` records per party. Marketing emails can be opted out while keeping transactional. |
+| **Transactional exemption** | Correspondence with `category=TRANSACTIONAL` (invoices, account freezes, password resets) bypasses preferences. Legally required comms cannot be suppressed. |
+| **Right to erasure (Art. 17)** | Preferences and correspondence history deletable via party lifecycle. Audit trail retained per financial regulation (7 years) - redacted, not deleted. |
+| **Preference audit trail** | Every preference change recorded with timestamp, source (party self-service, admin, API), and previous value. |
 
-PRD 052 defines the email infrastructure that this service wraps:
+### Enforcement Point
+
+`InitiateOutbound` checks preferences before queuing:
+
+```
+1. Resolve party preferences
+2. If global_unsubscribe AND category != TRANSACTIONAL → SUPPRESSED
+3. If channel+category opted out → SUPPRESSED
+4. If no preference record → default opted-in (implied consent)
+5. Otherwise → queue to outbox
+```
+
+Suppressed correspondence is still recorded in the audit trail (proof
+that the system respected the preference).
+
+### Unsubscribe Mechanism
+
+Every non-transactional email includes an unsubscribe link. The link
+calls `UpdateCommunicationPreferences` via the API gateway. One-click
+unsubscribe uses the `List-Unsubscribe-Post` header (RFC 8058) for
+email client native support.
+
+## 6. Integration with PRD 052
+
+PRD 052 defined the email infrastructure. This PRD promotes it to a
+BIAN-aligned service:
 
 | PRD 052 Component | Correspondence Service Relationship |
 |---|---|
-| Email outbox table | Correspondence writes to it via InitiateOutbound |
-| Resend worker | Reads from outbox, delivers via Resend API |
-| Templates | Correspondence resolves template_name to template content |
-| Webhooks (delivery status) | Updates correspondence status on delivery/bounce |
-| Metrics | Correspondence exposes BIAN-aligned metrics |
+| Email outbox table | Moves to `services/correspondence/migrations/` |
+| Resend worker | Moves to `services/correspondence/worker/` |
+| Templates | Moves to `services/correspondence/templates/` |
+| Webhook handler | Moves from api-gateway, proxied via gRPC |
+| Metrics | Adapted with BIAN-aligned labels |
 
-The Correspondence service is the **gRPC entry point**. PRD 052's email
-worker is the **delivery engine**. They are separate concerns:
-Correspondence handles orchestration-layer contract, email worker handles
-provider integration.
+PRD 052 is effectively **absorbed** into this service. The infrastructure
+it defined becomes the implementation of the Correspondence service domain.
 
-## 6. Scope
+## 7. Scope
 
 ### In Scope
 
+- Service scaffold: `services/correspondence/` with standard directory structure
 - Proto definition at `api/proto/meridian/correspondence/v1/`
-- Minimal service stub in `services/correspondence/`
+- gRPC implementation: InitiateOutbound, InitiateOutboundWithResponse,
+  RetrieveOutbound, RecordDeliveryStatus, GetCommunicationPreferences,
+  UpdateCommunicationPreferences
+- Move email package internals (outbox, audit, sender, templates, worker)
 - Starlark service bindings (`RegisterStarlarkHandlers`)
 - handlers.yaml migration (notification.send -> correspondence.initiate_outbound)
-- Saga script updates (cookbook patterns referencing notification.send)
-- Proto generation (`buf generate api/proto`)
+- Saga script updates (dunning_escalation, dunning_unfreeze)
+- Webhook proxy: api-gateway -> Correspondence gRPC
+- Communication preferences table + GDPR enforcement
+- Unsubscribe link generation in non-transactional emails
+- Atlas migrations for correspondence + preferences tables
 
 ### Out of Scope
 
-- Email delivery infrastructure (PRD 052)
-- Auth email flows (PRD 053)
-- SMS/webhook channel implementations (future)
+- SMS/webhook channel implementations (future - interface ready)
 - BlockMailing batch operations (future)
 - Inbound correspondence processing (future)
+- Self-service preference management UI (future - API ready)
+- Auth email flows (PRD 053 - uses shared Sender interface directly)
 
-## 7. Success Criteria
+## 8. Success Criteria
 
 1. `correspondence.initiate_outbound` in handlers.yaml with `proto_ref`
 2. `notification.send` removed from handlers.yaml
-3. All saga scripts updated to use `correspondence.*` namespace
-4. Proto generation succeeds (`buf generate api/proto`)
-5. Existing saga tests pass with the new handler namespace
-6. Service follows standard Meridian service directory structure
+3. All saga scripts use `correspondence.*` namespace
+4. Resend webhook handled by Correspondence service (api-gateway proxies)
+5. Communication preferences enforced on non-transactional correspondence
+6. Unsubscribe link in all marketing/operational emails
+7. `shared/pkg/email/` reduced to interface + types only
+8. Proto generation succeeds (`buf generate api/proto`)
+9. All existing and new tests pass
+10. Service follows standard Meridian service directory structure
 
-## 8. Complexity Estimate
+## 9. Complexity Estimate
 
-3 story points. Proto definition is straightforward. Service stub is
-minimal (delegates to PRD 052 infrastructure). Main effort is the handler
-migration and updating all saga script references.
+5 story points. The proto and service scaffold are straightforward.
+The main effort is moving code without breaking existing functionality
+and wiring the preference checks.
 
 | Task | Points | Deps |
 |---|---|---|
 | Proto + buf generate | 1 | - |
-| Service stub + Starlark bindings | 1 | Proto |
-| handlers.yaml + saga script migration | 1 | Service stub |
+| Service scaffold + migrations | 1 | Proto |
+| Move email internals + gRPC implementation | 2 | Scaffold |
+| handlers.yaml + saga script migration | 1 | gRPC impl |
+| Webhook proxy refactor | 1 | gRPC impl |
+| Communication preferences + GDPR | 2 | gRPC impl |
+| Starlark bindings + integration tests | 1 | All above |
+
+**Note:** Some tasks parallelize. Proto + scaffold can run with preference
+table design. Webhook proxy is independent of saga migration.
