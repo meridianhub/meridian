@@ -18,6 +18,8 @@ Generate type-safe Starlark saga scripts for Meridian's distributed transaction 
 
 **Related:**
 
+- **[Saga Contract Specification](../spec/saga-contract.md)** - Formal specification for how services transact together
+- **[Starlark Saga Architecture](../architecture/starlark-saga-architecture.md)** - Component diagrams, data flow, dependency injection
 - **[Starlark Style Guide](../guides/starlark-style-guide.md)** - Comprehensive syntax and conventions
 
 ---
@@ -198,52 +200,74 @@ From `shared/pkg/saga/schema/handlers.yaml`:
 
 ### position_keeping
 
-**Handlers:**
-
-- `initiate_log` - Create position log entry
-- `get_balance` - Query current balance
-- `create_lien` - Reserve funds
-- `release_lien` - Release reserved funds
-- `calculate_cost` - Calculate cost with quality ladder
-
-### financial_accounting
-
-**Handlers:**
-
-- `initiate_booking_log` - Start booking transaction
-- `capture_posting` - Record DEBIT or CREDIT
-- `update_booking_log` - Change status (e.g., to POSTED)
-- `get_balance` - Query ledger balance
+- `initiate_log` - Initiate a position log entry for a DEBIT or CREDIT transaction (compensate: `cancel_log`)
+- `update_log` - Update an existing position log entry
+- `cancel_log` - Cancel a position log entry (compensation handler)
 
 ### current_account
 
-**Handlers:**
+- `create_lien` - Create a lien (hold) on an account for a specified amount (compensate: `terminate_lien`)
+- `execute_lien` - Execute (consume) a previously created lien
+- `terminate_lien` - Terminate (release) a lien without execution (compensation handler)
+- `save` - Persist current account metadata for a transaction
+- `control` - Perform lifecycle control action on an account (FREEZE, UNFREEZE, CLOSE)
 
-- `save` - Persist account metadata
-- `get` - Retrieve account
+### financial_accounting
 
-### reference_data
+- `initiate_booking_log` - Initiate a booking log for a deposit or withdrawal transaction
+- `update_booking_log` - Update the status of an existing booking log
+- `capture_posting` - Capture a single-sided posting entry within a booking log (compensate: `compensate_posting`)
+- `compensate_posting` - Compensate (reverse) a captured posting entry
+- `create_booking` - Create a booking log entry for audit purposes
+- `post_entries` - Post double-entry accounting entries to the ledger (compensate: `reverse_entries`)
+- `reverse_entries` - Reverse previously posted accounting entries (compensation handler)
 
-**Handlers:**
+### financial_gateway (external)
 
-- `get_instrument` - Fetch instrument definition
-- `list_instruments` - Query instruments
-- `validate_quantity` - CEL-based validation
+- `dispatch_payment` - Dispatch a payment to an external provider (compensate: `cancel_payment`)
+- `cancel_payment` - Cancel a pending payment dispatch (compensation handler)
+- `dispatch_refund` - Dispatch a refund for a previously processed payment
+
+### operational_gateway (external)
+
+- `dispatch_instruction` - Queue an instruction for dispatch to an external provider (compensate: `cancel_instruction`)
+- `cancel_instruction` - Cancel a pending instruction before dispatch (compensation handler)
+- `get_instruction` - Get instruction status and details by ID
+
+### reconciliation
+
+- `initiate_run` - Initiate a new settlement reconciliation run (compensate: `cancel_run`)
+- `execute_run` - Trigger execution of a pending settlement run
+- `retrieve_run` - Retrieve a settlement run summary
+- `cancel_run` - Cancel a settlement run (compensation handler)
+- `assert_balance` - Evaluate a balance assertion against current positions
+- `initiate_dispute` - Raise a formal dispute against a detected variance
 
 ### party
 
-**Handlers:**
+- `get_default_payment_method` - Retrieve the default payment method for a party
+- `list_participants` - List active participants for a syndicate organization
+- `get_structuring_data` - Retrieve structuring metadata for a participant in a syndicate
 
-- `get_party` - Fetch party information
+### internal_account
+
+- `initiate` - Initiate a new internal account
+- `retrieve` - Retrieve an internal account by ID
+- `get_balance` - Query the current balance for an internal account
 
 ### market_information
 
-**Handlers:**
+- `get_rate` - Fetch FX rates for currency pair conversion
 
-- `get_meter_reads` - Fetch energy meter readings
-- `get_settlement_status` - Check settlement status
+### reference_data
 
-**Always check handlers.yaml for the latest available handlers.**
+- `retrieve_instrument` - Retrieve an instrument definition by code and version
+
+### notification
+
+- `send` - Send a notification (email) to a party
+
+**Always check `shared/pkg/saga/schema/handlers.yaml` for the latest available handlers and their compensation pairs.**
 
 ---
 
