@@ -1,6 +1,6 @@
 // Atlas configuration for Control Plane Service
 // Manages manifest application, validation, diffing, and staff identity
-// Shares meridian_platform database with tenant service
+// Uses dedicated meridian_control_plane database
 
 env "local" {
   // Service-specific migration directory
@@ -47,7 +47,7 @@ env "ci" {
 
 env "production" {
   // Production environment - apply only, never diff
-  // URL points to shared platform database (meridian_platform)
+  // URL points to service-specific database (meridian_control_plane)
   url = getenv("DATABASE_URL")
 
   migration {

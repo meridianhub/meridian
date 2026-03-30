@@ -429,7 +429,7 @@ func wireControlPlane(ctx context.Context, server *grpc.Server, pool *pgxpool.Po
 	// Ensure the apply_manifest saga definition is seeded in public.platform_saga_definition.
 	// Uses the control-plane pool intentionally: this seeds a platform-level table distinct
 	// from the tenant-scoped saga_definition table served by SagaRegistryService (reference-data).
-	// In the unified binary all pools share the same database, but the semantic ownership is control-plane.
+	// The control-plane has its own database (meridian_control_plane).
 	if err := controlplaneservice.EnsurePlatformSaga(ctx, pool); err != nil {
 		logger.Warn("failed to seed platform saga (non-fatal, --bootstrap will retry)", "error", err)
 	}

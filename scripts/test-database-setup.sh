@@ -16,11 +16,13 @@ TEST_TABLE="test_permissions_$$"  # Include PID for uniqueness
 # Service databases and their users (must match init-database.sh)
 DATABASES=(
   "meridian_platform:meridian_platform_user"
+  "meridian_control_plane:meridian_control_plane_user"
   "meridian_current_account:meridian_current_account_user"
   "meridian_financial_accounting:meridian_financial_accounting_user"
   "meridian_position_keeping:meridian_position_keeping_user"
   "meridian_payment_order:meridian_payment_order_user"
   "meridian_party:meridian_party_user"
+  "meridian_internal_account:meridian_internal_account_user"
 )
 
 TESTS_PASSED=0

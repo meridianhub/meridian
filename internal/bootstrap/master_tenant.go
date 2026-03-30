@@ -40,6 +40,10 @@ type Config struct {
 	// PlatformDB is the GORM connection to meridian_platform for provisioning status.
 	PlatformDB *gorm.DB
 
+	// ControlPlaneDB is the GORM connection to meridian_control_plane for
+	// manifest_versions seeding (used by seedPlatformManifest).
+	ControlPlaneDB *gorm.DB
+
 	// ControlPlanePool is the pgxpool connection used for the control-plane database
 	// (saga definitions, apply jobs).
 	ControlPlanePool *pgxpool.Pool
@@ -82,8 +86,8 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("manifest validation: %w", err)
 	}
 
-	// Step 4: Seed platform manifest into master tenant schema
-	if err := seedPlatformManifest(ctx, cfg.PlatformDB, logger); err != nil {
+	// Step 4: Seed platform manifest into master tenant schema (control-plane DB)
+	if err := seedPlatformManifest(ctx, cfg.ControlPlaneDB, logger); err != nil {
 		return fmt.Errorf("seed platform manifest: %w", err)
 	}
 
