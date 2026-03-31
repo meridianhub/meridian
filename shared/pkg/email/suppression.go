@@ -42,7 +42,7 @@ type SuppressionRepository interface {
 type SuppressedAddressEntity struct {
 	ID              uuid.UUID `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	TenantID        string    `gorm:"not null;uniqueIndex:uq_suppressed_addresses_tenant_email,priority:1"`
-	EmailAddress    string    `gorm:"not null;size:255;uniqueIndex:uq_suppressed_addresses_tenant_email,priority:2"`
+	EmailAddress    string    `gorm:"not null;size:255;uniqueIndex:uq_suppressed_addresses_tenant_email,priority:2;index:idx_suppressed_addresses_email"`
 	SuppressionType string    `gorm:"not null;size:20"`
 	ProviderID      *string   `gorm:"size:255"`
 	Reason          *string   `gorm:"type:text"`
@@ -55,8 +55,12 @@ func (SuppressedAddressEntity) TableName() string {
 	return "suppressed_addresses"
 }
 
-// ErrNilSuppressionEntry is returned when a nil entry is passed to AddSuppression.
-var ErrNilSuppressionEntry = errors.New("email: suppression entry must not be nil")
+// Suppression validation errors.
+var (
+	ErrNilSuppressionEntry      = errors.New("email: suppression entry must not be nil")
+	ErrEmptySuppressionEmail    = errors.New("email: suppression entry must have an email address")
+	ErrEmptySuppressionTenantID = errors.New("email: suppression entry must have a tenant ID")
+)
 
 var _ SuppressionRepository = (*PostgresSuppressionRepository)(nil)
 
@@ -90,8 +94,15 @@ func (r *PostgresSuppressionRepository) AddSuppression(ctx context.Context, entr
 		return ErrNilSuppressionEntry
 	}
 
-	now := time.Now().UTC()
 	normalised := strings.ToLower(strings.TrimSpace(entry.EmailAddress))
+	if normalised == "" {
+		return ErrEmptySuppressionEmail
+	}
+	if strings.TrimSpace(entry.TenantID) == "" {
+		return ErrEmptySuppressionTenantID
+	}
+
+	now := time.Now().UTC()
 
 	var providerID *string
 	if entry.ProviderID != "" {

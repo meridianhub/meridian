@@ -497,6 +497,7 @@ func TestProcessBatch_NotSuppressed_SendsNormally(t *testing.T) {
 	assert.Equal(t, 1, sender.calls, "should send when not suppressed")
 	assert.Equal(t, 1, outbox.markSentCalls)
 	assert.Equal(t, 0, outbox.cancelCalls)
+	assert.Equal(t, []string{"user@example.com"}, suppression.checkedAddrs, "should have checked the recipient")
 }
 
 func TestProcessBatch_SuppressionCheckError_ProceedsWithSend(t *testing.T) {
@@ -517,6 +518,7 @@ func TestProcessBatch_SuppressionCheckError_ProceedsWithSend(t *testing.T) {
 
 	assert.Equal(t, 1, sender.calls, "should send when suppression check fails")
 	assert.Equal(t, 1, outbox.markSentCalls)
+	assert.Equal(t, []string{"user@example.com"}, suppression.checkedAddrs, "should have attempted the check")
 }
 
 func TestProcessBatch_NilSuppressionRepo_SkipsCheck(t *testing.T) {
