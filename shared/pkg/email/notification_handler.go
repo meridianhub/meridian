@@ -31,6 +31,7 @@ var (
 	ErrMissingType                 = fmt.Errorf("email: missing required parameter: type")
 	ErrMissingOutbox               = fmt.Errorf("email: outbox repository is required")
 	ErrMissingEmailResolver        = fmt.Errorf("email: email resolver is required")
+	ErrMissingTenantContext        = fmt.Errorf("email: tenant context required for preference enforcement")
 )
 
 // NewNotificationSendHandler creates a saga handler for notification.send.
@@ -107,7 +108,7 @@ func checkPreferences(ctx *saga.StarlarkContext, deps NotificationHandlerDeps, p
 
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
-		return false, nil, fmt.Errorf("email: tenant context required for preference enforcement")
+		return false, nil, ErrMissingTenantContext
 	}
 	allowed, reason, err := deps.PreferenceEnforcer.ShouldSend(
 		ctx, string(tenantID), recipient, channel, templateName, category)
