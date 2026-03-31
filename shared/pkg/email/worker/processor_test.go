@@ -105,11 +105,11 @@ func (m *mockInvoiceChecker) IsInvoicePaid(_ context.Context, _, _ string) (bool
 }
 
 type mockSuppressionRepo struct {
-	suppressed    bool
-	isSuppErr     error
-	addCalls      int
-	lastAddEntry  *email.SuppressionEntry
-	checkedAddrs  []string
+	suppressed   bool
+	isSuppErr    error
+	addCalls     int
+	lastAddEntry *email.SuppressionEntry
+	checkedAddrs []string
 }
 
 func (m *mockSuppressionRepo) IsSuppressed(_ context.Context, addr string) (bool, error) {

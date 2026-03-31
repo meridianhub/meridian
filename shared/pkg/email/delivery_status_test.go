@@ -25,10 +25,12 @@ func (s *stubAuditRepo) Record(_ context.Context, _ *email.AuditEntry) error { r
 func (s *stubAuditRepo) FindByOutboxID(_ context.Context, _ uuid.UUID) ([]email.AuditEntry, error) {
 	return nil, nil
 }
+
 func (s *stubAuditRepo) FindByProviderID(_ context.Context, _ string) ([]email.AuditEntry, error) {
 	s.findByProviderIDCalls++
 	return s.findByProviderIDResult, s.findByProviderIDErr
 }
+
 func (s *stubAuditRepo) RecordByProviderID(_ context.Context, _ string, _ email.AuditStatus, _ map[string]any) error {
 	s.recordCalls++
 	return s.recordByProviderIDErr
@@ -44,6 +46,7 @@ type stubSuppressionRepo struct {
 func (s *stubSuppressionRepo) IsSuppressed(_ context.Context, _ string) (bool, error) {
 	return false, nil
 }
+
 func (s *stubSuppressionRepo) AddSuppression(_ context.Context, entry *email.SuppressionEntry) error {
 	s.addCalls++
 	s.lastEntry = entry
