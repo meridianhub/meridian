@@ -58,11 +58,11 @@ func NewNotificationSendHandler(deps NotificationHandlerDeps) saga.Handler {
 		recipient, _ := params["recipient"].(string)
 
 		if deps.PreferenceEnforcer != nil {
-			result, err := checkPreferences(ctx, deps, params, recipient)
+			suppressed, result, err := checkPreferences(ctx, deps, params, recipient)
 			if err != nil {
 				return nil, err
 			}
-			if result != nil {
+			if suppressed {
 				return result, nil
 			}
 		}
@@ -92,9 +92,9 @@ func NewNotificationSendHandler(deps NotificationHandlerDeps) saga.Handler {
 	}
 }
 
-// checkPreferences evaluates communication preferences. Returns a non-nil result
-// map when the message should be suppressed, or (nil, nil) when sending is allowed.
-func checkPreferences(ctx *saga.StarlarkContext, deps NotificationHandlerDeps, params map[string]any, recipient string) (any, error) {
+// checkPreferences evaluates communication preferences. Returns (true, result, nil)
+// when the message should be suppressed, or (false, nil, nil) when sending is allowed.
+func checkPreferences(ctx *saga.StarlarkContext, deps NotificationHandlerDeps, params map[string]any, recipient string) (bool, any, error) {
 	category, _ := params["category"].(string)
 	if category == "" {
 		category = CategoryTransactional // Default: legacy callers are transactional
@@ -109,17 +109,17 @@ func checkPreferences(ctx *saga.StarlarkContext, deps NotificationHandlerDeps, p
 	allowed, reason, err := deps.PreferenceEnforcer.ShouldSend(
 		ctx, string(tenantID), recipient, channel, templateName, category)
 	if err != nil {
-		return nil, fmt.Errorf("email: preference enforcement failed: %w", err)
+		return false, nil, fmt.Errorf("email: preference enforcement failed: %w", err)
 	}
 	if !allowed {
 		deps.Logger.Info("notification suppressed by preference",
 			"recipient", recipient, "category", category, "reason", reason)
-		return map[string]any{
+		return true, map[string]any{
 			"status":             "SUPPRESSED",
 			"suppression_reason": reason,
 		}, nil
 	}
-	return nil, nil
+	return false, nil, nil
 }
 
 func validateNotificationParams(params map[string]any) error {
