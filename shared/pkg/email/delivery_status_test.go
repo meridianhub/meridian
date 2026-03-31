@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/pkg/email"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -59,7 +60,7 @@ func (s *stubSuppressionRepo) AddSuppression(_ context.Context, entry *email.Sup
 func TestDeliveryStatusRecorder_RecordDelivered_NoSuppression(t *testing.T) {
 	audit := &stubAuditRepo{}
 	supp := &stubSuppressionRepo{}
-	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-1", email.AuditStatusDelivered, nil)
 
@@ -76,7 +77,7 @@ func TestDeliveryStatusRecorder_RecordBounced_AddsSuppression(t *testing.T) {
 		},
 	}
 	supp := &stubSuppressionRepo{}
-	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-2", email.AuditStatusBounced, nil)
 
@@ -96,7 +97,7 @@ func TestDeliveryStatusRecorder_RecordComplained_AddsSuppression(t *testing.T) {
 		},
 	}
 	supp := &stubSuppressionRepo{}
-	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-3", email.AuditStatusComplained, nil)
 
@@ -112,7 +113,7 @@ func TestDeliveryStatusRecorder_MultipleRecipients(t *testing.T) {
 		},
 	}
 	supp := &stubSuppressionRepo{}
-	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-4", email.AuditStatusBounced, nil)
 
@@ -123,7 +124,7 @@ func TestDeliveryStatusRecorder_MultipleRecipients(t *testing.T) {
 func TestDeliveryStatusRecorder_AuditError_PropagatesImmediately(t *testing.T) {
 	audit := &stubAuditRepo{recordByProviderIDErr: email.ErrAuditEntryNotFound}
 	supp := &stubSuppressionRepo{}
-	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-5", email.AuditStatusBounced, nil)
 
@@ -133,7 +134,7 @@ func TestDeliveryStatusRecorder_AuditError_PropagatesImmediately(t *testing.T) {
 
 func TestDeliveryStatusRecorder_NilSuppressionRepo_SkipsSuppression(t *testing.T) {
 	audit := &stubAuditRepo{}
-	recorder := email.NewDeliveryStatusRecorder(audit, nil, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, nil, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-6", email.AuditStatusBounced, nil)
 
@@ -149,7 +150,7 @@ func TestDeliveryStatusRecorder_SuppressionError_DoesNotFail(t *testing.T) {
 		},
 	}
 	supp := &stubSuppressionRepo{addErr: errors.New("db error")}
-	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-7", email.AuditStatusBounced, nil)
 
@@ -162,7 +163,7 @@ func TestDeliveryStatusRecorder_FindByProviderIDFails_LogsWarning(t *testing.T) 
 		findByProviderIDErr: errors.New("db error"),
 	}
 	supp := &stubSuppressionRepo{}
-	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-8", email.AuditStatusBounced, nil)
 
@@ -175,10 +176,92 @@ func TestDeliveryStatusRecorder_NoAuditEntries_SkipsSuppression(t *testing.T) {
 		findByProviderIDResult: []email.AuditEntry{},
 	}
 	supp := &stubSuppressionRepo{}
-	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
 
 	err := recorder.RecordDeliveryStatus(context.Background(), "msg-9", email.AuditStatusBounced, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, supp.addCalls)
+}
+
+// --- Metrics helpers ---
+
+func newTestDeliveryMetrics(t *testing.T) (*email.Metrics, *prometheus.Registry) {
+	t.Helper()
+	reg := prometheus.NewRegistry()
+	m := email.NewMetricsWithRegistry(reg)
+	return m, reg
+}
+
+func getCounterWithLabel(t *testing.T, reg *prometheus.Registry, name, labelName, labelValue string) float64 {
+	t.Helper()
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, f := range families {
+		if f.GetName() != name {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == labelName && lp.GetValue() == labelValue {
+					if m.Counter != nil {
+						return m.Counter.GetValue()
+					}
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// --- Metrics tests ---
+
+func TestDeliveryStatusRecorder_Complaint_IncrementsComplaintMetric(t *testing.T) {
+	audit := &stubAuditRepo{
+		findByProviderIDResult: []email.AuditEntry{
+			{TenantID: "tenant-42", ToAddresses: []string{"spam@example.com"}},
+		},
+	}
+	supp := &stubSuppressionRepo{}
+	m, reg := newTestDeliveryMetrics(t)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, m, nil)
+
+	err := recorder.RecordDeliveryStatus(context.Background(), "msg-c1", email.AuditStatusComplained, nil)
+
+	require.NoError(t, err)
+
+	complaints := getCounterWithLabel(t, reg, "meridian_email_complaints_total", "tenant_id", "tenant-42")
+	assert.Equal(t, float64(1), complaints, "complaint counter should be incremented for the tenant")
+}
+
+func TestDeliveryStatusRecorder_Bounce_DoesNotIncrementComplaintMetric(t *testing.T) {
+	audit := &stubAuditRepo{
+		findByProviderIDResult: []email.AuditEntry{
+			{TenantID: "tenant-42", ToAddresses: []string{"bounced@example.com"}},
+		},
+	}
+	supp := &stubSuppressionRepo{}
+	m, reg := newTestDeliveryMetrics(t)
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, m, nil)
+
+	err := recorder.RecordDeliveryStatus(context.Background(), "msg-b1", email.AuditStatusBounced, nil)
+
+	require.NoError(t, err)
+
+	complaints := getCounterWithLabel(t, reg, "meridian_email_complaints_total", "tenant_id", "tenant-42")
+	assert.Equal(t, float64(0), complaints, "bounce should not increment complaint counter")
+}
+
+func TestDeliveryStatusRecorder_NilMetrics_ComplaintDoesNotPanic(t *testing.T) {
+	audit := &stubAuditRepo{
+		findByProviderIDResult: []email.AuditEntry{
+			{TenantID: "tenant-1", ToAddresses: []string{"user@example.com"}},
+		},
+	}
+	supp := &stubSuppressionRepo{}
+	recorder := email.NewDeliveryStatusRecorder(audit, supp, nil, nil)
+
+	require.NotPanics(t, func() {
+		_ = recorder.RecordDeliveryStatus(context.Background(), "msg-np", email.AuditStatusComplained, nil)
+	})
 }

@@ -118,7 +118,7 @@ func buildPayload(t *testing.T, eventType, emailID string) []byte {
 
 func TestResendWebhookHandler_ValidSignature(t *testing.T) {
 	repo := &fakeAuditRepo{}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	body := buildPayload(t, "email.delivered", "resend-id-001")
 	r := buildWebhookRequest(t, body, testSecret)
@@ -142,7 +142,7 @@ func TestResendWebhookHandler_ValidSignature(t *testing.T) {
 
 func TestResendWebhookHandler_InvalidSignature(t *testing.T) {
 	repo := &fakeAuditRepo{}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	body := buildPayload(t, "email.delivered", "resend-id-001")
 	r := buildWebhookRequest(t, body, testSecret, func(h http.Header) {
@@ -162,7 +162,7 @@ func TestResendWebhookHandler_InvalidSignature(t *testing.T) {
 
 func TestResendWebhookHandler_MissingHeaders(t *testing.T) {
 	repo := &fakeAuditRepo{}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	body := buildPayload(t, "email.delivered", "resend-id-001")
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/resend", bytes.NewReader(body))
@@ -188,7 +188,7 @@ func TestResendWebhookHandler_EventTypesRouteCorrectly(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.eventType, func(t *testing.T) {
 			repo := &fakeAuditRepo{}
-			handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+			handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 			body := buildPayload(t, tc.eventType, "resend-id-test")
 			r := buildWebhookRequest(t, body, testSecret)
@@ -211,7 +211,7 @@ func TestResendWebhookHandler_EventTypesRouteCorrectly(t *testing.T) {
 
 func TestResendWebhookHandler_UnknownEventType_Returns200(t *testing.T) {
 	repo := &fakeAuditRepo{}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	body := buildPayload(t, "email.opened", "resend-id-001") // unknown type
 	r := buildWebhookRequest(t, body, testSecret)
@@ -229,7 +229,7 @@ func TestResendWebhookHandler_UnknownEventType_Returns200(t *testing.T) {
 
 func TestResendWebhookHandler_AuditEntryNotFound_Returns200(t *testing.T) {
 	repo := &fakeAuditRepo{notFoundOnIDs: map[string]bool{"missing-id": true}}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	body := buildPayload(t, "email.delivered", "missing-id")
 	r := buildWebhookRequest(t, body, testSecret)
@@ -245,7 +245,7 @@ func TestResendWebhookHandler_AuditEntryNotFound_Returns200(t *testing.T) {
 
 func TestResendWebhookHandler_RepoError_Returns500(t *testing.T) {
 	repo := &fakeAuditRepo{returnErr: errors.New("db connection lost")}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	body := buildPayload(t, "email.delivered", "resend-id-err")
 	r := buildWebhookRequest(t, body, testSecret)
@@ -260,7 +260,7 @@ func TestResendWebhookHandler_RepoError_Returns500(t *testing.T) {
 
 func TestResendWebhookHandler_WrongMethod(t *testing.T) {
 	repo := &fakeAuditRepo{}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/webhooks/resend", nil)
 	w := httptest.NewRecorder()
@@ -274,7 +274,7 @@ func TestResendWebhookHandler_WrongMethod(t *testing.T) {
 
 func TestResendWebhookHandler_InvalidBody_Returns400(t *testing.T) {
 	repo := &fakeAuditRepo{}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	body := []byte("not valid json")
 	r := buildWebhookRequest(t, body, testSecret)
@@ -291,7 +291,7 @@ func TestResendWebhookHandler_MultipleSignatures_FirstInvalid(t *testing.T) {
 	// Svix may send multiple signatures (key rotation). Verification should pass
 	// if any of them match.
 	repo := &fakeAuditRepo{}
-	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil), testSecret, slog.Default())
+	handler := gateway.NewResendWebhookHandler(email.NewDeliveryStatusRecorder(repo, nil, nil, nil), testSecret, slog.Default())
 
 	body := buildPayload(t, "email.delivered", "resend-id-multi")
 	msgID, ts, validSig := signPayload(t, body, "msg_multi", testSecret)

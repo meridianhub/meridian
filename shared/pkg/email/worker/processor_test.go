@@ -198,6 +198,67 @@ func TestProcessBatch_HappyPath(t *testing.T) {
 	assert.Equal(t, float64(1), getMetricValue(t, reg, "meridian_email_outbox_send_duration_seconds"))
 }
 
+func getMetricValueWithLabel(t *testing.T, reg *prometheus.Registry, name, labelName, labelValue string) float64 {
+	t.Helper()
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	for _, f := range families {
+		if f.GetName() != name {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == labelName && lp.GetValue() == labelValue {
+					if m.Counter != nil {
+						return m.Counter.GetValue()
+					}
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func TestProcessBatch_HappyPath_IncrementsEmailSentMetric(t *testing.T) {
+	ctx := context.Background()
+	m, reg := newTestMetrics(t)
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-sent", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, NewEmailMetrics(m), nil)
+
+	entry := newTestEntry("invoice")
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	sent := getMetricValueWithLabel(t, reg, "meridian_email_sent_total", "tenant_id", "tenant-1")
+	assert.Equal(t, float64(1), sent, "sent counter should be incremented for the tenant")
+}
+
+func TestProcessBatch_SendFailure_DoesNotIncrementSentMetric(t *testing.T) {
+	ctx := context.Background()
+	m, reg := newTestMetrics(t)
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{err: errors.New("smtp error")}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, NewEmailMetrics(m), nil)
+
+	entry := newTestEntry("invoice")
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	sent := getMetricValueWithLabel(t, reg, "meridian_email_sent_total", "tenant_id", "tenant-1")
+	assert.Equal(t, float64(0), sent, "sent counter should not be incremented on send failure")
+}
+
 func TestProcessBatch_TemplateRenderFailure_DeadLettersImmediately(t *testing.T) {
 	ctx := context.Background()
 	m, reg := newTestMetrics(t)

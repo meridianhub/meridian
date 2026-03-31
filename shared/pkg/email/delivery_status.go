@@ -11,18 +11,20 @@ import (
 type DeliveryStatusRecorder struct {
 	auditRepo       AuditRepository
 	suppressionRepo SuppressionRepository
+	metrics         *Metrics
 	logger          *slog.Logger
 }
 
-// NewDeliveryStatusRecorder creates a new recorder. suppressionRepo may be nil
-// to skip suppression recording.
-func NewDeliveryStatusRecorder(auditRepo AuditRepository, suppressionRepo SuppressionRepository, logger *slog.Logger) *DeliveryStatusRecorder {
+// NewDeliveryStatusRecorder creates a new recorder. suppressionRepo and metrics
+// may be nil to skip suppression recording and metric tracking respectively.
+func NewDeliveryStatusRecorder(auditRepo AuditRepository, suppressionRepo SuppressionRepository, metrics *Metrics, logger *slog.Logger) *DeliveryStatusRecorder {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &DeliveryStatusRecorder{
 		auditRepo:       auditRepo,
 		suppressionRepo: suppressionRepo,
+		metrics:         metrics,
 		logger:          logger.With("component", "delivery-status-recorder"),
 	}
 }
@@ -66,6 +68,9 @@ func (r *DeliveryStatusRecorder) recordSuppressions(ctx context.Context, provide
 	suppType := SuppressionBounce
 	if status == AuditStatusComplained {
 		suppType = SuppressionComplaint
+		if r.metrics != nil {
+			r.metrics.RecordEmailComplaint(original.TenantID)
+		}
 	}
 
 	for _, addr := range original.ToAddresses {
