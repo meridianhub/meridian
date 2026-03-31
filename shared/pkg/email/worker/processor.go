@@ -104,6 +104,9 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		}
 	}
 
+	// Inject unsubscribe URL into template data for non-transactional emails.
+	p.injectUnsubscribeURL(entry)
+
 	// Render the template. Render errors are deterministic (same template+data will
 	// always fail), so we cancel immediately rather than burning through retries.
 	htmlBody, textBody, err := p.renderer.Render(entry.TemplateName, entry.TemplateData)
@@ -270,15 +273,34 @@ func (p *EmailProcessor) handleRenderFailure(ctx context.Context, entry *email.O
 	return nil
 }
 
-// buildHeaders returns email headers for the given outbox entry.
-// Adds RFC 2369/8058 unsubscribe headers for non-transactional emails.
-func (p *EmailProcessor) buildHeaders(entry *email.OutboxEntry) map[string]string {
-	return email.BuildUnsubscribeHeaders(p.unsubscribeCfg, email.UnsubscribeParams{
+// unsubscribeParams returns the UnsubscribeParams for the given outbox entry.
+func unsubscribeParams(entry *email.OutboxEntry) email.UnsubscribeParams {
+	return email.UnsubscribeParams{
 		TenantID: entry.TenantID,
 		PartyID:  entry.PartyID,
 		Channel:  "EMAIL",
 		Category: entry.Category,
-	})
+	}
+}
+
+// injectUnsubscribeURL adds the UnsubscribeURL key to the entry's TemplateData
+// for non-transactional emails. This makes the URL available to templates for
+// rendering a visible unsubscribe link in the email body.
+func (p *EmailProcessor) injectUnsubscribeURL(entry *email.OutboxEntry) {
+	unsubURL := email.BuildUnsubscribeURL(p.unsubscribeCfg, unsubscribeParams(entry))
+	if unsubURL == "" {
+		return
+	}
+	if entry.TemplateData == nil {
+		entry.TemplateData = make(map[string]any)
+	}
+	entry.TemplateData["UnsubscribeURL"] = unsubURL
+}
+
+// buildHeaders returns email headers for the given outbox entry.
+// Adds RFC 2369/8058 unsubscribe headers for non-transactional emails.
+func (p *EmailProcessor) buildHeaders(entry *email.OutboxEntry) map[string]string {
+	return email.BuildUnsubscribeHeaders(p.unsubscribeCfg, unsubscribeParams(entry))
 }
 
 // handleSendFailure marks the outbox entry as failed, which triggers backoff/dead-letter

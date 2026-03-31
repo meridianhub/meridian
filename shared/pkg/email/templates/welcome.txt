@@ -8,5 +8,7 @@ Sign in: {{.LoginURL}}
 
 Getting Started Guide: {{.GettingStartedURL}}
 
---
+{{if .UnsubscribeURL}}Unsubscribe: {{.UnsubscribeURL}}
+
+{{end}}--
 Meridian - The Operating System for the Real-World Economy

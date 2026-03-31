@@ -25,6 +25,18 @@ func (m *mockRenderer) Render(_ string, _ any) (string, string, error) {
 	return m.html, m.text, m.err
 }
 
+type capturingMockRenderer struct {
+	delegate *mockRenderer
+	calls    int
+	lastData any
+}
+
+func (m *capturingMockRenderer) Render(name string, data any) (string, string, error) {
+	m.calls++
+	m.lastData = data
+	return m.delegate.Render(name, data)
+}
+
 type mockSender struct {
 	result  email.SendResult
 	err     error
@@ -702,6 +714,70 @@ func TestProcessBatch_UnsubscribeHeaders_TransactionalEmail_NoHeaders(t *testing
 
 	require.Equal(t, 1, sender.calls)
 	assert.Nil(t, sender.lastMsg.Headers, "transactional emails should not have unsubscribe headers")
+}
+
+func TestProcessBatch_UnsubscribeURL_InjectedIntoTemplateData(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedData any
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	// Use a capturing renderer to inspect template data.
+	capturingRenderer := &capturingMockRenderer{delegate: renderer}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-url", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(capturingRenderer, sender, outbox, audit, nil, nil, nil, nil)
+	proc.SetUnsubscribeConfig(&email.UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example",
+	})
+
+	entry := newTestEntry("welcome")
+	entry.Category = email.CategoryOperational
+	entry.PartyID = "party-42"
+	entry.TenantID = "tenant-1"
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	require.Equal(t, 1, capturingRenderer.calls)
+	capturedData = capturingRenderer.lastData
+
+	dataMap, ok := capturedData.(map[string]any)
+	require.True(t, ok, "template data should be map[string]any")
+	unsubURL, ok := dataMap["UnsubscribeURL"].(string)
+	require.True(t, ok, "UnsubscribeURL should be a string")
+	assert.Contains(t, unsubURL, "https://app.meridian.example/unsubscribe?token=")
+}
+
+func TestProcessBatch_UnsubscribeURL_NotInjectedForTransactional(t *testing.T) {
+	ctx := context.Background()
+
+	capturingRenderer := &capturingMockRenderer{delegate: &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-txn-url", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(capturingRenderer, sender, outbox, audit, nil, nil, nil, nil)
+	proc.SetUnsubscribeConfig(&email.UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example",
+	})
+
+	entry := newTestEntry("dunning-notice")
+	entry.Category = email.CategoryTransactional
+	entry.PartyID = "party-42"
+	entry.TenantID = "tenant-1"
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	require.Equal(t, 1, capturingRenderer.calls)
+	dataMap, ok := capturingRenderer.lastData.(map[string]any)
+	require.True(t, ok)
+	_, hasURL := dataMap["UnsubscribeURL"]
+	assert.False(t, hasURL, "transactional emails should not have UnsubscribeURL in template data")
 }
 
 func TestProcessBatch_UnsubscribeHeaders_NoConfig_NoHeaders(t *testing.T) {
