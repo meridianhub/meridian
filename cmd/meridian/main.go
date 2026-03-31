@@ -387,13 +387,15 @@ func awaitAndShutdown(
 		provisioningWorker.Stop()
 		logger.Info("provisioning worker stopped")
 	}
+	stopped := 0
 	for _, ew := range emailWorkers {
 		if ew != nil {
 			ew.Stop()
+			stopped++
 		}
 	}
-	if len(emailWorkers) > 0 {
-		logger.Info("email workers stopped")
+	if stopped > 0 {
+		logger.Info("email workers stopped", "count", stopped)
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
