@@ -18,6 +18,8 @@ type OutboxEntity struct {
 	Subject        string         `gorm:"not null;size:500"`
 	TemplateName   string         `gorm:"not null;size:100"`
 	TemplateData   datatypes.JSON `gorm:"not null;default:'{}'"`
+	Category       string         `gorm:"size:20;default:TRANSACTIONAL"`
+	PartyID        string         `gorm:"size:255"`
 	Status         string         `gorm:"not null;size:20;default:PENDING"`
 	Attempts       int            `gorm:"not null;default:0"`
 	MaxAttempts    int            `gorm:"not null;default:5"`
