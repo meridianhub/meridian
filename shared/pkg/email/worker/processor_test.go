@@ -87,6 +87,10 @@ func (m *mockAuditRepo) FindByOutboxID(_ context.Context, _ uuid.UUID) ([]email.
 	return nil, nil
 }
 
+func (m *mockAuditRepo) FindByProviderID(_ context.Context, _ string) ([]email.AuditEntry, error) {
+	return nil, nil
+}
+
 func (m *mockAuditRepo) RecordByProviderID(_ context.Context, _ string, _ email.AuditStatus, _ map[string]any) error {
 	return nil
 }
