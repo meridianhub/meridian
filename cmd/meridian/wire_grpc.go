@@ -331,7 +331,7 @@ func wireCurrentAccount(
 	caEmailOutboxRepo := email.NewPostgresOutboxRepository(db)
 	emailResolver := newGRPCPartyEmailResolver(partyLoopback.Conn())
 	prefRepo := email.NewPostgresPreferenceRepository(db)
-	prefEnforcer := email.NewPreferenceEnforcer(prefRepo, email.DefaultTemplateCategoryMap, logger.With("component", "preference-enforcer"))
+	prefEnforcer := email.NewPreferenceEnforcer(prefRepo, email.DefaultTemplateCategoryMap(), logger.With("component", "preference-enforcer"))
 	notifHandler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
 		Outbox:             caEmailOutboxRepo,
 		EmailResolver:      emailResolver,

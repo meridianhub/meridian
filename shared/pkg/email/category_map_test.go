@@ -16,7 +16,7 @@ func TestDefaultTemplateCategoryMap_AllEntriesHaveValidCategories(t *testing.T) 
 		email.CategoryMarketing:     true,
 	}
 
-	for template, category := range email.DefaultTemplateCategoryMap {
+	for template, category := range email.DefaultTemplateCategoryMap() {
 		assert.True(t, validCategories[category],
 			"template %q has invalid category %q", template, category)
 	}
@@ -30,7 +30,7 @@ func TestDefaultTemplateCategoryMap_TransactionalTemplates(t *testing.T) {
 		"invoice-delivery",
 	}
 	for _, tmpl := range transactional {
-		assert.Equal(t, email.CategoryTransactional, email.DefaultTemplateCategoryMap[tmpl],
+		assert.Equal(t, email.CategoryTransactional, email.DefaultTemplateCategoryMap()[tmpl],
 			"template %q should be TRANSACTIONAL", tmpl)
 	}
 }
@@ -42,7 +42,7 @@ func TestDefaultTemplateCategoryMap_OperationalTemplates(t *testing.T) {
 		"service-update",
 	}
 	for _, tmpl := range operational {
-		assert.Equal(t, email.CategoryOperational, email.DefaultTemplateCategoryMap[tmpl],
+		assert.Equal(t, email.CategoryOperational, email.DefaultTemplateCategoryMap()[tmpl],
 			"template %q should be OPERATIONAL", tmpl)
 	}
 }
@@ -52,7 +52,7 @@ func TestDefaultTemplateCategoryMap_MarketingTemplates(t *testing.T) {
 		"promotional-offer",
 	}
 	for _, tmpl := range marketing {
-		assert.Equal(t, email.CategoryMarketing, email.DefaultTemplateCategoryMap[tmpl],
+		assert.Equal(t, email.CategoryMarketing, email.DefaultTemplateCategoryMap()[tmpl],
 			"template %q should be MARKETING", tmpl)
 	}
 }
@@ -60,12 +60,12 @@ func TestDefaultTemplateCategoryMap_MarketingTemplates(t *testing.T) {
 func TestCategoryEnforcement_MismatchRejectedForAllMapEntries(t *testing.T) {
 	enforcer := email.NewPreferenceEnforcer(
 		&mockPreferenceRepository{},
-		email.DefaultTemplateCategoryMap,
+		email.DefaultTemplateCategoryMap(),
 		slog.Default(),
 	)
 
 	// For each template in the map, try declaring a wrong category and verify rejection.
-	for tmpl, correctCategory := range email.DefaultTemplateCategoryMap {
+	for tmpl, correctCategory := range email.DefaultTemplateCategoryMap() {
 		wrongCategory := email.CategoryMarketing
 		if correctCategory == email.CategoryMarketing {
 			wrongCategory = email.CategoryTransactional
@@ -81,7 +81,7 @@ func TestCategoryEnforcement_MismatchRejectedForAllMapEntries(t *testing.T) {
 func TestCategoryEnforcement_CorrectCategoryAllowed(t *testing.T) {
 	enforcer := email.NewPreferenceEnforcer(
 		&mockPreferenceRepository{},
-		email.DefaultTemplateCategoryMap,
+		email.DefaultTemplateCategoryMap(),
 		slog.Default(),
 	)
 
@@ -103,7 +103,7 @@ func TestCategoryEnforcement_CorrectCategoryAllowed(t *testing.T) {
 func TestCategoryEnforcement_MarketingCorrectCategorySuppressedWithoutOptIn(t *testing.T) {
 	enforcer := email.NewPreferenceEnforcer(
 		&mockPreferenceRepository{}, // no explicit opt-in
-		email.DefaultTemplateCategoryMap,
+		email.DefaultTemplateCategoryMap(),
 		slog.Default(),
 	)
 
@@ -116,7 +116,7 @@ func TestCategoryEnforcement_MarketingCorrectCategorySuppressedWithoutOptIn(t *t
 func TestCategoryEnforcement_UnknownTemplatePassesThrough(t *testing.T) {
 	enforcer := email.NewPreferenceEnforcer(
 		&mockPreferenceRepository{},
-		email.DefaultTemplateCategoryMap,
+		email.DefaultTemplateCategoryMap(),
 		slog.Default(),
 	)
 
