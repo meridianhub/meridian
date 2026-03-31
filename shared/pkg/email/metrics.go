@@ -7,13 +7,13 @@ import (
 
 // Metrics provides Prometheus metrics for the email outbox dispatch pipeline.
 type Metrics struct {
-	pendingTotal        prometheus.Gauge
-	sendDuration        prometheus.Histogram
-	sendErrorsTotal     *prometheus.CounterVec
-	deadLetterTotal     prometheus.Counter
-	cancelledTotal      prometheus.Counter
-	circuitBreakerSt    prometheus.Gauge
-	emailsSentTotal     *prometheus.CounterVec
+	pendingTotal         prometheus.Gauge
+	sendDuration         prometheus.Histogram
+	sendErrorsTotal      *prometheus.CounterVec
+	deadLetterTotal      prometheus.Counter
+	cancelledTotal       prometheus.Counter
+	circuitBreakerSt     prometheus.Gauge
+	emailsSentTotal      *prometheus.CounterVec
 	emailComplaintsTotal *prometheus.CounterVec
 }
 
