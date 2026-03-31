@@ -118,7 +118,7 @@ Protect domain reputation and relocate webhook ownership.
 | Webhook relocation | Move Resend webhook handler from api-gateway to correspondence domain (gRPC `RecordDeliveryStatus`) |
 | Complaint rate metric | Per-tenant complaint rate Prometheus metric; alert on > 0.1% |
 
-### Phase 2: Domain Model + GDPR (8 points)
+### Phase 2: Domain Model + GDPR (9 points)
 
 Proto definition, handler migration, communication preferences.
 
@@ -438,7 +438,7 @@ to a BIAN-aligned service:
 
 ## 9. Complexity Estimate
 
-~22 story points total across all phases.
+~23 story points total across all phases.
 
 | Phase | Task | Points | Deps |
 |---|---|---|---|
