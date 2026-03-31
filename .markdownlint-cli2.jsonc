@@ -53,6 +53,7 @@
     ".claude/**",
     "docs/architecture/**",
     "docs/adr/**",
-    "docs/analysis/**"
+    "docs/analysis/**",
+    "docs/spec/**"
   ]
 }

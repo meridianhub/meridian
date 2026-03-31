@@ -1,5 +1,7 @@
 # Starlark Saga Architecture
 
+> For the formal specification of how services transact together (handler schemas, trigger grammar, error classification, composition model, safety guarantees), see the [Saga Contract Specification](../spec/saga-contract.md).
+
 ## Overview
 
 Meridian uses [Starlark](https://github.com/google/starlark-go) for saga orchestration, enabling tenant-specific
