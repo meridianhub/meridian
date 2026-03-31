@@ -212,6 +212,43 @@ jobs:
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
             docker image prune -f
 
+      - name: Ensure databases exist
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            # Docker init scripts only run on first volume creation. When new
+            # databases are added to init-databases.sql, existing volumes
+            # won't have them. Create any missing databases so the app can start.
+            cd /opt/meridian
+            created=0
+            for db in $(grep -oP 'CREATE DATABASE \K\w+' init-databases.sql); do
+              exists=$(docker exec meridian-postgres-1 psql -U meridian -tAc \
+                "SELECT 1 FROM pg_database WHERE datname = '${db}'")
+              if [ "$exists" != "1" ]; then
+                docker exec meridian-postgres-1 createdb -U meridian "${db}"
+                echo "Created missing database: ${db}"
+                created=1
+              fi
+            done
+            if [ "$created" = "1" ]; then
+              echo "New databases created - restarting app to pick up connections"
+              docker compose restart meridian
+            fi
+            # Wait for the container to be running before attempting migrations
+            for i in $(seq 1 30); do
+              if docker exec meridian-meridian-1 echo ok 2>/dev/null; then
+                echo "Container is running"
+                exit 0
+              fi
+              echo "Waiting for container... ($i/30)"
+              sleep 2
+            done
+            echo "Container failed to start after 60s"
+            exit 1
+
       - name: Run migrations
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
