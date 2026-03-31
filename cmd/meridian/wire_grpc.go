@@ -330,10 +330,13 @@ func wireCurrentAccount(
 	// Uses the current-account database for the email outbox (each service owns its outbox).
 	caEmailOutboxRepo := email.NewPostgresOutboxRepository(db)
 	emailResolver := newGRPCPartyEmailResolver(partyLoopback.Conn())
+	prefRepo := email.NewPostgresPreferenceRepository(db)
+	prefEnforcer := email.NewPreferenceEnforcer(prefRepo, email.DefaultTemplateCategoryMap, logger.With("component", "preference-enforcer"))
 	notifHandler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
-		Outbox:        caEmailOutboxRepo,
-		EmailResolver: emailResolver,
-		Logger:        logger.With("component", "notification-handler"),
+		Outbox:             caEmailOutboxRepo,
+		EmailResolver:      emailResolver,
+		PreferenceEnforcer: prefEnforcer,
+		Logger:             logger.With("component", "notification-handler"),
 	})
 	caOpts = append(caOpts, currentaccountservice.WithNotificationSagaHandler(notifHandler))
 
