@@ -441,6 +441,7 @@ func startEmailWorker(ctx context.Context, serviceName string, db *gorm.DB, logg
 
 	outboxRepo := email.NewPostgresOutboxRepository(db)
 	auditRepo := email.NewPostgresAuditRepository(db)
+	suppressionRepo := email.NewPostgresSuppressionRepository(db)
 	metrics := email.NewMetrics()
 
 	w := emailworker.NewEmailWorker(
@@ -448,6 +449,7 @@ func startEmailWorker(ctx context.Context, serviceName string, db *gorm.DB, logg
 		auditRepo,
 		renderer,
 		sender,
+		suppressionRepo,
 		nil, // invoiceChecker - not wired yet (dunning validation)
 		metrics,
 		dispatch.WorkerConfig{

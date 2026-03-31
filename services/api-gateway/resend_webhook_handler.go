@@ -39,18 +39,21 @@ type resendWebhookPayload struct {
 // Resend uses Svix for webhook delivery. Each request carries three headers:
 // Svix-Id, Svix-Timestamp, and Svix-Signature. The handler verifies the
 // HMAC-SHA256 signature before processing the payload. No auth middleware
-// is applied to this route — the signature IS the authentication.
+// is applied to this route - the signature IS the authentication.
+//
+// HTTP/signature concerns live here; business logic (audit recording,
+// suppression) is delegated to email.DeliveryStatusRecorder.
 type ResendWebhookHandler struct {
-	auditRepo  email.AuditRepository
+	recorder   *email.DeliveryStatusRecorder
 	webhookKey string
 	logger     *slog.Logger
 }
 
 // NewResendWebhookHandler creates a webhook handler.
 // webhookKey must be the raw secret from Resend (format: "whsec_<base64>").
-func NewResendWebhookHandler(auditRepo email.AuditRepository, webhookKey string, logger *slog.Logger) *ResendWebhookHandler {
+func NewResendWebhookHandler(recorder *email.DeliveryStatusRecorder, webhookKey string, logger *slog.Logger) *ResendWebhookHandler {
 	return &ResendWebhookHandler{
-		auditRepo:  auditRepo,
+		recorder:   recorder,
 		webhookKey: webhookKey,
 		logger:     logger,
 	}
@@ -115,7 +118,7 @@ func (h *ResendWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.auditRepo.RecordByProviderID(r.Context(), providerID, auditStatus, payload.Data); err != nil {
+	if err := h.recorder.RecordDeliveryStatus(r.Context(), providerID, auditStatus, payload.Data); err != nil {
 		if errors.Is(err, email.ErrAuditEntryNotFound) {
 			// Not found: may be a replay of an old event or a race with cleanup.
 			h.logger.WarnContext(r.Context(), "resend webhook: no audit entry for provider ID",
@@ -123,7 +126,7 @@ func (h *ResendWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		h.logger.ErrorContext(r.Context(), "resend webhook: failed to record audit entry",
+		h.logger.ErrorContext(r.Context(), "resend webhook: failed to record delivery status",
 			"provider_id", providerID, "type", payload.Type, "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
