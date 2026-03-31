@@ -95,7 +95,8 @@ func BuildUnsubscribeURL(cfg *UnsubscribeConfig, params UnsubscribeParams) strin
 	}
 
 	token := GenerateUnsubscribeToken(cfg.HMACKey, params)
-	return fmt.Sprintf("%s/unsubscribe?token=%s", cfg.BaseURL, url.QueryEscape(token))
+	base := strings.TrimRight(cfg.BaseURL, "/")
+	return fmt.Sprintf("%s/unsubscribe?token=%s", base, url.QueryEscape(token))
 }
 
 // BuildUnsubscribeHeaders returns RFC 2369 List-Unsubscribe and RFC 8058

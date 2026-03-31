@@ -141,6 +141,23 @@ func TestBuildUnsubscribeURL_Transactional_ReturnsEmpty(t *testing.T) {
 	assert.Empty(t, url)
 }
 
+func TestBuildUnsubscribeURL_TrailingSlash_Normalized(t *testing.T) {
+	cfg := &UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example/",
+	}
+	params := UnsubscribeParams{
+		TenantID: "tenant-1",
+		PartyID:  "party-42",
+		Channel:  "EMAIL",
+		Category: CategoryOperational,
+	}
+
+	url := BuildUnsubscribeURL(cfg, params)
+	assert.Contains(t, url, "https://app.meridian.example/unsubscribe?token=")
+	assert.NotContains(t, url, "//unsubscribe")
+}
+
 func TestBuildUnsubscribeURL_NilConfig_ReturnsEmpty(t *testing.T) {
 	url := BuildUnsubscribeURL(nil, UnsubscribeParams{Category: CategoryOperational})
 	assert.Empty(t, url)
