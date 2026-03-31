@@ -155,7 +155,10 @@ func WithInstrumentGetter(getter InstrumentGetter) Option {
 
 // WithNotificationSagaHandler injects a real notification.send saga handler,
 // replacing the default stub that returns errHandlerNotImplemented.
-// The handler is applied during saga runner construction.
+//
+// Constructor-only: this option is consumed during saga runner construction
+// in NewServiceWithExistingClients. Calling ApplyOptions with this option
+// after construction has no effect on the already-built saga runner.
 func WithNotificationSagaHandler(handler saga.Handler) Option {
 	return func(s *Service) {
 		s.notificationHandler = handler

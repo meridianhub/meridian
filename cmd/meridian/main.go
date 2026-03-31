@@ -329,14 +329,14 @@ func setupAndStartGateway(ctx context.Context, infra *unifiedInfra, grpcPort, ht
 	extraGWOpts = append(extraGWOpts, bffAuthOpts...)
 
 	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
-	emailOutboxRepo := email.NewPostgresOutboxRepository(infra.conns.gormDB("payment-order"))
-	if regOpt := wireRegistration(infra.conns.gormDB("identity"), infra.conns.gormDB("tenant"), infra.loopback.rawConn, baseDomain, emailOutboxRepo, logger); regOpt != nil {
+	identityEmailOutboxRepo := email.NewPostgresOutboxRepository(infra.conns.gormDB("identity"))
+	if regOpt := wireRegistration(infra.conns.gormDB("identity"), infra.conns.gormDB("tenant"), infra.loopback.rawConn, baseDomain, identityEmailOutboxRepo, logger); regOpt != nil {
 		extraGWOpts = append(extraGWOpts, regOpt)
 	}
-	if verifyOpt := wireVerification(infra.conns.gormDB("identity"), emailOutboxRepo, baseDomain, logger); verifyOpt != nil {
+	if verifyOpt := wireVerification(infra.conns.gormDB("identity"), identityEmailOutboxRepo, baseDomain, logger); verifyOpt != nil {
 		extraGWOpts = append(extraGWOpts, verifyOpt)
 	}
-	if resetOpt := wirePasswordReset(infra.conns.gormDB("identity"), emailOutboxRepo, baseDomain, logger); resetOpt != nil {
+	if resetOpt := wirePasswordReset(infra.conns.gormDB("identity"), identityEmailOutboxRepo, baseDomain, logger); resetOpt != nil {
 		extraGWOpts = append(extraGWOpts, resetOpt)
 	}
 	if webhookOpt := wireResendWebhook(infra.conns.gormDB("payment-order"), logger); webhookOpt != nil {
