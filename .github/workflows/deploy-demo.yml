@@ -241,11 +241,13 @@ jobs:
             for i in $(seq 1 30); do
               if docker exec meridian-meridian-1 echo ok 2>/dev/null; then
                 echo "Container is running"
-                break
+                exit 0
               fi
               echo "Waiting for container... ($i/30)"
               sleep 2
             done
+            echo "Container failed to start after 60s"
+            exit 1
 
       - name: Run migrations
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
