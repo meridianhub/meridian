@@ -41,35 +41,40 @@ func (r *DeliveryStatusRecorder) RecordDeliveryStatus(ctx context.Context, provi
 		return err
 	}
 
-	// Track complaint metrics independently of suppression config.
-	if status == AuditStatusComplained && r.metrics != nil {
-		r.recordComplaintMetric(ctx, providerID)
+	needMetric := status == AuditStatusComplained && r.metrics != nil
+	needSuppression := r.suppressionRepo != nil && (status == AuditStatusBounced || status == AuditStatusComplained)
+
+	if !needMetric && !needSuppression {
+		return nil
 	}
 
-	// Add suppression on bounce/complaint.
-	if r.suppressionRepo != nil && (status == AuditStatusBounced || status == AuditStatusComplained) {
-		r.recordSuppressions(ctx, providerID, status)
-	}
-
-	return nil
-}
-
-// recordSuppressions looks up audit entries by provider ID to get tenant and
-// recipients, then writes suppression records. Errors are logged but not
-// propagated - the audit record is the primary concern.
-func (r *DeliveryStatusRecorder) recordSuppressions(ctx context.Context, providerID string, status AuditStatus) {
+	// Resolve audit entries once for both metrics and suppression.
 	entries, err := r.auditRepo.FindByProviderID(ctx, providerID)
 	if err != nil || len(entries) == 0 {
-		r.logger.WarnContext(ctx, "cannot resolve recipients for suppression",
+		r.logger.WarnContext(ctx, "cannot resolve audit entries for post-delivery processing",
 			"provider_id", providerID,
 			"error", err,
 		)
-		return
+		return nil
 	}
 
 	// Use the oldest entry (original SENT record) for tenant/recipient info.
 	original := entries[len(entries)-1]
 
+	if needMetric {
+		r.metrics.RecordEmailComplaint(original.TenantID)
+	}
+
+	if needSuppression {
+		r.recordSuppressions(ctx, providerID, status, original)
+	}
+
+	return nil
+}
+
+// recordSuppressions writes suppression records for each recipient. Errors are
+// logged but not propagated - the audit record is the primary concern.
+func (r *DeliveryStatusRecorder) recordSuppressions(ctx context.Context, providerID string, status AuditStatus, original AuditEntry) {
 	suppType := SuppressionBounce
 	if status == AuditStatusComplained {
 		suppType = SuppressionComplaint
@@ -89,18 +94,4 @@ func (r *DeliveryStatusRecorder) recordSuppressions(ctx context.Context, provide
 			)
 		}
 	}
-}
-
-// recordComplaintMetric resolves tenant from audit entries and increments the
-// complaint counter. Errors are logged but not propagated.
-func (r *DeliveryStatusRecorder) recordComplaintMetric(ctx context.Context, providerID string) {
-	entries, err := r.auditRepo.FindByProviderID(ctx, providerID)
-	if err != nil || len(entries) == 0 {
-		r.logger.WarnContext(ctx, "cannot resolve tenant for complaint metric",
-			"provider_id", providerID,
-			"error", err,
-		)
-		return
-	}
-	r.metrics.RecordEmailComplaint(entries[len(entries)-1].TenantID)
 }
