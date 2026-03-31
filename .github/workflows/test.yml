@@ -174,7 +174,7 @@ jobs:
         run: go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ./coverage/coverage-filtered.out
           flags: unittests
