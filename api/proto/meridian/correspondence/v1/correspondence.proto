@@ -80,6 +80,43 @@ enum CorrespondenceCategory {
   CORRESPONDENCE_CATEGORY_MARKETING = 3;
 }
 
+// CorrespondenceStatus tracks the lifecycle of an outbound correspondence
+// from initiation through delivery.
+enum CorrespondenceStatus {
+  // CORRESPONDENCE_STATUS_UNSPECIFIED means the status is unknown.
+  CORRESPONDENCE_STATUS_UNSPECIFIED = 0;
+  // CORRESPONDENCE_STATUS_QUEUED means the correspondence is queued for delivery.
+  CORRESPONDENCE_STATUS_QUEUED = 1;
+  // CORRESPONDENCE_STATUS_SUPPRESSED means delivery was suppressed due to a suppression rule
+  // (e.g., prior bounce or complaint).
+  CORRESPONDENCE_STATUS_SUPPRESSED = 2;
+  // CORRESPONDENCE_STATUS_OPTED_OUT means the recipient has opted out of this category.
+  CORRESPONDENCE_STATUS_OPTED_OUT = 3;
+  // CORRESPONDENCE_STATUS_SENT means the correspondence was sent to the delivery provider.
+  CORRESPONDENCE_STATUS_SENT = 4;
+  // CORRESPONDENCE_STATUS_DELIVERED means the provider confirmed delivery to the recipient.
+  CORRESPONDENCE_STATUS_DELIVERED = 5;
+  // CORRESPONDENCE_STATUS_BOUNCED means delivery failed (hard or soft bounce).
+  CORRESPONDENCE_STATUS_BOUNCED = 6;
+  // CORRESPONDENCE_STATUS_COMPLAINED means the recipient marked the message as spam.
+  CORRESPONDENCE_STATUS_COMPLAINED = 7;
+}
+
+// DeliveryStatus represents status values reported by external delivery providers
+// via webhook callbacks.
+enum DeliveryStatus {
+  // DELIVERY_STATUS_UNSPECIFIED means the status is unknown.
+  DELIVERY_STATUS_UNSPECIFIED = 0;
+  // DELIVERY_STATUS_DELIVERED means the provider confirmed successful delivery.
+  DELIVERY_STATUS_DELIVERED = 1;
+  // DELIVERY_STATUS_BOUNCED means delivery failed permanently or temporarily.
+  DELIVERY_STATUS_BOUNCED = 2;
+  // DELIVERY_STATUS_COMPLAINED means the recipient reported the message as spam.
+  DELIVERY_STATUS_COMPLAINED = 3;
+  // DELIVERY_STATUS_REJECTED means the provider rejected the message before delivery attempt.
+  DELIVERY_STATUS_REJECTED = 4;
+}
+
 // InitiateOutboundRequest sends an outbound correspondence via the specified channel.
 message InitiateOutboundRequest {
   // The party to receive the correspondence.
@@ -92,16 +129,16 @@ message InitiateOutboundRequest {
   google.protobuf.Struct template_data = 4;
   // Client-provided idempotency key to prevent duplicate sends.
   meridian.common.v1.IdempotencyKey idempotency_key = 5 [(buf.validate.field).required = true];
-  // Category for consent enforcement and routing.
-  CorrespondenceCategory category = 6;
+  // Category for consent enforcement and routing. Must not be UNSPECIFIED.
+  CorrespondenceCategory category = 6 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
 }
 
 // InitiateOutboundResponse returns the result of initiating outbound correspondence.
 message InitiateOutboundResponse {
   // Unique identifier for the created correspondence.
   string correspondence_id = 1;
-  // Current status: "QUEUED", "SUPPRESSED", or "OPTED_OUT".
-  string status = 2;
+  // Current status after initiation (QUEUED, SUPPRESSED, or OPTED_OUT).
+  CorrespondenceStatus status = 2 [(buf.validate.field).enum = {defined_only: true}];
   // Reason for suppression, if the correspondence was not queued.
   string suppression_reason = 3;
 }
@@ -124,8 +161,8 @@ message RetrieveOutboundResponse {
   string template_name = 4;
   // Category of the correspondence.
   CorrespondenceCategory category = 5;
-  // Current delivery status: "QUEUED", "SENT", "DELIVERED", "BOUNCED", "COMPLAINED".
-  string status = 6;
+  // Current lifecycle status.
+  CorrespondenceStatus status = 6 [(buf.validate.field).enum = {defined_only: true}];
   // When the correspondence was created.
   google.protobuf.Timestamp created_at = 7;
   // When the correspondence was sent to the provider.
@@ -136,8 +173,8 @@ message RetrieveOutboundResponse {
 message RecordDeliveryStatusRequest {
   // Provider-assigned message identifier.
   string provider_id = 1 [(buf.validate.field).required = true];
-  // Delivery status reported by the provider (e.g., "DELIVERED", "BOUNCED", "COMPLAINED").
-  string status = 2 [(buf.validate.field).required = true];
+  // Delivery status reported by the provider. Must not be UNSPECIFIED.
+  DeliveryStatus status = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
   // Additional metadata from the provider.
   google.protobuf.Struct provider_metadata = 3;
 }
@@ -155,7 +192,8 @@ message GetCommunicationPreferencesRequest {
   string party_id = 1 [(buf.validate.field).required = true];
 }
 
-// CommunicationPreference represents a single channel+category preference.
+// CommunicationPreference represents a single channel+category preference
+// with full audit trail. Used in read responses only.
 message CommunicationPreference {
   // The communication channel (e.g., "EMAIL", "SMS").
   string channel = 1;
@@ -171,31 +209,51 @@ message CommunicationPreference {
   string consent_text = 6;
 }
 
+// CommunicationPreferenceUpdate represents a preference change for a single
+// channel+category pair. Audit fields (consent_source, consent_text) are
+// provided at the request level and applied uniformly to all preference updates.
+message CommunicationPreferenceUpdate {
+  // The communication channel (e.g., "EMAIL", "SMS").
+  string channel = 1 [(buf.validate.field).required = true];
+  // The correspondence category this preference applies to. Must not be UNSPECIFIED.
+  CorrespondenceCategory category = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  // Whether the party is opting in to this channel+category combination.
+  bool opted_in = 3;
+}
+
 // GetCommunicationPreferencesResponse returns a party's communication preferences.
 message GetCommunicationPreferencesResponse {
-  // Individual channel+category preferences.
+  // Individual channel+category preferences with audit trail.
   repeated CommunicationPreference preferences = 1;
   // Whether the party has globally unsubscribed from all non-transactional communications.
   bool global_unsubscribe = 2;
 }
 
 // UpdateCommunicationPreferencesRequest updates a party's communication preferences.
+// Uses replace semantics: the supplied list fully replaces all existing preferences
+// for the specified channel+category pairs. Pairs not included in the list are
+// left unchanged. To remove a preference, include it with opted_in=false.
 message UpdateCommunicationPreferencesRequest {
   // The party whose preferences to update.
   string party_id = 1 [(buf.validate.field).required = true];
-  // The preferences to set.
-  repeated CommunicationPreference preferences = 2;
+  // The preferences to upsert. Each entry updates (or creates) the preference for
+  // the given channel+category pair. Existing pairs not listed here are preserved.
+  repeated CommunicationPreferenceUpdate preferences = 2;
   // Whether to globally unsubscribe from all non-transactional communications.
+  // When true, overrides per-channel opt-in for OPERATIONAL and MARKETING categories.
+  // TRANSACTIONAL correspondence is always delivered regardless of this flag.
   bool global_unsubscribe = 3;
-  // Source of consent (e.g., "web_form", "api", "customer_portal").
+  // Source of consent for this update (e.g., "web_form", "api", "customer_portal").
+  // Applied to all preference changes in this request.
   string consent_source = 4 [(buf.validate.field).required = true];
-  // The consent text presented to the party.
+  // The consent text presented to the party for this update.
+  // Applied to all preference changes in this request.
   string consent_text = 5 [(buf.validate.field).required = true];
 }
 
-// UpdateCommunicationPreferencesResponse returns the updated preferences.
+// UpdateCommunicationPreferencesResponse returns the full set of preferences after the update.
 message UpdateCommunicationPreferencesResponse {
-  // The updated preferences after the change.
+  // The complete set of preferences after applying the update, with audit trail.
   repeated CommunicationPreference preferences = 1;
 }
 
@@ -262,7 +320,7 @@ service CorrespondenceService {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get communication preferences"
       description: "Returns the communication preferences for a party, including "
-                   "per-channel and per-category opt-in status."
+                   "per-channel and per-category opt-in status with full audit trail."
       responses: {
         key: "404"
         value: {
@@ -273,7 +331,8 @@ service CorrespondenceService {
   }
 
   // UpdateCommunicationPreferences updates a party's communication preferences.
-  // Records consent metadata for audit trail compliance.
+  // Uses upsert semantics: listed channel+category pairs are updated; unlisted pairs
+  // are preserved. Records consent metadata for audit trail compliance.
   rpc UpdateCommunicationPreferences(UpdateCommunicationPreferencesRequest) returns (UpdateCommunicationPreferencesResponse) {
     option (google.api.http) = {
       put: "/v1/parties/{party_id}/communication-preferences"
@@ -281,8 +340,9 @@ service CorrespondenceService {
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Update communication preferences"
-      description: "Updates a party's communication preferences. Records consent source "
-                   "and text for regulatory audit trail."
+      description: "Updates a party's communication preferences using upsert semantics. "
+                   "Listed channel+category pairs are created or updated; unlisted pairs "
+                   "are preserved. Records consent source and text for regulatory audit trail."
     };
   }
 }

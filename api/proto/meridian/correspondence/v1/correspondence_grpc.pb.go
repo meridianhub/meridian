@@ -45,7 +45,8 @@ type CorrespondenceServiceClient interface {
 	// GetCommunicationPreferences retrieves a party's communication preferences.
 	GetCommunicationPreferences(ctx context.Context, in *GetCommunicationPreferencesRequest, opts ...grpc.CallOption) (*GetCommunicationPreferencesResponse, error)
 	// UpdateCommunicationPreferences updates a party's communication preferences.
-	// Records consent metadata for audit trail compliance.
+	// Uses upsert semantics: listed channel+category pairs are updated; unlisted pairs
+	// are preserved. Records consent metadata for audit trail compliance.
 	UpdateCommunicationPreferences(ctx context.Context, in *UpdateCommunicationPreferencesRequest, opts ...grpc.CallOption) (*UpdateCommunicationPreferencesResponse, error)
 }
 
@@ -126,7 +127,8 @@ type CorrespondenceServiceServer interface {
 	// GetCommunicationPreferences retrieves a party's communication preferences.
 	GetCommunicationPreferences(context.Context, *GetCommunicationPreferencesRequest) (*GetCommunicationPreferencesResponse, error)
 	// UpdateCommunicationPreferences updates a party's communication preferences.
-	// Records consent metadata for audit trail compliance.
+	// Uses upsert semantics: listed channel+category pairs are updated; unlisted pairs
+	// are preserved. Records consent metadata for audit trail compliance.
 	UpdateCommunicationPreferences(context.Context, *UpdateCommunicationPreferencesRequest) (*UpdateCommunicationPreferencesResponse, error)
 	mustEmbedUnimplementedCorrespondenceServiceServer()
 }

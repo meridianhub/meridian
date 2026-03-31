@@ -17,7 +17,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file meridian/correspondence/v1/correspondence.proto.
  */
 export const file_meridian_correspondence_v1_correspondence: GenFile = /*@__PURE__*/
-  fileDesc("Ci9tZXJpZGlhbi9jb3JyZXNwb25kZW5jZS92MS9jb3JyZXNwb25kZW5jZS5wcm90bxIabWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEisAIKF0luaXRpYXRlT3V0Ym91bmRSZXF1ZXN0EiIKEnJlY2lwaWVudF9wYXJ0eV9pZBgBIAEoCUIGukgDyAEBEhcKB2NoYW5uZWwYAiABKAlCBrpIA8gBARIdCg10ZW1wbGF0ZV9uYW1lGAMgASgJQga6SAPIAQESLgoNdGVtcGxhdGVfZGF0YRgEIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSQwoPaWRlbXBvdGVuY3lfa2V5GAUgASgLMiIubWVyaWRpYW4uY29tbW9uLnYxLklkZW1wb3RlbmN5S2V5Qga6SAPIAQESRAoIY2F0ZWdvcnkYBiABKA4yMi5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5Db3JyZXNwb25kZW5jZUNhdGVnb3J5ImEKGEluaXRpYXRlT3V0Ym91bmRSZXNwb25zZRIZChFjb3JyZXNwb25kZW5jZV9pZBgBIAEoCRIOCgZzdGF0dXMYAiABKAkSGgoSc3VwcHJlc3Npb25fcmVhc29uGAMgASgJIjwKF1JldHJpZXZlT3V0Ym91bmRSZXF1ZXN0EiEKEWNvcnJlc3BvbmRlbmNlX2lkGAEgASgJQga6SAPIAQEirAIKGFJldHJpZXZlT3V0Ym91bmRSZXNwb25zZRIZChFjb3JyZXNwb25kZW5jZV9pZBgBIAEoCRIaChJyZWNpcGllbnRfcGFydHlfaWQYAiABKAkSDwoHY2hhbm5lbBgDIAEoCRIVCg10ZW1wbGF0ZV9uYW1lGAQgASgJEkQKCGNhdGVnb3J5GAUgASgOMjIubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuQ29ycmVzcG9uZGVuY2VDYXRlZ29yeRIOCgZzdGF0dXMYBiABKAkSLgoKY3JlYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKwoHc2VudF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAihgEKG1JlY29yZERlbGl2ZXJ5U3RhdHVzUmVxdWVzdBIbCgtwcm92aWRlcl9pZBgBIAEoCUIGukgDyAEBEhYKBnN0YXR1cxgCIAEoCUIGukgDyAEBEjIKEXByb3ZpZGVyX21ldGFkYXRhGAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCI5ChxSZWNvcmREZWxpdmVyeVN0YXR1c1Jlc3BvbnNlEhkKEXN1cHByZXNzaW9uX2FkZGVkGAEgASgIIj4KIkdldENvbW11bmljYXRpb25QcmVmZXJlbmNlc1JlcXVlc3QSGAoIcGFydHlfaWQYASABKAlCBrpIA8gBASLoAQoXQ29tbXVuaWNhdGlvblByZWZlcmVuY2USDwoHY2hhbm5lbBgBIAEoCRJECghjYXRlZ29yeRgCIAEoDjIyLm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLkNvcnJlc3BvbmRlbmNlQ2F0ZWdvcnkSEAoIb3B0ZWRfaW4YAyABKAgSNgoSY29uc2VudF9ncmFudGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIWCg5jb25zZW50X3NvdXJjZRgFIAEoCRIUCgxjb25zZW50X3RleHQYBiABKAkiiwEKI0dldENvbW11bmljYXRpb25QcmVmZXJlbmNlc1Jlc3BvbnNlEkgKC3ByZWZlcmVuY2VzGAEgAygLMjMubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuQ29tbXVuaWNhdGlvblByZWZlcmVuY2USGgoSZ2xvYmFsX3Vuc3Vic2NyaWJlGAIgASgIIuUBCiVVcGRhdGVDb21tdW5pY2F0aW9uUHJlZmVyZW5jZXNSZXF1ZXN0EhgKCHBhcnR5X2lkGAEgASgJQga6SAPIAQESSAoLcHJlZmVyZW5jZXMYAiADKAsyMy5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5Db21tdW5pY2F0aW9uUHJlZmVyZW5jZRIaChJnbG9iYWxfdW5zdWJzY3JpYmUYAyABKAgSHgoOY29uc2VudF9zb3VyY2UYBCABKAlCBrpIA8gBARIcCgxjb25zZW50X3RleHQYBSABKAlCBrpIA8gBASJyCiZVcGRhdGVDb21tdW5pY2F0aW9uUHJlZmVyZW5jZXNSZXNwb25zZRJICgtwcmVmZXJlbmNlcxgBIAMoCzIzLm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLkNvbW11bmljYXRpb25QcmVmZXJlbmNlKrwBChZDb3JyZXNwb25kZW5jZUNhdGVnb3J5EicKI0NPUlJFU1BPTkRFTkNFX0NBVEVHT1JZX1VOU1BFQ0lGSUVEEAASKQolQ09SUkVTUE9OREVOQ0VfQ0FURUdPUllfVFJBTlNBQ1RJT05BTBABEicKI0NPUlJFU1BPTkRFTkNFX0NBVEVHT1JZX09QRVJBVElPTkFMEAISJQohQ09SUkVTUE9OREVOQ0VfQ0FURUdPUllfTUFSS0VUSU5HEAMysA4KFUNvcnJlc3BvbmRlbmNlU2VydmljZRLxAgoQSW5pdGlhdGVPdXRib3VuZBIzLm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLkluaXRpYXRlT3V0Ym91bmRSZXF1ZXN0GjQubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuSW5pdGlhdGVPdXRib3VuZFJlc3BvbnNlIvEBkkHHARIgSW5pdGlhdGUgb3V0Ym91bmQgY29ycmVzcG9uZGVuY2Uac1NlbmRzIGFuIG91dGJvdW5kIGNvcnJlc3BvbmRlbmNlIHZpYSB0aGUgc3BlY2lmaWVkIGNoYW5uZWwuIFZhbGlkYXRlcyBjb25zZW50IGFuZCBzdXBwcmVzc2lvbiBydWxlcyBiZWZvcmUgcXVldWluZy5KLgoDMjAxEicKJUNvcnJlc3BvbmRlbmNlIGluaXRpYXRlZCBzdWNjZXNzZnVsbHmC0+STAiA6ASoiGy92MS9jb3JyZXNwb25kZW5jZS9vdXRib3VuZBLLAgoQUmV0cmlldmVPdXRib3VuZBIzLm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLlJldHJpZXZlT3V0Ym91bmRSZXF1ZXN0GjQubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuUmV0cmlldmVPdXRib3VuZFJlc3BvbnNlIssBkkGQARIgUmV0cmlldmUgb3V0Ym91bmQgY29ycmVzcG9uZGVuY2UaSVJldHVybnMgdGhlIGZ1bGwgZGV0YWlscyBhbmQgY3VycmVudCBkZWxpdmVyeSBzdGF0dXMgb2YgYSBjb3JyZXNwb25kZW5jZS5KIQoDNDA0EhoKGENvcnJlc3BvbmRlbmNlIG5vdCBmb3VuZILT5JMCMRIvL3YxL2NvcnJlc3BvbmRlbmNlL291dGJvdW5kL3tjb3JyZXNwb25kZW5jZV9pZH0S2QIKFFJlY29yZERlbGl2ZXJ5U3RhdHVzEjcubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuUmVjb3JkRGVsaXZlcnlTdGF0dXNSZXF1ZXN0GjgubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuUmVjb3JkRGVsaXZlcnlTdGF0dXNSZXNwb25zZSLNAZJBnAESFlJlY29yZCBkZWxpdmVyeSBzdGF0dXMagQFSZWNvcmRzIGEgZGVsaXZlcnkgc3RhdHVzIHVwZGF0ZSBmcm9tIGFuIGVtYWlsIG9yIFNNUyBwcm92aWRlciB3ZWJob29rLiBCb3VuY2VzIGFuZCBjb21wbGFpbnRzIG1heSB0cmlnZ2VyIGF1dG9tYXRpYyBzdXBwcmVzc2lvbi6C0+STAic6ASoiIi92MS9jb3JyZXNwb25kZW5jZS9kZWxpdmVyeS1zdGF0dXMSgAMKG0dldENvbW11bmljYXRpb25QcmVmZXJlbmNlcxI+Lm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLkdldENvbW11bmljYXRpb25QcmVmZXJlbmNlc1JlcXVlc3QaPy5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5HZXRDb21tdW5pY2F0aW9uUHJlZmVyZW5jZXNSZXNwb25zZSLfAZJBowESHUdldCBjb21tdW5pY2F0aW9uIHByZWZlcmVuY2VzGmhSZXR1cm5zIHRoZSBjb21tdW5pY2F0aW9uIHByZWZlcmVuY2VzIGZvciBhIHBhcnR5LCBpbmNsdWRpbmcgcGVyLWNoYW5uZWwgYW5kIHBlci1jYXRlZ29yeSBvcHQtaW4gc3RhdHVzLkoYCgM0MDQSEQoPUGFydHkgbm90IGZvdW5kgtPkkwIyEjAvdjEvcGFydGllcy97cGFydHlfaWR9L2NvbW11bmljYXRpb24tcHJlZmVyZW5jZXMS9QIKHlVwZGF0ZUNvbW11bmljYXRpb25QcmVmZXJlbmNlcxJBLm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLlVwZGF0ZUNvbW11bmljYXRpb25QcmVmZXJlbmNlc1JlcXVlc3QaQi5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5VcGRhdGVDb21tdW5pY2F0aW9uUHJlZmVyZW5jZXNSZXNwb25zZSLLAZJBjAESIFVwZGF0ZSBjb21tdW5pY2F0aW9uIHByZWZlcmVuY2VzGmhVcGRhdGVzIGEgcGFydHkncyBjb21tdW5pY2F0aW9uIHByZWZlcmVuY2VzLiBSZWNvcmRzIGNvbnNlbnQgc291cmNlIGFuZCB0ZXh0IGZvciByZWd1bGF0b3J5IGF1ZGl0IHRyYWlsLoLT5JMCNToBKhowL3YxL3BhcnRpZXMve3BhcnR5X2lkfS9jb21tdW5pY2F0aW9uLXByZWZlcmVuY2VzQtEFWlVnaXRodWIuY29tL21lcmlkaWFuaHViL21lcmlkaWFuL2FwaS9wcm90by9tZXJpZGlhbi9jb3JyZXNwb25kZW5jZS92MTtjb3JyZXNwb25kZW5jZXYxkkH2BBKFAwojTWVyaWRpYW4gQ29ycmVzcG9uZGVuY2UgU2VydmljZSBBUEkS3wFCSUFOLWFsaWduZWQgY29ycmVzcG9uZGVuY2UgbWFuYWdlbWVudCBmb3Igb3V0Ym91bmQgY29tbXVuaWNhdGlvbnMsIGRlbGl2ZXJ5IHRyYWNraW5nLCBhbmQgY29tbXVuaWNhdGlvbiBwcmVmZXJlbmNlIG1hbmFnZW1lbnQuIFN1cHBvcnRzIG11bHRpLWNoYW5uZWwgZGVsaXZlcnkgKGVtYWlsLCBTTVMpIHdpdGggY29uc2VudCBlbmZvcmNlbWVudCBhbmQgc3VwcHJlc3Npb24gaGFuZGxpbmcuIjwKEU1lcmlkaWFuIEFQSSBUZWFtEidodHRwczovL2dpdGh1Yi5jb20vbWVyaWRpYW5odWIvbWVyaWRpYW4qOQoKQXBhY2hlIDIuMBIraHR0cHM6Ly93d3cuYXBhY2hlLm9yZy9saWNlbnNlcy9MSUNFTlNFLTIuMDIDMS4wKgECMhBhcHBsaWNhdGlvbi9qc29uOhBhcHBsaWNhdGlvbi9qc29uUjcKAzQwMRIwCi5VbmF1dGhvcml6ZWQgLSBNaXNzaW5nIG9yIGludmFsaWQgQmVhcmVyIHRva2VuUkAKAzQwMxI5CjdGb3JiaWRkZW4gLSBJbnN1ZmZpY2llbnQgcGVybWlzc2lvbnMgZm9yIHRoaXMgb3BlcmF0aW9uWjwKOgoGQmVhcmVyEjAIAhIbQmVhcmVyIHRva2VuIGF1dGhlbnRpY2F0aW9uGg1BdXRob3JpemF0aW9uIAJiDAoKCgZCZWFyZXISAGIGcHJvdG8z", [file_buf_validate_validate, file_google_api_annotations, file_google_protobuf_struct, file_google_protobuf_timestamp, file_meridian_common_v1_types, file_protoc_gen_openapiv2_options_annotations]);
+  fileDesc("Ci9tZXJpZGlhbi9jb3JyZXNwb25kZW5jZS92MS9jb3JyZXNwb25kZW5jZS5wcm90bxIabWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEivAIKF0luaXRpYXRlT3V0Ym91bmRSZXF1ZXN0EiIKEnJlY2lwaWVudF9wYXJ0eV9pZBgBIAEoCUIGukgDyAEBEhcKB2NoYW5uZWwYAiABKAlCBrpIA8gBARIdCg10ZW1wbGF0ZV9uYW1lGAMgASgJQga6SAPIAQESLgoNdGVtcGxhdGVfZGF0YRgEIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSQwoPaWRlbXBvdGVuY3lfa2V5GAUgASgLMiIubWVyaWRpYW4uY29tbW9uLnYxLklkZW1wb3RlbmN5S2V5Qga6SAPIAQESUAoIY2F0ZWdvcnkYBiABKA4yMi5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5Db3JyZXNwb25kZW5jZUNhdGVnb3J5Qgq6SAeCAQQQASAAIp0BChhJbml0aWF0ZU91dGJvdW5kUmVzcG9uc2USGQoRY29ycmVzcG9uZGVuY2VfaWQYASABKAkSSgoGc3RhdHVzGAIgASgOMjAubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuQ29ycmVzcG9uZGVuY2VTdGF0dXNCCLpIBYIBAhABEhoKEnN1cHByZXNzaW9uX3JlYXNvbhgDIAEoCSI8ChdSZXRyaWV2ZU91dGJvdW5kUmVxdWVzdBIhChFjb3JyZXNwb25kZW5jZV9pZBgBIAEoCUIGukgDyAEBIugCChhSZXRyaWV2ZU91dGJvdW5kUmVzcG9uc2USGQoRY29ycmVzcG9uZGVuY2VfaWQYASABKAkSGgoScmVjaXBpZW50X3BhcnR5X2lkGAIgASgJEg8KB2NoYW5uZWwYAyABKAkSFQoNdGVtcGxhdGVfbmFtZRgEIAEoCRJECghjYXRlZ29yeRgFIAEoDjIyLm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLkNvcnJlc3BvbmRlbmNlQ2F0ZWdvcnkSSgoGc3RhdHVzGAYgASgOMjAubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuQ29ycmVzcG9uZGVuY2VTdGF0dXNCCLpIBYIBAhABEi4KCmNyZWF0ZWRfYXQYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEisKB3NlbnRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIrYBChtSZWNvcmREZWxpdmVyeVN0YXR1c1JlcXVlc3QSGwoLcHJvdmlkZXJfaWQYASABKAlCBrpIA8gBARJGCgZzdGF0dXMYAiABKA4yKi5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5EZWxpdmVyeVN0YXR1c0IKukgHggEEEAEgABIyChFwcm92aWRlcl9tZXRhZGF0YRgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiOQocUmVjb3JkRGVsaXZlcnlTdGF0dXNSZXNwb25zZRIZChFzdXBwcmVzc2lvbl9hZGRlZBgBIAEoCCI+CiJHZXRDb21tdW5pY2F0aW9uUHJlZmVyZW5jZXNSZXF1ZXN0EhgKCHBhcnR5X2lkGAEgASgJQga6SAPIAQEi6AEKF0NvbW11bmljYXRpb25QcmVmZXJlbmNlEg8KB2NoYW5uZWwYASABKAkSRAoIY2F0ZWdvcnkYAiABKA4yMi5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5Db3JyZXNwb25kZW5jZUNhdGVnb3J5EhAKCG9wdGVkX2luGAMgASgIEjYKEmNvbnNlbnRfZ3JhbnRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFgoOY29uc2VudF9zb3VyY2UYBSABKAkSFAoMY29uc2VudF90ZXh0GAYgASgJIpwBCh1Db21tdW5pY2F0aW9uUHJlZmVyZW5jZVVwZGF0ZRIXCgdjaGFubmVsGAEgASgJQga6SAPIAQESUAoIY2F0ZWdvcnkYAiABKA4yMi5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5Db3JyZXNwb25kZW5jZUNhdGVnb3J5Qgq6SAeCAQQQASAAEhAKCG9wdGVkX2luGAMgASgIIosBCiNHZXRDb21tdW5pY2F0aW9uUHJlZmVyZW5jZXNSZXNwb25zZRJICgtwcmVmZXJlbmNlcxgBIAMoCzIzLm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLkNvbW11bmljYXRpb25QcmVmZXJlbmNlEhoKEmdsb2JhbF91bnN1YnNjcmliZRgCIAEoCCLrAQolVXBkYXRlQ29tbXVuaWNhdGlvblByZWZlcmVuY2VzUmVxdWVzdBIYCghwYXJ0eV9pZBgBIAEoCUIGukgDyAEBEk4KC3ByZWZlcmVuY2VzGAIgAygLMjkubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuQ29tbXVuaWNhdGlvblByZWZlcmVuY2VVcGRhdGUSGgoSZ2xvYmFsX3Vuc3Vic2NyaWJlGAMgASgIEh4KDmNvbnNlbnRfc291cmNlGAQgASgJQga6SAPIAQESHAoMY29uc2VudF90ZXh0GAUgASgJQga6SAPIAQEicgomVXBkYXRlQ29tbXVuaWNhdGlvblByZWZlcmVuY2VzUmVzcG9uc2USSAoLcHJlZmVyZW5jZXMYASADKAsyMy5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5Db21tdW5pY2F0aW9uUHJlZmVyZW5jZSq8AQoWQ29ycmVzcG9uZGVuY2VDYXRlZ29yeRInCiNDT1JSRVNQT05ERU5DRV9DQVRFR09SWV9VTlNQRUNJRklFRBAAEikKJUNPUlJFU1BPTkRFTkNFX0NBVEVHT1JZX1RSQU5TQUNUSU9OQUwQARInCiNDT1JSRVNQT05ERU5DRV9DQVRFR09SWV9PUEVSQVRJT05BTBACEiUKIUNPUlJFU1BPTkRFTkNFX0NBVEVHT1JZX01BUktFVElORxADKrgCChRDb3JyZXNwb25kZW5jZVN0YXR1cxIlCiFDT1JSRVNQT05ERU5DRV9TVEFUVVNfVU5TUEVDSUZJRUQQABIgChxDT1JSRVNQT05ERU5DRV9TVEFUVVNfUVVFVUVEEAESJAogQ09SUkVTUE9OREVOQ0VfU1RBVFVTX1NVUFBSRVNTRUQQAhIjCh9DT1JSRVNQT05ERU5DRV9TVEFUVVNfT1BURURfT1VUEAMSHgoaQ09SUkVTUE9OREVOQ0VfU1RBVFVTX1NFTlQQBBIjCh9DT1JSRVNQT05ERU5DRV9TVEFUVVNfREVMSVZFUkVEEAUSIQodQ09SUkVTUE9OREVOQ0VfU1RBVFVTX0JPVU5DRUQQBhIkCiBDT1JSRVNQT05ERU5DRV9TVEFUVVNfQ09NUExBSU5FRBAHKqsBCg5EZWxpdmVyeVN0YXR1cxIfChtERUxJVkVSWV9TVEFUVVNfVU5TUEVDSUZJRUQQABIdChlERUxJVkVSWV9TVEFUVVNfREVMSVZFUkVEEAESGwoXREVMSVZFUllfU1RBVFVTX0JPVU5DRUQQAhIeChpERUxJVkVSWV9TVEFUVVNfQ09NUExBSU5FRBADEhwKGERFTElWRVJZX1NUQVRVU19SRUpFQ1RFRBAEMrIPChVDb3JyZXNwb25kZW5jZVNlcnZpY2US8QIKEEluaXRpYXRlT3V0Ym91bmQSMy5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5Jbml0aWF0ZU91dGJvdW5kUmVxdWVzdBo0Lm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLkluaXRpYXRlT3V0Ym91bmRSZXNwb25zZSLxAZJBxwESIEluaXRpYXRlIG91dGJvdW5kIGNvcnJlc3BvbmRlbmNlGnNTZW5kcyBhbiBvdXRib3VuZCBjb3JyZXNwb25kZW5jZSB2aWEgdGhlIHNwZWNpZmllZCBjaGFubmVsLiBWYWxpZGF0ZXMgY29uc2VudCBhbmQgc3VwcHJlc3Npb24gcnVsZXMgYmVmb3JlIHF1ZXVpbmcuSi4KAzIwMRInCiVDb3JyZXNwb25kZW5jZSBpbml0aWF0ZWQgc3VjY2Vzc2Z1bGx5gtPkkwIgOgEqIhsvdjEvY29ycmVzcG9uZGVuY2Uvb3V0Ym91bmQSywIKEFJldHJpZXZlT3V0Ym91bmQSMy5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5SZXRyaWV2ZU91dGJvdW5kUmVxdWVzdBo0Lm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLlJldHJpZXZlT3V0Ym91bmRSZXNwb25zZSLLAZJBkAESIFJldHJpZXZlIG91dGJvdW5kIGNvcnJlc3BvbmRlbmNlGklSZXR1cm5zIHRoZSBmdWxsIGRldGFpbHMgYW5kIGN1cnJlbnQgZGVsaXZlcnkgc3RhdHVzIG9mIGEgY29ycmVzcG9uZGVuY2UuSiEKAzQwNBIaChhDb3JyZXNwb25kZW5jZSBub3QgZm91bmSC0+STAjESLy92MS9jb3JyZXNwb25kZW5jZS9vdXRib3VuZC97Y29ycmVzcG9uZGVuY2VfaWR9EtkCChRSZWNvcmREZWxpdmVyeVN0YXR1cxI3Lm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLlJlY29yZERlbGl2ZXJ5U3RhdHVzUmVxdWVzdBo4Lm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLlJlY29yZERlbGl2ZXJ5U3RhdHVzUmVzcG9uc2UizQGSQZwBEhZSZWNvcmQgZGVsaXZlcnkgc3RhdHVzGoEBUmVjb3JkcyBhIGRlbGl2ZXJ5IHN0YXR1cyB1cGRhdGUgZnJvbSBhbiBlbWFpbCBvciBTTVMgcHJvdmlkZXIgd2ViaG9vay4gQm91bmNlcyBhbmQgY29tcGxhaW50cyBtYXkgdHJpZ2dlciBhdXRvbWF0aWMgc3VwcHJlc3Npb24ugtPkkwInOgEqIiIvdjEvY29ycmVzcG9uZGVuY2UvZGVsaXZlcnktc3RhdHVzEpYDChtHZXRDb21tdW5pY2F0aW9uUHJlZmVyZW5jZXMSPi5tZXJpZGlhbi5jb3JyZXNwb25kZW5jZS52MS5HZXRDb21tdW5pY2F0aW9uUHJlZmVyZW5jZXNSZXF1ZXN0Gj8ubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuR2V0Q29tbXVuaWNhdGlvblByZWZlcmVuY2VzUmVzcG9uc2Ui9QGSQbkBEh1HZXQgY29tbXVuaWNhdGlvbiBwcmVmZXJlbmNlcxp+UmV0dXJucyB0aGUgY29tbXVuaWNhdGlvbiBwcmVmZXJlbmNlcyBmb3IgYSBwYXJ0eSwgaW5jbHVkaW5nIHBlci1jaGFubmVsIGFuZCBwZXItY2F0ZWdvcnkgb3B0LWluIHN0YXR1cyB3aXRoIGZ1bGwgYXVkaXQgdHJhaWwuShgKAzQwNBIRCg9QYXJ0eSBub3QgZm91bmSC0+STAjISMC92MS9wYXJ0aWVzL3twYXJ0eV9pZH0vY29tbXVuaWNhdGlvbi1wcmVmZXJlbmNlcxLhAwoeVXBkYXRlQ29tbXVuaWNhdGlvblByZWZlcmVuY2VzEkEubWVyaWRpYW4uY29ycmVzcG9uZGVuY2UudjEuVXBkYXRlQ29tbXVuaWNhdGlvblByZWZlcmVuY2VzUmVxdWVzdBpCLm1lcmlkaWFuLmNvcnJlc3BvbmRlbmNlLnYxLlVwZGF0ZUNvbW11bmljYXRpb25QcmVmZXJlbmNlc1Jlc3BvbnNlIrcCkkH4ARIgVXBkYXRlIGNvbW11bmljYXRpb24gcHJlZmVyZW5jZXMa0wFVcGRhdGVzIGEgcGFydHkncyBjb21tdW5pY2F0aW9uIHByZWZlcmVuY2VzIHVzaW5nIHVwc2VydCBzZW1hbnRpY3MuIExpc3RlZCBjaGFubmVsK2NhdGVnb3J5IHBhaXJzIGFyZSBjcmVhdGVkIG9yIHVwZGF0ZWQ7IHVubGlzdGVkIHBhaXJzIGFyZSBwcmVzZXJ2ZWQuIFJlY29yZHMgY29uc2VudCBzb3VyY2UgYW5kIHRleHQgZm9yIHJlZ3VsYXRvcnkgYXVkaXQgdHJhaWwugtPkkwI1OgEqGjAvdjEvcGFydGllcy97cGFydHlfaWR9L2NvbW11bmljYXRpb24tcHJlZmVyZW5jZXNC0QVaVWdpdGh1Yi5jb20vbWVyaWRpYW5odWIvbWVyaWRpYW4vYXBpL3Byb3RvL21lcmlkaWFuL2NvcnJlc3BvbmRlbmNlL3YxO2NvcnJlc3BvbmRlbmNldjGSQfYEEoUDCiNNZXJpZGlhbiBDb3JyZXNwb25kZW5jZSBTZXJ2aWNlIEFQSRLfAUJJQU4tYWxpZ25lZCBjb3JyZXNwb25kZW5jZSBtYW5hZ2VtZW50IGZvciBvdXRib3VuZCBjb21tdW5pY2F0aW9ucywgZGVsaXZlcnkgdHJhY2tpbmcsIGFuZCBjb21tdW5pY2F0aW9uIHByZWZlcmVuY2UgbWFuYWdlbWVudC4gU3VwcG9ydHMgbXVsdGktY2hhbm5lbCBkZWxpdmVyeSAoZW1haWwsIFNNUykgd2l0aCBjb25zZW50IGVuZm9yY2VtZW50IGFuZCBzdXBwcmVzc2lvbiBoYW5kbGluZy4iPAoRTWVyaWRpYW4gQVBJIFRlYW0SJ2h0dHBzOi8vZ2l0aHViLmNvbS9tZXJpZGlhbmh1Yi9tZXJpZGlhbio5CgpBcGFjaGUgMi4wEitodHRwczovL3d3dy5hcGFjaGUub3JnL2xpY2Vuc2VzL0xJQ0VOU0UtMi4wMgMxLjAqAQIyEGFwcGxpY2F0aW9uL2pzb246EGFwcGxpY2F0aW9uL2pzb25SNwoDNDAxEjAKLlVuYXV0aG9yaXplZCAtIE1pc3Npbmcgb3IgaW52YWxpZCBCZWFyZXIgdG9rZW5SQAoDNDAzEjkKN0ZvcmJpZGRlbiAtIEluc3VmZmljaWVudCBwZXJtaXNzaW9ucyBmb3IgdGhpcyBvcGVyYXRpb25aPAo6CgZCZWFyZXISMAgCEhtCZWFyZXIgdG9rZW4gYXV0aGVudGljYXRpb24aDUF1dGhvcml6YXRpb24gAmIMCgoKBkJlYXJlchIAYgZwcm90bzM", [file_buf_validate_validate, file_google_api_annotations, file_google_protobuf_struct, file_google_protobuf_timestamp, file_meridian_common_v1_types, file_protoc_gen_openapiv2_options_annotations]);
 
 /**
  * InitiateOutboundRequest sends an outbound correspondence via the specified channel.
@@ -61,7 +61,7 @@ export type InitiateOutboundRequest = Message<"meridian.correspondence.v1.Initia
   idempotencyKey?: IdempotencyKey;
 
   /**
-   * Category for consent enforcement and routing.
+   * Category for consent enforcement and routing. Must not be UNSPECIFIED.
    *
    * @generated from field: meridian.correspondence.v1.CorrespondenceCategory category = 6;
    */
@@ -89,11 +89,11 @@ export type InitiateOutboundResponse = Message<"meridian.correspondence.v1.Initi
   correspondenceId: string;
 
   /**
-   * Current status: "QUEUED", "SUPPRESSED", or "OPTED_OUT".
+   * Current status after initiation (QUEUED, SUPPRESSED, or OPTED_OUT).
    *
-   * @generated from field: string status = 2;
+   * @generated from field: meridian.correspondence.v1.CorrespondenceStatus status = 2;
    */
-  status: string;
+  status: CorrespondenceStatus;
 
   /**
    * Reason for suppression, if the correspondence was not queued.
@@ -173,11 +173,11 @@ export type RetrieveOutboundResponse = Message<"meridian.correspondence.v1.Retri
   category: CorrespondenceCategory;
 
   /**
-   * Current delivery status: "QUEUED", "SENT", "DELIVERED", "BOUNCED", "COMPLAINED".
+   * Current lifecycle status.
    *
-   * @generated from field: string status = 6;
+   * @generated from field: meridian.correspondence.v1.CorrespondenceStatus status = 6;
    */
-  status: string;
+  status: CorrespondenceStatus;
 
   /**
    * When the correspondence was created.
@@ -215,11 +215,11 @@ export type RecordDeliveryStatusRequest = Message<"meridian.correspondence.v1.Re
   providerId: string;
 
   /**
-   * Delivery status reported by the provider (e.g., "DELIVERED", "BOUNCED", "COMPLAINED").
+   * Delivery status reported by the provider. Must not be UNSPECIFIED.
    *
-   * @generated from field: string status = 2;
+   * @generated from field: meridian.correspondence.v1.DeliveryStatus status = 2;
    */
-  status: string;
+  status: DeliveryStatus;
 
   /**
    * Additional metadata from the provider.
@@ -280,7 +280,8 @@ export const GetCommunicationPreferencesRequestSchema: GenMessage<GetCommunicati
   messageDesc(file_meridian_correspondence_v1_correspondence, 6);
 
 /**
- * CommunicationPreference represents a single channel+category preference.
+ * CommunicationPreference represents a single channel+category preference
+ * with full audit trail. Used in read responses only.
  *
  * @generated from message meridian.correspondence.v1.CommunicationPreference
  */
@@ -336,13 +337,50 @@ export const CommunicationPreferenceSchema: GenMessage<CommunicationPreference> 
   messageDesc(file_meridian_correspondence_v1_correspondence, 7);
 
 /**
+ * CommunicationPreferenceUpdate represents a preference change for a single
+ * channel+category pair. Audit fields (consent_source, consent_text) are
+ * provided at the request level and applied uniformly to all preference updates.
+ *
+ * @generated from message meridian.correspondence.v1.CommunicationPreferenceUpdate
+ */
+export type CommunicationPreferenceUpdate = Message<"meridian.correspondence.v1.CommunicationPreferenceUpdate"> & {
+  /**
+   * The communication channel (e.g., "EMAIL", "SMS").
+   *
+   * @generated from field: string channel = 1;
+   */
+  channel: string;
+
+  /**
+   * The correspondence category this preference applies to. Must not be UNSPECIFIED.
+   *
+   * @generated from field: meridian.correspondence.v1.CorrespondenceCategory category = 2;
+   */
+  category: CorrespondenceCategory;
+
+  /**
+   * Whether the party is opting in to this channel+category combination.
+   *
+   * @generated from field: bool opted_in = 3;
+   */
+  optedIn: boolean;
+};
+
+/**
+ * Describes the message meridian.correspondence.v1.CommunicationPreferenceUpdate.
+ * Use `create(CommunicationPreferenceUpdateSchema)` to create a new message.
+ */
+export const CommunicationPreferenceUpdateSchema: GenMessage<CommunicationPreferenceUpdate> = /*@__PURE__*/
+  messageDesc(file_meridian_correspondence_v1_correspondence, 8);
+
+/**
  * GetCommunicationPreferencesResponse returns a party's communication preferences.
  *
  * @generated from message meridian.correspondence.v1.GetCommunicationPreferencesResponse
  */
 export type GetCommunicationPreferencesResponse = Message<"meridian.correspondence.v1.GetCommunicationPreferencesResponse"> & {
   /**
-   * Individual channel+category preferences.
+   * Individual channel+category preferences with audit trail.
    *
    * @generated from field: repeated meridian.correspondence.v1.CommunicationPreference preferences = 1;
    */
@@ -361,10 +399,13 @@ export type GetCommunicationPreferencesResponse = Message<"meridian.corresponden
  * Use `create(GetCommunicationPreferencesResponseSchema)` to create a new message.
  */
 export const GetCommunicationPreferencesResponseSchema: GenMessage<GetCommunicationPreferencesResponse> = /*@__PURE__*/
-  messageDesc(file_meridian_correspondence_v1_correspondence, 8);
+  messageDesc(file_meridian_correspondence_v1_correspondence, 9);
 
 /**
  * UpdateCommunicationPreferencesRequest updates a party's communication preferences.
+ * Uses replace semantics: the supplied list fully replaces all existing preferences
+ * for the specified channel+category pairs. Pairs not included in the list are
+ * left unchanged. To remove a preference, include it with opted_in=false.
  *
  * @generated from message meridian.correspondence.v1.UpdateCommunicationPreferencesRequest
  */
@@ -377,28 +418,33 @@ export type UpdateCommunicationPreferencesRequest = Message<"meridian.correspond
   partyId: string;
 
   /**
-   * The preferences to set.
+   * The preferences to upsert. Each entry updates (or creates) the preference for
+   * the given channel+category pair. Existing pairs not listed here are preserved.
    *
-   * @generated from field: repeated meridian.correspondence.v1.CommunicationPreference preferences = 2;
+   * @generated from field: repeated meridian.correspondence.v1.CommunicationPreferenceUpdate preferences = 2;
    */
-  preferences: CommunicationPreference[];
+  preferences: CommunicationPreferenceUpdate[];
 
   /**
    * Whether to globally unsubscribe from all non-transactional communications.
+   * When true, overrides per-channel opt-in for OPERATIONAL and MARKETING categories.
+   * TRANSACTIONAL correspondence is always delivered regardless of this flag.
    *
    * @generated from field: bool global_unsubscribe = 3;
    */
   globalUnsubscribe: boolean;
 
   /**
-   * Source of consent (e.g., "web_form", "api", "customer_portal").
+   * Source of consent for this update (e.g., "web_form", "api", "customer_portal").
+   * Applied to all preference changes in this request.
    *
    * @generated from field: string consent_source = 4;
    */
   consentSource: string;
 
   /**
-   * The consent text presented to the party.
+   * The consent text presented to the party for this update.
+   * Applied to all preference changes in this request.
    *
    * @generated from field: string consent_text = 5;
    */
@@ -410,16 +456,16 @@ export type UpdateCommunicationPreferencesRequest = Message<"meridian.correspond
  * Use `create(UpdateCommunicationPreferencesRequestSchema)` to create a new message.
  */
 export const UpdateCommunicationPreferencesRequestSchema: GenMessage<UpdateCommunicationPreferencesRequest> = /*@__PURE__*/
-  messageDesc(file_meridian_correspondence_v1_correspondence, 9);
+  messageDesc(file_meridian_correspondence_v1_correspondence, 10);
 
 /**
- * UpdateCommunicationPreferencesResponse returns the updated preferences.
+ * UpdateCommunicationPreferencesResponse returns the full set of preferences after the update.
  *
  * @generated from message meridian.correspondence.v1.UpdateCommunicationPreferencesResponse
  */
 export type UpdateCommunicationPreferencesResponse = Message<"meridian.correspondence.v1.UpdateCommunicationPreferencesResponse"> & {
   /**
-   * The updated preferences after the change.
+   * The complete set of preferences after applying the update, with audit trail.
    *
    * @generated from field: repeated meridian.correspondence.v1.CommunicationPreference preferences = 1;
    */
@@ -431,7 +477,7 @@ export type UpdateCommunicationPreferencesResponse = Message<"meridian.correspon
  * Use `create(UpdateCommunicationPreferencesResponseSchema)` to create a new message.
  */
 export const UpdateCommunicationPreferencesResponseSchema: GenMessage<UpdateCommunicationPreferencesResponse> = /*@__PURE__*/
-  messageDesc(file_meridian_correspondence_v1_correspondence, 10);
+  messageDesc(file_meridian_correspondence_v1_correspondence, 11);
 
 /**
  * CorrespondenceCategory classifies the purpose of a correspondence for
@@ -478,6 +524,126 @@ export enum CorrespondenceCategory {
  */
 export const CorrespondenceCategorySchema: GenEnum<CorrespondenceCategory> = /*@__PURE__*/
   enumDesc(file_meridian_correspondence_v1_correspondence, 0);
+
+/**
+ * CorrespondenceStatus tracks the lifecycle of an outbound correspondence
+ * from initiation through delivery.
+ *
+ * @generated from enum meridian.correspondence.v1.CorrespondenceStatus
+ */
+export enum CorrespondenceStatus {
+  /**
+   * CORRESPONDENCE_STATUS_UNSPECIFIED means the status is unknown.
+   *
+   * @generated from enum value: CORRESPONDENCE_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * CORRESPONDENCE_STATUS_QUEUED means the correspondence is queued for delivery.
+   *
+   * @generated from enum value: CORRESPONDENCE_STATUS_QUEUED = 1;
+   */
+  QUEUED = 1,
+
+  /**
+   * CORRESPONDENCE_STATUS_SUPPRESSED means delivery was suppressed due to a suppression rule
+   * (e.g., prior bounce or complaint).
+   *
+   * @generated from enum value: CORRESPONDENCE_STATUS_SUPPRESSED = 2;
+   */
+  SUPPRESSED = 2,
+
+  /**
+   * CORRESPONDENCE_STATUS_OPTED_OUT means the recipient has opted out of this category.
+   *
+   * @generated from enum value: CORRESPONDENCE_STATUS_OPTED_OUT = 3;
+   */
+  OPTED_OUT = 3,
+
+  /**
+   * CORRESPONDENCE_STATUS_SENT means the correspondence was sent to the delivery provider.
+   *
+   * @generated from enum value: CORRESPONDENCE_STATUS_SENT = 4;
+   */
+  SENT = 4,
+
+  /**
+   * CORRESPONDENCE_STATUS_DELIVERED means the provider confirmed delivery to the recipient.
+   *
+   * @generated from enum value: CORRESPONDENCE_STATUS_DELIVERED = 5;
+   */
+  DELIVERED = 5,
+
+  /**
+   * CORRESPONDENCE_STATUS_BOUNCED means delivery failed (hard or soft bounce).
+   *
+   * @generated from enum value: CORRESPONDENCE_STATUS_BOUNCED = 6;
+   */
+  BOUNCED = 6,
+
+  /**
+   * CORRESPONDENCE_STATUS_COMPLAINED means the recipient marked the message as spam.
+   *
+   * @generated from enum value: CORRESPONDENCE_STATUS_COMPLAINED = 7;
+   */
+  COMPLAINED = 7,
+}
+
+/**
+ * Describes the enum meridian.correspondence.v1.CorrespondenceStatus.
+ */
+export const CorrespondenceStatusSchema: GenEnum<CorrespondenceStatus> = /*@__PURE__*/
+  enumDesc(file_meridian_correspondence_v1_correspondence, 1);
+
+/**
+ * DeliveryStatus represents status values reported by external delivery providers
+ * via webhook callbacks.
+ *
+ * @generated from enum meridian.correspondence.v1.DeliveryStatus
+ */
+export enum DeliveryStatus {
+  /**
+   * DELIVERY_STATUS_UNSPECIFIED means the status is unknown.
+   *
+   * @generated from enum value: DELIVERY_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * DELIVERY_STATUS_DELIVERED means the provider confirmed successful delivery.
+   *
+   * @generated from enum value: DELIVERY_STATUS_DELIVERED = 1;
+   */
+  DELIVERED = 1,
+
+  /**
+   * DELIVERY_STATUS_BOUNCED means delivery failed permanently or temporarily.
+   *
+   * @generated from enum value: DELIVERY_STATUS_BOUNCED = 2;
+   */
+  BOUNCED = 2,
+
+  /**
+   * DELIVERY_STATUS_COMPLAINED means the recipient reported the message as spam.
+   *
+   * @generated from enum value: DELIVERY_STATUS_COMPLAINED = 3;
+   */
+  COMPLAINED = 3,
+
+  /**
+   * DELIVERY_STATUS_REJECTED means the provider rejected the message before delivery attempt.
+   *
+   * @generated from enum value: DELIVERY_STATUS_REJECTED = 4;
+   */
+  REJECTED = 4,
+}
+
+/**
+ * Describes the enum meridian.correspondence.v1.DeliveryStatus.
+ */
+export const DeliveryStatusSchema: GenEnum<DeliveryStatus> = /*@__PURE__*/
+  enumDesc(file_meridian_correspondence_v1_correspondence, 2);
 
 /**
  * CorrespondenceService manages outbound correspondence delivery, status tracking,
@@ -531,7 +697,8 @@ export const CorrespondenceService: GenService<{
   },
   /**
    * UpdateCommunicationPreferences updates a party's communication preferences.
-   * Records consent metadata for audit trail compliance.
+   * Uses upsert semantics: listed channel+category pairs are updated; unlisted pairs
+   * are preserved. Records consent metadata for audit trail compliance.
    *
    * @generated from rpc meridian.correspondence.v1.CorrespondenceService.UpdateCommunicationPreferences
    */
