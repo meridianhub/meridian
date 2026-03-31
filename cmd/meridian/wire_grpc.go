@@ -63,6 +63,7 @@ import (
 	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
 	tenantservice "github.com/meridianhub/meridian/services/tenant/service"
 
+	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/env"
@@ -324,6 +325,17 @@ func wireCurrentAccount(
 		caOpts = append(caOpts, currentaccountservice.WithInstrumentGetter(
 			&inProcessInstrumentGetter{registry: refData.instrumentRegistry}))
 	}
+
+	// Wire notification.send saga handler so dunning sagas can enqueue emails.
+	// Uses the current-account database for the email outbox (each service owns its outbox).
+	caEmailOutboxRepo := email.NewPostgresOutboxRepository(db)
+	emailResolver := newGRPCPartyEmailResolver(partyLoopback.Conn())
+	notifHandler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:        caEmailOutboxRepo,
+		EmailResolver: emailResolver,
+		Logger:        logger.With("component", "notification-handler"),
+	})
+	caOpts = append(caOpts, currentaccountservice.WithNotificationSagaHandler(notifHandler))
 
 	svc, err := currentaccountservice.NewServiceWithExistingClients(
 		repo, lienRepo, withdrawalRepo,
