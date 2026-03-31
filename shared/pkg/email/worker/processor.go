@@ -48,8 +48,8 @@ func NewEmailProcessor(
 		auditRepo:       auditRepo,
 		suppressionRepo: suppressionRepo,
 		invoiceChecker:  invoiceChecker,
-		metrics:        metrics,
-		logger:         logger.With("component", "email-processor"),
+		metrics:         metrics,
+		logger:          logger.With("component", "email-processor"),
 	}
 }
 
@@ -104,7 +104,11 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		return p.handleRenderFailure(ctx, entry, fmt.Sprintf("template render failed: %v", err))
 	}
 
-	// Build and send message.
+	return p.sendAndRecord(ctx, entry, htmlBody, textBody)
+}
+
+// sendAndRecord sends the email and records the result in outbox and audit log.
+func (p *EmailProcessor) sendAndRecord(ctx context.Context, entry *email.OutboxEntry, htmlBody, textBody string) error {
 	msg := email.Message{
 		To:             entry.ToAddresses,
 		From:           entry.FromAddress,
@@ -129,12 +133,10 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		return p.handleSendFailure(ctx, entry, fmt.Sprintf("send failed: %v", err))
 	}
 
-	// Mark sent in outbox.
 	if err := p.outboxRepo.MarkSent(ctx, entry.ID); err != nil {
 		return fmt.Errorf("marking outbox entry sent: %w", err)
 	}
 
-	// Create audit entry.
 	sentAt := result.SentAt
 	providerID := result.ProviderID
 	auditEntry := &email.AuditEntry{
@@ -149,7 +151,6 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		SentAt:       &sentAt,
 	}
 	if err := p.auditRepo.Record(ctx, auditEntry); err != nil {
-		// Log but don't fail - the email was sent successfully.
 		p.logger.WarnContext(ctx, "failed to record audit entry",
 			"outbox_id", entry.ID,
 			"error", err,

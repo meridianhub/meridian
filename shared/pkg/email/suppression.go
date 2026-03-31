@@ -14,6 +14,7 @@ import (
 // SuppressionType indicates why an address was suppressed.
 type SuppressionType string
 
+// Suppression type constants.
 const (
 	SuppressionBounce    SuppressionType = "BOUNCE"
 	SuppressionComplaint SuppressionType = "COMPLAINT"
@@ -21,11 +22,11 @@ const (
 
 // SuppressionEntry represents a suppressed email address.
 type SuppressionEntry struct {
-	EmailAddress   string
+	EmailAddress    string
 	SuppressionType SuppressionType
-	ProviderID     string
-	Reason         string
-	TenantID       string
+	ProviderID      string
+	Reason          string
+	TenantID        string
 }
 
 // SuppressionRepository checks and records email address suppressions.
@@ -53,6 +54,9 @@ type SuppressedAddressEntity struct {
 func (SuppressedAddressEntity) TableName() string {
 	return "suppressed_addresses"
 }
+
+// ErrNilSuppressionEntry is returned when a nil entry is passed to AddSuppression.
+var ErrNilSuppressionEntry = errors.New("email: suppression entry must not be nil")
 
 var _ SuppressionRepository = (*PostgresSuppressionRepository)(nil)
 
@@ -83,7 +87,7 @@ func (r *PostgresSuppressionRepository) IsSuppressed(ctx context.Context, emailA
 // already exists, the row is updated with the latest suppression details.
 func (r *PostgresSuppressionRepository) AddSuppression(ctx context.Context, entry *SuppressionEntry) error {
 	if entry == nil {
-		return errors.New("email: suppression entry must not be nil")
+		return ErrNilSuppressionEntry
 	}
 
 	now := time.Now().UTC()

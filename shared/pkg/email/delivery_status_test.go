@@ -14,11 +14,11 @@ import (
 // --- Test doubles for DeliveryStatusRecorder ---
 
 type stubAuditRepo struct {
-	recordByProviderIDErr   error
-	recordCalls             int
-	findByProviderIDResult  []email.AuditEntry
-	findByProviderIDErr     error
-	findByProviderIDCalls   int
+	recordByProviderIDErr  error
+	recordCalls            int
+	findByProviderIDResult []email.AuditEntry
+	findByProviderIDErr    error
+	findByProviderIDCalls  int
 }
 
 func (s *stubAuditRepo) Record(_ context.Context, _ *email.AuditEntry) error { return nil }
