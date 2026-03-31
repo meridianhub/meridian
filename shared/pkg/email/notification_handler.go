@@ -105,7 +105,10 @@ func checkPreferences(ctx *saga.StarlarkContext, deps NotificationHandlerDeps, p
 		templateName = "generic-notification"
 	}
 
-	tenantID, _ := tenant.FromContext(ctx)
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		return false, nil, fmt.Errorf("email: tenant context required for preference enforcement")
+	}
 	allowed, reason, err := deps.PreferenceEnforcer.ShouldSend(
 		ctx, string(tenantID), recipient, channel, templateName, category)
 	if err != nil {

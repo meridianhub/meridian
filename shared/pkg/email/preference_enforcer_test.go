@@ -225,3 +225,9 @@ func TestPreferenceEnforcer_NilLoggerUsesDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, allowed)
 }
+
+func TestPreferenceEnforcer_NilRepoPanics(t *testing.T) {
+	assert.Panics(t, func() {
+		email.NewPreferenceEnforcer(nil, nil, slog.Default())
+	})
+}

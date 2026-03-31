@@ -30,6 +30,9 @@ type PreferenceEnforcer struct {
 // templateCategoryMap maps template names to their expected category
 // (e.g., "dunning-notice" -> "TRANSACTIONAL").
 func NewPreferenceEnforcer(prefRepo PreferenceRepository, templateCategoryMap map[string]string, logger *slog.Logger) *PreferenceEnforcer {
+	if prefRepo == nil {
+		panic("email: PreferenceRepository must not be nil")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}

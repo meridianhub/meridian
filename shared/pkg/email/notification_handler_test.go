@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,6 +63,16 @@ func (m *mockEmailResolver) ResolveEmail(ctx context.Context, partyID string) (s
 func newTestStarlarkContext() *saga.StarlarkContext {
 	return &saga.StarlarkContext{
 		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		IdempotencyKey:  "step_1",
+		Logger:          slog.Default(),
+	}
+}
+
+func newTestStarlarkContextWithTenant() *saga.StarlarkContext {
+	tid, _ := tenant.NewTenantID("test-tenant")
+	return &saga.StarlarkContext{
+		Context:         tenant.WithTenant(context.Background(), tid),
 		SagaExecutionID: uuid.New(),
 		IdempotencyKey:  "step_1",
 		Logger:          slog.Default(),
@@ -397,7 +408,7 @@ func TestNotificationSendHandler_PreferenceEnforcerSuppresses(t *testing.T) {
 		Logger:             slog.Default(),
 	})
 
-	ctx := newTestStarlarkContext()
+	ctx := newTestStarlarkContextWithTenant()
 	result, err := handler(ctx, map[string]any{
 		"type":      "EMAIL",
 		"recipient": "party-123",
@@ -427,7 +438,7 @@ func TestNotificationSendHandler_PreferenceEnforcerAllowsTransactional(t *testin
 		Logger:             slog.Default(),
 	})
 
-	ctx := newTestStarlarkContext()
+	ctx := newTestStarlarkContextWithTenant()
 	result, err := handler(ctx, map[string]any{
 		"type":      "EMAIL",
 		"recipient": "party-123",
@@ -476,7 +487,7 @@ func TestNotificationSendHandler_DefaultCategoryIsTransactional(t *testing.T) {
 		Logger:             slog.Default(),
 	})
 
-	ctx := newTestStarlarkContext()
+	ctx := newTestStarlarkContextWithTenant()
 	// No category param - should default to TRANSACTIONAL and bypass preference checks
 	result, err := handler(ctx, map[string]any{
 		"type":      "EMAIL",
