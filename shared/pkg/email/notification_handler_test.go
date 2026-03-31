@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/pkg/email"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,6 +63,16 @@ func (m *mockEmailResolver) ResolveEmail(ctx context.Context, partyID string) (s
 func newTestStarlarkContext() *saga.StarlarkContext {
 	return &saga.StarlarkContext{
 		Context:         context.Background(),
+		SagaExecutionID: uuid.New(),
+		IdempotencyKey:  "step_1",
+		Logger:          slog.Default(),
+	}
+}
+
+func newTestStarlarkContextWithTenant() *saga.StarlarkContext {
+	tid, _ := tenant.NewTenantID("test-tenant")
+	return &saga.StarlarkContext{
+		Context:         tenant.WithTenant(context.Background(), tid),
 		SagaExecutionID: uuid.New(),
 		IdempotencyKey:  "step_1",
 		Logger:          slog.Default(),
@@ -381,4 +392,109 @@ func TestNotificationSendHandler_EnqueueError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to enqueue notification")
+}
+
+func TestNotificationSendHandler_PreferenceEnforcerSuppresses(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	enforcer := email.NewPreferenceEnforcer(
+		&mockPreferenceRepository{globalUnsubscribe: true},
+		nil,
+		slog.Default(),
+	)
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:             outbox,
+		EmailResolver:      &mockEmailResolver{},
+		PreferenceEnforcer: enforcer,
+		Logger:             slog.Default(),
+	})
+
+	ctx := newTestStarlarkContextWithTenant()
+	result, err := handler(ctx, map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+		"template":  "promo-email",
+		"category":  "MARKETING",
+	})
+
+	require.NoError(t, err)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "SUPPRESSED", resultMap["status"])
+	assert.Contains(t, resultMap["suppression_reason"], "globally unsubscribed")
+	assert.Empty(t, outbox.enqueuedEntries, "should not enqueue when suppressed")
+}
+
+func TestNotificationSendHandler_PreferenceEnforcerAllowsTransactional(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	enforcer := email.NewPreferenceEnforcer(
+		&mockPreferenceRepository{globalUnsubscribe: true},
+		nil,
+		slog.Default(),
+	)
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:             outbox,
+		EmailResolver:      &mockEmailResolver{},
+		PreferenceEnforcer: enforcer,
+		Logger:             slog.Default(),
+	})
+
+	ctx := newTestStarlarkContextWithTenant()
+	result, err := handler(ctx, map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+		"template":  "invoice",
+		"category":  "TRANSACTIONAL",
+	})
+
+	require.NoError(t, err)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "QUEUED", resultMap["status"])
+	require.Len(t, outbox.enqueuedEntries, 1)
+}
+
+func TestNotificationSendHandler_NilEnforcerSkipsPreferenceCheck(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:        outbox,
+		EmailResolver: &mockEmailResolver{},
+		Logger:        slog.Default(),
+	})
+
+	ctx := newTestStarlarkContext()
+	result, err := handler(ctx, map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+		"category":  "MARKETING",
+	})
+
+	require.NoError(t, err)
+	resultMap := result.(map[string]any)
+	assert.Equal(t, "QUEUED", resultMap["status"])
+}
+
+func TestNotificationSendHandler_DefaultCategoryIsTransactional(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	enforcer := email.NewPreferenceEnforcer(
+		&mockPreferenceRepository{globalUnsubscribe: true},
+		nil,
+		slog.Default(),
+	)
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:             outbox,
+		EmailResolver:      &mockEmailResolver{},
+		PreferenceEnforcer: enforcer,
+		Logger:             slog.Default(),
+	})
+
+	ctx := newTestStarlarkContextWithTenant()
+	// No category param - should default to TRANSACTIONAL and bypass preference checks
+	result, err := handler(ctx, map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+	})
+
+	require.NoError(t, err)
+	resultMap := result.(map[string]any)
+	assert.Equal(t, "QUEUED", resultMap["status"])
 }
