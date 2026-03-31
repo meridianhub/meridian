@@ -105,7 +105,7 @@ Fix the three latent bugs. No new architecture - just wire what exists.
 | Task | Description |
 |---|---|
 | Wire notification handler | Call `WithNotificationHandler` in `cmd/meridian/` so dunning saga `notification.send` calls work |
-| Fix identity outbox | Consolidate to single outbox DB or add identity DB polling to worker |
+| Fix identity outbox | Add a second `dispatch.Worker[EmailOutboxRow]` instance polling the identity DB. Do NOT consolidate to a single outbox DB (violates ADR-0002 database-per-service). Each service DB that originates emails must have its own dedicated worker. |
 | Complaint suppression | Worker checks audit trail for COMPLAINED/BOUNCED before sending; `suppressed_addresses` table |
 
 ### Phase 1: Deliverability (3 points)
@@ -138,12 +138,21 @@ Proto definition, handler migration, communication preferences.
 Full service boundary. Deferred until multi-channel support or
 independent scaling justifies the operational overhead.
 
+**Outbox coordination (ADR-0002 constraint):** Today `payment-order`
+writes invoice + outbox row in one ACID transaction. Extracting the
+outbox to a separate `meridian_correspondence` DB breaks this guarantee.
+Phase 3 must move to saga-driven coordination: the invoice generation
+saga explicitly calls `correspondence.initiate_outbound` as a distinct
+step with compensation, replacing the cross-service atomic DB write.
+This is the natural Meridian pattern - the saga engine already exists.
+
 | Task | Description |
 |---|---|
 | Service scaffold | `services/correspondence/` with standard directory structure, gRPC server, migrations, Atlas config |
 | Code relocation | Move 26 Go files from `shared/pkg/email/` (outbox, audit, sender, templates, worker) |
 | Import rewiring | Update 29+ import sites across the codebase |
 | gRPC endpoints | `InitiateOutbound` wraps existing handler logic, `RecordDeliveryStatus` wraps webhook logic |
+| Saga-driven outbox | Replace atomic cross-DB writes with saga step calls to `correspondence.initiate_outbound` |
 | Starlark bindings | `RegisterStarlarkHandlers` for `correspondence.*` namespace |
 | Integration tests | End-to-end saga execution through the new service boundary |
 
@@ -154,6 +163,8 @@ syntax = "proto3";
 package meridian.correspondence.v1;
 
 import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
 
 enum CorrespondenceCategory {
   CORRESPONDENCE_CATEGORY_UNSPECIFIED = 0;
@@ -187,7 +198,7 @@ message InitiateOutboundRequest {
   string recipient_party_id = 2;
   string template_name = 3;
   google.protobuf.Struct template_data = 4;
-  string idempotency_key = 5;
+  meridian.common.v1.IdempotencyKey idempotency_key = 5;
   string priority = 6;
   CorrespondenceCategory category = 7;
 }
@@ -203,10 +214,10 @@ message InitiateOutboundWithResponseRequest {
   string recipient_party_id = 2;
   string template_name = 3;
   google.protobuf.Struct template_data = 4;
-  string idempotency_key = 5;
+  meridian.common.v1.IdempotencyKey idempotency_key = 5;
   string priority = 6;
   CorrespondenceCategory category = 7;
-  string response_deadline = 8;
+  google.protobuf.Timestamp response_deadline = 8;
 }
 
 message InitiateOutboundWithResponseResponse {
@@ -226,9 +237,9 @@ message RetrieveOutboundResponse {
   string channel = 3;
   string recipient_party_id = 4;
   string template_name = 5;
-  string created_at = 6;
-  string sent_at = 7;
-  string delivered_at = 8;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp sent_at = 7;
+  google.protobuf.Timestamp delivered_at = 8;
 }
 
 message RecordDeliveryStatusRequest {
@@ -256,9 +267,9 @@ message ChannelPreference {
   string channel = 1;
   CorrespondenceCategory category = 2;
   bool opted_in = 3;
-  string updated_at = 4;
+  google.protobuf.Timestamp updated_at = 4;
   string consent_source = 5;
-  string consent_granted_at = 6;
+  google.protobuf.Timestamp consent_granted_at = 6;
   string consent_text = 7;
 }
 
@@ -445,3 +456,20 @@ to a BIAN-aligned service:
 Phase 0 tasks are independent and can run in parallel. Phase 3 is
 deferred until multi-channel or independent scaling justifies the
 operational overhead of a separate service boundary.
+
+## 10. Future Considerations (Out of Scope)
+
+- **SMS/webhook channel implementations** - interface ready via
+  `channel` field
+- **BlockMailing batch operations** - BIAN behaviour qualifier defined
+  but not implemented
+- **Inbound correspondence processing** - future BIAN behaviour qualifier
+- **Self-service preference management UI** - API ready
+- **Auth email flows** - PRD 053, uses shared `Sender` interface directly
+- **Tenant-configurable templates** - tenants will eventually want to
+  author their own email templates or bring their own provider API keys.
+  Templates and provider credentials should move into the Tenant Manifest
+  (similar to `payment_rails` and `operational_gateway.provider_connections`
+  in PRD-033). Not required for initial phases.
+- **CAN-SPAM compliance** - physical address in footer, explicit opt-out
+  mechanism for US recipients. Can be addressed when US market is active.
