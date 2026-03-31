@@ -84,14 +84,19 @@ func (c *CompositeAuditRepository) FindByOutboxID(_ context.Context, _ uuid.UUID
 // matching the provider ID. Returns results from the first repository that
 // finds entries.
 func (c *CompositeAuditRepository) FindByProviderID(ctx context.Context, providerID string) ([]AuditEntry, error) {
+	var lastErr error
 	for _, repo := range c.repos {
 		entries, err := repo.FindByProviderID(ctx, providerID)
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		if len(entries) > 0 {
 			return entries, nil
 		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
 	}
 	return nil, nil
 }
