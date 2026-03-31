@@ -41,6 +41,11 @@ func (r *DeliveryStatusRecorder) RecordDeliveryStatus(ctx context.Context, provi
 		return err
 	}
 
+	// Track complaint metrics independently of suppression config.
+	if status == AuditStatusComplained && r.metrics != nil {
+		r.recordComplaintMetric(ctx, providerID)
+	}
+
 	// Add suppression on bounce/complaint.
 	if r.suppressionRepo != nil && (status == AuditStatusBounced || status == AuditStatusComplained) {
 		r.recordSuppressions(ctx, providerID, status)
@@ -68,9 +73,6 @@ func (r *DeliveryStatusRecorder) recordSuppressions(ctx context.Context, provide
 	suppType := SuppressionBounce
 	if status == AuditStatusComplained {
 		suppType = SuppressionComplaint
-		if r.metrics != nil {
-			r.metrics.RecordEmailComplaint(original.TenantID)
-		}
 	}
 
 	for _, addr := range original.ToAddresses {
@@ -87,4 +89,18 @@ func (r *DeliveryStatusRecorder) recordSuppressions(ctx context.Context, provide
 			)
 		}
 	}
+}
+
+// recordComplaintMetric resolves tenant from audit entries and increments the
+// complaint counter. Errors are logged but not propagated.
+func (r *DeliveryStatusRecorder) recordComplaintMetric(ctx context.Context, providerID string) {
+	entries, err := r.auditRepo.FindByProviderID(ctx, providerID)
+	if err != nil || len(entries) == 0 {
+		r.logger.WarnContext(ctx, "cannot resolve tenant for complaint metric",
+			"provider_id", providerID,
+			"error", err,
+		)
+		return
+	}
+	r.metrics.RecordEmailComplaint(entries[len(entries)-1].TenantID)
 }

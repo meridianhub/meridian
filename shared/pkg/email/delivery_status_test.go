@@ -252,6 +252,23 @@ func TestDeliveryStatusRecorder_Bounce_DoesNotIncrementComplaintMetric(t *testin
 	assert.Equal(t, float64(0), complaints, "bounce should not increment complaint counter")
 }
 
+func TestDeliveryStatusRecorder_Complaint_MetricsFire_WithoutSuppressionRepo(t *testing.T) {
+	audit := &stubAuditRepo{
+		findByProviderIDResult: []email.AuditEntry{
+			{TenantID: "tenant-99", ToAddresses: []string{"complainer@example.com"}},
+		},
+	}
+	m, reg := newTestDeliveryMetrics(t)
+	recorder := email.NewDeliveryStatusRecorder(audit, nil, m, nil)
+
+	err := recorder.RecordDeliveryStatus(context.Background(), "msg-nosup", email.AuditStatusComplained, nil)
+
+	require.NoError(t, err)
+
+	complaints := getCounterWithLabel(t, reg, "meridian_email_complaints_total", "tenant_id", "tenant-99")
+	assert.Equal(t, float64(1), complaints, "complaint metric should fire even without suppression repo")
+}
+
 func TestDeliveryStatusRecorder_NilMetrics_ComplaintDoesNotPanic(t *testing.T) {
 	audit := &stubAuditRepo{
 		findByProviderIDResult: []email.AuditEntry{
