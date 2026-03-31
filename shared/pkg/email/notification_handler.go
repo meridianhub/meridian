@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // PartyEmailResolver resolves a party ID to an email address.
@@ -17,9 +18,10 @@ type PartyEmailResolver interface {
 
 // NotificationHandlerDeps holds dependencies for the notification.send handler.
 type NotificationHandlerDeps struct {
-	Outbox        OutboxRepository
-	EmailResolver PartyEmailResolver
-	Logger        *slog.Logger
+	Outbox             OutboxRepository
+	EmailResolver      PartyEmailResolver
+	PreferenceEnforcer *PreferenceEnforcer
+	Logger             *slog.Logger
 }
 
 // Sentinel errors for notification handler operations.
@@ -29,6 +31,7 @@ var (
 	ErrMissingType                 = fmt.Errorf("email: missing required parameter: type")
 	ErrMissingOutbox               = fmt.Errorf("email: outbox repository is required")
 	ErrMissingEmailResolver        = fmt.Errorf("email: email resolver is required")
+	ErrMissingTenantContext        = fmt.Errorf("email: tenant context required for preference enforcement")
 )
 
 // NewNotificationSendHandler creates a saga handler for notification.send.
@@ -54,6 +57,17 @@ func NewNotificationSendHandler(deps NotificationHandlerDeps) saga.Handler {
 		}
 
 		recipient, _ := params["recipient"].(string)
+
+		if deps.PreferenceEnforcer != nil {
+			suppressed, result, err := checkPreferences(ctx, deps, params, recipient)
+			if err != nil {
+				return nil, err
+			}
+			if suppressed {
+				return result, nil
+			}
+		}
+
 		emailAddr, err := deps.EmailResolver.ResolveEmail(ctx, recipient)
 		if err != nil {
 			return nil, fmt.Errorf("email: failed to resolve email for party %s: %w", recipient, err)
@@ -77,6 +91,39 @@ func NewNotificationSendHandler(deps NotificationHandlerDeps) saga.Handler {
 			"idempotency_key": entry.IdempotencyKey,
 		}, nil
 	}
+}
+
+// checkPreferences evaluates communication preferences. Returns (true, result, nil)
+// when the message should be suppressed, or (false, nil, nil) when sending is allowed.
+func checkPreferences(ctx *saga.StarlarkContext, deps NotificationHandlerDeps, params map[string]any, recipient string) (bool, any, error) {
+	category, _ := params["category"].(string)
+	if category == "" {
+		category = CategoryTransactional // Default: legacy callers are transactional
+	}
+	channel, _ := params["type"].(string)
+	templateName, _ := params["template"].(string)
+	if templateName == "" {
+		templateName = "generic-notification"
+	}
+
+	tenantID, ok := tenant.FromContext(ctx)
+	if !ok {
+		return false, nil, ErrMissingTenantContext
+	}
+	allowed, reason, err := deps.PreferenceEnforcer.ShouldSend(
+		ctx, string(tenantID), recipient, channel, templateName, category)
+	if err != nil {
+		return false, nil, fmt.Errorf("email: preference enforcement failed: %w", err)
+	}
+	if !allowed {
+		deps.Logger.Info("notification suppressed by preference",
+			"recipient", recipient, "category", category, "reason", reason)
+		return true, map[string]any{
+			"status":             "SUPPRESSED",
+			"suppression_reason": reason,
+		}, nil
+	}
+	return false, nil, nil
 }
 
 func validateNotificationParams(params map[string]any) error {
