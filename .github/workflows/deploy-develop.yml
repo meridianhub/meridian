@@ -249,13 +249,15 @@ jobs:
               echo "New databases created - restarting app to pick up connections"
               docker compose -f docker-compose.develop.yml restart meridian-develop
             fi
-            # Wait for the container to be running before attempting migrations
+            # Wait for the container to be running (not restarting) before migrations.
+            # The app image is distroless - no shell utilities - so use docker inspect.
             for i in $(seq 1 30); do
-              if docker exec meridian-develop echo ok 2>/dev/null; then
+              status=$(docker inspect --format='{{.State.Status}}' meridian-develop 2>/dev/null || echo "missing")
+              if [ "$status" = "running" ]; then
                 echo "Container is running"
                 exit 0
               fi
-              echo "Waiting for container... ($i/30)"
+              echo "Waiting for container (status: $status)... ($i/30)"
               sleep 2
             done
             echo "Container failed to start after 60s"
