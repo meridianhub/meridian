@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS suppressed_addresses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id VARCHAR(36) NOT NULL,
-    email_address VARCHAR(255) NOT NULL,
+    tenant_id VARCHAR(255) NOT NULL,
+    email_address VARCHAR(255) NOT NULL CHECK (email_address = lower(trim(email_address))),
     suppression_type VARCHAR(20) NOT NULL CHECK (suppression_type IN ('BOUNCE', 'COMPLAINT')),
     provider_id VARCHAR(255),
     reason TEXT,
@@ -10,5 +10,3 @@ CREATE TABLE IF NOT EXISTS suppressed_addresses (
 
     CONSTRAINT uq_suppressed_addresses_tenant_email UNIQUE (tenant_id, email_address)
 );
-
-CREATE INDEX idx_suppressed_addresses_lookup ON suppressed_addresses (tenant_id, email_address);
