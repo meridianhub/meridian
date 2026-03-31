@@ -193,7 +193,9 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	if provisionerCleanup != nil {
 		defer provisionerCleanup()
 	}
-	emailWorker := startEmailWorker(ctx, infra.conns.gormDB("payment-order"), logger)
+	emailWorker := startEmailWorker(ctx, "payment-order", infra.conns.gormDB("payment-order"), logger)
+	identityEmailWorker := startEmailWorker(ctx, "identity", infra.conns.gormDB("identity"), logger)
+	caEmailWorker := startEmailWorker(ctx, "current-account", infra.conns.gormDB("current-account"), logger)
 
 	// Start gRPC server
 	grpcAddr := fmt.Sprintf(":%d", grpcPort)
@@ -222,7 +224,9 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 		}
 	}()
 
-	return awaitAndShutdown(infra.grpcServer, gwServer, auditWorker, provisioningWorker, emailWorker, serverErrors, gatewayErrors, logger)
+	return awaitAndShutdown(infra.grpcServer, gwServer, auditWorker, provisioningWorker,
+		[]*dispatch.Worker[*emailworker.OutboxInstruction]{emailWorker, identityEmailWorker, caEmailWorker},
+		serverErrors, gatewayErrors, logger)
 }
 
 // initInfrastructure creates all shared infrastructure: database connections, tracer,
@@ -358,7 +362,7 @@ func awaitAndShutdown(
 	gwServer *gateway.Server,
 	auditWorker *audit.MultiTenantWorker,
 	provisioningWorker *tenantworker.ProvisioningWorker,
-	emailWorker *dispatch.Worker[*emailworker.OutboxInstruction],
+	emailWorkers []*dispatch.Worker[*emailworker.OutboxInstruction],
 	serverErrors, gatewayErrors chan error,
 	logger *slog.Logger,
 ) error {
@@ -383,9 +387,13 @@ func awaitAndShutdown(
 		provisioningWorker.Stop()
 		logger.Info("provisioning worker stopped")
 	}
-	if emailWorker != nil {
-		emailWorker.Stop()
-		logger.Info("email worker stopped")
+	for _, ew := range emailWorkers {
+		if ew != nil {
+			ew.Stop()
+		}
+	}
+	if len(emailWorkers) > 0 {
+		logger.Info("email workers stopped")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -410,27 +418,27 @@ func awaitAndShutdown(
 // When EMAIL_MODE is "disabled" (the dev default), the worker is not started at
 // all. This prevents the NoopSender from silently consuming outbox entries and
 // marking them as sent without actual delivery.
-func startEmailWorker(ctx context.Context, paymentOrderDB *gorm.DB, logger *slog.Logger) *dispatch.Worker[*emailworker.OutboxInstruction] {
+func startEmailWorker(ctx context.Context, serviceName string, db *gorm.DB, logger *slog.Logger) *dispatch.Worker[*emailworker.OutboxInstruction] {
 	mode := os.Getenv("EMAIL_MODE")
 	if mode == "disabled" {
-		logger.Info("email worker disabled", "email_mode", mode)
+		logger.Info("email worker disabled", "email_mode", mode, "service", serviceName)
 		return nil
 	}
 
 	sender, err := email.NewSenderFromEnv(logger)
 	if err != nil {
-		logger.Warn("email sender not configured, email worker disabled", "error", err)
+		logger.Warn("email sender not configured, email worker disabled", "error", err, "service", serviceName)
 		return nil
 	}
 
 	renderer, err := email.NewEmbeddedRenderer()
 	if err != nil {
-		logger.Error("email renderer init failed, email worker disabled", "error", err)
+		logger.Error("email renderer init failed, email worker disabled", "error", err, "service", serviceName)
 		return nil
 	}
 
-	outboxRepo := email.NewPostgresOutboxRepository(paymentOrderDB)
-	auditRepo := email.NewPostgresAuditRepository(paymentOrderDB)
+	outboxRepo := email.NewPostgresOutboxRepository(db)
+	auditRepo := email.NewPostgresAuditRepository(db)
 	metrics := email.NewMetrics()
 
 	w := emailworker.NewEmailWorker(
@@ -444,11 +452,11 @@ func startEmailWorker(ctx context.Context, paymentOrderDB *gorm.DB, logger *slog
 			BatchSize:    env.GetEnvAsInt("EMAIL_WORKER_BATCH_SIZE", dispatch.DefaultBatchSize),
 			PollInterval: env.GetEnvAsDuration("EMAIL_WORKER_POLL_INTERVAL", 5*time.Second),
 		},
-		logger.With("component", "email-worker"),
+		logger.With("component", "email-worker", "service", serviceName),
 	)
 
 	w.Start(ctx)
-	logger.Info("email worker started")
+	logger.Info("email worker started", "service", serviceName)
 	return w
 }
 
