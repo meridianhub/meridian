@@ -1,7 +1,7 @@
 # Correspondence Service (BIAN-Aligned)
 
 **Status:** Draft
-**Version:** 1.1
+**Version:** 2.0
 **Author:** Platform Team
 **Companion PRDs:** [052 - Email Platform](./052-email-platform.md),
 [053 - Auth Email Flows](./053-auth-email-flows.md)
@@ -22,7 +22,27 @@ locations with no single service owning the domain:
 | Email outbox + worker + sender | `shared/pkg/email/` | Shared package with no gRPC service boundary, no BIAN alignment |
 | Audit trail | `shared/pkg/email/audit_postgres.go` | Delivery audit lives in shared package, not owned by a service |
 
-This creates several issues:
+### Latent Bugs (Pre-existing)
+
+Investigation during PRD review revealed three bugs that exist today:
+
+1. **Identity outbox never polled** - `wire_identity.go:20` creates
+   outbox repo against the identity DB, but the email worker only polls
+   the payment-order DB. Identity-originated emails (invites, lockout
+   notifications) are silently lost.
+
+2. **notification.send handler never wired** - `WithNotificationHandler`
+   is never called in `cmd/meridian/`. The 5 `notification.send` calls
+   in dunning saga scripts fail silently with `errHandlerNotImplemented`.
+   We are not migrating a working system - we are completing an
+   unfinished one.
+
+3. **Complaint feedback loop broken** - Webhook handler records
+   COMPLAINED/BOUNCED in audit log, but the worker never reads it back.
+   Complained addresses get re-emailed, risking domain reputation
+   degradation. Gmail/Yahoo mandate < 0.3% complaint rates.
+
+### Issues
 
 1. **No Saga Contract compliance** - `notification.send` is the last
    non-composite handler using inline params instead of proto_ref
@@ -35,6 +55,9 @@ This creates several issues:
    capability, or GDPR right-to-erasure support for party communications
 5. **Webhook misownership** - Resend delivery callbacks are handled by
    the API gateway, which has no domain knowledge of correspondence
+6. **No category enforcement** - saga scripts self-declare the category
+   (TRANSACTIONAL, MARKETING, OPERATIONAL) with no server-side
+   validation that the content matches the declared category
 
 ## 2. BIAN Alignment
 
@@ -58,7 +81,7 @@ qualifiers:
 | `Initiate` | Create new outbound correspondence | `InitiateOutbound` |
 | `Retrieve` | Get correspondence status/details | `RetrieveOutbound` |
 | `Update` | Modify pending correspondence | Future (out of scope) |
-| `Execute` | Run automated task (e.g., batch send) | `ExecuteBlockMailing` |
+| `Execute` | Run automated task (e.g., batch send) | Future (`ExecuteBlockMailing`) |
 
 ### Service Domain Naming
 
@@ -69,7 +92,62 @@ Following Meridian's convention (ADR-002: microservices per BIAN domain):
 - Go module: `services/correspondence/`
 - Handler namespace: `correspondence` (replaces `notification`)
 
-## 3. Proto Definition
+## 3. Phased Delivery
+
+Each phase ships independently and delivers value. Phase 0 fixes
+production bugs that exist today regardless of this PRD. The PRD serves
+as the architectural north star for all phases.
+
+### Phase 0: Bug Fixes (3 points)
+
+Fix the three latent bugs. No new architecture - just wire what exists.
+
+| Task | Description |
+|---|---|
+| Wire notification handler | Call `WithNotificationHandler` in `cmd/meridian/` so dunning saga `notification.send` calls work |
+| Fix identity outbox | Consolidate to single outbox DB or add identity DB polling to worker |
+| Complaint suppression | Worker checks audit trail for COMPLAINED/BOUNCED before sending; `suppressed_addresses` table |
+
+### Phase 1: Deliverability (3 points)
+
+Protect domain reputation and relocate webhook ownership.
+
+| Task | Description |
+|---|---|
+| `suppressed_addresses` table | Pre-send check against bounced/complained addresses |
+| Webhook relocation | Move Resend webhook handler from api-gateway to correspondence domain (gRPC `RecordDeliveryStatus`) |
+| Complaint rate metric | Per-tenant complaint rate Prometheus metric; alert on > 0.1% |
+
+### Phase 2: Domain Model + GDPR (8 points)
+
+Proto definition, handler migration, communication preferences.
+
+| Task | Description |
+|---|---|
+| Proto + buf generate | Define `meridian.correspondence.v1.CorrespondenceService` |
+| handlers.yaml migration | Replace `notification.send` (inline) with `correspondence.initiate_outbound` (proto_ref) with `param_aliases` for backward compat |
+| Saga script updates | Update dunning_escalation, dunning_unfreeze (atomic with handlers.yaml change) |
+| Operational gateway route migration | Data migration for persisted `notification.send` instruction types |
+| Communication preferences | Preferences table with consent provenance, enforcement in InitiateOutbound |
+| Category enforcement | `CorrespondenceCategory` enum + `templateCategoryMap` binding to prevent self-declaration bypass |
+| Unsubscribe headers | RFC 2369 (`List-Unsubscribe`) + RFC 8058 (`List-Unsubscribe-Post`) on all non-transactional emails |
+| Template modifications | Add unsubscribe links, update `template_data` struct for 18 template files |
+
+### Phase 3: Service Extraction (8 points, deferred)
+
+Full service boundary. Deferred until multi-channel support or
+independent scaling justifies the operational overhead.
+
+| Task | Description |
+|---|---|
+| Service scaffold | `services/correspondence/` with standard directory structure, gRPC server, migrations, Atlas config |
+| Code relocation | Move 26 Go files from `shared/pkg/email/` (outbox, audit, sender, templates, worker) |
+| Import rewiring | Update 29+ import sites across the codebase |
+| gRPC endpoints | `InitiateOutbound` wraps existing handler logic, `RecordDeliveryStatus` wraps webhook logic |
+| Starlark bindings | `RegisterStarlarkHandlers` for `correspondence.*` namespace |
+| Integration tests | End-to-end saga execution through the new service boundary |
+
+## 4. Proto Definition
 
 ```protobuf
 syntax = "proto3";
@@ -77,56 +155,46 @@ package meridian.correspondence.v1;
 
 import "google/protobuf/struct.proto";
 
+enum CorrespondenceCategory {
+  CORRESPONDENCE_CATEGORY_UNSPECIFIED = 0;
+  CORRESPONDENCE_CATEGORY_TRANSACTIONAL = 1;
+  CORRESPONDENCE_CATEGORY_OPERATIONAL = 2;
+  CORRESPONDENCE_CATEGORY_MARKETING = 3;
+}
+
 service CorrespondenceService {
-  // Initiate outbound correspondence (fire-and-forget)
   rpc InitiateOutbound(InitiateOutboundRequest)
       returns (InitiateOutboundResponse);
 
-  // Initiate outbound with tracked response
   rpc InitiateOutboundWithResponse(InitiateOutboundWithResponseRequest)
       returns (InitiateOutboundWithResponseResponse);
 
-  // Retrieve correspondence status
   rpc RetrieveOutbound(RetrieveOutboundRequest)
       returns (RetrieveOutboundResponse);
 
-  // Record delivery status from provider webhook
   rpc RecordDeliveryStatus(RecordDeliveryStatusRequest)
       returns (RecordDeliveryStatusResponse);
 
-  // Check communication preferences for a party
   rpc GetCommunicationPreferences(GetCommunicationPreferencesRequest)
       returns (GetCommunicationPreferencesResponse);
 
-  // Update communication preferences (subscribe/unsubscribe)
   rpc UpdateCommunicationPreferences(UpdateCommunicationPreferencesRequest)
       returns (UpdateCommunicationPreferencesResponse);
 }
 
 message InitiateOutboundRequest {
-  // Channel: EMAIL, SMS, WEBHOOK (extensible)
   string channel = 1;
-  // Recipient party ID (resolved to contact details server-side)
   string recipient_party_id = 2;
-  // Template name (e.g., "invoice_delivery", "dunning_notice")
   string template_name = 3;
-  // Template data (key-value pairs for template rendering, supports mixed types)
   google.protobuf.Struct template_data = 4;
-  // Idempotency key (auto-generated from saga execution if omitted)
   string idempotency_key = 5;
-  // Priority: NORMAL, HIGH, LOW
   string priority = 6;
-  // Category for preference checking: TRANSACTIONAL, MARKETING, OPERATIONAL
-  // TRANSACTIONAL bypasses unsubscribe (legally required comms)
-  // MARKETING and OPERATIONAL respect party preferences
-  string category = 7;
+  CorrespondenceCategory category = 7;
 }
 
 message InitiateOutboundResponse {
   string correspondence_id = 1;
-  // QUEUED, SENT, SUPPRESSED (party opted out), FAILED
   string status = 2;
-  // When suppressed, explains why (e.g., "party_unsubscribed")
   string suppression_reason = 3;
 }
 
@@ -137,8 +205,7 @@ message InitiateOutboundWithResponseRequest {
   google.protobuf.Struct template_data = 4;
   string idempotency_key = 5;
   string priority = 6;
-  string category = 7;
-  // Expected response deadline (e.g., "P7D" for 7 days)
+  CorrespondenceCategory category = 7;
   string response_deadline = 8;
 }
 
@@ -166,7 +233,6 @@ message RetrieveOutboundResponse {
 
 message RecordDeliveryStatusRequest {
   string provider_id = 1;
-  // DELIVERED, BOUNCED, COMPLAINED
   string status = 2;
   map<string, string> provider_metadata = 3;
 }
@@ -182,24 +248,23 @@ message GetCommunicationPreferencesRequest {
 
 message GetCommunicationPreferencesResponse {
   string party_id = 1;
-  // Per-channel, per-category preferences
   repeated ChannelPreference preferences = 2;
-  // GDPR: if true, all non-transactional comms are suppressed
   bool global_unsubscribe = 3;
 }
 
 message ChannelPreference {
-  string channel = 1;    // EMAIL, SMS, WEBHOOK
-  string category = 2;   // MARKETING, OPERATIONAL, TRANSACTIONAL
+  string channel = 1;
+  CorrespondenceCategory category = 2;
   bool opted_in = 3;
   string updated_at = 4;
+  string consent_source = 5;
+  string consent_granted_at = 6;
+  string consent_text = 7;
 }
 
 message UpdateCommunicationPreferencesRequest {
   string party_id = 1;
-  // Set global unsubscribe (GDPR right to object)
   optional bool global_unsubscribe = 2;
-  // Per-channel, per-category opt-in/opt-out
   repeated ChannelPreference preferences = 3;
 }
 
@@ -209,58 +274,108 @@ message UpdateCommunicationPreferencesResponse {
 }
 ```
 
-## 4. Refactoring Plan
+Key design decisions:
+- `category` uses a proto enum (`CorrespondenceCategory`) not a string,
+  preventing invalid categories at the wire level
+- `template_data` uses `google.protobuf.Struct` (not `map<string, string>`)
+  to support mixed types - existing dunning scripts pass integers
+- `ChannelPreference` includes consent provenance fields as NOT NULL in
+  the migration - you cannot create a preference without documenting
+  provenance (GDPR Art. 7(1) requirement)
 
-### What Moves
+## 5. Communication Preferences (GDPR)
 
-| From | To | Notes |
-|---|---|---|
-| `shared/pkg/email/notification_handler.go` | `services/correspondence/handler/` | Saga handler becomes a gRPC client call instead of local function |
-| `shared/pkg/email/outbox_*.go` | `services/correspondence/adapters/persistence/` | Outbox is now owned by the service |
-| `shared/pkg/email/audit_*.go` | `services/correspondence/adapters/persistence/` | Audit trail owned by the service |
-| `shared/pkg/email/resend.go` | `services/correspondence/adapters/provider/` | Resend adapter behind a `Sender` interface |
-| `shared/pkg/email/sender*.go` | `services/correspondence/adapters/provider/` | Sender interface + factory |
-| `shared/pkg/email/template*.go` | `services/correspondence/templates/` | Template rendering |
-| `shared/pkg/email/worker/` | `services/correspondence/worker/` | Email dispatch worker |
-| `services/api-gateway/resend_webhook_handler.go` | `services/correspondence/webhook/` | API gateway proxies to Correspondence service via gRPC `RecordDeliveryStatus` |
+### Requirements
 
-### What Stays
-
-| Component | Why |
+| Requirement | Implementation |
 |---|---|
-| `shared/pkg/email/` package | Becomes thin - just the `Message` type and `Sender` interface for any service that needs to send email directly (e.g., auth verification in identity service). The interface stays shared; the implementation moves. |
+| **Right to object (Art. 21)** | `global_unsubscribe` flag. When set, all non-transactional comms suppressed. |
+| **Unsubscribe per channel/category** | `ChannelPreference` records per party. |
+| **Transactional exemption** | `TRANSACTIONAL` category bypasses all preferences. |
+| **Right to erasure (Art. 17)** | Preferences deletable via party lifecycle. Audit trail redacted, not deleted (7-year financial regulation). |
+| **Consent demonstration (Art. 7(1))** | Append-only preference table IS the audit trail. `consent_source`, `consent_granted_at`, `consent_text` are NOT NULL. Single SELECT proves consent existed. |
 
-### Migration Strategy
+### Enforcement Point
 
-1. **Create service scaffold** - standard Meridian service directory
-   structure with gRPC server, migrations, Atlas config
-2. **Move email package internals** - outbox, audit, sender, templates,
-   worker into the new service
-3. **Implement gRPC endpoints** - `InitiateOutbound` wraps the existing
-   notification handler logic, `RecordDeliveryStatus` wraps the existing
-   webhook handler logic
-4. **Register Starlark bindings** - `correspondence.initiate_outbound`
-   registered with the saga handler registry
-5. **Update handlers.yaml and saga scripts atomically** - add
-   `correspondence.initiate_outbound` (proto_ref) to handlers.yaml,
-   update dunning_escalation and dunning_unfreeze saga scripts, and
-   remove `notification.send` in a single commit. This prevents a
-   window where scripts reference a handler that doesn't exist.
-7. **Proxy webhook** - API gateway's `/api/v1/webhooks/resend` route
-   calls Correspondence service's `RecordDeliveryStatus` gRPC endpoint
-   instead of writing directly to the audit table
-8. **Migrate operational gateway routes** - persisted routes in the
-   operational gateway reference `notification.send` as an instruction
-   type. Add a data migration to update these to
-   `correspondence.initiate_outbound`. Also update test fixtures that
-   use `notification.send` as example instruction types.
-9. **Add communication preferences** - new table, preference check in
-   InitiateOutbound before queuing
+`InitiateOutbound` checks preferences before queuing:
 
-### Backward Compatibility
+```text
+1. Validate category against templateCategoryMap (server-side,
+   prevents self-declaration bypass)
+2. Resolve party preferences
+3. If global_unsubscribe AND category != TRANSACTIONAL → SUPPRESSED
+4. If channel+category explicitly opted out → SUPPRESSED
+5. If category == TRANSACTIONAL → allow (legally required)
+6. If category == OPERATIONAL AND no preference record → allow
+   (legitimate interest, Art. 6(1)(f))
+7. If category == MARKETING AND no preference record → SUPPRESSED
+   (explicit consent required, Art. 7)
+8. Check suppressed_addresses for bounce/complaint → SUPPRESSED
+9. Queue to outbox
+```
 
-The `param_aliases` mechanism in handlers.yaml maps old saga parameter
-names to new proto fields:
+Suppressed correspondence is recorded in the audit trail with the
+GDPR article reference that triggered suppression.
+
+### Category Enforcement
+
+A server-side `templateCategoryMap` binds template names to their
+allowed categories. This prevents a saga script from declaring a
+marketing template as TRANSACTIONAL to bypass preferences:
+
+```go
+var templateCategoryMap = map[string]CorrespondenceCategory{
+    "dunning-notice":        TRANSACTIONAL,
+    "account-frozen":        TRANSACTIONAL,
+    "payment-confirmation":  TRANSACTIONAL,
+    "invoice-delivery":      TRANSACTIONAL,
+    "dunning-resolved":      OPERATIONAL,
+    "welcome":               OPERATIONAL,
+    "service-update":        OPERATIONAL,
+    "promotional-offer":     MARKETING,
+}
+```
+
+If a saga declares `category=TRANSACTIONAL` but the template maps to
+`MARKETING`, the request is rejected with a validation error.
+
+### Category Definitions
+
+- `TRANSACTIONAL`: Legally required communications (invoices, account
+  freezes, dunning notices, password resets). Cannot be suppressed.
+- `OPERATIONAL`: Service-related communications sent under legitimate
+  interest (Art. 6(1)(f)) - welcome emails, service updates, account
+  notifications. Allowed by default, party can opt out.
+- `MARKETING`: Promotional communications requiring explicit opt-in
+  consent (Art. 7). Suppressed by default, party must opt in.
+
+### Unsubscribe Mechanism
+
+Every non-transactional email includes both `List-Unsubscribe`
+(RFC 2369) and `List-Unsubscribe-Post` (RFC 8058) headers. Both are
+required - RFC 8058 Section 3.1 uses MUST language for the companion
+header. Gmail and Yahoo's 2024 sender requirements mandate both for
+bulk/marketing email.
+
+The unsubscribe link calls `UpdateCommunicationPreferences` via the
+API gateway.
+
+## 6. Backward Compatibility
+
+### Handler Name Transition
+
+During Phase 2, both handler names can coexist:
+
+1. **Phase 2 (dual support)**: Retain `notification.send` as a
+   deprecated alias in handlers.yaml mapping to the same proto_ref
+2. **Phase 2 (data migration)**: Update persisted operational gateway
+   route/instruction-type records
+3. **Phase 2 (removal)**: After all tenants migrated, remove alias
+
+### Parameter Aliases
+
+The `param_aliases` mechanism maps old saga parameter names to new
+proto fields:
 
 ```yaml
 correspondence.initiate_outbound:
@@ -273,151 +388,60 @@ correspondence.initiate_outbound:
       template_data: data
 ```
 
-Existing saga scripts using `notification.send(type="EMAIL", recipient=party_id)`
-work unchanged via aliases during migration. Scripts are updated to use
-`correspondence.initiate_outbound(channel="EMAIL", recipient_party_id=party_id)`
-as a follow-up.
+## 7. Integration with PRD 052
 
-## 5. Communication Preferences (GDPR)
+PRD 052 defined the email infrastructure. This PRD phases its promotion
+to a BIAN-aligned service:
 
-### Requirements
-
-| Requirement | Implementation |
-|---|---|
-| **Right to object (Art. 21)** | `global_unsubscribe` flag on party preferences. When set, all non-transactional comms suppressed. |
-| **Unsubscribe per channel/category** | `ChannelPreference` records per party. Marketing emails can be opted out while keeping transactional. |
-| **Transactional exemption** | Correspondence with `category=TRANSACTIONAL` (invoices, account freezes, password resets) bypasses preferences. Legally required comms cannot be suppressed. |
-| **Right to erasure (Art. 17)** | Preferences and correspondence history deletable via party lifecycle. Audit trail retained per financial regulation (7 years) - redacted, not deleted. |
-| **Preference audit trail** | Every preference change recorded with timestamp, source (party self-service, admin, API), and previous value. |
-
-### Enforcement Point
-
-`InitiateOutbound` checks preferences before queuing:
-
-```text
-1. Resolve party preferences
-2. If global_unsubscribe AND category != TRANSACTIONAL → SUPPRESSED
-3. If channel+category explicitly opted out → SUPPRESSED
-4. If category == TRANSACTIONAL → allow (legally required, bypasses all prefs)
-5. If category == OPERATIONAL AND no preference record → allow (legitimate
-   interest - welcome emails, service updates, account notifications)
-6. If category == MARKETING AND no preference record → SUPPRESSED (GDPR
-   Art. 7: explicit consent required for marketing)
-7. Otherwise → queue to outbox
-```
-
-**Category definitions:**
-- `TRANSACTIONAL`: Legally required communications (invoices, account
-  freezes, dunning notices, password resets). Cannot be suppressed.
-- `OPERATIONAL`: Service-related communications sent under legitimate
-  interest (Art. 6(1)(f)) - welcome emails, service updates, account
-  notifications. Allowed by default, party can opt out.
-- `MARKETING`: Promotional communications requiring explicit opt-in
-  consent (Art. 7). Suppressed by default, party must opt in.
-
-Suppressed correspondence is still recorded in the audit trail (proof
-that the system respected the preference).
-
-### Consent Provenance
-
-GDPR Art. 7(1) requires demonstrating that consent existed. The
-`ChannelPreference` proto is extended with provenance fields:
-
-```protobuf
-message ChannelPreference {
-  string channel = 1;
-  string category = 2;
-  bool opted_in = 3;
-  string updated_at = 4;
-  // Provenance: how and when consent was obtained
-  string consent_source = 5;   // SELF_SERVICE, ADMIN, API, SIGNUP_FLOW
-  string consent_granted_at = 6;
-  string consent_text = 7;     // The specific text the party agreed to
-}
-```
-
-Every preference change is recorded as an immutable audit event with
-the previous value, new value, source, and timestamp.
-
-### Unsubscribe Mechanism
-
-Every non-transactional email includes unsubscribe headers per RFC 2369
-and RFC 8058. Both headers are required - `List-Unsubscribe` (RFC 2369)
-provides the URL, `List-Unsubscribe-Post` (RFC 8058) enables one-click
-native unsubscribe in email clients. Gmail and Yahoo's 2024 sender
-requirements mandate both headers for bulk/marketing email.
-
-## 6. Integration with PRD 052
-
-PRD 052 defined the email infrastructure. This PRD promotes it to a
-BIAN-aligned service:
-
-| PRD 052 Component | Correspondence Service Relationship |
-|---|---|
-| Email outbox table | Moves to `services/correspondence/migrations/` |
-| Resend worker | Moves to `services/correspondence/worker/` |
-| Templates | Moves to `services/correspondence/templates/` |
-| Webhook handler | Moves from api-gateway, proxied via gRPC |
-| Metrics | Adapted with BIAN-aligned labels |
-
-PRD 052 is effectively **absorbed** into this service. The infrastructure
-it defined becomes the implementation of the Correspondence service domain.
-
-## 7. Scope
-
-### In Scope
-
-- Service scaffold: `services/correspondence/` with standard directory structure
-- Proto definition at `api/proto/meridian/correspondence/v1/`
-- gRPC implementation: InitiateOutbound, InitiateOutboundWithResponse,
-  RetrieveOutbound, RecordDeliveryStatus, GetCommunicationPreferences,
-  UpdateCommunicationPreferences
-- Move email package internals (outbox, audit, sender, templates, worker)
-- Starlark service bindings (`RegisterStarlarkHandlers`)
-- handlers.yaml migration (notification.send -> correspondence.initiate_outbound)
-- Saga script updates (dunning_escalation, dunning_unfreeze)
-- Webhook proxy: api-gateway -> Correspondence gRPC
-- Communication preferences table + GDPR enforcement
-- Unsubscribe link generation in non-transactional emails
-- Atlas migrations for correspondence + preferences tables
-
-### Out of Scope
-
-- SMS/webhook channel implementations (future - interface ready)
-- BlockMailing batch operations (future)
-- Inbound correspondence processing (future)
-- Self-service preference management UI (future - API ready)
-- Auth email flows (PRD 053 - uses shared Sender interface directly)
+- **Phase 0-1**: PRD 052 infrastructure stays in `shared/pkg/email/`,
+  bugs are fixed in place
+- **Phase 2**: Proto definition and handler migration add the domain
+  model on top of existing infrastructure
+- **Phase 3**: Physical service extraction moves code to
+  `services/correspondence/`
 
 ## 8. Success Criteria
 
-1. `correspondence.initiate_outbound` in handlers.yaml with `proto_ref`
-2. `notification.send` removed from handlers.yaml
-3. All saga scripts use `correspondence.*` namespace
-4. Resend webhook handled by Correspondence service (api-gateway proxies)
-5. Communication preferences enforced on non-transactional correspondence
-6. Unsubscribe link in all marketing/operational emails
-7. `shared/pkg/email/` reduced to interface + types only
-8. Proto generation succeeds (`buf generate api/proto`)
-9. All existing and new tests pass
-10. Service follows standard Meridian service directory structure
+### Phase 0
+1. Dunning saga `notification.send` calls work end-to-end
+2. Identity-originated emails reach the outbox
+3. Complained/bounced addresses are not re-emailed
+
+### Phase 2
+4. `correspondence.initiate_outbound` in handlers.yaml with `proto_ref`
+5. `notification.send` removed (or deprecated alias only)
+6. Category enforcement prevents self-declaration bypass
+7. Communication preferences enforced on non-transactional correspondence
+8. Unsubscribe headers (RFC 2369 + 8058) on all non-transactional emails
+9. Proto generation succeeds (`buf generate api/proto`)
+10. All existing and new tests pass
+
+### Phase 3
+11. `shared/pkg/email/` reduced to interface + types only
+12. Service follows standard Meridian service directory structure
+13. Resend webhook handled by Correspondence service via gRPC
 
 ## 9. Complexity Estimate
 
-13 story points. The code move (26 Go files, GORM models, metric
-namespaces, 29+ import sites) is larger than a simple refactor. The
-preference system with GDPR consent provenance adds meaningful schema
-and logic.
+~22 story points total across all phases.
 
-| Task | Points | Deps |
-|---|---|---|
-| Proto + buf generate | 1 | - |
-| Service scaffold + migrations | 2 | Proto |
-| Move email internals + gRPC implementation | 3 | Scaffold |
-| handlers.yaml + saga script migration (atomic) | 1 | gRPC impl |
-| Webhook proxy refactor | 1 | gRPC impl |
-| Communication preferences + GDPR + consent provenance | 3 | gRPC impl |
-| Starlark bindings + integration tests | 2 | All above |
+| Phase | Task | Points | Deps |
+|---|---|---|---|
+| **0** | Wire notification handler | 1 | - |
+| **0** | Fix identity outbox wiring | 1 | - |
+| **0** | Complaint suppression (suppressed_addresses + pre-send check) | 1 | - |
+| **1** | Webhook relocation + RecordDeliveryStatus | 2 | Phase 0 |
+| **1** | Per-tenant complaint rate metric | 1 | Phase 0 |
+| **2** | Proto + buf generate + CorrespondenceCategory enum | 1 | - |
+| **2** | handlers.yaml + saga script migration (atomic) | 1 | Proto |
+| **2** | Operational gateway route migration | 1 | Proto |
+| **2** | Communication preferences + consent provenance | 3 | Proto |
+| **2** | Category enforcement (templateCategoryMap) | 1 | Proto |
+| **2** | Unsubscribe headers (RFC 2369 + 8058) + template modifications | 2 | Preferences |
+| **3** | Service scaffold + migrations | 2 | Phase 2 |
+| **3** | Code relocation (26 files, 29+ import sites) | 3 | Scaffold |
+| **3** | gRPC endpoints + Starlark bindings + integration tests | 3 | Relocation |
 
-**Note:** Some tasks parallelize. Proto + scaffold can run with preference
-table design. Webhook proxy is independent of saga migration.
+Phase 0 tasks are independent and can run in parallel. Phase 3 is
+deferred until multi-channel or independent scaling justifies the
+operational overhead of a separate service boundary.
