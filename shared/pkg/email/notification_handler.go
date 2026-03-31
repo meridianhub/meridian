@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // PartyEmailResolver resolves a party ID to an email address.
@@ -17,9 +18,10 @@ type PartyEmailResolver interface {
 
 // NotificationHandlerDeps holds dependencies for the notification.send handler.
 type NotificationHandlerDeps struct {
-	Outbox        OutboxRepository
-	EmailResolver PartyEmailResolver
-	Logger        *slog.Logger
+	Outbox              OutboxRepository
+	EmailResolver       PartyEmailResolver
+	PreferenceEnforcer  *PreferenceEnforcer
+	Logger              *slog.Logger
 }
 
 // Sentinel errors for notification handler operations.
@@ -29,6 +31,7 @@ var (
 	ErrMissingType                 = fmt.Errorf("email: missing required parameter: type")
 	ErrMissingOutbox               = fmt.Errorf("email: outbox repository is required")
 	ErrMissingEmailResolver        = fmt.Errorf("email: email resolver is required")
+	ErrPreferenceSuppressed        = fmt.Errorf("email: suppressed by communication preference")
 )
 
 // NewNotificationSendHandler creates a saga handler for notification.send.
@@ -54,6 +57,35 @@ func NewNotificationSendHandler(deps NotificationHandlerDeps) saga.Handler {
 		}
 
 		recipient, _ := params["recipient"].(string)
+
+		// Check communication preferences before resolving email or enqueuing.
+		if deps.PreferenceEnforcer != nil {
+			category, _ := params["category"].(string)
+			if category == "" {
+				category = CategoryTransactional // Default: legacy callers are transactional
+			}
+			channel, _ := params["type"].(string) // "EMAIL"
+			templateName, _ := params["template"].(string)
+			if templateName == "" {
+				templateName = "generic-notification"
+			}
+
+			tenantID, _ := tenant.FromContext(ctx)
+			allowed, reason, prefErr := deps.PreferenceEnforcer.ShouldSend(
+				ctx, string(tenantID), recipient, channel, templateName, category)
+			if prefErr != nil {
+				return nil, fmt.Errorf("email: preference enforcement failed: %w", prefErr)
+			}
+			if !allowed {
+				deps.Logger.Info("notification suppressed by preference",
+					"recipient", recipient, "category", category, "reason", reason)
+				return map[string]any{
+					"status":             "SUPPRESSED",
+					"suppression_reason": reason,
+				}, nil
+			}
+		}
+
 		emailAddr, err := deps.EmailResolver.ResolveEmail(ctx, recipient)
 		if err != nil {
 			return nil, fmt.Errorf("email: failed to resolve email for party %s: %w", recipient, err)

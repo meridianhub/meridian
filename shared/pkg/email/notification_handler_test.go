@@ -382,3 +382,108 @@ func TestNotificationSendHandler_EnqueueError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to enqueue notification")
 }
+
+func TestNotificationSendHandler_PreferenceEnforcerSuppresses(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	enforcer := email.NewPreferenceEnforcer(
+		&mockPreferenceRepository{globalUnsubscribe: true},
+		nil,
+		slog.Default(),
+	)
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:             outbox,
+		EmailResolver:      &mockEmailResolver{},
+		PreferenceEnforcer: enforcer,
+		Logger:             slog.Default(),
+	})
+
+	ctx := newTestStarlarkContext()
+	result, err := handler(ctx, map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+		"template":  "promo-email",
+		"category":  "MARKETING",
+	})
+
+	require.NoError(t, err)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "SUPPRESSED", resultMap["status"])
+	assert.Contains(t, resultMap["suppression_reason"], "globally unsubscribed")
+	assert.Empty(t, outbox.enqueuedEntries, "should not enqueue when suppressed")
+}
+
+func TestNotificationSendHandler_PreferenceEnforcerAllowsTransactional(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	enforcer := email.NewPreferenceEnforcer(
+		&mockPreferenceRepository{globalUnsubscribe: true},
+		nil,
+		slog.Default(),
+	)
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:             outbox,
+		EmailResolver:      &mockEmailResolver{},
+		PreferenceEnforcer: enforcer,
+		Logger:             slog.Default(),
+	})
+
+	ctx := newTestStarlarkContext()
+	result, err := handler(ctx, map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+		"template":  "invoice",
+		"category":  "TRANSACTIONAL",
+	})
+
+	require.NoError(t, err)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "QUEUED", resultMap["status"])
+	require.Len(t, outbox.enqueuedEntries, 1)
+}
+
+func TestNotificationSendHandler_NilEnforcerSkipsPreferenceCheck(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:        outbox,
+		EmailResolver: &mockEmailResolver{},
+		Logger:        slog.Default(),
+	})
+
+	ctx := newTestStarlarkContext()
+	result, err := handler(ctx, map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+		"category":  "MARKETING",
+	})
+
+	require.NoError(t, err)
+	resultMap := result.(map[string]any)
+	assert.Equal(t, "QUEUED", resultMap["status"])
+}
+
+func TestNotificationSendHandler_DefaultCategoryIsTransactional(t *testing.T) {
+	outbox := &mockOutboxRepository{}
+	enforcer := email.NewPreferenceEnforcer(
+		&mockPreferenceRepository{globalUnsubscribe: true},
+		nil,
+		slog.Default(),
+	)
+	handler := email.NewNotificationSendHandler(email.NotificationHandlerDeps{
+		Outbox:             outbox,
+		EmailResolver:      &mockEmailResolver{},
+		PreferenceEnforcer: enforcer,
+		Logger:             slog.Default(),
+	})
+
+	ctx := newTestStarlarkContext()
+	// No category param - should default to TRANSACTIONAL and bypass preference checks
+	result, err := handler(ctx, map[string]any{
+		"type":      "EMAIL",
+		"recipient": "party-123",
+	})
+
+	require.NoError(t, err)
+	resultMap := result.(map[string]any)
+	assert.Equal(t, "QUEUED", resultMap["status"])
+}
