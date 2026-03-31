@@ -160,12 +160,20 @@ func buildOutboxEntry(ctx *saga.StarlarkContext, params map[string]any, emailAdd
 			ctx.SagaExecutionID.String(), ctx.IdempotencyKey)
 	}
 
+	category, _ := params["category"].(string)
+	if category == "" {
+		category = CategoryTransactional
+	}
+	recipient, _ := params["recipient"].(string)
+
 	return &OutboxEntry{
 		IdempotencyKey: idempotencyKey,
 		ToAddresses:    []string{emailAddr},
 		Subject:        buildSubjectFromTemplate(templateName, templateData),
 		TemplateName:   templateName,
 		TemplateData:   templateData,
+		Category:       category,
+		PartyID:        recipient,
 	}
 }
 

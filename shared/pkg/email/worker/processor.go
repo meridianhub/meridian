@@ -23,6 +23,7 @@ type EmailProcessor struct {
 	auditRepo       email.AuditRepository
 	suppressionRepo email.SuppressionRepository
 	invoiceChecker  InvoiceStatusChecker
+	unsubscribeCfg  *email.UnsubscribeConfig
 	metrics         *EmailMetrics
 	logger          *slog.Logger
 }
@@ -51,6 +52,12 @@ func NewEmailProcessor(
 		metrics:         metrics,
 		logger:          logger.With("component", "email-processor"),
 	}
+}
+
+// SetUnsubscribeConfig configures RFC 2369/8058 unsubscribe header generation.
+// When set, non-transactional emails will include List-Unsubscribe headers.
+func (p *EmailProcessor) SetUnsubscribeConfig(cfg *email.UnsubscribeConfig) {
+	p.unsubscribeCfg = cfg
 }
 
 // ProcessBatch processes a batch of outbox instructions. This is the BatchProcessor
@@ -109,12 +116,15 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 
 // sendAndRecord sends the email and records the result in outbox and audit log.
 func (p *EmailProcessor) sendAndRecord(ctx context.Context, entry *email.OutboxEntry, htmlBody, textBody string) error {
+	headers := p.buildHeaders(entry)
+
 	msg := email.Message{
 		To:             entry.ToAddresses,
 		From:           entry.FromAddress,
 		Subject:        entry.Subject,
 		HTMLBody:       htmlBody,
 		TextBody:       textBody,
+		Headers:        headers,
 		IdempotencyKey: entry.IdempotencyKey,
 	}
 
@@ -254,6 +264,17 @@ func (p *EmailProcessor) handleRenderFailure(ctx context.Context, entry *email.O
 		"error", errMsg,
 	)
 	return nil
+}
+
+// buildHeaders returns email headers for the given outbox entry.
+// Adds RFC 2369/8058 unsubscribe headers for non-transactional emails.
+func (p *EmailProcessor) buildHeaders(entry *email.OutboxEntry) map[string]string {
+	return email.BuildUnsubscribeHeaders(p.unsubscribeCfg, email.UnsubscribeParams{
+		TenantID: entry.TenantID,
+		PartyID:  entry.PartyID,
+		Channel:  "EMAIL",
+		Category: entry.Category,
+	})
 }
 
 // handleSendFailure marks the outbox entry as failed, which triggers backoff/dead-letter

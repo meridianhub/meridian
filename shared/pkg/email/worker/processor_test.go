@@ -26,13 +26,15 @@ func (m *mockRenderer) Render(_ string, _ any) (string, string, error) {
 }
 
 type mockSender struct {
-	result email.SendResult
-	err    error
-	calls  int
+	result  email.SendResult
+	err     error
+	calls   int
+	lastMsg email.Message
 }
 
-func (m *mockSender) Send(_ context.Context, _ email.Message) (email.SendResult, error) {
+func (m *mockSender) Send(_ context.Context, msg email.Message) (email.SendResult, error) {
 	m.calls++
+	m.lastMsg = msg
 	return m.result, m.err
 }
 
@@ -559,4 +561,106 @@ func TestProcessBatch_NilSuppressionRepo_SkipsCheck(t *testing.T) {
 
 	assert.Equal(t, 1, sender.calls, "should send when no suppression repo configured")
 	assert.Equal(t, 1, outbox.markSentCalls)
+}
+
+func TestProcessBatch_UnsubscribeHeaders_OperationalEmail(t *testing.T) {
+	ctx := context.Background()
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-unsub", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil, nil)
+	proc.SetUnsubscribeConfig(&email.UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example",
+	})
+
+	entry := newTestEntry("account-update")
+	entry.Category = email.CategoryOperational
+	entry.PartyID = "party-42"
+	entry.TenantID = "tenant-1"
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	require.Equal(t, 1, sender.calls)
+	assert.Contains(t, sender.lastMsg.Headers["List-Unsubscribe"], "https://app.meridian.example/unsubscribe?token=")
+	assert.Equal(t, "List-Unsubscribe=One-Click", sender.lastMsg.Headers["List-Unsubscribe-Post"])
+}
+
+func TestProcessBatch_UnsubscribeHeaders_MarketingEmail(t *testing.T) {
+	ctx := context.Background()
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-mkt", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil, nil)
+	proc.SetUnsubscribeConfig(&email.UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example",
+	})
+
+	entry := newTestEntry("promo")
+	entry.Category = email.CategoryMarketing
+	entry.PartyID = "party-99"
+	entry.TenantID = "tenant-1"
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	require.Equal(t, 1, sender.calls)
+	assert.Contains(t, sender.lastMsg.Headers, "List-Unsubscribe")
+	assert.Contains(t, sender.lastMsg.Headers, "List-Unsubscribe-Post")
+}
+
+func TestProcessBatch_UnsubscribeHeaders_TransactionalEmail_NoHeaders(t *testing.T) {
+	ctx := context.Background()
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-txn", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil, nil)
+	proc.SetUnsubscribeConfig(&email.UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example",
+	})
+
+	entry := newTestEntry("dunning-notice")
+	entry.Category = email.CategoryTransactional
+	entry.PartyID = "party-42"
+	entry.TenantID = "tenant-1"
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	require.Equal(t, 1, sender.calls)
+	assert.Nil(t, sender.lastMsg.Headers, "transactional emails should not have unsubscribe headers")
+}
+
+func TestProcessBatch_UnsubscribeHeaders_NoConfig_NoHeaders(t *testing.T) {
+	ctx := context.Background()
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-noconfig", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil, nil)
+	// No SetUnsubscribeConfig call
+
+	entry := newTestEntry("account-update")
+	entry.Category = email.CategoryOperational
+	entry.PartyID = "party-42"
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	require.Equal(t, 1, sender.calls)
+	assert.Nil(t, sender.lastMsg.Headers, "should not have headers when no unsubscribe config set")
 }

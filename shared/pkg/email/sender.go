@@ -49,6 +49,8 @@ type OutboxEntry struct {
 	Subject        string
 	TemplateName   string
 	TemplateData   map[string]any
+	Category       string // TRANSACTIONAL, OPERATIONAL, or MARKETING
+	PartyID        string // originating party, used for unsubscribe tokens
 	Status         OutboxStatus
 	Attempts       int
 	MaxAttempts    int
