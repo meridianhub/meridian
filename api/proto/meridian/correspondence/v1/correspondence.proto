@@ -164,6 +164,10 @@ message CommunicationPreference {
   bool opted_in = 3;
   // When consent was granted for this preference.
   google.protobuf.Timestamp consent_granted_at = 4;
+  // Source of consent (e.g., "web_form", "api", "customer_portal").
+  string consent_source = 5;
+  // The consent text that was presented to the party.
+  string consent_text = 6;
 }
 
 // GetCommunicationPreferencesResponse returns a party's communication preferences.
