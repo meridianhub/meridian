@@ -234,7 +234,10 @@ jobs:
               fi
             done
             if [ "$created" = "1" ]; then
-              echo "New databases created - restarting app to pick up connections"
+              echo "New databases created - resetting tenant provisioning status"
+              docker exec meridian-postgres-1 psql -U meridian -d meridian_platform -c \
+                "UPDATE tenant_provisioning SET state = 'pending' WHERE state = 'active'"
+              echo "Restarting app to pick up new database connections"
               docker compose restart meridian
             fi
             # Wait for the container to be running (not restarting) before migrations.
