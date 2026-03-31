@@ -255,7 +255,9 @@ func wireResendWebhook(paymentOrderDB *gorm.DB, logger *slog.Logger) gateway.Ser
 	}
 
 	auditRepo := email.NewPostgresAuditRepository(paymentOrderDB)
-	handler := gateway.NewResendWebhookHandler(auditRepo, secret, logger)
+	suppressionRepo := email.NewPostgresSuppressionRepository(paymentOrderDB)
+	recorder := email.NewDeliveryStatusRecorder(auditRepo, suppressionRepo, logger)
+	handler := gateway.NewResendWebhookHandler(recorder, secret, logger)
 	logger.Info("resend webhook handler initialized")
 	return gateway.WithResendWebhookHandler(handler)
 }

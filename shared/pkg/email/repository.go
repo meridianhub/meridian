@@ -39,6 +39,10 @@ type AuditRepository interface {
 	// FindByOutboxID returns all audit entries for a given outbox entry.
 	FindByOutboxID(ctx context.Context, outboxID uuid.UUID) ([]AuditEntry, error)
 
+	// FindByProviderID returns all audit entries for a given provider-assigned
+	// email ID (cross-tenant lookup). Returns entries ordered newest-first.
+	FindByProviderID(ctx context.Context, providerID string) ([]AuditEntry, error)
+
 	// RecordByProviderID records a webhook delivery status update for the email
 	// identified by providerID. It looks up the tenant from existing audit entries
 	// and records a new status entry with the supplied payload. Returns

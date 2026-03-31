@@ -17,13 +17,14 @@ type InvoiceStatusChecker interface {
 // EmailProcessor handles the per-entry processing logic for the email dispatch worker.
 // It renders templates, sends emails, and updates outbox/audit state.
 type EmailProcessor struct {
-	renderer       email.TemplateRenderer
-	sender         email.Sender
-	outboxRepo     email.OutboxRepository
-	auditRepo      email.AuditRepository
-	invoiceChecker InvoiceStatusChecker
-	metrics        *EmailMetrics
-	logger         *slog.Logger
+	renderer        email.TemplateRenderer
+	sender          email.Sender
+	outboxRepo      email.OutboxRepository
+	auditRepo       email.AuditRepository
+	suppressionRepo email.SuppressionRepository
+	invoiceChecker  InvoiceStatusChecker
+	metrics         *EmailMetrics
+	logger          *slog.Logger
 }
 
 // NewEmailProcessor creates an EmailProcessor with the given dependencies.
@@ -32,6 +33,7 @@ func NewEmailProcessor(
 	sender email.Sender,
 	outboxRepo email.OutboxRepository,
 	auditRepo email.AuditRepository,
+	suppressionRepo email.SuppressionRepository,
 	invoiceChecker InvoiceStatusChecker,
 	metrics *EmailMetrics,
 	logger *slog.Logger,
@@ -40,13 +42,14 @@ func NewEmailProcessor(
 		logger = slog.Default()
 	}
 	return &EmailProcessor{
-		renderer:       renderer,
-		sender:         sender,
-		outboxRepo:     outboxRepo,
-		auditRepo:      auditRepo,
-		invoiceChecker: invoiceChecker,
-		metrics:        metrics,
-		logger:         logger.With("component", "email-processor"),
+		renderer:        renderer,
+		sender:          sender,
+		outboxRepo:      outboxRepo,
+		auditRepo:       auditRepo,
+		suppressionRepo: suppressionRepo,
+		invoiceChecker:  invoiceChecker,
+		metrics:         metrics,
+		logger:          logger.With("component", "email-processor"),
 	}
 }
 
@@ -83,6 +86,17 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		}
 	}
 
+	// Check if any recipient is suppressed (bounced/complained).
+	if p.suppressionRepo != nil {
+		cancelled, err := p.checkSuppression(ctx, entry)
+		if err != nil {
+			return fmt.Errorf("checking suppression: %w", err)
+		}
+		if cancelled {
+			return nil
+		}
+	}
+
 	// Render the template. Render errors are deterministic (same template+data will
 	// always fail), so we cancel immediately rather than burning through retries.
 	htmlBody, textBody, err := p.renderer.Render(entry.TemplateName, entry.TemplateData)
@@ -90,7 +104,11 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		return p.handleRenderFailure(ctx, entry, fmt.Sprintf("template render failed: %v", err))
 	}
 
-	// Build and send message.
+	return p.sendAndRecord(ctx, entry, htmlBody, textBody)
+}
+
+// sendAndRecord sends the email and records the result in outbox and audit log.
+func (p *EmailProcessor) sendAndRecord(ctx context.Context, entry *email.OutboxEntry, htmlBody, textBody string) error {
 	msg := email.Message{
 		To:             entry.ToAddresses,
 		From:           entry.FromAddress,
@@ -115,12 +133,10 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		return p.handleSendFailure(ctx, entry, fmt.Sprintf("send failed: %v", err))
 	}
 
-	// Mark sent in outbox.
 	if err := p.outboxRepo.MarkSent(ctx, entry.ID); err != nil {
 		return fmt.Errorf("marking outbox entry sent: %w", err)
 	}
 
-	// Create audit entry.
 	sentAt := result.SentAt
 	providerID := result.ProviderID
 	auditEntry := &email.AuditEntry{
@@ -135,7 +151,6 @@ func (p *EmailProcessor) processOne(ctx context.Context, instr *OutboxInstructio
 		SentAt:       &sentAt,
 	}
 	if err := p.auditRepo.Record(ctx, auditEntry); err != nil {
-		// Log but don't fail - the email was sent successfully.
 		p.logger.WarnContext(ctx, "failed to record audit entry",
 			"outbox_id", entry.ID,
 			"error", err,
@@ -188,6 +203,39 @@ func (p *EmailProcessor) checkDunningCancellation(ctx context.Context, entry *em
 		return true, nil
 	}
 
+	return false, nil
+}
+
+// checkSuppression checks if any recipient address is suppressed. Cancels the
+// entry as soon as the first suppressed address is found. On lookup errors,
+// logs and continues checking remaining recipients (fail-open per address).
+// Returns true if cancelled.
+func (p *EmailProcessor) checkSuppression(ctx context.Context, entry *email.OutboxEntry) (bool, error) {
+	for _, addr := range entry.ToAddresses {
+		suppressed, err := p.suppressionRepo.IsSuppressed(ctx, addr)
+		if err != nil {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
+			p.logger.WarnContext(ctx, "failed to check suppression, continuing",
+				"outbox_id", entry.ID,
+				"error", err,
+			)
+			continue
+		}
+		if suppressed {
+			if err := p.outboxRepo.Cancel(ctx, entry.ID); err != nil {
+				return false, fmt.Errorf("cancelling suppressed email: %w", err)
+			}
+			if p.metrics != nil {
+				p.metrics.RecordCancelled()
+			}
+			p.logger.InfoContext(ctx, "cancelled email - recipient suppressed",
+				"outbox_id", entry.ID,
+			)
+			return true, nil
+		}
+	}
 	return false, nil
 }
 

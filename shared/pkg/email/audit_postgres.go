@@ -90,6 +90,24 @@ func (r *PostgresAuditRepository) FindByOutboxID(ctx context.Context, outboxID u
 	return entries, nil
 }
 
+// FindByProviderID returns all audit entries for a given provider ID (cross-tenant).
+func (r *PostgresAuditRepository) FindByProviderID(ctx context.Context, providerID string) ([]AuditEntry, error) {
+	var entities []AuditLogEntity
+
+	if err := r.db.WithContext(ctx).
+		Where("provider_id = ?", providerID).
+		Order("created_at DESC").
+		Find(&entities).Error; err != nil {
+		return nil, fmt.Errorf("email: failed to find audit entries by provider ID: %w", err)
+	}
+
+	entries := make([]AuditEntry, len(entities))
+	for i, e := range entities {
+		entries[i] = entityToAuditEntry(e)
+	}
+	return entries, nil
+}
+
 // RecordByProviderID looks up existing audit entries by providerID (without tenant scope),
 // resolves the tenant from the first match, then records a new status update entry.
 func (r *PostgresAuditRepository) RecordByProviderID(ctx context.Context, providerID string, status AuditStatus, payload map[string]any) error {

@@ -43,6 +43,7 @@ func NewEmailWorker(
 	auditRepo email.AuditRepository,
 	renderer email.TemplateRenderer,
 	sender email.Sender,
+	suppressionRepo email.SuppressionRepository,
 	invoiceChecker InvoiceStatusChecker,
 	metrics *email.Metrics,
 	config dispatch.WorkerConfig,
@@ -50,7 +51,7 @@ func NewEmailWorker(
 ) *dispatch.Worker[*OutboxInstruction] {
 	fetcher := NewOutboxFetcher(outboxRepo)
 	emailMetrics := NewEmailMetrics(metrics)
-	processor := NewEmailProcessor(renderer, sender, outboxRepo, auditRepo, invoiceChecker, emailMetrics, logger)
+	processor := NewEmailProcessor(renderer, sender, outboxRepo, auditRepo, suppressionRepo, invoiceChecker, emailMetrics, logger)
 
 	return dispatch.NewWorker[*OutboxInstruction](
 		fetcher,
