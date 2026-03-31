@@ -235,26 +235,20 @@ jobs:
             # databases are added to init-databases-develop.sql, existing volumes
             # won't have them. Create any missing databases so the app can start.
             cd /opt/meridian-develop
+            created=0
             for db in $(grep -oP 'CREATE DATABASE \K\w+' init-databases-develop.sql); do
               exists=$(docker exec postgres-develop psql -U meridian -tAc \
                 "SELECT 1 FROM pg_database WHERE datname = '${db}'")
               if [ "$exists" != "1" ]; then
                 docker exec postgres-develop createdb -U meridian "${db}"
                 echo "Created missing database: ${db}"
+                created=1
               fi
             done
-
-      - name: Restart app after database provisioning
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
-        with:
-          host: ${{ secrets.DROPLET_IP }}
-          username: deploy
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            # Restart to pick up any newly-created databases. The app connects to
-            # all databases at startup; missing ones cause a crash loop.
-            cd /opt/meridian-develop
-            docker compose -f docker-compose.develop.yml restart meridian-develop
+            if [ "$created" = "1" ]; then
+              echo "New databases created - restarting app to pick up connections"
+              docker compose -f docker-compose.develop.yml restart meridian-develop
+            fi
             # Wait for the container to be running before attempting migrations
             for i in $(seq 1 30); do
               if docker exec meridian-develop echo ok 2>/dev/null; then
