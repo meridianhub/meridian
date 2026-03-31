@@ -168,7 +168,10 @@ func currentAccountCoreHandlers(notifHandler saga.Handler) []handlerEntry {
 		{"current_account.execute_lien", stubNotImplemented("current_account.execute_lien"), nil},
 		{"current_account.terminate_lien", stubNotImplemented("current_account.terminate_lien"), nil},
 
-		// Notification
+		// Correspondence (BIAN-aligned, replaces notification)
+		{"correspondence.initiate_outbound", notifHandler, nil},
+
+		// Deprecated alias for backward compatibility
 		{"notification.send", notifHandler, nil},
 	}
 }

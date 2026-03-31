@@ -94,18 +94,19 @@ def dunning_unfreeze():
     result["gateway_reference_id"] = gateway_result.gateway_reference_id
     result["gateway_status"] = gateway_result.gateway_status
 
-    # Step 5: Send confirmation notification
+    # Step 5: Send confirmation correspondence
     step(name="send_confirmation")
-    notification.send(
-        type="EMAIL",
-        recipient=party_id,
-        template="dunning-resolved",
-        data={
+    correspondence.initiate_outbound(
+        channel="EMAIL",
+        recipient_party_id=party_id,
+        template_name="dunning-resolved",
+        template_data={
             "amount_cents": ctx.get("amount_cents"),
             "currency": ctx.get("currency"),
             "billing_run_id": ctx.get("billing_run_id"),
         },
         idempotency_key="dunning-resolved-" + ctx.get("billing_run_id", ""),
+        category="OPERATIONAL",
     )
     result["notification_sent"] = True
 
