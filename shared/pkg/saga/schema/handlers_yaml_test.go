@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	// Import all service protos to register them in the global registry
+	_ "github.com/meridianhub/meridian/api/proto/meridian/correspondence/v1"
 	_ "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	_ "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	_ "github.com/meridianhub/meridian/api/proto/meridian/financial_gateway/v1"
@@ -73,8 +74,8 @@ func TestHandlersYAML_ProtoResolution(t *testing.T) {
 	t.Logf("Proto-referenced: %d, Legacy: %d, Total: %d",
 		protoRefHandlers, legacyHandlers, protoRefHandlers+legacyHandlers)
 
-	assert.GreaterOrEqual(t, protoRefHandlers, 34,
-		"at least 34 handlers should use proto-referenced format")
+	assert.GreaterOrEqual(t, protoRefHandlers, 36,
+		"at least 36 handlers should use proto-referenced format")
 }
 
 func TestHandlersYAML_AllExpectedHandlersPresent(t *testing.T) {
@@ -124,6 +125,8 @@ func TestHandlersYAML_AllExpectedHandlersPresent(t *testing.T) {
 		"internal_account.get_balance",
 		"market_information.get_rate",
 		"reference_data.retrieve_instrument",
+		"correspondence.initiate_outbound",
+		"notification.send",
 	}
 
 	for _, name := range expectedHandlers {

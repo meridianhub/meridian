@@ -34,6 +34,7 @@ func TestRegisterCurrentAccountHandlers_AllHandlersPresent(t *testing.T) {
 		"current_account.create_lien",
 		"current_account.execute_lien",
 		"current_account.terminate_lien",
+		"correspondence.initiate_outbound",
 	}
 
 	for _, name := range coreHandlers {
@@ -44,7 +45,7 @@ func TestRegisterCurrentAccountHandlers_AllHandlersPresent(t *testing.T) {
 
 	// Verify platform-wide stub handlers are also registered
 	platformStubs := []string{
-		"notification.send",
+		"notification.send", // deprecated alias
 		"payment_order.create_lien",
 		"reconciliation.initiate_run",
 		"party.get_default_payment_method",
@@ -107,7 +108,7 @@ func TestRegisterCurrentAccountHandlers_HandlerCount(t *testing.T) {
 	err := RegisterCurrentAccountHandlers(registry)
 	require.NoError(t, err)
 
-	const expectedCount = 47
+	const expectedCount = 48
 	registered := registry.List()
 	assert.Equal(t, expectedCount, len(registered), "expected %d handlers to be registered, got %d: %v", expectedCount, len(registered), registered)
 }

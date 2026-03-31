@@ -69,14 +69,14 @@ def dunning_escalation():
 
     billing_run_id = ctx["billing_run_id"]
 
-    # Step 1: Send notification based on escalation level
+    # Step 1: Send correspondence based on escalation level
     if new_level == 1:
         step(name="send_first_notice")
-        notification.send(
-            type="EMAIL",
-            recipient=party_id,
-            template="dunning-notice",
-            data={
+        correspondence.initiate_outbound(
+            channel="EMAIL",
+            recipient_party_id=party_id,
+            template_name="dunning-notice",
+            template_data={
                 "severity": 1,
                 "days_overdue": 0,
                 "amount_cents": amount_cents,
@@ -84,16 +84,17 @@ def dunning_escalation():
                 "invoice_number": invoice_number,
             },
             idempotency_key="dunning-1-" + billing_run_id,
+            category="TRANSACTIONAL",
         )
         result["action_taken"] = "first_notice_sent"
 
     elif new_level == 2:
         step(name="send_second_notice")
-        notification.send(
-            type="EMAIL",
-            recipient=party_id,
-            template="dunning-notice",
-            data={
+        correspondence.initiate_outbound(
+            channel="EMAIL",
+            recipient_party_id=party_id,
+            template_name="dunning-notice",
+            template_data={
                 "severity": 2,
                 "days_overdue": 3,
                 "amount_cents": amount_cents,
@@ -101,23 +102,25 @@ def dunning_escalation():
                 "invoice_number": invoice_number,
             },
             idempotency_key="dunning-2-" + billing_run_id,
+            category="TRANSACTIONAL",
         )
         result["action_taken"] = "second_notice_sent"
 
     elif new_level >= 3:
         # At max dunning level: send final warning, freeze the account, notify
         step(name="send_final_warning")
-        notification.send(
-            type="EMAIL",
-            recipient=party_id,
-            template="dunning-notice",
-            data={
+        correspondence.initiate_outbound(
+            channel="EMAIL",
+            recipient_party_id=party_id,
+            template_name="dunning-notice",
+            template_data={
                 "severity": 3,
                 "amount_cents": amount_cents,
                 "currency": currency,
                 "invoice_number": invoice_number,
             },
             idempotency_key="dunning-3-" + billing_run_id,
+            category="TRANSACTIONAL",
         )
 
         # Step 2: Freeze the account at max dunning level
@@ -134,16 +137,17 @@ def dunning_escalation():
 
         # Send freeze notification
         step(name="send_freeze_notice")
-        notification.send(
-            type="EMAIL",
-            recipient=party_id,
-            template="account-frozen",
-            data={
+        correspondence.initiate_outbound(
+            channel="EMAIL",
+            recipient_party_id=party_id,
+            template_name="account-frozen",
+            template_data={
                 "amount_cents": amount_cents,
                 "currency": currency,
                 "invoice_number": invoice_number,
             },
             idempotency_key="dunning-frozen-" + billing_run_id,
+            category="TRANSACTIONAL",
         )
 
     return result
