@@ -2,11 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	partyv1 "github.com/meridianhub/meridian/api/proto/meridian/party/v1"
 	"github.com/meridianhub/meridian/shared/pkg/email"
 	"google.golang.org/grpc"
+)
+
+// Sentinel errors for party email resolution.
+var (
+	ErrPartyEmailEmpty    = errors.New("party has empty email attribute")
+	ErrPartyEmailNotFound = errors.New("party has no email attribute")
 )
 
 // Compile-time interface assertion.
@@ -38,11 +45,11 @@ func (r *grpcPartyEmailResolver) ResolveEmail(ctx context.Context, partyID strin
 	for _, attr := range resp.Party.GetAttributes() {
 		if attr.Key == "email" {
 			if attr.Value == "" {
-				return "", fmt.Errorf("party %s has empty email attribute", partyID)
+				return "", fmt.Errorf("party %s: %w", partyID, ErrPartyEmailEmpty)
 			}
 			return attr.Value, nil
 		}
 	}
 
-	return "", fmt.Errorf("party %s has no email attribute", partyID)
+	return "", fmt.Errorf("party %s: %w", partyID, ErrPartyEmailNotFound)
 }

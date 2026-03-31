@@ -122,7 +122,7 @@ func registerServices(
 
 	// Tier 2: Depend on Tier 1 (current-account needs PK, FA loopback clients for saga orchestration)
 	caOutboxRepo := events.NewPostgresOutboxRepository(conns.gormDB("current-account"))
-	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, loopback.party, idempotencySvc, caOutboxRepo, refDataComps, tracer, logger); err != nil {
+	if err := wireCurrentAccount(grpcServer, conns.gormDB("current-account"), loopback.pk, loopback.fa, loopback.party, idempotencySvc, caOutboxRepo, refDataComps, tracer, logger); err != nil { //nolint:contextcheck // saga.StarlarkContext embeds context.Context; handler receives context at runtime
 		return nil, fmt.Errorf("current-account: %w", err)
 	}
 	logger.Info("Tier 2 services registered")

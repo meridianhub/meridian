@@ -227,7 +227,7 @@ type Service struct {
 	webhookNotifier        WebhookNotifier       // Optional: sends webhook notifications for lifecycle events
 	logger                 *slog.Logger
 	tracer                 *observability.Tracer
-	notificationHandler    saga.Handler             // Optional: real notification.send handler (replaces stub)
+	notificationHandler    saga.Handler            // Optional: real notification.send handler (replaces stub)
 	depositOrchestrator    *DepositOrchestrator    // Handles deposit saga orchestration
 	withdrawalOrchestrator *WithdrawalOrchestrator // Handles withdrawal saga orchestration
 }

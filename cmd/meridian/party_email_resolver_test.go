@@ -35,7 +35,7 @@ func newTestPartyServer(t *testing.T, parties map[string]*partyv1.Party) *grpc.C
 	srv := grpc.NewServer()
 	partyv1.RegisterPartyServiceServer(srv, &fakePartyService{parties: parties})
 
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	lis, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.GracefulStop)
@@ -94,12 +94,12 @@ func TestGRPCPartyEmailResolver_ResolveEmail(t *testing.T) {
 	t.Run("error when no email attribute", func(t *testing.T) {
 		_, err := resolver.ResolveEmail(ctx, "party-no-email")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no email attribute")
+		assert.ErrorIs(t, err, ErrPartyEmailNotFound)
 	})
 
 	t.Run("error when empty email attribute", func(t *testing.T) {
 		_, err := resolver.ResolveEmail(ctx, "party-empty-email")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "empty email attribute")
+		assert.ErrorIs(t, err, ErrPartyEmailEmpty)
 	})
 }
