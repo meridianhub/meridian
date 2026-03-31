@@ -521,6 +521,27 @@ func TestProcessBatch_SuppressionCheckError_ProceedsWithSend(t *testing.T) {
 	assert.Equal(t, []string{"user@example.com"}, suppression.checkedAddrs, "should have attempted the check")
 }
 
+func TestProcessBatch_SuppressionCheckContextCancelled_DoesNotSend(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-ctx", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+	suppression := &mockSuppressionRepo{isSuppErr: context.Canceled}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, suppression, nil, nil, nil)
+
+	entry := newTestEntry("invoice")
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	assert.Equal(t, 0, sender.calls, "should not send when context is cancelled")
+	assert.Equal(t, 0, outbox.markSentCalls)
+}
+
 func TestProcessBatch_NilSuppressionRepo_SkipsCheck(t *testing.T) {
 	ctx := context.Background()
 

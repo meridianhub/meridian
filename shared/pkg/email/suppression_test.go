@@ -128,3 +128,30 @@ func TestPostgresSuppressionRepository_NilEntry(t *testing.T) {
 	err := repo.AddSuppression(context.Background(), nil)
 	require.Error(t, err)
 }
+
+func TestPostgresSuppressionRepository_InvalidSuppressionType(t *testing.T) {
+	db, _, cleanup := setupSuppressionTestDB(t)
+	defer cleanup()
+
+	repo := email.NewPostgresSuppressionRepository(db)
+
+	err := repo.AddSuppression(context.Background(), &email.SuppressionEntry{
+		EmailAddress:    "user@example.com",
+		SuppressionType: "INVALID",
+		TenantID:        testTenantID,
+	})
+	require.ErrorIs(t, err, email.ErrInvalidSuppressionType)
+}
+
+func TestPostgresSuppressionRepository_EmptySuppressionType(t *testing.T) {
+	db, _, cleanup := setupSuppressionTestDB(t)
+	defer cleanup()
+
+	repo := email.NewPostgresSuppressionRepository(db)
+
+	err := repo.AddSuppression(context.Background(), &email.SuppressionEntry{
+		EmailAddress: "user@example.com",
+		TenantID:     testTenantID,
+	})
+	require.ErrorIs(t, err, email.ErrInvalidSuppressionType)
+}

@@ -60,7 +60,14 @@ var (
 	ErrNilSuppressionEntry      = errors.New("email: suppression entry must not be nil")
 	ErrEmptySuppressionEmail    = errors.New("email: suppression entry must have an email address")
 	ErrEmptySuppressionTenantID = errors.New("email: suppression entry must have a tenant ID")
+	ErrInvalidSuppressionType   = errors.New("email: suppression entry must have a valid suppression type")
 )
+
+// validSuppressionTypes enumerates accepted SuppressionType values.
+var validSuppressionTypes = map[SuppressionType]bool{
+	SuppressionBounce:    true,
+	SuppressionComplaint: true,
+}
 
 var _ SuppressionRepository = (*PostgresSuppressionRepository)(nil)
 
@@ -100,6 +107,9 @@ func (r *PostgresSuppressionRepository) AddSuppression(ctx context.Context, entr
 	}
 	if strings.TrimSpace(entry.TenantID) == "" {
 		return ErrEmptySuppressionTenantID
+	}
+	if !validSuppressionTypes[entry.SuppressionType] {
+		return ErrInvalidSuppressionType
 	}
 
 	now := time.Now().UTC()

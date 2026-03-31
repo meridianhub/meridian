@@ -214,9 +214,11 @@ func (p *EmailProcessor) checkSuppression(ctx context.Context, entry *email.Outb
 	for _, addr := range entry.ToAddresses {
 		suppressed, err := p.suppressionRepo.IsSuppressed(ctx, addr)
 		if err != nil {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
 			p.logger.WarnContext(ctx, "failed to check suppression, continuing",
 				"outbox_id", entry.ID,
-				"address", addr,
 				"error", err,
 			)
 			continue
@@ -230,7 +232,6 @@ func (p *EmailProcessor) checkSuppression(ctx context.Context, entry *email.Outb
 			}
 			p.logger.InfoContext(ctx, "cancelled email - recipient suppressed",
 				"outbox_id", entry.ID,
-				"address", addr,
 			)
 			return true, nil
 		}
