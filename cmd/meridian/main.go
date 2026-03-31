@@ -340,7 +340,12 @@ func setupAndStartGateway(ctx context.Context, infra *unifiedInfra, grpcPort, ht
 	if resetOpt := wirePasswordReset(infra.conns.gormDB("identity"), identityEmailOutboxRepo, baseDomain, logger); resetOpt != nil {
 		extraGWOpts = append(extraGWOpts, resetOpt)
 	}
-	if webhookOpt := wireResendWebhook(infra.conns.gormDB("payment-order"), emailMetrics, logger); webhookOpt != nil {
+	webhookDBs := []*gorm.DB{
+		infra.conns.gormDB("payment-order"),
+		infra.conns.gormDB("identity"),
+		infra.conns.gormDB("current-account"),
+	}
+	if webhookOpt := wireResendWebhook(webhookDBs, emailMetrics, logger); webhookOpt != nil {
 		extraGWOpts = append(extraGWOpts, webhookOpt)
 	}
 	if adminOpt := wireAdminHandler(infra.conns.gormDB("identity"), logger); adminOpt != nil {
