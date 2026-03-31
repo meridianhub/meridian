@@ -40,6 +40,17 @@ func TestVerifyUnsubscribeToken_WrongKey(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidTokenSignature)
 }
 
+func TestVerifyUnsubscribeToken_EmptyKey(t *testing.T) {
+	token := GenerateUnsubscribeToken([]byte("some-key"), UnsubscribeParams{
+		TenantID: "t", PartyID: "p", Channel: "EMAIL", Category: CategoryOperational,
+	})
+	_, err := VerifyUnsubscribeToken(nil, token)
+	assert.ErrorIs(t, err, ErrEmptyHMACKey)
+
+	_, err = VerifyUnsubscribeToken([]byte{}, token)
+	assert.ErrorIs(t, err, ErrEmptyHMACKey)
+}
+
 func TestVerifyUnsubscribeToken_InvalidEncoding(t *testing.T) {
 	key := []byte("test-secret-key")
 	_, err := VerifyUnsubscribeToken(key, "not-valid-base64!!!")

@@ -14,6 +14,7 @@ import (
 var (
 	ErrInvalidTokenFormat    = errors.New("email: invalid unsubscribe token format")
 	ErrInvalidTokenSignature = errors.New("email: invalid unsubscribe token signature")
+	ErrEmptyHMACKey          = errors.New("email: unsubscribe HMAC key is empty")
 )
 
 // UnsubscribeConfig holds configuration for generating RFC 2369/8058 unsubscribe headers.
@@ -34,6 +35,8 @@ type UnsubscribeParams struct {
 
 // GenerateUnsubscribeToken creates an HMAC-signed token encoding the unsubscribe parameters.
 // The token format is: base64url(tenantID|partyID|channel|category|hmac_signature)
+// The "|" delimiter is safe because all fields are controlled values (UUIDs, enum constants),
+// not free-text user input.
 func GenerateUnsubscribeToken(key []byte, params UnsubscribeParams) string {
 	payload := strings.Join([]string{params.TenantID, params.PartyID, params.Channel, params.Category}, "|")
 	sig := computeHMAC(key, payload)
@@ -43,6 +46,10 @@ func GenerateUnsubscribeToken(key []byte, params UnsubscribeParams) string {
 // VerifyUnsubscribeToken verifies and decodes an unsubscribe token.
 // Returns the decoded parameters if the signature is valid.
 func VerifyUnsubscribeToken(key []byte, token string) (UnsubscribeParams, error) {
+	if len(key) == 0 {
+		return UnsubscribeParams{}, ErrEmptyHMACKey
+	}
+
 	decoded, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
 		return UnsubscribeParams{}, fmt.Errorf("email: invalid unsubscribe token encoding: %w", err)
@@ -74,13 +81,16 @@ func computeHMAC(key []byte, message string) string {
 }
 
 // BuildUnsubscribeHeaders returns RFC 2369 List-Unsubscribe and RFC 8058
-// List-Unsubscribe-Post headers for non-transactional emails.
-// Returns nil if the category is TRANSACTIONAL or if config is not set.
+// List-Unsubscribe-Post headers for OPERATIONAL and MARKETING emails only.
+// Returns nil for TRANSACTIONAL emails, unknown categories, or if config is not set.
 func BuildUnsubscribeHeaders(cfg *UnsubscribeConfig, params UnsubscribeParams) map[string]string {
 	if cfg == nil || len(cfg.HMACKey) == 0 || cfg.BaseURL == "" {
 		return nil
 	}
-	if params.Category == CategoryTransactional {
+	switch params.Category {
+	case CategoryOperational, CategoryMarketing:
+		// These categories get unsubscribe headers
+	default:
 		return nil
 	}
 
