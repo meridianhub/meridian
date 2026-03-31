@@ -130,3 +130,35 @@ func TestRegisterCurrentAccountHandlers_CompensationMetadata(t *testing.T) {
 	require.NotNil(t, captureMetadata)
 	assert.Equal(t, "financial_accounting.compensate_posting", captureMetadata.Compensate)
 }
+
+func TestWithNotificationHandler_ReplacesStub(t *testing.T) {
+	called := false
+	realHandler := func(_ *saga.StarlarkContext, _ map[string]any) (any, error) {
+		called = true
+		return map[string]any{"status": "QUEUED"}, nil
+	}
+
+	registry := saga.NewHandlerRegistry()
+	err := RegisterCurrentAccountHandlers(registry, WithNotificationHandler(realHandler))
+	require.NoError(t, err)
+
+	handler, err := registry.Get("notification.send")
+	require.NoError(t, err)
+
+	_, err = handler(nil, nil)
+	require.NoError(t, err)
+	assert.True(t, called, "real notification handler should have been called")
+}
+
+func TestWithoutNotificationHandler_UsesStub(t *testing.T) {
+	registry := saga.NewHandlerRegistry()
+	err := RegisterCurrentAccountHandlers(registry)
+	require.NoError(t, err)
+
+	handler, err := registry.Get("notification.send")
+	require.NoError(t, err)
+
+	_, err = handler(nil, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errHandlerNotImplemented)
+}
