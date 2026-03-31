@@ -431,6 +431,7 @@ func startEmailWorker(ctx context.Context, paymentOrderDB *gorm.DB, logger *slog
 
 	outboxRepo := email.NewPostgresOutboxRepository(paymentOrderDB)
 	auditRepo := email.NewPostgresAuditRepository(paymentOrderDB)
+	suppressionRepo := email.NewPostgresSuppressionRepository(paymentOrderDB)
 	metrics := email.NewMetrics()
 
 	w := emailworker.NewEmailWorker(
@@ -438,6 +439,7 @@ func startEmailWorker(ctx context.Context, paymentOrderDB *gorm.DB, logger *slog
 		auditRepo,
 		renderer,
 		sender,
+		suppressionRepo,
 		nil, // invoiceChecker - not wired yet (dunning validation)
 		metrics,
 		dispatch.WorkerConfig{

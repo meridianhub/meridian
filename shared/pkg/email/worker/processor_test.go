@@ -100,6 +100,25 @@ func (m *mockInvoiceChecker) IsInvoicePaid(_ context.Context, _, _ string) (bool
 	return m.paid, m.err
 }
 
+type mockSuppressionRepo struct {
+	suppressed    bool
+	isSuppErr     error
+	addCalls      int
+	lastAddEntry  *email.SuppressionEntry
+	checkedAddrs  []string
+}
+
+func (m *mockSuppressionRepo) IsSuppressed(_ context.Context, addr string) (bool, error) {
+	m.checkedAddrs = append(m.checkedAddrs, addr)
+	return m.suppressed, m.isSuppErr
+}
+
+func (m *mockSuppressionRepo) AddSuppression(_ context.Context, entry *email.SuppressionEntry) error {
+	m.addCalls++
+	m.lastAddEntry = entry
+	return nil
+}
+
 // --- Helpers ---
 
 func newTestEntry(templateName string) email.OutboxEntry {
@@ -159,7 +178,7 @@ func TestProcessBatch_HappyPath(t *testing.T) {
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, NewEmailMetrics(m), nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, NewEmailMetrics(m), nil)
 
 	entry := newTestEntry("invoice")
 	instr := &OutboxInstruction{Entry: entry}
@@ -184,7 +203,7 @@ func TestProcessBatch_TemplateRenderFailure_DeadLettersImmediately(t *testing.T)
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, NewEmailMetrics(m), nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, NewEmailMetrics(m), nil)
 
 	entry := newTestEntry("invoice")
 	entry.Attempts = 0
@@ -211,7 +230,7 @@ func TestProcessBatch_SendFailure_WithRetry(t *testing.T) {
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, NewEmailMetrics(m), nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, NewEmailMetrics(m), nil)
 
 	entry := newTestEntry("invoice")
 	entry.Attempts = 1
@@ -238,7 +257,7 @@ func TestProcessBatch_SendFailure_DeadLetter(t *testing.T) {
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, NewEmailMetrics(m), nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, NewEmailMetrics(m), nil)
 
 	entry := newTestEntry("invoice")
 	entry.Attempts = 4
@@ -263,7 +282,7 @@ func TestProcessBatch_DunningCancellation_InvoicePaid(t *testing.T) {
 	audit := &mockAuditRepo{}
 	checker := &mockInvoiceChecker{paid: true}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, checker, NewEmailMetrics(m), nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, checker, NewEmailMetrics(m), nil)
 
 	entry := newTestEntry("dunning-notice")
 	entry.TemplateData = map[string]any{
@@ -290,7 +309,7 @@ func TestProcessBatch_DunningNotCancelled_InvoiceUnpaid(t *testing.T) {
 	audit := &mockAuditRepo{}
 	checker := &mockInvoiceChecker{paid: false}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, checker, nil, nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, checker, nil, nil)
 
 	entry := newTestEntry("dunning-notice")
 	entry.TemplateData = map[string]any{
@@ -315,7 +334,7 @@ func TestProcessBatch_DunningCancellation_CheckerError(t *testing.T) {
 	audit := &mockAuditRepo{}
 	checker := &mockInvoiceChecker{err: errors.New("db error")}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, checker, nil, nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, checker, nil, nil)
 
 	entry := newTestEntry("dunning-notice")
 	entry.TemplateData = map[string]any{
@@ -340,7 +359,7 @@ func TestProcessBatch_ContextCancelled(t *testing.T) {
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil, nil)
 
 	entry := newTestEntry("invoice")
 	instr := &OutboxInstruction{Entry: entry}
@@ -358,7 +377,7 @@ func TestProcessBatch_AuditFailureDoesNotBlockSend(t *testing.T) {
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{recordErr: errors.New("audit db error")}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil, nil)
 
 	entry := newTestEntry("invoice")
 	instr := &OutboxInstruction{Entry: entry}
@@ -377,7 +396,7 @@ func TestProcessBatch_NilInvoiceChecker_DunningProceedsNormally(t *testing.T) {
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil, nil)
 
 	entry := newTestEntry("dunning-notice")
 	entry.TemplateData = map[string]any{
@@ -401,7 +420,7 @@ func TestProcessBatch_SendErrorMetricsRecorded(t *testing.T) {
 	outbox := &mockOutboxRepo{}
 	audit := &mockAuditRepo{}
 
-	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, NewEmailMetrics(m), nil)
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, NewEmailMetrics(m), nil)
 
 	entry := newTestEntry("invoice")
 	instr := &OutboxInstruction{Entry: entry}
@@ -430,4 +449,87 @@ func TestProcessBatch_SendErrorMetricsRecorded(t *testing.T) {
 		}
 	}
 	assert.True(t, foundError, "send_errors_total metric should exist")
+}
+
+func TestProcessBatch_SuppressedRecipient_CancelsEntry(t *testing.T) {
+	ctx := context.Background()
+	m, reg := newTestMetrics(t)
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+	suppression := &mockSuppressionRepo{suppressed: true}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, suppression, nil, NewEmailMetrics(m), nil)
+
+	entry := newTestEntry("invoice")
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	assert.Equal(t, 0, sender.calls, "should not send to suppressed recipient")
+	assert.Equal(t, 1, outbox.cancelCalls, "should cancel the entry")
+	assert.Equal(t, 0, outbox.markSentCalls)
+	assert.Equal(t, float64(1), getMetricValue(t, reg, "meridian_email_outbox_cancelled_total"))
+}
+
+func TestProcessBatch_NotSuppressed_SendsNormally(t *testing.T) {
+	ctx := context.Background()
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-ok", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+	suppression := &mockSuppressionRepo{suppressed: false}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, suppression, nil, nil, nil)
+
+	entry := newTestEntry("invoice")
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	assert.Equal(t, 1, sender.calls, "should send when not suppressed")
+	assert.Equal(t, 1, outbox.markSentCalls)
+	assert.Equal(t, 0, outbox.cancelCalls)
+}
+
+func TestProcessBatch_SuppressionCheckError_ProceedsWithSend(t *testing.T) {
+	ctx := context.Background()
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-err", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+	suppression := &mockSuppressionRepo{isSuppErr: errors.New("db error")}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, suppression, nil, nil, nil)
+
+	entry := newTestEntry("invoice")
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	assert.Equal(t, 1, sender.calls, "should send when suppression check fails")
+	assert.Equal(t, 1, outbox.markSentCalls)
+}
+
+func TestProcessBatch_NilSuppressionRepo_SkipsCheck(t *testing.T) {
+	ctx := context.Background()
+
+	renderer := &mockRenderer{html: "<h1>Hi</h1>", text: "Hi"}
+	sender := &mockSender{result: email.SendResult{ProviderID: "msg-nil-supp", SentAt: time.Now()}}
+	outbox := &mockOutboxRepo{}
+	audit := &mockAuditRepo{}
+
+	proc := NewEmailProcessor(renderer, sender, outbox, audit, nil, nil, nil, nil)
+
+	entry := newTestEntry("invoice")
+	instr := &OutboxInstruction{Entry: entry}
+
+	proc.ProcessBatch(ctx, []*OutboxInstruction{instr})
+
+	assert.Equal(t, 1, sender.calls, "should send when no suppression repo configured")
+	assert.Equal(t, 1, outbox.markSentCalls)
 }
