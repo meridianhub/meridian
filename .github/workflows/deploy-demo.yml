@@ -260,6 +260,20 @@ jobs:
           script: |
             docker exec meridian-meridian-1 /meridian --migrate
 
+      - name: Reset tenant provisioning
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            # If any tenant has stale "active" status but missing schemas (e.g. after
+            # new databases were created), reset to "pending" so the provisioner
+            # re-creates schemas. Must run AFTER migrations so the provisioner has
+            # up-to-date DDL. Safe when schemas already exist (CREATE SCHEMA IF NOT EXISTS).
+            docker exec meridian-postgres-1 psql -U meridian -d meridian_platform -c \
+              "UPDATE tenant_provisioning SET state = 'pending' WHERE state IN ('active', 'failed')"
+
       - name: Bootstrap master tenant
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:

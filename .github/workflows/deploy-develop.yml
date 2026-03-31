@@ -279,10 +279,16 @@ jobs:
           username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
+            cd /opt/meridian-develop
+            # If any tenant has stale "active" status but missing schemas (e.g. after
+            # new databases were created), reset to "pending" so the provisioner
+            # re-creates schemas. Must run AFTER migrations so the provisioner has
+            # up-to-date DDL. Safe when schemas already exist (CREATE SCHEMA IF NOT EXISTS).
+            docker exec postgres-develop psql -U meridian -d meridian_platform -c \
+              "UPDATE tenant_provisioning SET state = 'pending' WHERE state IN ('active', 'failed')"
             # Restart so the app picks up migrated schemas and provisions tenant
             # schemas (SCHEMA_PROVISIONING_ENABLED=true). Without this, seed-dev
             # fails on fresh databases because tenant schemas don't exist yet.
-            cd /opt/meridian-develop
             docker compose -f docker-compose.develop.yml restart meridian-develop
 
       - name: Seed develop data
