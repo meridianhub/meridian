@@ -167,6 +167,10 @@ func (p *EmailProcessor) sendAndRecord(ctx context.Context, entry *email.OutboxE
 		)
 	}
 
+	if p.metrics != nil {
+		p.metrics.RecordEmailSent(entry.TenantID)
+	}
+
 	p.logger.InfoContext(ctx, "email sent",
 		"outbox_id", entry.ID,
 		"template", entry.TemplateName,

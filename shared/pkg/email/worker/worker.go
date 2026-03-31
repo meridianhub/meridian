@@ -37,6 +37,9 @@ func (m *EmailMetrics) RecordDeadLetter() { m.inner.RecordDeadLetter() }
 // RecordCancelled increments the cancellation counter.
 func (m *EmailMetrics) RecordCancelled() { m.inner.RecordCancelled() }
 
+// RecordEmailSent increments the per-tenant sent counter.
+func (m *EmailMetrics) RecordEmailSent(tenantID string) { m.inner.RecordEmailSent(tenantID) }
+
 // NewEmailWorker creates a dispatch.Worker configured for the email outbox.
 func NewEmailWorker(
 	outboxRepo email.OutboxRepository,

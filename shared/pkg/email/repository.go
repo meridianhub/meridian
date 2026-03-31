@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -52,3 +53,66 @@ type AuditRepository interface {
 
 // ErrAuditEntryNotFound is returned when no audit entry matches the given criteria.
 var ErrAuditEntryNotFound = fmt.Errorf("email: audit entry not found")
+
+// CompositeAuditRepository fans out read operations across multiple underlying
+// repositories. This is used by the webhook handler which must resolve provider
+// IDs across all service databases (payment-order, identity, current-account).
+// Write operations (Record) are not supported and will panic - use the
+// service-specific repository for writes.
+type CompositeAuditRepository struct {
+	repos []AuditRepository
+}
+
+// NewCompositeAuditRepository creates a repository that searches across all
+// provided repositories for read operations.
+func NewCompositeAuditRepository(repos ...AuditRepository) *CompositeAuditRepository {
+	return &CompositeAuditRepository{repos: repos}
+}
+
+// Record is not supported on composite repositories. The webhook handler only
+// reads and records by provider ID; direct writes go to service-specific repos.
+func (c *CompositeAuditRepository) Record(_ context.Context, _ *AuditEntry) error {
+	panic("CompositeAuditRepository does not support Record - use service-specific repository")
+}
+
+// FindByOutboxID is not supported on composite repositories.
+func (c *CompositeAuditRepository) FindByOutboxID(_ context.Context, _ uuid.UUID) ([]AuditEntry, error) {
+	panic("CompositeAuditRepository does not support FindByOutboxID - use service-specific repository")
+}
+
+// FindByProviderID searches all underlying repositories for audit entries
+// matching the provider ID. Returns results from the first repository that
+// finds entries.
+func (c *CompositeAuditRepository) FindByProviderID(ctx context.Context, providerID string) ([]AuditEntry, error) {
+	var lastErr error
+	for _, repo := range c.repos {
+		entries, err := repo.FindByProviderID(ctx, providerID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(entries) > 0 {
+			return entries, nil
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, nil
+}
+
+// RecordByProviderID searches all underlying repositories for an existing audit
+// entry matching the provider ID and records the status update in the same
+// repository.
+func (c *CompositeAuditRepository) RecordByProviderID(ctx context.Context, providerID string, status AuditStatus, payload map[string]any) error {
+	for _, repo := range c.repos {
+		err := repo.RecordByProviderID(ctx, providerID, status, payload)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, ErrAuditEntryNotFound) {
+			return err
+		}
+	}
+	return ErrAuditEntryNotFound
+}

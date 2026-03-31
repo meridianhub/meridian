@@ -7,12 +7,14 @@ import (
 
 // Metrics provides Prometheus metrics for the email outbox dispatch pipeline.
 type Metrics struct {
-	pendingTotal     prometheus.Gauge
-	sendDuration     prometheus.Histogram
-	sendErrorsTotal  *prometheus.CounterVec
-	deadLetterTotal  prometheus.Counter
-	cancelledTotal   prometheus.Counter
-	circuitBreakerSt prometheus.Gauge
+	pendingTotal         prometheus.Gauge
+	sendDuration         prometheus.Histogram
+	sendErrorsTotal      *prometheus.CounterVec
+	deadLetterTotal      prometheus.Counter
+	cancelledTotal       prometheus.Counter
+	circuitBreakerSt     prometheus.Gauge
+	emailsSentTotal      *prometheus.CounterVec
+	emailComplaintsTotal *prometheus.CounterVec
 }
 
 // NewMetrics creates email metrics auto-registered with the default registry.
@@ -77,6 +79,22 @@ func newMetrics(factory promauto.Factory) *Metrics {
 				Help:      "Current circuit breaker state: 0=closed, 1=half-open, 2=open.",
 			},
 		),
+		emailsSentTotal: factory.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "meridian",
+				Name:      "email_sent_total",
+				Help:      "Total emails sent successfully per tenant.",
+			},
+			[]string{"tenant_id"},
+		),
+		emailComplaintsTotal: factory.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "meridian",
+				Name:      "email_complaints_total",
+				Help:      "Total email complaints received per tenant.",
+			},
+			[]string{"tenant_id"},
+		),
 	}
 }
 
@@ -100,3 +118,14 @@ func (m *Metrics) RecordCancelled() { m.cancelledTotal.Inc() }
 // SetCircuitBreakerState sets the circuit breaker state gauge.
 // 0=closed, 1=half-open, 2=open.
 func (m *Metrics) SetCircuitBreakerState(state float64) { m.circuitBreakerSt.Set(state) }
+
+// RecordEmailSent increments the per-tenant sent counter.
+func (m *Metrics) RecordEmailSent(tenantID string) {
+	m.emailsSentTotal.WithLabelValues(tenantID).Inc()
+}
+
+// RecordEmailComplaint increments the per-tenant complaint counter.
+// Alert fires when rate(complaints[7d]) / rate(sent[7d]) > 0.001 (0.1%).
+func (m *Metrics) RecordEmailComplaint(tenantID string) {
+	m.emailComplaintsTotal.WithLabelValues(tenantID).Inc()
+}

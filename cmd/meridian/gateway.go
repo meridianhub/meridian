@@ -247,16 +247,23 @@ func (c *loopbackSlugChecker) IsSlugAvailable(ctx context.Context, slug string) 
 
 // wireResendWebhook creates the Resend delivery status webhook handler and returns
 // a ServerOption. Returns nil if RESEND_WEBHOOK_SECRET is not set (webhook disabled).
-func wireResendWebhook(paymentOrderDB *gorm.DB, logger *slog.Logger) gateway.ServerOption {
+// It accepts all service DBs so the webhook can resolve provider IDs regardless of
+// which service sent the email.
+func wireResendWebhook(serviceDBs []*gorm.DB, metrics *email.Metrics, logger *slog.Logger) gateway.ServerOption {
 	secret := env.GetEnvOrDefault("RESEND_WEBHOOK_SECRET", "")
 	if secret == "" {
 		logger.Info("resend webhook disabled: RESEND_WEBHOOK_SECRET not set")
 		return nil
 	}
 
-	auditRepo := email.NewPostgresAuditRepository(paymentOrderDB)
-	suppressionRepo := email.NewPostgresSuppressionRepository(paymentOrderDB)
-	recorder := email.NewDeliveryStatusRecorder(auditRepo, suppressionRepo, logger)
+	auditRepos := make([]email.AuditRepository, len(serviceDBs))
+	for i, db := range serviceDBs {
+		auditRepos[i] = email.NewPostgresAuditRepository(db)
+	}
+	auditRepo := email.NewCompositeAuditRepository(auditRepos...)
+	// Suppression is written to the first DB (payment-order) as the canonical store.
+	suppressionRepo := email.NewPostgresSuppressionRepository(serviceDBs[0])
+	recorder := email.NewDeliveryStatusRecorder(auditRepo, suppressionRepo, metrics, logger)
 	handler := gateway.NewResendWebhookHandler(recorder, secret, logger)
 	logger.Info("resend webhook handler initialized")
 	return gateway.WithResendWebhookHandler(handler)

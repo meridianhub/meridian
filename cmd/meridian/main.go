@@ -193,9 +193,10 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	if provisionerCleanup != nil {
 		defer provisionerCleanup()
 	}
-	emailWorker := startEmailWorker(ctx, "payment-order", infra.conns.gormDB("payment-order"), logger)
-	identityEmailWorker := startEmailWorker(ctx, "identity", infra.conns.gormDB("identity"), logger)
-	caEmailWorker := startEmailWorker(ctx, "current-account", infra.conns.gormDB("current-account"), logger)
+	emailMetrics := email.NewMetrics()
+	emailWorker := startEmailWorker(ctx, "payment-order", infra.conns.gormDB("payment-order"), emailMetrics, logger)
+	identityEmailWorker := startEmailWorker(ctx, "identity", infra.conns.gormDB("identity"), emailMetrics, logger)
+	caEmailWorker := startEmailWorker(ctx, "current-account", infra.conns.gormDB("current-account"), emailMetrics, logger)
 
 	// Start gRPC server
 	grpcAddr := fmt.Sprintf(":%d", grpcPort)
@@ -212,7 +213,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	}()
 
 	// Start gateway HTTP server
-	gwServer, routerCancel, err := setupAndStartGateway(ctx, infra, grpcPort, httpPort, logger)
+	gwServer, routerCancel, err := setupAndStartGateway(ctx, infra, grpcPort, httpPort, emailMetrics, logger)
 	if err != nil {
 		return err
 	}
@@ -311,7 +312,7 @@ func initLoopbackAndProvisioner(ctx context.Context, infra *unifiedInfra, grpcPo
 }
 
 // setupAndStartGateway wires all gateway HTTP handlers and creates the gateway server.
-func setupAndStartGateway(ctx context.Context, infra *unifiedInfra, grpcPort, httpPort int, logger *slog.Logger) (*gateway.Server, context.CancelFunc, error) {
+func setupAndStartGateway(ctx context.Context, infra *unifiedInfra, grpcPort, httpPort int, emailMetrics *email.Metrics, logger *slog.Logger) (*gateway.Server, context.CancelFunc, error) {
 	platformDSN, err := replaceDSNDatabase(infra.baseDSN, "meridian_platform")
 	if err != nil {
 		return nil, nil, fmt.Errorf("platform DSN: %w", err)
@@ -339,7 +340,12 @@ func setupAndStartGateway(ctx context.Context, infra *unifiedInfra, grpcPort, ht
 	if resetOpt := wirePasswordReset(infra.conns.gormDB("identity"), identityEmailOutboxRepo, baseDomain, logger); resetOpt != nil {
 		extraGWOpts = append(extraGWOpts, resetOpt)
 	}
-	if webhookOpt := wireResendWebhook(infra.conns.gormDB("payment-order"), logger); webhookOpt != nil {
+	webhookDBs := []*gorm.DB{
+		infra.conns.gormDB("payment-order"),
+		infra.conns.gormDB("identity"),
+		infra.conns.gormDB("current-account"),
+	}
+	if webhookOpt := wireResendWebhook(webhookDBs, emailMetrics, logger); webhookOpt != nil {
 		extraGWOpts = append(extraGWOpts, webhookOpt)
 	}
 	if adminOpt := wireAdminHandler(infra.conns.gormDB("identity"), logger); adminOpt != nil {
@@ -420,7 +426,7 @@ func awaitAndShutdown(
 // When EMAIL_MODE is "disabled" (the dev default), the worker is not started at
 // all. This prevents the NoopSender from silently consuming outbox entries and
 // marking them as sent without actual delivery.
-func startEmailWorker(ctx context.Context, serviceName string, db *gorm.DB, logger *slog.Logger) *dispatch.Worker[*emailworker.OutboxInstruction] {
+func startEmailWorker(ctx context.Context, serviceName string, db *gorm.DB, metrics *email.Metrics, logger *slog.Logger) *dispatch.Worker[*emailworker.OutboxInstruction] {
 	mode := os.Getenv("EMAIL_MODE")
 	if mode == "disabled" {
 		logger.Info("email worker disabled", "email_mode", mode, "service", serviceName)
@@ -442,7 +448,6 @@ func startEmailWorker(ctx context.Context, serviceName string, db *gorm.DB, logg
 	outboxRepo := email.NewPostgresOutboxRepository(db)
 	auditRepo := email.NewPostgresAuditRepository(db)
 	suppressionRepo := email.NewPostgresSuppressionRepository(db)
-	metrics := email.NewMetrics()
 
 	w := emailworker.NewEmailWorker(
 		outboxRepo,
