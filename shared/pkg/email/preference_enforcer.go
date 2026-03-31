@@ -21,9 +21,9 @@ var (
 
 // PreferenceEnforcer checks communication preferences before sending.
 type PreferenceEnforcer struct {
-	prefRepo           PreferenceRepository
+	prefRepo            PreferenceRepository
 	templateCategoryMap map[string]string // template name -> category
-	logger             *slog.Logger
+	logger              *slog.Logger
 }
 
 // NewPreferenceEnforcer creates a new enforcer.
@@ -34,9 +34,9 @@ func NewPreferenceEnforcer(prefRepo PreferenceRepository, templateCategoryMap ma
 		logger = slog.Default()
 	}
 	return &PreferenceEnforcer{
-		prefRepo:           prefRepo,
+		prefRepo:            prefRepo,
 		templateCategoryMap: templateCategoryMap,
-		logger:             logger,
+		logger:              logger,
 	}
 }
 

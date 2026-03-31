@@ -2,7 +2,6 @@ package email
 
 import (
 	"context"
-	"fmt"
 	"time"
 )
 
@@ -29,8 +28,3 @@ type PreferenceRepository interface {
 	// Returns nil, nil when no preference row exists (no explicit preference set).
 	GetPreference(ctx context.Context, tenantID, partyID, channel, category string) (*CommunicationPreference, error)
 }
-
-// Sentinel errors for preference operations.
-var (
-	ErrPreferenceNotFound = fmt.Errorf("email: preference not found")
-)
