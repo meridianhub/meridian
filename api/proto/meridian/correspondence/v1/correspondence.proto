@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
+import "meridian/common/v1/types.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/correspondence/v1;correspondencev1";
@@ -90,7 +91,7 @@ message InitiateOutboundRequest {
   // Key-value data to populate the template.
   google.protobuf.Struct template_data = 4;
   // Client-provided idempotency key to prevent duplicate sends.
-  string idempotency_key = 5 [(buf.validate.field).required = true];
+  meridian.common.v1.IdempotencyKey idempotency_key = 5 [(buf.validate.field).required = true];
   // Category for consent enforcement and routing.
   CorrespondenceCategory category = 6;
 }
