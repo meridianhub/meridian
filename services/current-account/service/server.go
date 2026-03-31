@@ -153,6 +153,15 @@ func WithInstrumentGetter(getter InstrumentGetter) Option {
 	}
 }
 
+// WithNotificationSagaHandler injects a real notification.send saga handler,
+// replacing the default stub that returns errHandlerNotImplemented.
+// The handler is applied during saga runner construction.
+func WithNotificationSagaHandler(handler saga.Handler) Option {
+	return func(s *Service) {
+		s.notificationHandler = handler
+	}
+}
+
 // WithAccountTypeCache sets the account type cache for product type resolution.
 func WithAccountTypeCache(cache AccountTypeCache) Option {
 	return func(s *Service) {
@@ -218,6 +227,7 @@ type Service struct {
 	webhookNotifier        WebhookNotifier       // Optional: sends webhook notifications for lifecycle events
 	logger                 *slog.Logger
 	tracer                 *observability.Tracer
+	notificationHandler    saga.Handler             // Optional: real notification.send handler (replaces stub)
 	depositOrchestrator    *DepositOrchestrator    // Handles deposit saga orchestration
 	withdrawalOrchestrator *WithdrawalOrchestrator // Handles withdrawal saga orchestration
 }
@@ -325,8 +335,20 @@ func NewServiceWithExistingClients(
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
+	// Pre-scan options for saga handler configuration (needed before buildSagaRunner).
+	var handlerOpts []RegisterCurrentAccountHandlersOption
+	probe := &Service{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(probe)
+		}
+	}
+	if probe.notificationHandler != nil {
+		handlerOpts = append(handlerOpts, WithNotificationHandler(probe.notificationHandler))
+	}
+
 	// Initialize saga infrastructure (scripts, registry, runtime, runner)
-	sagaRunner, depositScript, withdrawalScript, err := buildSagaRunner(logger)
+	sagaRunner, depositScript, withdrawalScript, err := buildSagaRunner(logger, handlerOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +388,7 @@ func NewServiceWithExistingClients(
 }
 
 // buildSagaRunner initializes the saga infrastructure: loads scripts, registers handlers, and creates the runner.
-func buildSagaRunner(logger *slog.Logger) (*saga.StarlarkSagaRunner, string, string, error) {
+func buildSagaRunner(logger *slog.Logger, handlerOpts ...RegisterCurrentAccountHandlersOption) (*saga.StarlarkSagaRunner, string, string, error) {
 	depositScript, err := loadSagaAsset(filepath.Join("services", "reference-data", "saga", "defaults", "deposit", "v1.0.0.star"))
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to load deposit saga script: %w", err)
@@ -377,7 +399,7 @@ func buildSagaRunner(logger *slog.Logger) (*saga.StarlarkSagaRunner, string, str
 	}
 
 	handlerRegistry := saga.NewHandlerRegistry()
-	if err := RegisterCurrentAccountHandlers(handlerRegistry); err != nil {
+	if err := RegisterCurrentAccountHandlers(handlerRegistry, handlerOpts...); err != nil {
 		return nil, "", "", fmt.Errorf("failed to register saga handlers: %w", err)
 	}
 
