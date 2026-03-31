@@ -71,6 +71,7 @@ type WelcomeData struct {
 	TenantName        string
 	LoginURL          string
 	GettingStartedURL string
+	UnsubscribeURL    string // populated by the processor for non-transactional emails
 }
 
 // AccountLockoutData holds the data required to render an account lockout email.

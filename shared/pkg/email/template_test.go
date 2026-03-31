@@ -522,6 +522,71 @@ func TestRender_Welcome_EmptyData_DoesNotPanic(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRender_Welcome_WithUnsubscribeURL(t *testing.T) {
+	r := newTestRenderer(t)
+	data := WelcomeData{
+		TenantName:        "Acme Platform",
+		LoginURL:          "https://app.example.com/login",
+		GettingStartedURL: "https://docs.example.com/getting-started",
+		UnsubscribeURL:    "https://app.example.com/unsubscribe?token=abc123",
+	}
+
+	html, text, err := r.Render("welcome", data)
+	require.NoError(t, err)
+
+	assert.Contains(t, html, "https://app.example.com/unsubscribe?token=abc123")
+	assert.Contains(t, html, "Unsubscribe from these emails")
+
+	assert.Contains(t, text, "Unsubscribe: https://app.example.com/unsubscribe?token=abc123")
+}
+
+func TestRender_Welcome_WithoutUnsubscribeURL_NoLink(t *testing.T) {
+	r := newTestRenderer(t)
+	data := WelcomeData{
+		TenantName:        "Acme Platform",
+		LoginURL:          "https://app.example.com/login",
+		GettingStartedURL: "https://docs.example.com/getting-started",
+	}
+
+	html, text, err := r.Render("welcome", data)
+	require.NoError(t, err)
+
+	assert.NotContains(t, html, "Unsubscribe")
+	assert.NotContains(t, text, "Unsubscribe")
+}
+
+func TestRender_Welcome_MapData_WithUnsubscribeURL(t *testing.T) {
+	r := newTestRenderer(t)
+	data := map[string]any{
+		"TenantName":        "Acme Platform",
+		"LoginURL":          "https://app.example.com/login",
+		"GettingStartedURL": "https://docs.example.com/getting-started",
+		"UnsubscribeURL":    "https://app.example.com/unsubscribe?token=xyz",
+	}
+
+	html, text, err := r.Render("welcome", data)
+	require.NoError(t, err)
+
+	assert.Contains(t, html, "https://app.example.com/unsubscribe?token=xyz")
+	assert.Contains(t, html, "Unsubscribe from these emails")
+	assert.Contains(t, text, "Unsubscribe: https://app.example.com/unsubscribe?token=xyz")
+}
+
+func TestRender_Welcome_MapData_WithoutUnsubscribeURL(t *testing.T) {
+	r := newTestRenderer(t)
+	data := map[string]any{
+		"TenantName":        "Acme Platform",
+		"LoginURL":          "https://app.example.com/login",
+		"GettingStartedURL": "https://docs.example.com/getting-started",
+	}
+
+	html, text, err := r.Render("welcome", data)
+	require.NoError(t, err)
+
+	assert.NotContains(t, html, "Unsubscribe")
+	assert.NotContains(t, text, "Unsubscribe")
+}
+
 // ---- Account Lockout ----
 
 func TestRender_AccountLockout_ReturnsBothOutputs(t *testing.T) {

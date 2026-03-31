@@ -80,22 +80,32 @@ func computeHMAC(key []byte, message string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
+// BuildUnsubscribeURL returns the unsubscribe URL for OPERATIONAL and MARKETING
+// emails. Returns empty string for TRANSACTIONAL emails, unknown categories, or
+// if config is not set.
+func BuildUnsubscribeURL(cfg *UnsubscribeConfig, params UnsubscribeParams) string {
+	if cfg == nil || len(cfg.HMACKey) == 0 || cfg.BaseURL == "" {
+		return ""
+	}
+	switch params.Category {
+	case CategoryOperational, CategoryMarketing:
+		// These categories get unsubscribe URLs
+	default:
+		return ""
+	}
+
+	token := GenerateUnsubscribeToken(cfg.HMACKey, params)
+	return fmt.Sprintf("%s/unsubscribe?token=%s", cfg.BaseURL, url.QueryEscape(token))
+}
+
 // BuildUnsubscribeHeaders returns RFC 2369 List-Unsubscribe and RFC 8058
 // List-Unsubscribe-Post headers for OPERATIONAL and MARKETING emails only.
 // Returns nil for TRANSACTIONAL emails, unknown categories, or if config is not set.
 func BuildUnsubscribeHeaders(cfg *UnsubscribeConfig, params UnsubscribeParams) map[string]string {
-	if cfg == nil || len(cfg.HMACKey) == 0 || cfg.BaseURL == "" {
+	unsubURL := BuildUnsubscribeURL(cfg, params)
+	if unsubURL == "" {
 		return nil
 	}
-	switch params.Category {
-	case CategoryOperational, CategoryMarketing:
-		// These categories get unsubscribe headers
-	default:
-		return nil
-	}
-
-	token := GenerateUnsubscribeToken(cfg.HMACKey, params)
-	unsubURL := fmt.Sprintf("%s/unsubscribe?token=%s", cfg.BaseURL, url.QueryEscape(token))
 
 	return map[string]string{
 		"List-Unsubscribe":      fmt.Sprintf("<%s>", unsubURL),

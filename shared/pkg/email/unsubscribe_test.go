@@ -90,6 +90,62 @@ func TestVerifyUnsubscribeToken_TamperedPayload(t *testing.T) {
 	assert.Equal(t, "tenant-2", decoded2.TenantID)
 }
 
+func TestBuildUnsubscribeURL_Operational(t *testing.T) {
+	cfg := &UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example",
+	}
+	params := UnsubscribeParams{
+		TenantID: "tenant-1",
+		PartyID:  "party-42",
+		Channel:  "EMAIL",
+		Category: CategoryOperational,
+	}
+
+	url := BuildUnsubscribeURL(cfg, params)
+
+	assert.Contains(t, url, "https://app.meridian.example/unsubscribe?token=")
+}
+
+func TestBuildUnsubscribeURL_Marketing(t *testing.T) {
+	cfg := &UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example",
+	}
+	params := UnsubscribeParams{
+		TenantID: "tenant-1",
+		PartyID:  "party-42",
+		Channel:  "EMAIL",
+		Category: CategoryMarketing,
+	}
+
+	url := BuildUnsubscribeURL(cfg, params)
+
+	assert.NotEmpty(t, url)
+	assert.Contains(t, url, "https://app.meridian.example/unsubscribe?token=")
+}
+
+func TestBuildUnsubscribeURL_Transactional_ReturnsEmpty(t *testing.T) {
+	cfg := &UnsubscribeConfig{
+		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
+		BaseURL: "https://app.meridian.example",
+	}
+	params := UnsubscribeParams{
+		TenantID: "tenant-1",
+		PartyID:  "party-42",
+		Channel:  "EMAIL",
+		Category: CategoryTransactional,
+	}
+
+	url := BuildUnsubscribeURL(cfg, params)
+	assert.Empty(t, url)
+}
+
+func TestBuildUnsubscribeURL_NilConfig_ReturnsEmpty(t *testing.T) {
+	url := BuildUnsubscribeURL(nil, UnsubscribeParams{Category: CategoryOperational})
+	assert.Empty(t, url)
+}
+
 func TestBuildUnsubscribeHeaders_Operational(t *testing.T) {
 	cfg := &UnsubscribeConfig{
 		HMACKey: []byte("test-secret-key-32-bytes-long!!!"),
