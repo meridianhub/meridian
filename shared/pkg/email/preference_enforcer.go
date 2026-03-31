@@ -36,9 +36,13 @@ func NewPreferenceEnforcer(prefRepo PreferenceRepository, templateCategoryMap ma
 	if logger == nil {
 		logger = slog.Default()
 	}
+	cp := make(map[string]string, len(templateCategoryMap))
+	for k, v := range templateCategoryMap {
+		cp[k] = v
+	}
 	return &PreferenceEnforcer{
 		prefRepo:            prefRepo,
-		templateCategoryMap: templateCategoryMap,
+		templateCategoryMap: cp,
 		logger:              logger,
 	}
 }
