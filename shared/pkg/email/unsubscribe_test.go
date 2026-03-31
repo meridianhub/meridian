@@ -37,8 +37,7 @@ func TestVerifyUnsubscribeToken_WrongKey(t *testing.T) {
 	})
 
 	_, err := VerifyUnsubscribeToken(wrongKey, token)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid unsubscribe token signature")
+	assert.ErrorIs(t, err, ErrInvalidTokenSignature)
 }
 
 func TestVerifyUnsubscribeToken_InvalidEncoding(t *testing.T) {

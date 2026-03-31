@@ -4,9 +4,16 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+)
+
+// Sentinel errors for unsubscribe token operations.
+var (
+	ErrInvalidTokenFormat    = errors.New("email: invalid unsubscribe token format")
+	ErrInvalidTokenSignature = errors.New("email: invalid unsubscribe token signature")
 )
 
 // UnsubscribeConfig holds configuration for generating RFC 2369/8058 unsubscribe headers.
@@ -43,13 +50,13 @@ func VerifyUnsubscribeToken(key []byte, token string) (UnsubscribeParams, error)
 
 	parts := strings.Split(string(decoded), "|")
 	if len(parts) != 5 {
-		return UnsubscribeParams{}, fmt.Errorf("email: invalid unsubscribe token format")
+		return UnsubscribeParams{}, ErrInvalidTokenFormat
 	}
 
 	payload := strings.Join(parts[:4], "|")
 	expectedSig := computeHMAC(key, payload)
 	if !hmac.Equal([]byte(parts[4]), []byte(expectedSig)) {
-		return UnsubscribeParams{}, fmt.Errorf("email: invalid unsubscribe token signature")
+		return UnsubscribeParams{}, ErrInvalidTokenSignature
 	}
 
 	return UnsubscribeParams{
