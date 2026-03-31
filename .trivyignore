@@ -25,3 +25,15 @@ GHSA-vh7g-p26c-j2cw
 # GO-2024-2476 — Dex TLS config discarding (no upstream fix; not applicable
 # because embedded Dex serves HTTP behind the gateway, Caddy terminates TLS)
 GHSA-gr79-9v6v-gc9r
+
+# docker/docker (Moby) — indirect dependency via testcontainers-go (test only).
+# go mod why confirms main module does not need github.com/docker/docker.
+# No fix available for either CVE.
+
+# CVE-2026-34040 — AuthZ plugin bypass with oversized request bodies
+CVE-2026-34040
+GHSA-x744-4wpc-v9h2
+
+# CVE-2026-33997 — Off-by-one error in plugin privilege validation
+CVE-2026-33997
+GHSA-pxq6-2prw-chj9
