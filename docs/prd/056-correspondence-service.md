@@ -315,7 +315,8 @@ Key design decisions:
    prevents self-declaration bypass)
 2. Resolve party preferences
 3. If global_unsubscribe AND category != TRANSACTIONAL → SUPPRESSED
-4. If channel+category explicitly opted out → SUPPRESSED
+4. If channel+category explicitly opted out AND category != TRANSACTIONAL
+   → SUPPRESSED
 5. If category == TRANSACTIONAL → allow (legally required)
 6. If category == OPERATIONAL AND no preference record → allow
    (legitimate interest, Art. 6(1)(f))
@@ -414,23 +415,26 @@ to a BIAN-aligned service:
 ## 8. Success Criteria
 
 ### Phase 0
+
 1. Dunning saga `notification.send` calls work end-to-end
-2. Identity-originated emails reach the outbox
-3. Complained/bounced addresses are not re-emailed
+1. Identity-originated emails reach the outbox
+1. Complained/bounced addresses are not re-emailed
 
 ### Phase 2
-4. `correspondence.initiate_outbound` in handlers.yaml with `proto_ref`
-5. `notification.send` removed (or deprecated alias only)
-6. Category enforcement prevents self-declaration bypass
-7. Communication preferences enforced on non-transactional correspondence
-8. Unsubscribe headers (RFC 2369 + 8058) on all non-transactional emails
-9. Proto generation succeeds (`buf generate api/proto`)
-10. All existing and new tests pass
+
+1. `correspondence.initiate_outbound` in handlers.yaml with `proto_ref`
+1. `notification.send` removed (or deprecated alias only)
+1. Category enforcement prevents self-declaration bypass
+1. Communication preferences enforced on non-transactional correspondence
+1. Unsubscribe headers (RFC 2369 + 8058) on all non-transactional emails
+1. Proto generation succeeds (`buf generate api/proto`)
+1. All existing and new tests pass
 
 ### Phase 3
-11. `shared/pkg/email/` reduced to interface + types only
-12. Service follows standard Meridian service directory structure
-13. Resend webhook handled by Correspondence service via gRPC
+
+1. `shared/pkg/email/` reduced to interface + types only
+1. Service follows standard Meridian service directory structure
+1. Resend webhook handled by Correspondence service via gRPC
 
 ## 9. Complexity Estimate
 
