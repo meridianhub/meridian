@@ -49,7 +49,9 @@ test.describe('Parties list', () => {
 
   test('renders Status filter', async ({ authenticatedPage: page }) => {
     await navigateTo(page, '/parties')
-    await expect(page.getByText('Status')).toBeVisible()
+    // Use getByRole('combobox') to target the filter select specifically,
+    // avoiding column headers and other Status text elements on the page.
+    await expect(page.getByRole('combobox', { name: /status/i })).toBeVisible()
   })
 
   test('renders Search filter', async ({ authenticatedPage: page }) => {
