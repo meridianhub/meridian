@@ -206,8 +206,8 @@ func (p *EmailProcessor) checkDunningCancellation(ctx context.Context, entry *em
 	return false, nil
 }
 
-// checkSuppression checks if any recipient address is suppressed. If all recipients
-// are suppressed, the entry is cancelled. Returns true if the entry was cancelled.
+// checkSuppression checks if any recipient address is suppressed. Cancels the
+// entry as soon as the first suppressed address is found. Returns true if cancelled.
 func (p *EmailProcessor) checkSuppression(ctx context.Context, entry *email.OutboxEntry) (bool, error) {
 	for _, addr := range entry.ToAddresses {
 		suppressed, err := p.suppressionRepo.IsSuppressed(ctx, addr)
