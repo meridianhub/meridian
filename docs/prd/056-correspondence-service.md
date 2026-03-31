@@ -234,7 +234,7 @@ message RetrieveOutboundResponse {
 message RecordDeliveryStatusRequest {
   string provider_id = 1;
   string status = 2;
-  map<string, string> provider_metadata = 3;
+  google.protobuf.Struct provider_metadata = 3;
 }
 
 message RecordDeliveryStatusResponse {
