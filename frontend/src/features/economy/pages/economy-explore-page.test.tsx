@@ -135,6 +135,10 @@ describe('EconomyExplorePage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('explorer-empty')).toBeInTheDocument()
     })
+    expect(screen.getByText('No custom economy configured')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View Sagas' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View Account Types' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View Valuation Rules' })).toBeInTheDocument()
   })
 
   it('renders error state when API fails with no cached data', async () => {
