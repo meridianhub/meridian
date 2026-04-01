@@ -84,7 +84,7 @@ func (s *AccountTypeService) ListAll(ctx context.Context, req *pb.ListAllRequest
 	}
 	// If the caller provided a non-empty filter but all values were UNSPECIFIED, reject.
 	if len(req.GetStatusFilter()) > 0 && len(statusFilter) == 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "status_filter contains only unrecognised values")
+		return nil, status.Errorf(codes.InvalidArgument, "status_filter contains only unrecognized values")
 	}
 
 	defs, err := s.registry.ListAll(ctx, statusFilter)
