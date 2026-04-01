@@ -170,6 +170,15 @@ func diffPlanToReconcileResult(plan *differ.DiffPlan, version string) *Reconcile
 			result.Summary.TotalDrifted++
 		case differ.ActionNoChange:
 			// No drift for this resource.
+		case differ.ActionDeprecate:
+			result.DriftItems = append(result.DriftItems, DriftItem{
+				ResourceType: string(action.ResourceType),
+				ResourceCode: action.ResourceCode,
+				DriftType:    DriftTypeExtra,
+				Description:  fmt.Sprintf("Resource %s %s exists in live state but not in manifest (deprecated)", action.ResourceType, action.ResourceCode),
+			})
+			result.Summary.Extra++
+			result.Summary.TotalDrifted++
 		}
 		result.Summary.TotalChecked++
 	}

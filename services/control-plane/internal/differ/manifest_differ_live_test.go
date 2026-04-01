@@ -212,7 +212,7 @@ func TestDiffAgainstLiveState_AccountTypes_AllActions(t *testing.T) {
 
 	manifest := &controlplanev1.Manifest{
 		AccountTypes: []*controlplanev1.AccountTypeDefinition{
-			{Code: "CURRENT", Name: "Current Account", NormalBalance: controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT}, // NO_CHANGE
+			{Code: "CURRENT", Name: "Current Account", NormalBalance: controlplanev1.NormalBalance_NORMAL_BALANCE_DEBIT},  // NO_CHANGE
 			{Code: "SAVINGS", Name: "Updated Savings", NormalBalance: controlplanev1.NormalBalance_NORMAL_BALANCE_CREDIT}, // UPDATE
 			{Code: "NEW_TYPE", Name: "New Type"}, // CREATE
 		},
@@ -263,8 +263,8 @@ func TestDiffAgainstLiveState_Sagas_AllActions(t *testing.T) {
 	manifest := &controlplanev1.Manifest{
 		Sagas: []*controlplanev1.SagaDefinition{
 			{Name: "existing_saga", Trigger: "api:/v1/settle", Script: "new_script"}, // UPDATE
-			{Name: "unchanged_saga", Trigger: "event:foo", Script: "script"},          // NO_CHANGE
-			{Name: "new_saga", Trigger: "webhook:stripe", Script: "new"},              // CREATE
+			{Name: "unchanged_saga", Trigger: "event:foo", Script: "script"},         // NO_CHANGE
+			{Name: "new_saga", Trigger: "webhook:stripe", Script: "new"},             // CREATE
 		},
 	}
 
@@ -390,7 +390,7 @@ func TestDiffAgainstLiveState_InternalAccounts(t *testing.T) {
 
 	manifest := &controlplanev1.Manifest{
 		InternalAccounts: []*controlplanev1.InternalAccountDefinition{
-			{Code: "SUSPENSE", AccountType: "CURRENT", Instrument: "GBP"},      // NO_CHANGE
+			{Code: "SUSPENSE", AccountType: "CURRENT", Instrument: "GBP"}, // NO_CHANGE
 			{Code: "NEW_ACCT", AccountType: "CURRENT", Instrument: "EUR"}, // CREATE
 		},
 	}
@@ -416,7 +416,7 @@ func TestDiffAgainstLiveState_ProviderConnections(t *testing.T) {
 	manifest := &controlplanev1.Manifest{
 		OperationalGateway: &controlplanev1.OperationalGatewayConfig{
 			ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
-				{ConnectionId: "stripe-1", ProviderName: "stripe"},         // NO_CHANGE
+				{ConnectionId: "stripe-1", ProviderName: "stripe"},       // NO_CHANGE
 				{ConnectionId: "new-conn", ProviderName: "new-provider"}, // CREATE
 			},
 		},
@@ -443,7 +443,7 @@ func TestDiffAgainstLiveState_InstructionRoutes(t *testing.T) {
 	manifest := &controlplanev1.Manifest{
 		OperationalGateway: &controlplanev1.OperationalGatewayConfig{
 			InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
-				{InstructionType: "payment", ConnectionId: "stripe-1"},       // NO_CHANGE
+				{InstructionType: "payment", ConnectionId: "stripe-1"},   // NO_CHANGE
 				{InstructionType: "new-route", ConnectionId: "new-conn"}, // CREATE
 			},
 		},
@@ -555,9 +555,9 @@ func TestDiffAgainstLiveState_FullMixedScenario(t *testing.T) {
 
 	manifest := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
-			{Code: "GBP", Name: "British Pound", Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT},          // NO_CHANGE
+			{Code: "GBP", Name: "British Pound", Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT},              // NO_CHANGE
 			{Code: "KWH", Name: "Kilowatt-Hour Updated", Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY}, // UPDATE
-			{Code: "CO2", Name: "Carbon Credit", Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER}, // CREATE
+			{Code: "CO2", Name: "Carbon Credit", Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER},           // CREATE
 		},
 	}
 
