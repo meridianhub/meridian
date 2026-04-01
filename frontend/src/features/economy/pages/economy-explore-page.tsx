@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { ConnectError, Code } from '@connectrpc/connect'
+import { Link } from 'react-router-dom'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
 import type { SagaDefinition } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
@@ -36,11 +37,11 @@ function EmptyState() {
         5 valuation methods, and 3 policies. Apply a manifest to add custom configurations.
       </span>
       <div className="flex flex-wrap gap-2 mt-2 text-sm">
-        <a href="/starlark-config" className="text-primary hover:underline">View Sagas</a>
+        <Link to="/starlark-config" className="text-primary hover:underline">View Sagas</Link>
         <span className="text-muted-foreground">·</span>
-        <a href="/reference-data/account-types" className="text-primary hover:underline">View Account Types</a>
+        <Link to="/reference-data/account-types" className="text-primary hover:underline">View Account Types</Link>
         <span className="text-muted-foreground">·</span>
-        <a href="/reference-data/valuation-rules" className="text-primary hover:underline">View Valuation Rules</a>
+        <Link to="/reference-data/valuation-rules" className="text-primary hover:underline">View Valuation Rules</Link>
       </div>
     </div>
   )
