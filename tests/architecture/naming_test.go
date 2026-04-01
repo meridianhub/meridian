@@ -70,7 +70,7 @@ var repositoryMethodVerbs = []string{
 	"Save", "Count", "Exists", "Get", "Remove", "Upsert",
 	// Domain-specific verbs common in this codebase.
 	"Insert", "Record", "Query", "Retrieve", "Load",
-	"Mark", "Sum", "Is", "Soft",
+	"Mark", "Sum", "Is", "Soft", "Deprecate",
 }
 
 // TestRepositoryMethodVerbs validates that methods on types ending in "Repository"
