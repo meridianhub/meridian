@@ -352,4 +352,45 @@ describe('InstrumentsPage', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
   })
+
+  describe('Platform badge', () => {
+    it('renders Platform badge for isSystem instruments', async () => {
+      mockListInstruments.mockResolvedValue({
+        instruments: mockInstruments,
+        nextPageToken: '',
+      })
+
+      render(
+        <Wrapper>
+          <InstrumentsPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('GBP')).toBeInTheDocument()
+      })
+
+      const badges = screen.getAllByText('Platform')
+      expect(badges).toHaveLength(1)
+    })
+
+    it('does not render Platform badge for non-system instruments', async () => {
+      mockListInstruments.mockResolvedValue({
+        instruments: [mockInstruments[1]], // KWH with isSystem: false
+        nextPageToken: '',
+      })
+
+      render(
+        <Wrapper>
+          <InstrumentsPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('KWH')).toBeInTheDocument()
+      })
+
+      expect(screen.queryByText('Platform')).not.toBeInTheDocument()
+    })
+  })
 })

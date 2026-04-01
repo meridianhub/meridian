@@ -9,6 +9,7 @@ import { PageShell } from '@/shared/page-shell'
 import { PageHeader } from '@/shared/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { referenceKeys } from '@/lib/query-keys'
 import {
@@ -57,7 +58,12 @@ export function AccountTypesPage() {
       accessorKey: 'code',
       header: 'Code',
       cell: ({ row }) => (
-        <span className="font-mono text-sm font-medium">{row.original.code}</span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-sm font-medium">{row.original.code}</span>
+          {row.original.isSystem && (
+            <Badge variant="outline" className="text-xs">Platform</Badge>
+          )}
+        </div>
       ),
     },
     {

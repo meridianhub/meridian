@@ -221,4 +221,46 @@ describe('StarlarkConfigPage', () => {
       })
     })
   })
+
+  describe('Platform badge', () => {
+    it('renders Platform badge for isSystem sagas', async () => {
+      vi.mocked(useApiClients).mockReturnValue(
+        makeMockClients([
+          { ...eventSaga, isSystem: true },
+          { ...apiSaga, isSystem: false },
+        ]) as never,
+      )
+
+      render(
+        <Wrapper>
+          <StarlarkConfigPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('current_account_withdrawal')).toBeInTheDocument()
+      })
+
+      const badges = screen.getAllByText('Platform')
+      expect(badges).toHaveLength(1)
+    })
+
+    it('does not render Platform badge for non-system sagas', async () => {
+      vi.mocked(useApiClients).mockReturnValue(
+        makeMockClients([{ ...apiSaga, isSystem: false }]) as never,
+      )
+
+      render(
+        <Wrapper>
+          <StarlarkConfigPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('payment_initiation')).toBeInTheDocument()
+      })
+
+      expect(screen.queryByText('Platform')).not.toBeInTheDocument()
+    })
+  })
 })

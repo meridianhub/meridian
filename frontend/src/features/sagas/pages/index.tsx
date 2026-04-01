@@ -34,12 +34,17 @@ export function StarlarkConfigPage() {
       accessorKey: 'name',
       header: 'Name',
       cell: (row) => (
-        <Link
-          to={`/starlark-config/${row.row.original.name}`}
-          className="font-mono text-sm text-primary hover:underline"
-        >
-          {row.row.original.name}
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to={`/starlark-config/${row.row.original.name}`}
+            className="font-mono text-sm text-primary hover:underline"
+          >
+            {row.row.original.name}
+          </Link>
+          {row.row.original.isSystem && (
+            <Badge variant="outline" className="text-xs">Platform</Badge>
+          )}
+        </div>
       ),
       size: 220,
     },
