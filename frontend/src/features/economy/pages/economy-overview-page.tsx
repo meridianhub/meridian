@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { ConnectError, Code } from '@connectrpc/connect'
@@ -11,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Edit, Compass } from 'lucide-react'
 import { DriftWarningBanner } from '@/features/economy/components/drift-warning-banner'
+import { track } from '@/lib/analytics'
 
 function LoadingSkeleton() {
   return (
@@ -39,6 +41,11 @@ function LoadingSkeleton() {
 
 function EmptyState() {
   const navigate = useNavigate()
+
+  useEffect(() => {
+    track('economy.empty_state_shown', { page: 'overview', hasManifest: false })
+  }, [])
+
   return (
     <div data-testid="overview-empty" className="p-6 flex flex-col items-center gap-4 py-16 text-muted-foreground">
       <span className="text-lg font-medium">No custom economy configured</span>

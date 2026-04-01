@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import type { SagaDefinition } from '@/api/gen/meridian/control_plane/v1/manifes
 import { useSagasTable } from '../hooks'
 import { usePageTitle } from '@/hooks/use-page-title'
 import { CreateSagaDraftDialog } from './create-saga-draft-dialog'
+import { track } from '@/lib/analytics'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,23 +31,51 @@ export function StarlarkConfigPage() {
   const { queryKey, queryFn } = useSagasTable()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
+  const { data } = useQuery({
+    queryKey: [...queryKey, {}],
+    queryFn: () => queryFn({ pageSize: 25 }),
+  })
+
+  useEffect(() => {
+    if (!data?.items) return
+    const platformCount = data.items.filter((s) => s.isSystem).length
+    if (platformCount === 0) return
+    track('economy.platform_badge_visible', {
+      page: 'sagas',
+      platform_count: platformCount,
+      tenant_count: data.items.length - platformCount,
+    })
+  }, [data])
+
   const columns = useMemo((): ColumnDef<SagaDefinition>[] => [
     {
       accessorKey: 'name',
       header: 'Name',
-      cell: (row) => (
-        <div className="flex items-center gap-2">
-          <Link
-            to={`/starlark-config/${row.row.original.name}`}
-            className="font-mono text-sm text-primary hover:underline"
-          >
-            {row.row.original.name}
-          </Link>
-          {row.row.original.isSystem && (
-            <Badge variant="outline" className="text-xs">Platform</Badge>
-          )}
-        </div>
-      ),
+      cell: (row) => {
+        const saga = row.row.original
+        return (
+          <div className="flex items-center gap-2">
+            <Link
+              to={`/starlark-config/${saga.name}`}
+              className="font-mono text-sm text-primary hover:underline"
+              onClick={() => {
+                if (saga.isSystem) {
+                  track('economy.platform_resource_clicked', {
+                    resource_type: 'saga',
+                    resource_code: saga.name,
+                    page: 'sagas',
+                  })
+                }
+              }}
+            >
+              {saga.name}
+            </Link>
+            {saga.isSystem && (
+              <Badge variant="outline" className="text-xs">Platform</Badge>
+            )}
+          </div>
+        )
+      },
       size: 220,
     },
     {
@@ -66,6 +96,14 @@ export function StarlarkConfigPage() {
     },
   ], [])
 
+  function handleCreateSaga() {
+    setCreateDialogOpen(true)
+    track('economy.override_intent', {
+      source_saga_name: '',
+      navigation_path: '/starlark-config/new',
+    })
+  }
+
   return (
     <PageShell>
       <Breadcrumbs items={[
@@ -76,7 +114,7 @@ export function StarlarkConfigPage() {
       <PageHeader
         title="Starlark Configuration"
         description="Manage saga workflow definitions and Starlark scripts"
-        actions={<Button onClick={() => setCreateDialogOpen(true)}>Create Saga</Button>}
+        actions={<Button onClick={handleCreateSaga}>Create Saga</Button>}
       />
 
       <CreateSagaDraftDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />

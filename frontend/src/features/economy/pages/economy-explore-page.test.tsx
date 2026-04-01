@@ -12,7 +12,12 @@ vi.mock('@/api/context', () => ({
   ApiClientProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
+vi.mock('@/lib/analytics', () => ({
+  track: vi.fn(),
+}))
+
 import { useApiClients } from '@/api/context'
+import { track } from '@/lib/analytics'
 
 const mockManifestVersion = {
   id: 'mv-1',
@@ -385,5 +390,24 @@ describe('EconomyExplorePage', () => {
     const breadcrumb = screen.getByLabelText('Breadcrumb')
     const economyLink = within(breadcrumb).getByText('Economy')
     expect(economyLink.closest('a')).toHaveAttribute('href', '/economy')
+  })
+
+  it('fires empty_state_shown when no manifest exists', async () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockResolvedValue({ version: null }),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('explorer-empty')).toBeInTheDocument()
+    })
+
+    expect(vi.mocked(track)).toHaveBeenCalledWith('economy.empty_state_shown', {
+      page: 'explore',
+      hasManifest: false,
+    })
   })
 })

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { Breadcrumbs } from '@/shared/breadcrumbs'
@@ -20,6 +20,7 @@ import {
 } from '@/api/gen/meridian/reference_data/v1/instrument_pb'
 import { RegisterInstrumentDialog } from './register-instrument-dialog'
 import { ExecutionContextTab } from '../../components/execution-context-tab'
+import { track } from '@/lib/analytics'
 
 const DIMENSION_LABELS: Record<number, string> = {
   0: 'Unspecified',
@@ -190,6 +191,22 @@ export function InstrumentsPage() {
     }
   }
 
+  const { data: analyticsData } = useQuery({
+    queryKey: [...referenceKeys.instruments(), {}],
+    queryFn: () => queryFn({ pageSize: 25 }),
+  })
+
+  React.useEffect(() => {
+    if (!analyticsData?.items) return
+    const platformCount = analyticsData.items.filter((i) => i.isSystem).length
+    if (platformCount === 0) return
+    track('economy.platform_badge_visible', {
+      page: 'instruments',
+      platform_count: platformCount,
+      tenant_count: analyticsData.items.length - platformCount,
+    })
+  }, [analyticsData])
+
   return (
     <PageShell>
       <Breadcrumbs items={[
@@ -220,7 +237,16 @@ export function InstrumentsPage() {
           columns={columns}
           pageSize={25}
           filters={filters}
-          onRowClick={(inst) => setSelectedInstrument(inst)}
+          onRowClick={(inst) => {
+            setSelectedInstrument(inst)
+            if (inst.isSystem) {
+              track('economy.platform_resource_clicked', {
+                resource_type: 'instrument',
+                resource_code: inst.code,
+                page: 'instruments',
+              })
+            }
+          }}
         />
       </Card>
 

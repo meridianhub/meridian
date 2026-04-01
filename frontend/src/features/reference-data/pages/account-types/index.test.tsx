@@ -22,7 +22,12 @@ vi.mock('@/api/context', () => ({
   })),
 }))
 
+vi.mock('@/lib/analytics', () => ({
+  track: vi.fn(),
+}))
+
 import { AccountTypesPage } from './index'
+import { track } from '@/lib/analytics'
 
 function makeQueryClient() {
   return new QueryClient({
@@ -268,6 +273,56 @@ describe('AccountTypesPage', () => {
       })
 
       expect(screen.queryByText('Platform')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('analytics', () => {
+    it('fires platform_badge_visible when system account types are present', async () => {
+      mockListActive.mockResolvedValue({
+        definitions: mockDefinitions, // includes isSystem: true
+        nextPageToken: '',
+      })
+
+      render(
+        <Wrapper>
+          <AccountTypesPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(vi.mocked(track)).toHaveBeenCalledWith('economy.platform_badge_visible', {
+          page: 'account-types',
+          platform_count: 1,
+          tenant_count: 1,
+        })
+      })
+    })
+
+    it('fires platform_resource_clicked when system account type row is clicked', async () => {
+      mockListActive.mockResolvedValue({
+        definitions: mockDefinitions,
+        nextPageToken: '',
+      })
+
+      const user = userEvent.setup()
+
+      render(
+        <Wrapper>
+          <AccountTypesPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('CUSTOMER_CURRENT')).toBeInTheDocument()
+      })
+
+      await user.click(screen.getByText('CUSTOMER_CURRENT'))
+
+      expect(vi.mocked(track)).toHaveBeenCalledWith('economy.platform_resource_clicked', {
+        resource_type: 'account_type',
+        resource_code: 'CUSTOMER_CURRENT',
+        page: 'account-types',
+      })
     })
   })
 })
