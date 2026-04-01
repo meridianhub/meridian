@@ -139,11 +139,13 @@ workstreams._
 - The diff step queries each service via existing list endpoints
   to build a picture of current state
 - Compare live state against desired manifest to produce precise
-  actions: CREATE, UPDATE, NO_CHANGE, DEPRECATE
-- Handle `is_system` resources: exclude from tenant diff,
-  recognize saga overrides as intentional
-- Handle nil/missing live state gracefully (new tenant, new
-  database, service unavailable)
+  actions per the action enum defined in the Diff Logic section
+- Filter `is_system` resources before planning (pre-plan filter,
+  not a plan action) - recognize saga overrides as intentional
+- If a service list endpoint fails, the apply fails with a clear
+  error ("cannot determine current state for reference-data").
+  Partial live state would produce incorrect diffs. The manifest
+  is not applied until full current state is known.
 
 #### Phase 3: Plan-driven saga execution
 
@@ -237,21 +239,45 @@ as an exception - consistent with PRD-045.
 
 ### Diff Logic
 
+#### Action Enum
+
+The diff produces one action per resource. The full set:
+
+- **CREATE** - Resource in manifest but not in live state.
+  Register and activate.
+- **NO_CHANGE** - Resource in both, fields and status match.
+  No-op.
+- **UPDATE** - Resource in both, fields differ. Semantics
+  depend on resource type: for resources that support in-place
+  mutation (OG connections/routes via upsert), apply directly.
+  For lifecycle-managed resources (instruments, account types),
+  UPDATE is deferred to Phase 2 implementation - the initial
+  approach treats field changes as a validation warning until
+  we define deprecate-and-recreate semantics.
+- **DEPRECATE** - Resource in live state but not in manifest,
+  tenant-owned. Move to terminal state.
+
+#### Pre-plan filtering (not an action)
+
+Before actions are planned, `is_system=true` resources are
+filtered out entirely. They are not included in the action
+list. Saga overrides (tenant saga with same code as platform
+default) are identified by checking `is_system=false` with a
+non-nil `platform_ref` - these are tenant-owned and included
+in the diff normally.
+
+#### Resource matching
+
 For each resource code in the desired manifest:
 
 - **Not in live state** - Action: CREATE
-- **In live state, matching fields and status** - Action:
-  NO_CHANGE
-- **In live state, different fields** - Action: UPDATE
-- **In live state, `is_system=true`** - Action: SKIP (platform
-  default, not tenant-managed)
-- **In live state, `is_system=true` but saga with tenant
-  override** - Action: handled by override model
+- **In live state, matching fields and status** - NO_CHANGE
+- **In live state, different fields** - UPDATE
 
-For each resource in live state but NOT in the desired manifest:
+For each tenant-owned resource in live state but NOT in the
+desired manifest:
 
-- **`is_system=true`** - Action: SKIP (platform default)
-- **`is_system=false`, tenant-owned** - Action: DEPRECATE
+- Action: DEPRECATE
 
 ### Handler Idempotency Contract
 
