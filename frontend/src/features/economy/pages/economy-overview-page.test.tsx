@@ -13,6 +13,10 @@ vi.mock('@/api/context', () => ({
   ApiClientProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
+vi.mock('@/lib/analytics', () => ({
+  track: vi.fn(),
+}))
+
 // ManifestGraph and ManifestHistoryTable are complex components — stub them for unit tests
 vi.mock('@/features/manifests/components/manifest-graph', () => ({
   ManifestGraph: () => <div data-testid="manifest-graph" />,
@@ -23,6 +27,7 @@ vi.mock('@/features/manifests/pages/manifest-history-table', () => ({
 }))
 
 import { useApiClients } from '@/api/context'
+import { track } from '@/lib/analytics'
 
 const mockManifestVersion = {
   id: 'mv-1',
@@ -361,5 +366,27 @@ describe('EconomyOverviewPage', () => {
 
     expect(screen.getByTestId('overview-loading')).toBeInTheDocument()
     expect(screen.getByLabelText('Breadcrumb')).toBeInTheDocument()
+  })
+
+  it('fires empty_state_shown when no manifest exists', async () => {
+    vi.mocked(track).mockClear()
+
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockResolvedValue({ version: null }),
+        listManifestVersions: vi.fn().mockResolvedValue({ versions: [], totalCount: 0 }),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-empty')).toBeInTheDocument()
+    })
+
+    expect(vi.mocked(track)).toHaveBeenCalledWith('economy.empty_state_shown', {
+      page: 'overview',
+      hasManifest: false,
+    })
   })
 })

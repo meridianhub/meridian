@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SagaFlowDiagram } from './saga-flow'
+import { estimateDecisionSize, estimateStartNodeWidth, getNodeDimensions } from './saga-flow-sizing'
 import { parseTriggerService } from '../lib/star-parser'
 import type { SagaFlow } from '../lib/star-parser'
 
@@ -11,14 +12,23 @@ vi.mock('@xyflow/react', () => {
 
   function Handle() { return null }
 
-  function ReactFlow({ nodes, edges, children }: { nodes: unknown[]; edges: unknown[]; children?: React.ReactNode }) {
+  // Render actual custom node components so their rendering logic gets coverage
+  function ReactFlow({ nodes, edges, nodeTypes, children }: {
+    nodes: { id: string; type?: string; data: Record<string, unknown> }[];
+    edges: unknown[];
+    nodeTypes?: Record<string, React.ComponentType<{ data: Record<string, unknown> }>>;
+    children?: React.ReactNode;
+  }) {
     return (
       <div data-testid="react-flow" data-node-count={nodes.length} data-edge-count={edges.length}>
-        {(nodes as { id: string; data: { label?: string } }[]).map((n) => (
-          <div key={n.id} data-testid={`node-${n.id}`}>
-            {n.data?.label ?? n.id}
-          </div>
-        ))}
+        {nodes.map((n) => {
+          const NodeComponent = nodeTypes?.[n.type ?? '']
+          return (
+            <div key={n.id} data-testid={`node-${n.id}`}>
+              {NodeComponent ? <NodeComponent data={n.data} /> : (n.data?.label as string) ?? n.id}
+            </div>
+          )
+        })}
         {children}
       </div>
     )
@@ -249,6 +259,107 @@ describe('SagaFlowDiagram', () => {
     // Services from both: payments (trigger), reference_data, position_keeping, valuation_engine
     expect(screen.getByRole('button', { name: /valuation_engine/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /reference_data/ })).toBeInTheDocument()
+  })
+
+  it('renders decision node with condition label visible', () => {
+    render(<SagaFlowDiagram flows={[flowWithEarlyExit]} />)
+    expect(screen.getByText('existing.count > 0')).toBeInTheDocument()
+  })
+
+  it('renders exit node with return status visible', () => {
+    render(<SagaFlowDiagram flows={[flowWithEarlyExit]} />)
+    expect(screen.getByText('ALREADY_PROCESSED')).toBeInTheDocument()
+  })
+
+  it('renders trigger badge in start node', () => {
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
+    expect(screen.getByText('event:payments.received.v1')).toBeInTheDocument()
+  })
+
+  it('renders COMPLETED label in end node', () => {
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
+    expect(screen.getByText('COMPLETED')).toBeInTheDocument()
+  })
+
+  it('renders service call badges in step nodes', () => {
+    render(<SagaFlowDiagram flows={[simpleFlow]} />)
+    expect(screen.getByText('reference_data.get_account')).toBeInTheDocument()
+    expect(screen.getByText('position_keeping.initiate_log')).toBeInTheDocument()
+  })
+})
+
+describe('estimateDecisionSize', () => {
+  it('returns minimum size for short labels', () => {
+    const size = estimateDecisionSize('x > 0')
+    expect(size.width).toBeGreaterThanOrEqual(120)
+    expect(size.height).toBeGreaterThanOrEqual(80)
+  })
+
+  it('scales up for longer labels', () => {
+    const short = estimateDecisionSize('x > 0')
+    const long = estimateDecisionSize('not billing_account_id')
+    expect(long.width).toBeGreaterThan(short.width)
+  })
+
+  it('caps at maximum width', () => {
+    const size = estimateDecisionSize('a'.repeat(100))
+    expect(size.width).toBeLessThanOrEqual(220)
+  })
+})
+
+describe('estimateStartNodeWidth', () => {
+  it('returns minimum width for short names', () => {
+    expect(estimateStartNodeWidth('test', null)).toBeGreaterThanOrEqual(160)
+  })
+
+  it('scales up for long trigger text', () => {
+    const short = estimateStartNodeWidth('saga', 'scheduled:topup')
+    const long = estimateStartNodeWidth('saga', 'event:position-keeping.transaction-captured.v1')
+    expect(long).toBeGreaterThan(short)
+  })
+
+  it('caps at maximum width', () => {
+    expect(estimateStartNodeWidth('a'.repeat(100), null)).toBeLessThanOrEqual(300)
+  })
+})
+
+describe('getNodeDimensions', () => {
+  it('uses dynamic sizing for decision nodes', () => {
+    const short = getNodeDimensions('sagaDecision', 'x > 0', null)
+    const long = getNodeDimensions('sagaDecision', 'not billing_account_id', null)
+    expect(long.width).toBeGreaterThan(short.width)
+  })
+
+  it('uses dynamic sizing for start nodes', () => {
+    const short = getNodeDimensions('sagaStart', 'saga', null)
+    const long = getNodeDimensions('sagaStart', 'saga', 'event:position-keeping.transaction-captured.v1')
+    expect(long.width).toBeGreaterThan(short.width)
+  })
+
+  it('adjusts start node height based on trigger presence', () => {
+    const withTrigger = getNodeDimensions('sagaStart', 'saga', 'scheduled:topup')
+    const noTrigger = getNodeDimensions('sagaStart', 'saga', null)
+    expect(withTrigger.height).toBeGreaterThan(noTrigger.height)
+  })
+
+  it('returns default dimensions for step nodes', () => {
+    const dims = getNodeDimensions('sagaStep', 'step', null)
+    expect(dims).toEqual({ width: 200, height: 60 })
+  })
+
+  it('returns default dimensions for exit nodes', () => {
+    const dims = getNodeDimensions('sagaExit', 'exit', null)
+    expect(dims).toEqual({ width: 120, height: 36 })
+  })
+
+  it('returns default dimensions for end nodes', () => {
+    const dims = getNodeDimensions('sagaEnd', '', null)
+    expect(dims).toEqual({ width: 140, height: 44 })
+  })
+
+  it('falls back to step dimensions for unknown types', () => {
+    const dims = getNodeDimensions('unknown', '', null)
+    expect(dims).toEqual({ width: 200, height: 60 })
   })
 })
 

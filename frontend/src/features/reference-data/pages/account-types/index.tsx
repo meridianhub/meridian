@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
@@ -18,6 +19,7 @@ import {
 } from '@/api/gen/meridian/reference_data/v1/account_type_pb'
 import { CreateAccountTypeDialog } from './create-account-type-dialog'
 import { ExecutionContextTab } from '../../components/execution-context-tab'
+import { track } from '@/lib/analytics'
 
 const BEHAVIOR_CLASS_LABELS: Record<number, string> = {
   0: 'Unspecified',
@@ -52,6 +54,41 @@ export function AccountTypesPage() {
   const clients = useApiClients()
   const [selectedDefinition, setSelectedDefinition] = React.useState<AccountTypeDefinition | null>(null)
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false)
+
+  const queryFn = async (params: ListAccountTypesParams): Promise<ListAccountTypesResult> => {
+    const behaviorValue = params.filters?.behavior
+
+    const response = await clients.accountTypeRegistry.listActive({
+      behaviorClassFilter: behaviorValue
+        ? (Number(behaviorValue) as BehaviorClass)
+        : BehaviorClass.UNSPECIFIED,
+      pageSize: params.pageSize,
+      pageToken: params.pageToken ?? '',
+    })
+
+    return {
+      items: response.definitions ?? [],
+      nextPageToken: response.nextPageToken,
+    }
+  }
+
+  const { data: analyticsData } = useQuery({
+    queryKey: referenceKeys.accountTypes(),
+    queryFn: () => queryFn({ pageSize: 25 }),
+  })
+
+  const hasFiredBadgeRef = React.useRef(false)
+  React.useEffect(() => {
+    if (!analyticsData?.items || hasFiredBadgeRef.current) return
+    const platformCount = analyticsData.items.filter((d) => d.isSystem).length
+    if (platformCount === 0) return
+    hasFiredBadgeRef.current = true
+    track('economy.platform_badge_visible', {
+      page: 'account-types',
+      platform_count: platformCount,
+      tenant_count: analyticsData.items.length - platformCount,
+    })
+  }, [analyticsData])
 
   const columns: ColumnDef<AccountTypeDefinition>[] = [
     {
@@ -95,23 +132,6 @@ export function AccountTypesPage() {
     },
   ]
 
-  const queryFn = async (params: ListAccountTypesParams): Promise<ListAccountTypesResult> => {
-    const behaviorValue = params.filters?.behavior
-
-    const response = await clients.accountTypeRegistry.listActive({
-      behaviorClassFilter: behaviorValue
-        ? (Number(behaviorValue) as BehaviorClass)
-        : BehaviorClass.UNSPECIFIED,
-      pageSize: params.pageSize,
-      pageToken: params.pageToken ?? '',
-    })
-
-    return {
-      items: response.definitions ?? [],
-      nextPageToken: response.nextPageToken,
-    }
-  }
-
   return (
     <PageShell>
       <Breadcrumbs items={[
@@ -141,7 +161,16 @@ export function AccountTypesPage() {
           queryFn={queryFn}
           columns={columns}
           pageSize={25}
-          onRowClick={(def) => setSelectedDefinition(def)}
+          onRowClick={(def) => {
+            setSelectedDefinition(def)
+            if (def.isSystem) {
+              track('economy.platform_resource_clicked', {
+                resource_type: 'account_type',
+                resource_code: def.code,
+                page: 'account-types',
+              })
+            }
+          }}
         />
       </Card>
 

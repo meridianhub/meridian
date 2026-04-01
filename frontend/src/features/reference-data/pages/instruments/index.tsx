@@ -20,6 +20,7 @@ import {
 } from '@/api/gen/meridian/reference_data/v1/instrument_pb'
 import { RegisterInstrumentDialog } from './register-instrument-dialog'
 import { ExecutionContextTab } from '../../components/execution-context-tab'
+import { track } from '@/lib/analytics'
 
 const DIMENSION_LABELS: Record<number, string> = {
   0: 'Unspecified',
@@ -173,23 +174,19 @@ export function InstrumentsPage() {
     },
   ]
 
+  const hasFiredBadgeRef = React.useRef(false)
   const queryFn = async (params: ListInstrumentsParams): Promise<ListInstrumentsResult> => {
     const statusValue = params.filters?.status
     const dimValue = params.filters?.dimension
-
-    const response = await clients.referenceData.listInstruments({
+    const { instruments = [], nextPageToken } = await clients.referenceData.listInstruments({
       statusFilter: statusValue ? (Number(statusValue) as InstrumentStatus) : InstrumentStatus.UNSPECIFIED,
       dimensionFilter: dimValue ? (Number(dimValue) as Dimension) : Dimension.UNSPECIFIED,
       pageSize: params.pageSize,
       pageToken: params.pageToken ?? '',
     })
-
-    return {
-      items: response.instruments ?? [],
-      nextPageToken: response.nextPageToken,
-    }
+    if (!hasFiredBadgeRef.current) { hasFiredBadgeRef.current = true; const pc = instruments.filter((i) => i.isSystem).length; if (pc) track('economy.platform_badge_visible', { page: 'instruments', platform_count: pc, tenant_count: instruments.length - pc }) }
+    return { items: instruments, nextPageToken }
   }
-
   return (
     <PageShell>
       <Breadcrumbs items={[
@@ -220,7 +217,10 @@ export function InstrumentsPage() {
           columns={columns}
           pageSize={25}
           filters={filters}
-          onRowClick={(inst) => setSelectedInstrument(inst)}
+          onRowClick={(inst) => {
+            setSelectedInstrument(inst)
+            if (inst.isSystem) track('economy.platform_resource_clicked', { resource_type: 'instrument', resource_code: inst.code, page: 'instruments' })
+          }}
         />
       </Card>
 

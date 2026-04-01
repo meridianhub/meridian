@@ -164,3 +164,101 @@ func TestRegisterOrganization_OtherError_Propagated(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "database unavailable")
 }
+
+// ─── Proactive idempotency tests ──────────────────────────────────────────
+
+func TestRegisterOrganization_ProactiveCheck_AlreadyExists(t *testing.T) {
+	// ListParties returns the organization, so RegisterParty should never be called.
+	registerCalled := false
+	srv := &fakePartyServer{
+		listFn: func(_ context.Context, _ *partyv1.ListPartiesRequest) (*partyv1.ListPartiesResponse, error) {
+			return &partyv1.ListPartiesResponse{
+				Parties: []*partyv1.Party{
+					{
+						PartyId:               "existing-party-uuid",
+						LegalName:             "Acme Corp",
+						Status:                partyv1.PartyStatus_PARTY_STATUS_ACTIVE,
+						ExternalReference:     "123456",
+						ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_LEI,
+					},
+				},
+			}, nil
+		},
+		registerFn: func(_ context.Context, _ *partyv1.RegisterPartyRequest) (*partyv1.RegisterPartyResponse, error) {
+			registerCalled = true
+			return nil, status.Error(codes.AlreadyExists, "should not be called")
+		},
+	}
+	conn := newPartyTestServer(t, srv)
+	client := NewPartyClient(conn)
+
+	result, err := client.RegisterOrganization(testStarlarkCtx(), map[string]any{
+		"legal_name":              "Acme Corp",
+		"external_reference":      "123456",
+		"external_reference_type": "LEI",
+	})
+	require.NoError(t, err, "proactive check should return success for existing organization")
+	assert.False(t, registerCalled, "RegisterParty gRPC should not be called when proactive check finds party")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "existing-party-uuid", m["party_id"])
+	assert.Equal(t, "Acme Corp", m["legal_name"])
+}
+
+func TestRegisterOrganization_ProactiveCheck_NotFound_ProceedsToCreate(t *testing.T) {
+	// ListParties returns empty, so handler proceeds to RegisterParty.
+	srv := &fakePartyServer{
+		listFn: func(_ context.Context, _ *partyv1.ListPartiesRequest) (*partyv1.ListPartiesResponse, error) {
+			return &partyv1.ListPartiesResponse{}, nil
+		},
+	}
+	conn := newPartyTestServer(t, srv)
+	client := NewPartyClient(conn)
+
+	result, err := client.RegisterOrganization(testStarlarkCtx(), map[string]any{
+		"legal_name":              "New Corp",
+		"external_reference":      "789",
+		"external_reference_type": "LEI",
+	})
+	require.NoError(t, err, "should proceed to create when proactive check finds no party")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "party-uuid-1", m["party_id"])
+	assert.Equal(t, "New Corp", m["legal_name"])
+}
+
+func TestRegisterOrganization_ProactiveCheck_NoExternalRef_SkipsCheck(t *testing.T) {
+	// No external_reference, so proactive check is skipped.
+	srv := &fakePartyServer{}
+	conn := newPartyTestServer(t, srv)
+	client := NewPartyClient(conn)
+
+	result, err := client.RegisterOrganization(testStarlarkCtx(), map[string]any{
+		"legal_name": "No Ref Corp",
+	})
+	require.NoError(t, err, "should proceed directly when no external_reference")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "party-uuid-1", m["party_id"])
+}
+
+func TestRegisterOrganization_ProactiveCheck_ListFails_ProceedsToCreate(t *testing.T) {
+	// ListParties returns an error, so handler proceeds to RegisterParty.
+	srv := &fakePartyServer{
+		listFn: func(_ context.Context, _ *partyv1.ListPartiesRequest) (*partyv1.ListPartiesResponse, error) {
+			return nil, status.Error(codes.Internal, "database unavailable")
+		},
+	}
+	conn := newPartyTestServer(t, srv)
+	client := NewPartyClient(conn)
+
+	result, err := client.RegisterOrganization(testStarlarkCtx(), map[string]any{
+		"legal_name":              "Fallthrough Corp",
+		"external_reference":      "999",
+		"external_reference_type": "LEI",
+	})
+	require.NoError(t, err, "should proceed to create when proactive check fails")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "party-uuid-1", m["party_id"])
+}

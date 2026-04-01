@@ -44,13 +44,8 @@ func (f *fakeInternalAccountServer) RetrieveInternalAccount(ctx context.Context,
 	if f.retrieveFn != nil {
 		return f.retrieveFn(ctx, req)
 	}
-	return &internalaccountv1.RetrieveInternalAccountResponse{
-		Facility: &internalaccountv1.InternalAccountFacility{
-			AccountId:     "existing-ia-uuid",
-			AccountCode:   req.AccountId, // The service accepts code as account_id
-			AccountStatus: internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
-		},
-	}, nil
+	// Default: not found (proactive check falls through to create).
+	return nil, status.Error(codes.NotFound, "account not found")
 }
 
 // ─── Test setup ────────────────────────────────────────────────────────────
@@ -119,9 +114,25 @@ func TestInternalAccountClient_InitiateAccount_MinimalParams(t *testing.T) {
 // ─── Idempotency tests ──────────────────────────────────────────────────────
 
 func TestInternalAccountClient_InitiateAccount_AlreadyExists_TreatedAsSuccess(t *testing.T) {
+	// Proactive check returns NotFound, InitiateInternalAccount returns AlreadyExists,
+	// reactive fallback calls RetrieveInternalAccount again and finds the account.
+	callCount := 0
 	srv := &fakeInternalAccountServer{
 		initiateFn: func(_ context.Context, _ *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
 			return nil, status.Error(codes.AlreadyExists, "account code already exists: CLEARING_GBP")
+		},
+		retrieveFn: func(_ context.Context, req *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, status.Error(codes.NotFound, "account not found")
+			}
+			return &internalaccountv1.RetrieveInternalAccountResponse{
+				Facility: &internalaccountv1.InternalAccountFacility{
+					AccountId:     "existing-ia-uuid",
+					AccountCode:   req.AccountId,
+					AccountStatus: internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+				},
+			}, nil
 		},
 	}
 	conn := newInternalAccountTestServerWith(t, srv)
@@ -173,4 +184,78 @@ func TestInternalAccountClient_InitiateAccount_OtherError_Propagated(t *testing.
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "database unavailable")
+}
+
+// ─── Proactive idempotency tests ──────────────────────────────────────────
+
+func TestInternalAccountClient_InitiateAccount_ProactiveCheck_AlreadyExists(t *testing.T) {
+	// RetrieveInternalAccount returns the account, so InitiateInternalAccount should never be called.
+	initiateCalled := false
+	srv := &fakeInternalAccountServer{
+		retrieveFn: func(_ context.Context, req *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+			return &internalaccountv1.RetrieveInternalAccountResponse{
+				Facility: &internalaccountv1.InternalAccountFacility{
+					AccountId:     "existing-ia-uuid",
+					AccountCode:   req.AccountId,
+					AccountStatus: internalaccountv1.InternalAccountStatus_INTERNAL_ACCOUNT_STATUS_ACTIVE,
+				},
+			}, nil
+		},
+		initiateFn: func(_ context.Context, _ *internalaccountv1.InitiateInternalAccountRequest) (*internalaccountv1.InitiateInternalAccountResponse, error) {
+			initiateCalled = true
+			return nil, status.Error(codes.AlreadyExists, "should not be called")
+		},
+	}
+	conn := newInternalAccountTestServerWith(t, srv)
+	client := NewInternalAccountClient(conn)
+
+	result, err := client.InitiateAccount(testStarlarkCtx(), map[string]any{
+		"account_code": "CLEARING_GBP",
+	})
+	require.NoError(t, err, "proactive check should return success for existing account")
+	assert.False(t, initiateCalled, "InitiateInternalAccount gRPC should not be called when proactive check finds account")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "existing-ia-uuid", m["account_id"])
+	assert.Equal(t, "CLEARING_GBP", m["account_code"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestInternalAccountClient_InitiateAccount_ProactiveCheck_NotFound_ProceedsToCreate(t *testing.T) {
+	// RetrieveInternalAccount returns NotFound, so handler proceeds to InitiateInternalAccount.
+	srv := &fakeInternalAccountServer{
+		retrieveFn: func(_ context.Context, _ *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+			return nil, status.Error(codes.NotFound, "account not found")
+		},
+	}
+	conn := newInternalAccountTestServerWith(t, srv)
+	client := NewInternalAccountClient(conn)
+
+	result, err := client.InitiateAccount(testStarlarkCtx(), map[string]any{
+		"account_code": "NEW_ACCOUNT",
+	})
+	require.NoError(t, err, "should proceed to create when proactive check returns NotFound")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "ia-uuid-1", m["account_id"])
+	assert.Equal(t, "NEW_ACCOUNT", m["account_code"])
+}
+
+func TestInternalAccountClient_InitiateAccount_ProactiveCheck_Error_ProceedsToCreate(t *testing.T) {
+	// RetrieveInternalAccount returns an unexpected error, handler should still proceed.
+	srv := &fakeInternalAccountServer{
+		retrieveFn: func(_ context.Context, _ *internalaccountv1.RetrieveInternalAccountRequest) (*internalaccountv1.RetrieveInternalAccountResponse, error) {
+			return nil, status.Error(codes.Internal, "database unavailable")
+		},
+	}
+	conn := newInternalAccountTestServerWith(t, srv)
+	client := NewInternalAccountClient(conn)
+
+	result, err := client.InitiateAccount(testStarlarkCtx(), map[string]any{
+		"account_code": "FALLTHROUGH",
+	})
+	require.NoError(t, err, "should proceed to create when proactive check fails")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "ia-uuid-1", m["account_id"])
 }
