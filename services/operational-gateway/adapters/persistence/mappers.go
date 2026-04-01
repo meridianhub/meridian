@@ -161,6 +161,8 @@ func connectionToEntity(conn *domain.ProviderConnection) (*ConnectionEntity, err
 		CircuitOpenedAt:   conn.CircuitOpenedAt,
 		FailureCount:      conn.FailureCount,
 		SuccessCount:      conn.SuccessCount,
+		Status:            string(conn.Status),
+		DeprecatedAt:      conn.DeprecatedAt,
 		CreatedAt:         conn.CreatedAt,
 		UpdatedAt:         conn.UpdatedAt,
 	}
@@ -203,6 +205,8 @@ func connectionFromEntity(entity *ConnectionEntity) (*domain.ProviderConnection,
 		CircuitOpenedAt:   entity.CircuitOpenedAt,
 		FailureCount:      entity.FailureCount,
 		SuccessCount:      entity.SuccessCount,
+		Status:            domain.ConnectionStatus(entity.Status),
+		DeprecatedAt:      entity.DeprecatedAt,
 		CreatedAt:         entity.CreatedAt,
 		UpdatedAt:         entity.UpdatedAt,
 	}

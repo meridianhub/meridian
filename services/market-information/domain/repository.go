@@ -166,4 +166,10 @@ type SourceRepository interface {
 	// Returns the sources, a next page token (empty if no more results), and any error.
 	// Returns ErrInvalidPageToken if the pageToken format is invalid.
 	List(ctx context.Context, activeOnly bool, pageSize int, pageToken string) ([]DataSource, string, error)
+
+	// Deprecate transitions a data source from ACTIVE to DEPRECATED.
+	// Sets status to DEPRECATED, deprecated_at to current time, and is_active to false.
+	// Returns ErrDataSourceNotFound if the source does not exist.
+	// Returns ErrDataSourceNotActive if the source is not in ACTIVE status.
+	Deprecate(ctx context.Context, code string) error
 }

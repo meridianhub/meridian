@@ -89,6 +89,26 @@ enum Protocol {
   PROTOCOL_AMQP = 5;
 }
 
+// ConnectionStatus defines the lifecycle state of a provider connection.
+enum ConnectionStatus {
+  // CONNECTION_STATUS_UNSPECIFIED means the status is unknown.
+  CONNECTION_STATUS_UNSPECIFIED = 0;
+  // CONNECTION_STATUS_ACTIVE means the connection is available for dispatching instructions.
+  CONNECTION_STATUS_ACTIVE = 1;
+  // CONNECTION_STATUS_DEPRECATED means the connection is no longer recommended for new routes.
+  CONNECTION_STATUS_DEPRECATED = 2;
+}
+
+// RouteStatus defines the lifecycle state of an instruction route.
+enum RouteStatus {
+  // ROUTE_STATUS_UNSPECIFIED means the status is unknown.
+  ROUTE_STATUS_UNSPECIFIED = 0;
+  // ROUTE_STATUS_ACTIVE means the route is available for dispatching instructions.
+  ROUTE_STATUS_ACTIVE = 1;
+  // ROUTE_STATUS_DEPRECATED means the route is no longer recommended for new use.
+  ROUTE_STATUS_DEPRECATED = 2;
+}
+
 // HealthStatus represents the connection health as determined by the most recent health check.
 enum HealthStatus {
   // HEALTH_STATUS_UNSPECIFIED means the health is unknown (not yet checked).
@@ -424,6 +444,12 @@ message ProviderConnection {
 
   // updated_at is when this connection was last modified.
   google.protobuf.Timestamp updated_at = 17;
+
+  // status is the lifecycle state of this connection (ACTIVE or DEPRECATED).
+  ConnectionStatus status = 18 [(buf.validate.field).enum.defined_only = true];
+
+  // deprecated_at is when this connection was deprecated.
+  google.protobuf.Timestamp deprecated_at = 19;
 }
 
 // InstructionRoute maps an instruction_type to a ProviderConnection with optional field mapping.
@@ -470,6 +496,18 @@ message InstructionRoute {
   // Supports simple variable substitution using {field_name} placeholders resolved from the payload.
   // Example: "/v1/payments/{payment_id}/execute", "/accounts/{account_id}/freeze"
   string path_template = 7 [(buf.validate.field).string.max_len = 1024];
+
+  // created_at is when this route was created.
+  google.protobuf.Timestamp created_at = 8;
+
+  // updated_at is when this route was last modified.
+  google.protobuf.Timestamp updated_at = 9;
+
+  // status is the lifecycle state of this route (ACTIVE or DEPRECATED).
+  RouteStatus status = 10 [(buf.validate.field).enum.defined_only = true];
+
+  // deprecated_at is when this route was deprecated.
+  google.protobuf.Timestamp deprecated_at = 11;
 }
 
 // CallbackPayload represents an inbound callback from a provider acknowledging an instruction.
@@ -857,6 +895,16 @@ service ProviderConnectionService {
     };
   }
 
+  // DeprecateConnection transitions a provider connection from ACTIVE to DEPRECATED.
+  // Returns NOT_FOUND if the connection does not exist.
+  // Returns FAILED_PRECONDITION if the connection is not in ACTIVE status.
+  rpc DeprecateConnection(DeprecateConnectionRequest) returns (DeprecateConnectionResponse) {
+    option (google.api.http) = {
+      post: "/v1/operational-gateway/connections/{connection_id}/deprecate"
+      body: "*"
+    };
+  }
+
   // TestConnection (Phase 2) performs a health check on a provider connection.
   // Returns NOT_FOUND if the connection does not exist.
   rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse) {
@@ -893,6 +941,16 @@ service InstructionRouteService {
   rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse) {
     option (google.api.http) = {
       get: "/v1/operational-gateway/routes"
+    };
+  }
+
+  // DeprecateRoute transitions an instruction route from ACTIVE to DEPRECATED.
+  // Returns NOT_FOUND if the route does not exist.
+  // Returns FAILED_PRECONDITION if the route is not in ACTIVE status.
+  rpc DeprecateRoute(DeprecateRouteRequest) returns (DeprecateRouteResponse) {
+    option (google.api.http) = {
+      post: "/v1/operational-gateway/routes/{instruction_type}/deprecate"
+      body: "*"
     };
   }
 }
@@ -960,4 +1018,31 @@ message ListRoutesRequest {}
 message ListRoutesResponse {
   // routes is the list of all instruction routes for the tenant.
   repeated InstructionRoute routes = 1;
+}
+
+// DeprecateConnectionRequest transitions a provider connection from ACTIVE to DEPRECATED.
+message DeprecateConnectionRequest {
+  // connection_id is the unique identifier of the connection to deprecate (UUID).
+  string connection_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// DeprecateConnectionResponse returns the deprecated provider connection.
+message DeprecateConnectionResponse {
+  // connection is the deprecated provider connection with status DEPRECATED.
+  ProviderConnection connection = 1 [(buf.validate.field).required = true];
+}
+
+// DeprecateRouteRequest transitions an instruction route from ACTIVE to DEPRECATED.
+message DeprecateRouteRequest {
+  // instruction_type identifies the route to deprecate.
+  string instruction_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+// DeprecateRouteResponse returns the deprecated instruction route.
+message DeprecateRouteResponse {
+  // route is the deprecated instruction route with status DEPRECATED.
+  InstructionRoute route = 1 [(buf.validate.field).required = true];
 }

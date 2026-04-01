@@ -62,6 +62,16 @@ const (
 	HealthStatusUnhealthy = dispatch.HealthStatusUnhealthy
 )
 
+// ConnectionStatus represents the lifecycle state of a provider connection.
+type ConnectionStatus string
+
+const (
+	// ConnectionStatusActive means the connection is available for use.
+	ConnectionStatusActive ConnectionStatus = "ACTIVE"
+	// ConnectionStatusDeprecated means the connection is no longer recommended for new routes.
+	ConnectionStatusDeprecated ConnectionStatus = "DEPRECATED"
+)
+
 // Sentinel errors for domain validation.
 var (
 	// ErrTenantIDRequired is returned when the tenant ID is empty.
@@ -76,6 +86,8 @@ var (
 	ErrInvalidProtocol = errors.New("invalid protocol")
 	// ErrInvalidThreshold is returned when a failure threshold of zero or less is used.
 	ErrInvalidThreshold = errors.New("threshold must be greater than zero")
+	// ErrConnectionNotActive is returned when trying to deprecate a connection that is not ACTIVE.
+	ErrConnectionNotActive = errors.New("connection is not in ACTIVE status")
 )
 
 // AuthConfig is the interface implemented by all authentication configuration types.
@@ -217,6 +229,12 @@ type ProviderConnection struct {
 	// SuccessCount is the total number of successes recorded on this connection.
 	SuccessCount int
 
+	// Status is the lifecycle state of this connection (ACTIVE or DEPRECATED).
+	Status ConnectionStatus
+
+	// DeprecatedAt is the time this connection was deprecated, or nil if not deprecated.
+	DeprecatedAt *time.Time
+
 	// CreatedAt is the time this connection was created.
 	CreatedAt time.Time
 
@@ -267,6 +285,7 @@ func NewProviderConnection(
 		CircuitState:    CircuitStateClosed,
 		FailureCount:    0,
 		SuccessCount:    0,
+		Status:          ConnectionStatusActive,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}, nil
@@ -341,6 +360,23 @@ func (c *ProviderConnection) AttemptReset() {
 // requests to the provider (closed or half-open for a probe attempt).
 func (c *ProviderConnection) IsAvailable() bool {
 	return c.CircuitState == CircuitStateClosed || c.CircuitState == CircuitStateHalfOpen
+}
+
+// Deprecate transitions the connection from ACTIVE to DEPRECATED.
+// Returns ErrConnectionNotActive if the connection is not in ACTIVE status.
+// Idempotent: returns nil if already DEPRECATED.
+func (c *ProviderConnection) Deprecate() error {
+	if c.Status == ConnectionStatusDeprecated {
+		return nil // idempotent
+	}
+	if c.Status != ConnectionStatusActive {
+		return ErrConnectionNotActive
+	}
+	now := time.Now().UTC()
+	c.Status = ConnectionStatusDeprecated
+	c.DeprecatedAt = &now
+	c.UpdatedAt = now
+	return nil
 }
 
 // UpdateHealthStatus sets the health status and records the current time as the last

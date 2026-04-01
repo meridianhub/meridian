@@ -85,6 +85,8 @@ func (s *Server) UpdateDataSource(ctx context.Context, req *pb.UpdateDataSourceR
 		WithCode(existing.Code()).
 		WithSourceType(existing.SourceType()).
 		WithIsActive(existing.IsActive()).
+		WithStatus(existing.Status()).
+		WithDeprecatedAt(existing.DeprecatedAt()).
 		WithCreatedAt(existing.CreatedAt()).
 		WithUpdatedAt(time.Now())
 
@@ -140,7 +142,7 @@ func (s *Server) DeactivateDataSource(ctx context.Context, req *pb.DeactivateDat
 		"id", existing.ID().String())
 
 	// Return the source with IsActive=false to indicate deactivation
-	deactivated := domain.NewDataSourceBuilder().
+	deactivatedBuilder := domain.NewDataSourceBuilder().
 		WithID(existing.ID()).
 		WithCode(existing.Code()).
 		WithName(existing.Name()).
@@ -148,12 +150,45 @@ func (s *Server) DeactivateDataSource(ctx context.Context, req *pb.DeactivateDat
 		WithSourceType(existing.SourceType()).
 		WithTrustLevel(existing.TrustLevel()).
 		WithIsActive(false).
+		WithStatus(existing.Status()).
 		WithCreatedAt(existing.CreatedAt()).
-		WithUpdatedAt(time.Now()).
-		Build()
+		WithUpdatedAt(time.Now())
+
+	if existing.DeprecatedAt() != nil {
+		deactivatedBuilder.WithDeprecatedAt(existing.DeprecatedAt())
+	}
+
+	deactivated := deactivatedBuilder.Build()
 
 	return &pb.DeactivateDataSourceResponse{
 		Source: domainSourceToProto(deactivated),
+	}, nil
+}
+
+// DeprecateDataSource transitions a data source from ACTIVE to DEPRECATED.
+// Sets is_active to false for backward compatibility.
+// Returns NOT_FOUND if data source doesn't exist.
+// Returns FAILED_PRECONDITION if data source is not in ACTIVE status.
+func (s *Server) DeprecateDataSource(ctx context.Context, req *pb.DeprecateDataSourceRequest) (*pb.DeprecateDataSourceResponse, error) {
+	if err := s.sourceRepo.Deprecate(ctx, req.Code); err != nil {
+		if errors.Is(err, domain.ErrDataSourceNotActive) {
+			return nil, status.Errorf(codes.FailedPrecondition, "data source is not in ACTIVE status: %s", req.Code)
+		}
+		return nil, s.mapSourceDomainError(err, "DeprecateDataSource", req.Code)
+	}
+
+	// Reload to return the updated source
+	deprecated, err := s.sourceRepo.FindByCode(ctx, req.Code)
+	if err != nil {
+		return nil, s.mapSourceDomainError(err, "DeprecateDataSource", req.Code)
+	}
+
+	s.logger.Info("data source deprecated",
+		"code", deprecated.Code(),
+		"id", deprecated.ID().String())
+
+	return &pb.DeprecateDataSourceResponse{
+		Source: domainSourceToProto(deprecated),
 	}, nil
 }
 
@@ -237,6 +272,12 @@ func (s *Server) mapSourceDomainError(err error, operation, code string) error {
 			"code", code)
 		return status.Errorf(codes.InvalidArgument, "trust level must be between 0 and 100")
 
+	case errors.Is(err, domain.ErrDataSourceNotActive):
+		s.logger.Warn("data source not active",
+			"operation", operation,
+			"code", code)
+		return status.Errorf(codes.FailedPrecondition, "data source is not in ACTIVE status: %s", code)
+
 	default:
 		s.logger.Error("internal error",
 			"operation", operation,
@@ -255,6 +296,7 @@ func domainSourceToProto(source domain.DataSource) *pb.DataSource {
 		Description: source.Description(),
 		TrustLevel:  int32(source.TrustLevel()),
 		IsActive:    source.IsActive(),
+		Status:      domainToProtoDataSourceStatus(source.Status()),
 		CreatedAt:   timestamppb.New(source.CreatedAt()),
 	}
 
@@ -263,5 +305,21 @@ func domainSourceToProto(source domain.DataSource) *pb.DataSource {
 		pbSource.UpdatedAt = timestamppb.New(source.UpdatedAt())
 	}
 
+	if source.DeprecatedAt() != nil {
+		pbSource.DeprecatedAt = timestamppb.New(*source.DeprecatedAt())
+	}
+
 	return pbSource
+}
+
+// domainToProtoDataSourceStatus converts a domain DataSourceStatus to proto DataSourceStatus.
+func domainToProtoDataSourceStatus(s domain.DataSourceStatus) pb.DataSourceStatus {
+	switch s {
+	case domain.DataSourceStatusActive:
+		return pb.DataSourceStatus_DATA_SOURCE_STATUS_ACTIVE
+	case domain.DataSourceStatusDeprecated:
+		return pb.DataSourceStatus_DATA_SOURCE_STATUS_DEPRECATED
+	default:
+		return pb.DataSourceStatus_DATA_SOURCE_STATUS_UNSPECIFIED
+	}
 }

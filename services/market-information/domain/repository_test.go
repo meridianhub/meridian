@@ -119,6 +119,10 @@ func (m *mockSourceRepository) List(_ context.Context, _ bool, _ int, _ string) 
 	return nil, "", nil
 }
 
+func (m *mockSourceRepository) Deprecate(_ context.Context, _ string) error {
+	return nil
+}
+
 func (m *mockSourceRepository) Delete(_ context.Context, _ string) error {
 	return nil
 }

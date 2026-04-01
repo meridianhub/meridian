@@ -42,6 +42,8 @@ func (r *RouteRepository) Upsert(ctx context.Context, route *domain.Route) error
 				"inbound_mapping",
 				"http_method",
 				"path_template",
+				"status",
+				"deprecated_at",
 				"updated_at",
 			}),
 		}).

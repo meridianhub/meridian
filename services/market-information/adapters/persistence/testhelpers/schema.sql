@@ -13,9 +13,12 @@ CREATE TABLE data_source (
     updated_by character varying(100) NOT NULL DEFAULT 'SYSTEM',
     deleted_at timestamptz NULL,
     version bigint NOT NULL DEFAULT 1,
+    status character varying(20) NOT NULL DEFAULT 'ACTIVE',
+    deprecated_at timestamptz NULL,
     PRIMARY KEY (id),
     CONSTRAINT uq_data_source_code UNIQUE (code),
-    CONSTRAINT chk_data_source_trust_level CHECK (trust_level >= 0 AND trust_level <= 100)
+    CONSTRAINT chk_data_source_trust_level CHECK (trust_level >= 0 AND trust_level <= 100),
+    CONSTRAINT chk_data_source_status CHECK (status IN ('ACTIVE', 'DEPRECATED'))
 );
 
 CREATE TABLE dataset_definition (
@@ -110,6 +113,7 @@ CREATE INDEX idx_observation_causation
 
 CREATE INDEX idx_data_source_trust_level ON data_source (trust_level DESC);
 CREATE INDEX idx_data_source_deleted_at ON data_source (deleted_at);
+CREATE INDEX idx_data_source_status ON data_source (status);
 
 -- Cursor pagination indexes (from 20260123000003_add_cursor_pagination_indexes.sql)
 CREATE INDEX idx_data_source_cursor

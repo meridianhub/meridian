@@ -112,6 +112,10 @@ func (m *mockMDSClient) ListDataSources(context.Context, *marketinformationv1.Li
 	return nil, status.Errorf(codes.Unimplemented, "not implemented")
 }
 
+func (m *mockMDSClient) DeprecateDataSource(context.Context, *marketinformationv1.DeprecateDataSourceRequest, ...grpc.CallOption) (*marketinformationv1.DeprecateDataSourceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "not implemented")
+}
+
 func (m *mockMDSClient) RecordObservation(context.Context, *marketinformationv1.RecordObservationRequest, ...grpc.CallOption) (*marketinformationv1.RecordObservationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "not implemented")
 }

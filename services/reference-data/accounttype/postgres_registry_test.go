@@ -829,3 +829,59 @@ func TestPostgresAccountTypeRegistry_LifecycleTimestamps(t *testing.T) {
 		assert.NotNil(t, result.DeprecatedAt)
 	})
 }
+
+func TestPostgresAccountTypeRegistry_ListAll(t *testing.T) {
+	reg, pool := setupTestAccountTypeRegistry(t)
+	ctx := setupAccountTypeTenantContext(t, pool, "test-tenant-at-listall")
+
+	seedInstrument(t, pool, ctx, "GBP")
+	seedInstrument(t, pool, ctx, "EUR")
+	seedInstrument(t, pool, ctx, "USD")
+
+	draft := newTestDefinition("LISTALL_DRAFT", "GBP")
+	require.NoError(t, reg.CreateDraft(ctx, draft))
+
+	active := newTestDefinition("LISTALL_ACTIVE", "EUR")
+	require.NoError(t, reg.CreateDraft(ctx, active))
+	require.NoError(t, reg.ActivateAccountType(ctx, "LISTALL_ACTIVE", 1))
+
+	deprecated := newTestDefinition("LISTALL_DEPR", "USD")
+	require.NoError(t, reg.CreateDraft(ctx, deprecated))
+	require.NoError(t, reg.ActivateAccountType(ctx, "LISTALL_DEPR", 1))
+	require.NoError(t, reg.DeprecateAccountType(ctx, "LISTALL_DEPR", 1, nil))
+
+	t.Run("returns all statuses when no filter", func(t *testing.T) {
+		results, err := reg.ListAll(ctx, nil)
+		require.NoError(t, err)
+
+		codes := make(map[string]accounttype.Status)
+		for _, r := range results {
+			codes[r.Code] = r.Status
+		}
+		assert.Equal(t, accounttype.StatusDraft, codes["LISTALL_DRAFT"])
+		assert.Equal(t, accounttype.StatusActive, codes["LISTALL_ACTIVE"])
+		assert.Equal(t, accounttype.StatusDeprecated, codes["LISTALL_DEPR"])
+	})
+
+	t.Run("status filter returns only matching statuses", func(t *testing.T) {
+		results, err := reg.ListAll(ctx, []accounttype.Status{accounttype.StatusActive, accounttype.StatusDeprecated})
+		require.NoError(t, err)
+
+		codes := make(map[string]accounttype.Status)
+		for _, r := range results {
+			codes[r.Code] = r.Status
+		}
+		assert.Equal(t, accounttype.StatusActive, codes["LISTALL_ACTIVE"])
+		assert.Equal(t, accounttype.StatusDeprecated, codes["LISTALL_DEPR"])
+		_, hasDraft := codes["LISTALL_DRAFT"]
+		assert.False(t, hasDraft)
+	})
+
+	t.Run("empty result for unmatched status filter", func(t *testing.T) {
+		// Create a fresh tenant context with no definitions
+		emptyCtx := setupAccountTypeTenantContext(t, pool, "test-tenant-at-listall-empty")
+		results, err := reg.ListAll(emptyCtx, []accounttype.Status{accounttype.StatusActive})
+		require.NoError(t, err)
+		assert.Empty(t, results)
+	})
+}

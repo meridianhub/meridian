@@ -50,6 +50,8 @@ func (r *ConnectionRepository) Upsert(ctx context.Context, conn *domain.Provider
 				"circuit_opened_at",
 				"failure_count",
 				"success_count",
+				"status",
+				"deprecated_at",
 				"updated_at",
 			}),
 		}).

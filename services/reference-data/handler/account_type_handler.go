@@ -185,6 +185,21 @@ func domainAccountTypeStatusToProto(s accounttype.Status) pb.AccountTypeStatus {
 	}
 }
 
+func protoAccountTypeStatusToDomain(s pb.AccountTypeStatus) accounttype.Status {
+	switch s {
+	case pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_UNSPECIFIED:
+		return ""
+	case pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_DRAFT:
+		return accounttype.StatusDraft
+	case pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE:
+		return accounttype.StatusActive
+	case pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_DEPRECATED:
+		return accounttype.StatusDeprecated
+	default:
+		return ""
+	}
+}
+
 func domainNormalBalanceToProto(n accounttype.NormalBalance) pb.NormalBalance {
 	switch n {
 	case accounttype.NormalBalanceDebit:
