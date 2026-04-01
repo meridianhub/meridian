@@ -8,6 +8,27 @@ import (
 	"github.com/google/uuid"
 )
 
+// DataSourceStatus represents the lifecycle state of a data source.
+type DataSourceStatus string
+
+const (
+	// DataSourceStatusActive means the data source is available for use.
+	DataSourceStatusActive DataSourceStatus = "ACTIVE"
+
+	// DataSourceStatusDeprecated means the data source is no longer recommended for new use.
+	DataSourceStatusDeprecated DataSourceStatus = "DEPRECATED"
+)
+
+// IsValid returns true if the data source status is a recognized valid value.
+func (s DataSourceStatus) IsValid() bool {
+	return s == DataSourceStatusActive || s == DataSourceStatusDeprecated
+}
+
+// String returns the string representation of the data source status.
+func (s DataSourceStatus) String() string {
+	return string(s)
+}
+
 // DataSource errors.
 var (
 	// ErrDataSourceCodeRequired is returned when the code is empty.
@@ -21,6 +42,12 @@ var (
 
 	// ErrInvalidTrustLevel is returned when the trust level is outside the valid range (0-100).
 	ErrInvalidTrustLevel = errors.New("trust level must be between 0 and 100")
+
+	// ErrDataSourceNotActive is returned when trying to deprecate a data source that is not ACTIVE.
+	ErrDataSourceNotActive = errors.New("data source is not in ACTIVE status")
+
+	// ErrDataSourceAlreadyDeprecated is returned when trying to deprecate an already deprecated data source.
+	ErrDataSourceAlreadyDeprecated = errors.New("data source is already deprecated")
 )
 
 // SourceType represents the type of data source.
@@ -63,15 +90,17 @@ func (s SourceType) String() string {
 // precedence when multiple sources provide data for the same instrument and time period.
 // Higher trust levels indicate more reliable sources.
 type DataSource struct {
-	id          uuid.UUID
-	code        string // Unique business identifier (e.g., "LBMA", "BLOOMBERG", "MANUAL_ENTRY")
-	name        string // Display name
-	description string // Optional detailed description
-	sourceType  SourceType
-	trustLevel  int  // 0-100, higher values indicate more trusted sources
-	isActive    bool // Whether this source is currently accepting data
-	createdAt   time.Time
-	updatedAt   time.Time
+	id           uuid.UUID
+	code         string // Unique business identifier (e.g., "LBMA", "BLOOMBERG", "MANUAL_ENTRY")
+	name         string // Display name
+	description  string // Optional detailed description
+	sourceType   SourceType
+	trustLevel   int              // 0-100, higher values indicate more trusted sources
+	isActive     bool             // Whether this source is currently accepting data
+	status       DataSourceStatus // Lifecycle state (ACTIVE or DEPRECATED)
+	createdAt    time.Time
+	updatedAt    time.Time
+	deprecatedAt *time.Time // When this source was deprecated
 }
 
 // NewDataSource creates a new DataSource with validated fields.
@@ -119,6 +148,7 @@ func NewDataSource(
 		sourceType:  sourceType,
 		trustLevel:  trustLevel,
 		isActive:    true,
+		status:      DataSourceStatusActive,
 		createdAt:   now,
 		updatedAt:   now,
 	}, nil
@@ -169,6 +199,16 @@ func (d DataSource) CreatedAt() time.Time {
 // UpdatedAt returns the last update timestamp.
 func (d DataSource) UpdatedAt() time.Time {
 	return d.updatedAt
+}
+
+// Status returns the lifecycle status of this data source.
+func (d DataSource) Status() DataSourceStatus {
+	return d.status
+}
+
+// DeprecatedAt returns the deprecation timestamp, or nil if not deprecated.
+func (d DataSource) DeprecatedAt() *time.Time {
+	return d.deprecatedAt
 }
 
 // DataSourceBuilder provides a builder pattern for reconstructing
@@ -236,6 +276,18 @@ func (b *DataSourceBuilder) WithCreatedAt(createdAt time.Time) *DataSourceBuilde
 // WithUpdatedAt sets the last update timestamp.
 func (b *DataSourceBuilder) WithUpdatedAt(updatedAt time.Time) *DataSourceBuilder {
 	b.source.updatedAt = updatedAt
+	return b
+}
+
+// WithStatus sets the lifecycle status.
+func (b *DataSourceBuilder) WithStatus(status DataSourceStatus) *DataSourceBuilder {
+	b.source.status = status
+	return b
+}
+
+// WithDeprecatedAt sets the deprecation timestamp.
+func (b *DataSourceBuilder) WithDeprecatedAt(deprecatedAt *time.Time) *DataSourceBuilder {
+	b.source.deprecatedAt = deprecatedAt
 	return b
 }
 

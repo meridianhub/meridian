@@ -49,12 +49,14 @@ type MarketPriceObservationEntity struct {
 
 // DataSourceEntity represents a data source row in the database.
 type DataSourceEntity struct {
-	ID          uuid.UUID
-	Code        string
-	Name        string
-	Description sql.NullString
-	TrustLevel  int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Version     int64
+	ID           uuid.UUID
+	Code         string
+	Name         string
+	Description  sql.NullString
+	TrustLevel   int
+	Status       string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeprecatedAt sql.NullTime
+	Version      int64
 }

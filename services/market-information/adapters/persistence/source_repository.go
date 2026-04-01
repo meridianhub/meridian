@@ -35,16 +35,18 @@ func (r *SourceRepository) Save(ctx context.Context, source domain.DataSource) e
 		// Try to insert, on conflict update
 		query := `
 			INSERT INTO data_source (
-				id, code, name, description, trust_level,
+				id, code, name, description, trust_level, status,
 				created_at, created_by, updated_at, updated_by, version
 			) VALUES (
-				$1, $2, $3, $4, $5,
-				$6, $7, $8, $9, 1
+				$1, $2, $3, $4, $5, $6,
+				$7, $8, $9, $10, 1
 			)
 			ON CONFLICT (code) DO UPDATE SET
 				name = EXCLUDED.name,
 				description = EXCLUDED.description,
 				trust_level = EXCLUDED.trust_level,
+				status = EXCLUDED.status,
+				deprecated_at = EXCLUDED.deprecated_at,
 				updated_at = EXCLUDED.updated_at,
 				updated_by = EXCLUDED.updated_by,
 				version = data_source.version + 1
@@ -57,6 +59,7 @@ func (r *SourceRepository) Save(ctx context.Context, source domain.DataSource) e
 			entity.Name,
 			entity.Description,
 			entity.TrustLevel,
+			entity.Status,
 			entity.CreatedAt,
 			userID,
 			entity.UpdatedAt,
@@ -105,7 +108,7 @@ func (r *SourceRepository) FindByID(ctx context.Context, id uuid.UUID) (domain.D
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, code, name, description, trust_level, created_at, updated_at, version
+			SELECT id, code, name, description, trust_level, status, created_at, updated_at, deprecated_at, version
 			FROM data_source
 			WHERE id = $1 AND deleted_at IS NULL`
 
@@ -116,8 +119,10 @@ func (r *SourceRepository) FindByID(ctx context.Context, id uuid.UUID) (domain.D
 			&entity.Name,
 			&entity.Description,
 			&entity.TrustLevel,
+			&entity.Status,
 			&entity.CreatedAt,
 			&entity.UpdatedAt,
+			&entity.DeprecatedAt,
 			&entity.Version,
 		)
 		if err != nil {
@@ -141,7 +146,7 @@ func (r *SourceRepository) FindByCode(ctx context.Context, code string) (domain.
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
 		query := `
-			SELECT id, code, name, description, trust_level, created_at, updated_at, version
+			SELECT id, code, name, description, trust_level, status, created_at, updated_at, deprecated_at, version
 			FROM data_source
 			WHERE code = $1 AND deleted_at IS NULL`
 
@@ -152,8 +157,10 @@ func (r *SourceRepository) FindByCode(ctx context.Context, code string) (domain.
 			&entity.Name,
 			&entity.Description,
 			&entity.TrustLevel,
+			&entity.Status,
 			&entity.CreatedAt,
 			&entity.UpdatedAt,
+			&entity.DeprecatedAt,
 			&entity.Version,
 		)
 		if err != nil {
@@ -223,7 +230,7 @@ func (r *SourceRepository) List(ctx context.Context, _ bool, pageSize int, pageT
 func buildSourceListQuery(cursorTime time.Time, cursorID uuid.UUID, pageSize int) (string, []interface{}) {
 	if cursorTime.IsZero() {
 		return `
-			SELECT id, code, name, description, trust_level, created_at, updated_at, version
+			SELECT id, code, name, description, trust_level, status, created_at, updated_at, deprecated_at, version
 			FROM data_source
 			WHERE deleted_at IS NULL
 			ORDER BY date_trunc('second', created_at) DESC, id DESC
@@ -231,7 +238,7 @@ func buildSourceListQuery(cursorTime time.Time, cursorID uuid.UUID, pageSize int
 	}
 
 	return `
-		SELECT id, code, name, description, trust_level, created_at, updated_at, version
+		SELECT id, code, name, description, trust_level, status, created_at, updated_at, deprecated_at, version
 		FROM data_source
 		WHERE deleted_at IS NULL
 			AND (
@@ -253,8 +260,10 @@ func scanSourceEntities(rows pgx.Rows) ([]DataSourceEntity, error) {
 			&entity.Name,
 			&entity.Description,
 			&entity.TrustLevel,
+			&entity.Status,
 			&entity.CreatedAt,
 			&entity.UpdatedAt,
+			&entity.DeprecatedAt,
 			&entity.Version,
 		)
 		if err != nil {
@@ -303,6 +312,50 @@ func (r *SourceRepository) GetTrustLevel(ctx context.Context, sourceID uuid.UUID
 	})
 
 	return trustLevel, err
+}
+
+// Deprecate transitions a data source from ACTIVE to DEPRECATED.
+// Returns ErrDataSourceNotFound if the source does not exist.
+// Returns ErrDataSourceNotActive if the source is not in ACTIVE status.
+func (r *SourceRepository) Deprecate(ctx context.Context, code string) error {
+	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
+		userID := getUserFromContext(ctx)
+
+		// Check current status
+		var currentStatus string
+		checkQuery := `SELECT status FROM data_source WHERE code = $1 AND deleted_at IS NULL`
+		err := tx.QueryRow(ctx, checkQuery, code).Scan(&currentStatus)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return domain.ErrDataSourceNotFound
+			}
+			return fmt.Errorf("failed to check data source status: %w", err)
+		}
+
+		if currentStatus == "DEPRECATED" {
+			return nil // idempotent
+		}
+		if currentStatus != "ACTIVE" {
+			return domain.ErrDataSourceNotActive
+		}
+
+		// Transition to DEPRECATED
+		now := time.Now().UTC()
+		updateQuery := `
+			UPDATE data_source SET
+				status = 'DEPRECATED',
+				deprecated_at = $1,
+				updated_at = $1,
+				updated_by = $3
+			WHERE code = $2 AND deleted_at IS NULL`
+
+		_, err = tx.Exec(ctx, updateQuery, now, code, userID)
+		if err != nil {
+			return fmt.Errorf("failed to deprecate data source: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // Ensure SourceRepository implements domain.SourceRepository.

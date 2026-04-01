@@ -116,6 +116,7 @@ func DataSourceToEntity(s domain.DataSource) DataSourceEntity {
 		Code:       s.Code(),
 		Name:       s.Name(),
 		TrustLevel: s.TrustLevel(),
+		Status:     s.Status().String(),
 		CreatedAt:  s.CreatedAt(),
 		UpdatedAt:  s.UpdatedAt(),
 		Version:    1, // Default version for new entities
@@ -124,6 +125,9 @@ func DataSourceToEntity(s domain.DataSource) DataSourceEntity {
 	if s.Description() != "" {
 		entity.Description = sql.NullString{String: s.Description(), Valid: true}
 	}
+	if s.DeprecatedAt() != nil {
+		entity.DeprecatedAt = sql.NullTime{Time: *s.DeprecatedAt(), Valid: true}
+	}
 
 	return entity
 }
@@ -131,20 +135,40 @@ func DataSourceToEntity(s domain.DataSource) DataSourceEntity {
 // EntityToDataSource converts a database entity to a domain DataSource.
 // Sources loaded from DB are always active (soft-deleted sources are excluded by WHERE deleted_at IS NULL).
 func EntityToDataSource(e DataSourceEntity) domain.DataSource {
+	status := parseDataSourceStatus(e.Status)
+	isActive := status == domain.DataSourceStatusActive
+
 	builder := domain.NewDataSourceBuilder().
 		WithID(e.ID).
 		WithCode(e.Code).
 		WithName(e.Name).
 		WithTrustLevel(e.TrustLevel).
+		WithStatus(status).
+		WithIsActive(isActive).
 		WithCreatedAt(e.CreatedAt).
-		WithUpdatedAt(e.UpdatedAt).
-		WithIsActive(true) // Sources from DB are active (soft-deleted excluded by query)
+		WithUpdatedAt(e.UpdatedAt)
 
 	if e.Description.Valid {
 		builder.WithDescription(e.Description.String)
 	}
+	if e.DeprecatedAt.Valid {
+		deprecatedAt := e.DeprecatedAt.Time
+		builder.WithDeprecatedAt(&deprecatedAt)
+	}
 
 	return builder.Build()
+}
+
+// parseDataSourceStatus converts a string status to domain.DataSourceStatus.
+func parseDataSourceStatus(s string) domain.DataSourceStatus {
+	switch s {
+	case "ACTIVE":
+		return domain.DataSourceStatusActive
+	case "DEPRECATED":
+		return domain.DataSourceStatusDeprecated
+	default:
+		return domain.DataSourceStatusActive
+	}
 }
 
 // ObservationToEntity converts a domain MarketPriceObservation to a database entity.
