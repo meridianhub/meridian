@@ -151,14 +151,31 @@ tenants already browse resources.
   - `economy.empty_state_shown` - empty state displayed
     with `hasManifest: false`
 
-**Prerequisite verification:** Confirm that existing reference
-data list pages render `is_system=true` items (not filtering
-them out). If they already show everything, badges are pure
-additive. If they filter, that's a prerequisite fix.
+**`is_system` prerequisite checklist:**
 
-**Data source:** The reference-data List RPCs already return
-`is_system` on proto responses (`SagaDefinition`,
-`Instrument`, `AccountType`). The badge is:
+Before V1 implementation, verify each List RPC returns
+`is_system` and that the frontend renders those items:
+
+| Entity | Proto field | List RPC | Status |
+|---|---|---|---|
+| `SagaDefinition` | `bool is_system` | `ListSagas` | Verified in proto |
+| `AccountType` | `bool is_system` | `ListAccountTypes` | Verified in proto |
+| `Instrument` | `bool is_system` | `ListInstruments` | Verified in proto |
+| `ValuationMethod` | `bool is_system` | `ListValuationMethods` | To verify |
+| `ValuationPolicy` | `bool is_system` | `ListValuationPolicies` | To verify |
+
+If any entity's List RPC does not include `is_system`, that
+becomes a small backend prerequisite (adding the field to the
+proto response). The "no backend work" statement is
+conditional on all five passing verification.
+
+Additionally, confirm list pages render `is_system=true`
+items (not filtering them out). If they already show
+everything, badges are pure additive. If they filter, that's
+a prerequisite fix.
+
+**Data source:** The reference-data List RPCs return
+`is_system` on proto responses. The badge is:
 
 ```tsx
 {item.isSystem && <Badge variant="outline">Platform</Badge>}
@@ -233,12 +250,17 @@ provenance, graph integration, and override workflows.
 
 **V2 trigger criteria (measure from V1 analytics):**
 
-| Signal | Threshold |
-|---|---|
-| Badge click-through | >15% of sessions |
-| Override intent | >5% navigate to saga creation |
-| Explicit request | 3+ tenants ask for it |
-| Support deflection | 50% reduction in questions |
+Evaluate after a 30-day observation window post-V1 launch.
+Baseline = first 7 days of V1 data. Source of truth =
+analytics events for quantitative signals, support ticket
+system for qualitative signals.
+
+| Signal | Threshold | Denominator |
+|---|---|---|
+| Badge click-through | >15% of sessions | Sessions with badges visible |
+| Override intent | >5% | Users viewing platform resources |
+| Explicit request | 3+ distinct tenants | Support tickets in window |
+| Support deflection | 50% reduction | "What's included" questions vs baseline |
 
 ## Explicit Out of Scope for V0.5/V1
 
@@ -252,6 +274,25 @@ provenance, graph integration, and override workflows.
 - No functional grouping of platform defaults
 
 ## Related Workstreams
+
+### PRD-046: Economy Visualization Completeness
+
+PRD-046 covers economy graph integration, drift detection,
+and provenance display from the manifest perspective. It
+rejected manifest-managed badges on service pages as a
+non-goal, preferring the Explorer as the unified manifest
+view.
+
+PRD-058 V1 badges are architecturally different - they use
+the operational `is_system` flag from reference-data services,
+not manifest state. However, V2 scope (composite Economy
+Explorer, graph integration with origin-based styling, drift
+detection exclusion) overlaps with PRD-046 Phases 2-4.
+
+**Coordination:** PRD-046 owns the manifest view. PRD-058
+owns the platform/tenant provenance layer. V2 implementation
+should coordinate to avoid duplicate work in graph
+integration and drift detection.
 
 ### PRD-057: Convergent Manifest Apply
 
