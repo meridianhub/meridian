@@ -41,10 +41,22 @@ function EmptyState() {
   const navigate = useNavigate()
   return (
     <div data-testid="overview-empty" className="p-6 flex flex-col items-center gap-4 py-16 text-muted-foreground">
-      <span className="text-lg font-medium">No economy configured</span>
+      <span className="text-lg font-medium">No custom economy configured</span>
       <span className="text-sm text-center max-w-md">
-        Apply a manifest to configure instruments, account types, sagas, and more.
+        Your tenant includes 28 platform capabilities out of the box - 8 sagas, 12 account types,
+        5 valuation methods, and 3 policies. Apply a manifest to customize or extend them.
       </span>
+      <div className="flex flex-wrap gap-2 mt-2">
+        <Button variant="outline" size="sm" onClick={() => navigate('/starlark-config')}>
+          View Sagas
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => navigate('/reference-data/account-types')}>
+          View Account Types
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => navigate('/reference-data/valuation-rules')}>
+          View Valuation Rules
+        </Button>
+      </div>
       <Button onClick={() => navigate('/economy/edit')}>Configure Economy</Button>
     </div>
   )
@@ -149,6 +161,11 @@ export function EconomyOverviewPage() {
         <StatChip label="Account Types" value={accountTypes.length} testId="stat-account-types" onClick={() => navigate('/reference-data/account-types')} />
         <StatChip label="Sagas" value={sagas.length} testId="stat-sagas" onClick={() => navigate('/starlark-config')} />
         <StatChip label="Valuation Rules" value={valuationRules.length} testId="stat-valuation-rules" onClick={() => navigate('/reference-data/valuation-rules')} />
+      </div>
+
+      {/* Platform capabilities indicator */}
+      <div className="text-sm text-muted-foreground" data-testid="platform-capabilities-line">
+        Running on 28 platform capabilities (8 sagas, 12 account types, 5 valuation methods, 3 policies)
       </div>
 
       {/* Relationship graph */}
