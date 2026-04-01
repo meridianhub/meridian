@@ -28,6 +28,8 @@ type ConnectionEntity struct {
 	CircuitOpenedAt   *time.Time      `gorm:"column:circuit_opened_at"`
 	FailureCount      int             `gorm:"column:failure_count;not null;default:0"`
 	SuccessCount      int             `gorm:"column:success_count;not null;default:0"`
+	Status            string          `gorm:"column:status;type:varchar(20);not null;default:'ACTIVE'"`
+	DeprecatedAt      *time.Time      `gorm:"column:deprecated_at"`
 	CreatedAt         time.Time       `gorm:"column:created_at;not null;default:now()"`
 	UpdatedAt         time.Time       `gorm:"column:updated_at;not null;default:now()"`
 }

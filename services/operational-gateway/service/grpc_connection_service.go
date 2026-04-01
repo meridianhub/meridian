@@ -158,6 +158,42 @@ func filterConnections(all []*domain.ProviderConnection, req *opgatewayv1.ListCo
 	return filtered
 }
 
+// DeprecateConnection transitions a provider connection from ACTIVE to DEPRECATED.
+func (s *ProviderConnectionService) DeprecateConnection(
+	ctx context.Context,
+	req *opgatewayv1.DeprecateConnectionRequest,
+) (*opgatewayv1.DeprecateConnectionResponse, error) {
+	tid, err := requireTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := s.connectionRepo.FindByID(ctx, tenantIDToUUID(tid), req.ConnectionId)
+	if err != nil {
+		if errors.Is(err, ports.ErrConnectionNotFound) {
+			return nil, status.Errorf(codes.NotFound, "connection not found: %s", req.ConnectionId)
+		}
+		s.logger.Error("failed to retrieve connection for deprecation", "error", err)
+		return nil, status.Error(codes.Internal, "failed to retrieve connection")
+	}
+
+	if err := conn.Deprecate(); err != nil {
+		if errors.Is(err, domain.ErrConnectionNotActive) {
+			return nil, status.Errorf(codes.FailedPrecondition, "connection is not in ACTIVE status: %s", req.ConnectionId)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to deprecate connection: %v", err)
+	}
+
+	if err := s.connectionRepo.Upsert(ctx, conn); err != nil {
+		s.logger.Error("failed to persist deprecated connection", "error", err)
+		return nil, status.Error(codes.Internal, "failed to persist deprecated connection")
+	}
+
+	return &opgatewayv1.DeprecateConnectionResponse{
+		Connection: connectionToProto(conn),
+	}, nil
+}
+
 // TestConnection performs a health check on a provider connection (Phase 2 placeholder).
 func (s *ProviderConnectionService) TestConnection(
 	ctx context.Context,

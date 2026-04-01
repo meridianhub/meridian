@@ -28,6 +28,7 @@ const (
 	MarketInformationService_RegisterDataSource_FullMethodName     = "/meridian.market_information.v1.MarketInformationService/RegisterDataSource"
 	MarketInformationService_UpdateDataSource_FullMethodName       = "/meridian.market_information.v1.MarketInformationService/UpdateDataSource"
 	MarketInformationService_DeactivateDataSource_FullMethodName   = "/meridian.market_information.v1.MarketInformationService/DeactivateDataSource"
+	MarketInformationService_DeprecateDataSource_FullMethodName    = "/meridian.market_information.v1.MarketInformationService/DeprecateDataSource"
 	MarketInformationService_ListDataSources_FullMethodName        = "/meridian.market_information.v1.MarketInformationService/ListDataSources"
 	MarketInformationService_RecordObservation_FullMethodName      = "/meridian.market_information.v1.MarketInformationService/RecordObservation"
 	MarketInformationService_RecordObservationBatch_FullMethodName = "/meridian.market_information.v1.MarketInformationService/RecordObservationBatch"
@@ -73,6 +74,12 @@ type MarketInformationServiceClient interface {
 	// DeactivateDataSource marks a data source as inactive.
 	// Returns NOT_FOUND if data source doesn't exist.
 	DeactivateDataSource(ctx context.Context, in *DeactivateDataSourceRequest, opts ...grpc.CallOption) (*DeactivateDataSourceResponse, error)
+	// DeprecateDataSource transitions a data source from ACTIVE to DEPRECATED.
+	// Sets is_active to false for backward compatibility.
+	// Returns NOT_FOUND if data source doesn't exist.
+	// Idempotent: succeeds if the data source is already DEPRECATED.
+	// Returns FAILED_PRECONDITION only if the stored state is invalid.
+	DeprecateDataSource(ctx context.Context, in *DeprecateDataSourceRequest, opts ...grpc.CallOption) (*DeprecateDataSourceResponse, error)
 	// ListDataSources returns data sources matching the filter criteria.
 	ListDataSources(ctx context.Context, in *ListDataSourcesRequest, opts ...grpc.CallOption) (*ListDataSourcesResponse, error)
 	// RecordObservation records a new market data observation.
@@ -188,6 +195,16 @@ func (c *marketInformationServiceClient) DeactivateDataSource(ctx context.Contex
 	return out, nil
 }
 
+func (c *marketInformationServiceClient) DeprecateDataSource(ctx context.Context, in *DeprecateDataSourceRequest, opts ...grpc.CallOption) (*DeprecateDataSourceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeprecateDataSourceResponse)
+	err := c.cc.Invoke(ctx, MarketInformationService_DeprecateDataSource_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *marketInformationServiceClient) ListDataSources(ctx context.Context, in *ListDataSourcesRequest, opts ...grpc.CallOption) (*ListDataSourcesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListDataSourcesResponse)
@@ -276,6 +293,12 @@ type MarketInformationServiceServer interface {
 	// DeactivateDataSource marks a data source as inactive.
 	// Returns NOT_FOUND if data source doesn't exist.
 	DeactivateDataSource(context.Context, *DeactivateDataSourceRequest) (*DeactivateDataSourceResponse, error)
+	// DeprecateDataSource transitions a data source from ACTIVE to DEPRECATED.
+	// Sets is_active to false for backward compatibility.
+	// Returns NOT_FOUND if data source doesn't exist.
+	// Idempotent: succeeds if the data source is already DEPRECATED.
+	// Returns FAILED_PRECONDITION only if the stored state is invalid.
+	DeprecateDataSource(context.Context, *DeprecateDataSourceRequest) (*DeprecateDataSourceResponse, error)
 	// ListDataSources returns data sources matching the filter criteria.
 	ListDataSources(context.Context, *ListDataSourcesRequest) (*ListDataSourcesResponse, error)
 	// RecordObservation records a new market data observation.
@@ -327,6 +350,9 @@ func (UnimplementedMarketInformationServiceServer) UpdateDataSource(context.Cont
 }
 func (UnimplementedMarketInformationServiceServer) DeactivateDataSource(context.Context, *DeactivateDataSourceRequest) (*DeactivateDataSourceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeactivateDataSource not implemented")
+}
+func (UnimplementedMarketInformationServiceServer) DeprecateDataSource(context.Context, *DeprecateDataSourceRequest) (*DeprecateDataSourceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeprecateDataSource not implemented")
 }
 func (UnimplementedMarketInformationServiceServer) ListDataSources(context.Context, *ListDataSourcesRequest) (*ListDataSourcesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListDataSources not implemented")
@@ -527,6 +553,24 @@ func _MarketInformationService_DeactivateDataSource_Handler(srv interface{}, ctx
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MarketInformationService_DeprecateDataSource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeprecateDataSourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MarketInformationServiceServer).DeprecateDataSource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MarketInformationService_DeprecateDataSource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MarketInformationServiceServer).DeprecateDataSource(ctx, req.(*DeprecateDataSourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MarketInformationService_ListDataSources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListDataSourcesRequest)
 	if err := dec(in); err != nil {
@@ -659,6 +703,10 @@ var MarketInformationService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeactivateDataSource",
 			Handler:    _MarketInformationService_DeactivateDataSource_Handler,
+		},
+		{
+			MethodName: "DeprecateDataSource",
+			Handler:    _MarketInformationService_DeprecateDataSource_Handler,
 		},
 		{
 			MethodName: "ListDataSources",

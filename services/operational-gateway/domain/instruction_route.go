@@ -5,11 +5,22 @@ import (
 	"time"
 )
 
+// RouteStatus represents the lifecycle state of an instruction route.
+type RouteStatus string
+
+const (
+	// RouteStatusActive means the route is available for dispatching instructions.
+	RouteStatusActive RouteStatus = "ACTIVE"
+	// RouteStatusDeprecated means the route is no longer recommended for new use.
+	RouteStatusDeprecated RouteStatus = "DEPRECATED"
+)
+
 // InstructionRoute domain errors.
 var (
 	ErrInstructionTypeRequired  = errors.New("instruction_type is required")
 	ErrConnectionIDRequired     = errors.New("connection_id is required")
 	ErrInstructionRouteNotFound = errors.New("instruction route not found")
+	ErrRouteNotActive           = errors.New("route is not in ACTIVE status")
 )
 
 // Route represents a configured mapping from an instruction_type to a provider connection.
@@ -42,6 +53,12 @@ type Route struct {
 	// PathTemplate is the URL path template appended to the connection base_url.
 	PathTemplate string
 
+	// Status is the lifecycle state of this route (ACTIVE or DEPRECATED).
+	Status RouteStatus
+
+	// DeprecatedAt is when this route was deprecated, or nil if not deprecated.
+	DeprecatedAt *time.Time
+
 	// CreatedAt is when this route was first created.
 	CreatedAt time.Time
 
@@ -65,7 +82,25 @@ func NewRoute(tenantID, instructionType, connectionID string) (*Route, error) {
 		TenantID:        tenantID,
 		InstructionType: instructionType,
 		ConnectionID:    connectionID,
+		Status:          RouteStatusActive,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}, nil
+}
+
+// Deprecate transitions the route from ACTIVE to DEPRECATED.
+// Returns ErrRouteNotActive if the route is not in ACTIVE status.
+// Idempotent: returns nil if already DEPRECATED.
+func (r *Route) Deprecate() error {
+	if r.Status == RouteStatusDeprecated {
+		return nil // idempotent
+	}
+	if r.Status != RouteStatusActive {
+		return ErrRouteNotActive
+	}
+	now := time.Now().UTC()
+	r.Status = RouteStatusDeprecated
+	r.DeprecatedAt = &now
+	r.UpdatedAt = now
+	return nil
 }

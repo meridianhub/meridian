@@ -240,9 +240,12 @@ func createSchemaDataSourceTable(ctx context.Context, conn *pgxpool.Conn) error 
 			updated_by character varying(100) NOT NULL DEFAULT 'SYSTEM',
 			deleted_at timestamptz NULL,
 			version bigint NOT NULL DEFAULT 1,
+			status character varying(20) NOT NULL DEFAULT 'ACTIVE',
+			deprecated_at timestamptz NULL,
 			PRIMARY KEY (id),
 			CONSTRAINT uq_data_source_code UNIQUE (code),
-			CONSTRAINT chk_data_source_trust_level CHECK (trust_level >= 0 AND trust_level <= 100)
+			CONSTRAINT chk_data_source_trust_level CHECK (trust_level >= 0 AND trust_level <= 100),
+			CONSTRAINT chk_data_source_status CHECK (status IN ('ACTIVE', 'DEPRECATED'))
 		)
 	`)
 	if err != nil {

@@ -241,6 +241,16 @@ message MarketPriceObservation {
   repeated meridian.quantity.v1.AttributeEntry attributes = 14;
 }
 
+// DataSourceStatus defines the lifecycle state of a data source.
+enum DataSourceStatus {
+  // DATA_SOURCE_STATUS_UNSPECIFIED means the status is unknown.
+  DATA_SOURCE_STATUS_UNSPECIFIED = 0;
+  // DATA_SOURCE_STATUS_ACTIVE means the data source is available for use.
+  DATA_SOURCE_STATUS_ACTIVE = 1;
+  // DATA_SOURCE_STATUS_DEPRECATED means the data source is no longer recommended for new use.
+  DATA_SOURCE_STATUS_DEPRECATED = 2;
+}
+
 // DataSource represents a provider of market data.
 message DataSource {
   // id is the unique identifier for this data source (UUID).
@@ -270,6 +280,8 @@ message DataSource {
   }];
 
   // is_active indicates whether this source can provide new observations.
+  // Deprecated: Use status field instead. Kept for backward compatibility.
+  // Set to false when status is DEPRECATED.
   bool is_active = 6;
 
   // created_at is when this source was registered.
@@ -277,6 +289,12 @@ message DataSource {
 
   // updated_at is when this source was last updated.
   google.protobuf.Timestamp updated_at = 8;
+
+  // status is the lifecycle state of this data source.
+  DataSourceStatus status = 9 [(buf.validate.field).enum.defined_only = true];
+
+  // deprecated_at is when this data source was deprecated.
+  google.protobuf.Timestamp deprecated_at = 10;
 }
 
 // ========================================
@@ -432,6 +450,18 @@ service MarketInformationService {
   rpc DeactivateDataSource(DeactivateDataSourceRequest) returns (DeactivateDataSourceResponse) {
     option (google.api.http) = {
       post: "/v1/market-information/sources/{code}/deactivate"
+      body: "*"
+    };
+  }
+
+  // DeprecateDataSource transitions a data source from ACTIVE to DEPRECATED.
+  // Sets is_active to false for backward compatibility.
+  // Returns NOT_FOUND if data source doesn't exist.
+  // Idempotent: succeeds if the data source is already DEPRECATED.
+  // Returns FAILED_PRECONDITION only if the stored state is invalid.
+  rpc DeprecateDataSource(DeprecateDataSourceRequest) returns (DeprecateDataSourceResponse) {
+    option (google.api.http) = {
+      post: "/v1/market-information/sources/{code}/deprecate"
       body: "*"
     };
   }
@@ -776,6 +806,22 @@ message DeactivateDataSourceRequest {
 // DeactivateDataSourceResponse returns the deactivated data source.
 message DeactivateDataSourceResponse {
   // source is the deactivated data source.
+  DataSource source = 1;
+}
+
+// DeprecateDataSourceRequest transitions a data source from ACTIVE to DEPRECATED.
+message DeprecateDataSourceRequest {
+  // code identifies the data source to deprecate.
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+    pattern: "^[A-Z][A-Z0-9_]*$"
+  }];
+}
+
+// DeprecateDataSourceResponse returns the deprecated data source.
+message DeprecateDataSourceResponse {
+  // source is the deprecated data source with status DEPRECATED.
   DataSource source = 1;
 }
 

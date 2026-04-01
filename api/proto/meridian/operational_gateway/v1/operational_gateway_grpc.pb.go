@@ -338,10 +338,11 @@ var OperationalGatewayService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	ProviderConnectionService_UpsertConnection_FullMethodName = "/meridian.operational_gateway.v1.ProviderConnectionService/UpsertConnection"
-	ProviderConnectionService_GetConnection_FullMethodName    = "/meridian.operational_gateway.v1.ProviderConnectionService/GetConnection"
-	ProviderConnectionService_ListConnections_FullMethodName  = "/meridian.operational_gateway.v1.ProviderConnectionService/ListConnections"
-	ProviderConnectionService_TestConnection_FullMethodName   = "/meridian.operational_gateway.v1.ProviderConnectionService/TestConnection"
+	ProviderConnectionService_UpsertConnection_FullMethodName    = "/meridian.operational_gateway.v1.ProviderConnectionService/UpsertConnection"
+	ProviderConnectionService_GetConnection_FullMethodName       = "/meridian.operational_gateway.v1.ProviderConnectionService/GetConnection"
+	ProviderConnectionService_ListConnections_FullMethodName     = "/meridian.operational_gateway.v1.ProviderConnectionService/ListConnections"
+	ProviderConnectionService_DeprecateConnection_FullMethodName = "/meridian.operational_gateway.v1.ProviderConnectionService/DeprecateConnection"
+	ProviderConnectionService_TestConnection_FullMethodName      = "/meridian.operational_gateway.v1.ProviderConnectionService/TestConnection"
 )
 
 // ProviderConnectionServiceClient is the client API for ProviderConnectionService service.
@@ -360,6 +361,10 @@ type ProviderConnectionServiceClient interface {
 	GetConnection(ctx context.Context, in *GetConnectionRequest, opts ...grpc.CallOption) (*GetConnectionResponse, error)
 	// ListConnections returns a paginated list of provider connections with optional filtering.
 	ListConnections(ctx context.Context, in *ListConnectionsRequest, opts ...grpc.CallOption) (*ListConnectionsResponse, error)
+	// DeprecateConnection transitions a provider connection from ACTIVE to DEPRECATED.
+	// Returns NOT_FOUND if the connection does not exist.
+	// Returns FAILED_PRECONDITION if the connection is not in ACTIVE status.
+	DeprecateConnection(ctx context.Context, in *DeprecateConnectionRequest, opts ...grpc.CallOption) (*DeprecateConnectionResponse, error)
 	// TestConnection (Phase 2) performs a health check on a provider connection.
 	// Returns NOT_FOUND if the connection does not exist.
 	TestConnection(ctx context.Context, in *TestConnectionRequest, opts ...grpc.CallOption) (*TestConnectionResponse, error)
@@ -403,6 +408,16 @@ func (c *providerConnectionServiceClient) ListConnections(ctx context.Context, i
 	return out, nil
 }
 
+func (c *providerConnectionServiceClient) DeprecateConnection(ctx context.Context, in *DeprecateConnectionRequest, opts ...grpc.CallOption) (*DeprecateConnectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeprecateConnectionResponse)
+	err := c.cc.Invoke(ctx, ProviderConnectionService_DeprecateConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *providerConnectionServiceClient) TestConnection(ctx context.Context, in *TestConnectionRequest, opts ...grpc.CallOption) (*TestConnectionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TestConnectionResponse)
@@ -429,6 +444,10 @@ type ProviderConnectionServiceServer interface {
 	GetConnection(context.Context, *GetConnectionRequest) (*GetConnectionResponse, error)
 	// ListConnections returns a paginated list of provider connections with optional filtering.
 	ListConnections(context.Context, *ListConnectionsRequest) (*ListConnectionsResponse, error)
+	// DeprecateConnection transitions a provider connection from ACTIVE to DEPRECATED.
+	// Returns NOT_FOUND if the connection does not exist.
+	// Returns FAILED_PRECONDITION if the connection is not in ACTIVE status.
+	DeprecateConnection(context.Context, *DeprecateConnectionRequest) (*DeprecateConnectionResponse, error)
 	// TestConnection (Phase 2) performs a health check on a provider connection.
 	// Returns NOT_FOUND if the connection does not exist.
 	TestConnection(context.Context, *TestConnectionRequest) (*TestConnectionResponse, error)
@@ -450,6 +469,9 @@ func (UnimplementedProviderConnectionServiceServer) GetConnection(context.Contex
 }
 func (UnimplementedProviderConnectionServiceServer) ListConnections(context.Context, *ListConnectionsRequest) (*ListConnectionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListConnections not implemented")
+}
+func (UnimplementedProviderConnectionServiceServer) DeprecateConnection(context.Context, *DeprecateConnectionRequest) (*DeprecateConnectionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeprecateConnection not implemented")
 }
 func (UnimplementedProviderConnectionServiceServer) TestConnection(context.Context, *TestConnectionRequest) (*TestConnectionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TestConnection not implemented")
@@ -530,6 +552,24 @@ func _ProviderConnectionService_ListConnections_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ProviderConnectionService_DeprecateConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeprecateConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProviderConnectionServiceServer).DeprecateConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProviderConnectionService_DeprecateConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProviderConnectionServiceServer).DeprecateConnection(ctx, req.(*DeprecateConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ProviderConnectionService_TestConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TestConnectionRequest)
 	if err := dec(in); err != nil {
@@ -568,6 +608,10 @@ var ProviderConnectionService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ProviderConnectionService_ListConnections_Handler,
 		},
 		{
+			MethodName: "DeprecateConnection",
+			Handler:    _ProviderConnectionService_DeprecateConnection_Handler,
+		},
+		{
 			MethodName: "TestConnection",
 			Handler:    _ProviderConnectionService_TestConnection_Handler,
 		},
@@ -577,9 +621,10 @@ var ProviderConnectionService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	InstructionRouteService_UpsertRoute_FullMethodName = "/meridian.operational_gateway.v1.InstructionRouteService/UpsertRoute"
-	InstructionRouteService_GetRoute_FullMethodName    = "/meridian.operational_gateway.v1.InstructionRouteService/GetRoute"
-	InstructionRouteService_ListRoutes_FullMethodName  = "/meridian.operational_gateway.v1.InstructionRouteService/ListRoutes"
+	InstructionRouteService_UpsertRoute_FullMethodName    = "/meridian.operational_gateway.v1.InstructionRouteService/UpsertRoute"
+	InstructionRouteService_GetRoute_FullMethodName       = "/meridian.operational_gateway.v1.InstructionRouteService/GetRoute"
+	InstructionRouteService_ListRoutes_FullMethodName     = "/meridian.operational_gateway.v1.InstructionRouteService/ListRoutes"
+	InstructionRouteService_DeprecateRoute_FullMethodName = "/meridian.operational_gateway.v1.InstructionRouteService/DeprecateRoute"
 )
 
 // InstructionRouteServiceClient is the client API for InstructionRouteService service.
@@ -599,6 +644,10 @@ type InstructionRouteServiceClient interface {
 	GetRoute(ctx context.Context, in *GetRouteRequest, opts ...grpc.CallOption) (*GetRouteResponse, error)
 	// ListRoutes returns all instruction routes for the tenant.
 	ListRoutes(ctx context.Context, in *ListRoutesRequest, opts ...grpc.CallOption) (*ListRoutesResponse, error)
+	// DeprecateRoute transitions an instruction route from ACTIVE to DEPRECATED.
+	// Returns NOT_FOUND if the route does not exist.
+	// Returns FAILED_PRECONDITION if the route is not in ACTIVE status.
+	DeprecateRoute(ctx context.Context, in *DeprecateRouteRequest, opts ...grpc.CallOption) (*DeprecateRouteResponse, error)
 }
 
 type instructionRouteServiceClient struct {
@@ -639,6 +688,16 @@ func (c *instructionRouteServiceClient) ListRoutes(ctx context.Context, in *List
 	return out, nil
 }
 
+func (c *instructionRouteServiceClient) DeprecateRoute(ctx context.Context, in *DeprecateRouteRequest, opts ...grpc.CallOption) (*DeprecateRouteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeprecateRouteResponse)
+	err := c.cc.Invoke(ctx, InstructionRouteService_DeprecateRoute_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InstructionRouteServiceServer is the server API for InstructionRouteService service.
 // All implementations must embed UnimplementedInstructionRouteServiceServer
 // for forward compatibility.
@@ -656,6 +715,10 @@ type InstructionRouteServiceServer interface {
 	GetRoute(context.Context, *GetRouteRequest) (*GetRouteResponse, error)
 	// ListRoutes returns all instruction routes for the tenant.
 	ListRoutes(context.Context, *ListRoutesRequest) (*ListRoutesResponse, error)
+	// DeprecateRoute transitions an instruction route from ACTIVE to DEPRECATED.
+	// Returns NOT_FOUND if the route does not exist.
+	// Returns FAILED_PRECONDITION if the route is not in ACTIVE status.
+	DeprecateRoute(context.Context, *DeprecateRouteRequest) (*DeprecateRouteResponse, error)
 	mustEmbedUnimplementedInstructionRouteServiceServer()
 }
 
@@ -674,6 +737,9 @@ func (UnimplementedInstructionRouteServiceServer) GetRoute(context.Context, *Get
 }
 func (UnimplementedInstructionRouteServiceServer) ListRoutes(context.Context, *ListRoutesRequest) (*ListRoutesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRoutes not implemented")
+}
+func (UnimplementedInstructionRouteServiceServer) DeprecateRoute(context.Context, *DeprecateRouteRequest) (*DeprecateRouteResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeprecateRoute not implemented")
 }
 func (UnimplementedInstructionRouteServiceServer) mustEmbedUnimplementedInstructionRouteServiceServer() {
 }
@@ -751,6 +817,24 @@ func _InstructionRouteService_ListRoutes_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InstructionRouteService_DeprecateRoute_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeprecateRouteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstructionRouteServiceServer).DeprecateRoute(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstructionRouteService_DeprecateRoute_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstructionRouteServiceServer).DeprecateRoute(ctx, req.(*DeprecateRouteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InstructionRouteService_ServiceDesc is the grpc.ServiceDesc for InstructionRouteService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -769,6 +853,10 @@ var InstructionRouteService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRoutes",
 			Handler:    _InstructionRouteService_ListRoutes_Handler,
+		},
+		{
+			MethodName: "DeprecateRoute",
+			Handler:    _InstructionRouteService_DeprecateRoute_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
