@@ -86,12 +86,9 @@ func (s *Server) UpdateDataSource(ctx context.Context, req *pb.UpdateDataSourceR
 		WithSourceType(existing.SourceType()).
 		WithIsActive(existing.IsActive()).
 		WithStatus(existing.Status()).
+		WithDeprecatedAt(existing.DeprecatedAt()).
 		WithCreatedAt(existing.CreatedAt()).
 		WithUpdatedAt(time.Now())
-
-	if existing.DeprecatedAt() != nil {
-		builder.WithDeprecatedAt(existing.DeprecatedAt())
-	}
 
 	// Update name if provided, otherwise keep existing
 	if req.Name != "" {
