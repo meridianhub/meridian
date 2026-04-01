@@ -99,6 +99,33 @@ func TestSave_MultipleVersions(t *testing.T) {
 	assert.Equal(t, "Updated Manifest", result.Manifest.Metadata.Name)
 }
 
+func TestSave_UsesManifestVersion(t *testing.T) {
+	store, ctx := setupTestStore(t)
+
+	m := testManifest()
+	m.Version = "3.2.1"
+	err := store.Save(ctx, m, "user-c")
+	require.NoError(t, err)
+
+	result, err := store.GetLatestApplied(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Version should be the manifest's version string, not an auto-incremented integer
+	assert.Equal(t, "3.2.1", result.Version)
+}
+
+func TestSave_DuplicateVersionFails(t *testing.T) {
+	store, ctx := setupTestStore(t)
+
+	err := store.Save(ctx, testManifest(), "user-a")
+	require.NoError(t, err)
+
+	// Saving the same version again should fail (unique constraint)
+	err = store.Save(ctx, testManifest(), "user-b")
+	assert.Error(t, err)
+}
+
 func TestMultiTenantIsolation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
