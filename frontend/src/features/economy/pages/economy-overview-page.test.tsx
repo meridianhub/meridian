@@ -223,7 +223,7 @@ describe('EconomyOverviewPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('overview-empty')).toBeInTheDocument()
     })
-    expect(screen.getByText('No economy configured')).toBeInTheDocument()
+    expect(screen.getByText('No custom economy configured')).toBeInTheDocument()
   })
 
   it('renders compact stat cards inside a stats-bar container', async () => {
@@ -260,6 +260,86 @@ describe('EconomyOverviewPage', () => {
     const instruments = screen.getByTestId('stat-instruments')
     const clickableCard = instruments.closest('button')
     expect(clickableCard).toBeInTheDocument()
+  })
+
+  it('renders empty state with updated copy and navigation links', async () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockResolvedValue({ version: undefined }),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('overview-empty')).toBeInTheDocument()
+    })
+    expect(screen.getByText('No custom economy configured')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /view sagas/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /view account types/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /view valuation rules/i })).toBeInTheDocument()
+  })
+
+  it('empty state View Sagas button navigates to /starlark-config', async () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockResolvedValue({ version: undefined }),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /view sagas/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /view sagas/i }))
+    expect(mockNavigate).toHaveBeenCalledWith('/starlark-config')
+  })
+
+  it('empty state View Account Types button navigates to /reference-data/account-types', async () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockResolvedValue({ version: undefined }),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /view account types/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /view account types/i }))
+    expect(mockNavigate).toHaveBeenCalledWith('/reference-data/account-types')
+  })
+
+  it('empty state View Valuation Rules button navigates to /reference-data/valuation-rules', async () => {
+    vi.mocked(useApiClients).mockReturnValue({
+      manifestHistory: {
+        getCurrentManifest: vi.fn().mockResolvedValue({ version: undefined }),
+      },
+    } as unknown as ReturnType<typeof useApiClients>)
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /view valuation rules/i })).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: /view valuation rules/i }))
+    expect(mockNavigate).toHaveBeenCalledWith('/reference-data/valuation-rules')
+  })
+
+  it('renders platform capabilities line when manifest is present', async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('platform-capabilities-line')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('platform-capabilities-line')).toHaveTextContent(
+      'Running on 28 platform capabilities (8 sagas, 12 account types, 5 valuation methods, 3 policies)',
+    )
   })
 
   it('renders breadcrumbs navigation', async () => {
