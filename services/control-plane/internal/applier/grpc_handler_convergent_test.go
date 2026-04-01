@@ -193,6 +193,10 @@ func TestApplyManifest_LiveStateDiff_SystemResourcesExcluded(t *testing.T) {
 	// The diff should succeed without SYSTEM_INTERNAL appearing as DEPRECATE.
 	diffStep := resp.StepResults[1]
 	assert.Equal(t, controlplanev1.StepResultStatus_STEP_RESULT_STATUS_SUCCESS, diffStep.Status)
+	// Verify SYSTEM_INTERNAL does not appear in the diff summary (it would if
+	// the system resource was not filtered out before diff).
+	assert.NotContains(t, resp.DiffSummary, "SYSTEM_INTERNAL",
+		"system-managed resource should be excluded from diff")
 }
 
 func TestApplyManifest_NoLiveState_FallsBackToStoredManifestDiff(t *testing.T) {
