@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { SagaFlowDiagram } from './saga-flow'
+import { SagaFlowDiagram, estimateDecisionSize, estimateStartNodeWidth } from './saga-flow'
 import { parseTriggerService } from '../lib/star-parser'
 import type { SagaFlow } from '../lib/star-parser'
 
@@ -249,6 +249,41 @@ describe('SagaFlowDiagram', () => {
     // Services from both: payments (trigger), reference_data, position_keeping, valuation_engine
     expect(screen.getByRole('button', { name: /valuation_engine/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /reference_data/ })).toBeInTheDocument()
+  })
+})
+
+describe('estimateDecisionSize', () => {
+  it('returns minimum size for short labels', () => {
+    const size = estimateDecisionSize('x > 0')
+    expect(size.width).toBeGreaterThanOrEqual(120)
+    expect(size.height).toBeGreaterThanOrEqual(80)
+  })
+
+  it('scales up for longer labels', () => {
+    const short = estimateDecisionSize('x > 0')
+    const long = estimateDecisionSize('not billing_account_id')
+    expect(long.width).toBeGreaterThan(short.width)
+  })
+
+  it('caps at maximum width', () => {
+    const size = estimateDecisionSize('a'.repeat(100))
+    expect(size.width).toBeLessThanOrEqual(220)
+  })
+})
+
+describe('estimateStartNodeWidth', () => {
+  it('returns minimum width for short names', () => {
+    expect(estimateStartNodeWidth('test', null)).toBeGreaterThanOrEqual(160)
+  })
+
+  it('scales up for long trigger text', () => {
+    const short = estimateStartNodeWidth('saga', 'scheduled:topup')
+    const long = estimateStartNodeWidth('saga', 'event:position-keeping.transaction-captured.v1')
+    expect(long).toBeGreaterThan(short)
+  })
+
+  it('caps at maximum width', () => {
+    expect(estimateStartNodeWidth('a'.repeat(100), null)).toBeLessThanOrEqual(300)
   })
 })
 

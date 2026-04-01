@@ -106,10 +106,10 @@ const StartNode = memo(function StartNode({ data }: { data: StartNodeData }) {
         className={`flex flex-col items-center justify-center rounded-full border-2 border-success bg-success-muted px-4 py-2 transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
         style={containerStyle}
       >
-        <span className="text-xs font-semibold text-success-foreground">{data.label}</span>
+        <span className="text-xs font-semibold text-success-foreground whitespace-nowrap">{data.label}</span>
         {data.trigger && (
           <span
-            className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium mt-0.5"
+            className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium mt-0.5 whitespace-nowrap"
             style={triggerBadgeStyle}
           >
             {data.trigger}
@@ -197,22 +197,37 @@ interface DecisionNodeData {
   [key: string]: unknown
 }
 
-const DECISION_NODE_STYLE = {
-  width: 120,
-  height: 80,
-  clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-} as const
+/** Estimate diamond dimensions based on label length. The diamond clip-path
+ *  only exposes ~50% of width/height for text, so we scale up for longer labels. */
+export function estimateDecisionSize(label: string): { width: number; height: number } {
+  const charWidth = 6 // approximate px per character at text-[10px]
+  const textWidth = label.length * charWidth
+  // Diamond usable area is ~50% of dimensions, add padding
+  const width = Math.max(120, Math.min(220, textWidth * 2 + 40))
+  const height = Math.max(80, Math.round(width * 0.7))
+  return { width, height }
+}
 
 const DecisionNode = memo(function DecisionNode({ data }: { data: DecisionNodeData }) {
   const dimmed = data.highlightedSaga && data.highlightedSaga !== data.sagaName
+  const size = useMemo(() => estimateDecisionSize(data.label), [data.label])
+  const style = useMemo(() => ({
+    width: size.width,
+    height: size.height,
+    clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
+  }), [size])
+
   return (
     <>
       <Handle type="target" position={data.direction === 'TB' ? Position.Top : Position.Left} className="bg-transparent! border-0! w-0! h-0!" />
       <div
         className={`flex items-center justify-center border-2 border-warning bg-warning-muted transition-opacity ${dimmed ? 'opacity-30' : 'opacity-100'}`}
-        style={DECISION_NODE_STYLE}
+        style={style}
       >
-        <span className="inline-block text-[10px] font-medium text-warning-foreground text-center leading-tight px-4 max-w-[120px]">
+        <span
+          className="inline-block text-[10px] font-medium text-warning-foreground text-center leading-tight"
+          style={{ maxWidth: Math.round(size.width * 0.5), padding: '0 4px' }}
+        >
           {data.label}
         </span>
       </div>
@@ -271,12 +286,35 @@ const nodeTypes = {
 
 // --- Layout ---
 
-const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
+const DEFAULT_NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
   sagaStart: { width: 160, height: 50 },
   sagaStep: { width: 200, height: 60 },
   sagaDecision: { width: 120, height: 80 },
   sagaExit: { width: 120, height: 36 },
   sagaEnd: { width: 140, height: 44 },
+}
+
+/** Estimate start node width based on the longer of name or trigger text. */
+export function estimateStartNodeWidth(label: string, trigger: string | null): number {
+  const charWidth = 6
+  const labelWidth = label.length * charWidth + 32 // px-4 padding
+  const triggerWidth = trigger ? trigger.length * charWidth + 16 : 0
+  return Math.max(160, Math.min(300, Math.max(labelWidth, triggerWidth)))
+}
+
+/** Get node dimensions, using dynamic sizing for decision and start nodes. */
+function getNodeDimensions(node: Node): { width: number; height: number } {
+  if (node.type === 'sagaDecision') {
+    return estimateDecisionSize(String(node.data?.label ?? ''))
+  }
+  if (node.type === 'sagaStart') {
+    const width = estimateStartNodeWidth(
+      String(node.data?.label ?? ''),
+      (node.data?.trigger as string | null) ?? null,
+    )
+    return { width, height: node.data?.trigger ? 56 : 44 }
+  }
+  return DEFAULT_NODE_DIMENSIONS[node.type ?? 'sagaStep'] ?? { width: 200, height: 60 }
 }
 
 export type FlowDirection = 'LR' | 'TB'
@@ -286,7 +324,7 @@ function layoutNodes(nodes: Node[], edges: Edge[], direction: FlowDirection = 'L
   g.setGraph({ rankdir: direction, nodesep: 60, ranksep: 100 })
 
   for (const n of nodes) {
-    const dims = NODE_DIMENSIONS[n.type ?? 'sagaStep'] ?? { width: 200, height: 60 }
+    const dims = getNodeDimensions(n)
     g.setNode(n.id, { width: dims.width, height: dims.height })
   }
 
@@ -298,7 +336,7 @@ function layoutNodes(nodes: Node[], edges: Edge[], direction: FlowDirection = 'L
 
   return nodes.map((n) => {
     const nodeWithPos = g.node(n.id)
-    const dims = NODE_DIMENSIONS[n.type ?? 'sagaStep'] ?? { width: 200, height: 60 }
+    const dims = getNodeDimensions(n)
     return {
       ...n,
       position: {
