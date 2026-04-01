@@ -27,6 +27,7 @@ const (
 	AccountTypeRegistryService_ActivateAccountType_FullMethodName       = "/meridian.reference_data.v1.AccountTypeRegistryService/ActivateAccountType"
 	AccountTypeRegistryService_DeprecateAccountType_FullMethodName      = "/meridian.reference_data.v1.AccountTypeRegistryService/DeprecateAccountType"
 	AccountTypeRegistryService_ValidateProductDefinition_FullMethodName = "/meridian.reference_data.v1.AccountTypeRegistryService/ValidateProductDefinition"
+	AccountTypeRegistryService_ListAll_FullMethodName                   = "/meridian.reference_data.v1.AccountTypeRegistryService/ListAll"
 )
 
 // AccountTypeRegistryServiceClient is the client API for AccountTypeRegistryService service.
@@ -69,6 +70,9 @@ type AccountTypeRegistryServiceClient interface {
 	// Compiles and evaluates CEL expressions, validates attribute schema, and checks
 	// structural constraints. Returns detailed validation errors if invalid.
 	ValidateProductDefinition(ctx context.Context, in *ValidateProductDefinitionRequest, opts ...grpc.CallOption) (*ValidateProductDefinitionResponse, error)
+	// ListAll returns account type definitions across all statuses (DRAFT, ACTIVE, DEPRECATED).
+	// Supports optional status filtering and pagination. Used for live-state diffing.
+	ListAll(ctx context.Context, in *ListAllRequest, opts ...grpc.CallOption) (*ListAllResponse, error)
 }
 
 type accountTypeRegistryServiceClient struct {
@@ -159,6 +163,16 @@ func (c *accountTypeRegistryServiceClient) ValidateProductDefinition(ctx context
 	return out, nil
 }
 
+func (c *accountTypeRegistryServiceClient) ListAll(ctx context.Context, in *ListAllRequest, opts ...grpc.CallOption) (*ListAllResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAllResponse)
+	err := c.cc.Invoke(ctx, AccountTypeRegistryService_ListAll_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AccountTypeRegistryServiceServer is the server API for AccountTypeRegistryService service.
 // All implementations must embed UnimplementedAccountTypeRegistryServiceServer
 // for forward compatibility.
@@ -199,6 +213,9 @@ type AccountTypeRegistryServiceServer interface {
 	// Compiles and evaluates CEL expressions, validates attribute schema, and checks
 	// structural constraints. Returns detailed validation errors if invalid.
 	ValidateProductDefinition(context.Context, *ValidateProductDefinitionRequest) (*ValidateProductDefinitionResponse, error)
+	// ListAll returns account type definitions across all statuses (DRAFT, ACTIVE, DEPRECATED).
+	// Supports optional status filtering and pagination. Used for live-state diffing.
+	ListAll(context.Context, *ListAllRequest) (*ListAllResponse, error)
 	mustEmbedUnimplementedAccountTypeRegistryServiceServer()
 }
 
@@ -232,6 +249,9 @@ func (UnimplementedAccountTypeRegistryServiceServer) DeprecateAccountType(contex
 }
 func (UnimplementedAccountTypeRegistryServiceServer) ValidateProductDefinition(context.Context, *ValidateProductDefinitionRequest) (*ValidateProductDefinitionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateProductDefinition not implemented")
+}
+func (UnimplementedAccountTypeRegistryServiceServer) ListAll(context.Context, *ListAllRequest) (*ListAllResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAll not implemented")
 }
 func (UnimplementedAccountTypeRegistryServiceServer) mustEmbedUnimplementedAccountTypeRegistryServiceServer() {
 }
@@ -399,6 +419,24 @@ func _AccountTypeRegistryService_ValidateProductDefinition_Handler(srv interface
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AccountTypeRegistryService_ListAll_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAllRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AccountTypeRegistryServiceServer).ListAll(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AccountTypeRegistryService_ListAll_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AccountTypeRegistryServiceServer).ListAll(ctx, req.(*ListAllRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AccountTypeRegistryService_ServiceDesc is the grpc.ServiceDesc for AccountTypeRegistryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -437,6 +475,10 @@ var AccountTypeRegistryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateProductDefinition",
 			Handler:    _AccountTypeRegistryService_ValidateProductDefinition_Handler,
+		},
+		{
+			MethodName: "ListAll",
+			Handler:    _AccountTypeRegistryService_ListAll_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -71,6 +71,38 @@ func (s *AccountTypeService) ListActive(ctx context.Context, req *pb.ListActiveR
 	}, nil
 }
 
+// ListAll returns account type definitions across all statuses.
+func (s *AccountTypeService) ListAll(ctx context.Context, req *pb.ListAllRequest) (*pb.ListAllResponse, error) {
+	var statusFilter []accounttype.Status
+	for _, ps := range req.GetStatusFilter() {
+		if d := protoAccountTypeStatusToDomain(ps); d != "" {
+			statusFilter = append(statusFilter, d)
+		}
+	}
+
+	defs, err := s.registry.ListAll(ctx, statusFilter)
+	if err != nil {
+		s.logger.Error("failed to list account types", "error", err)
+		return nil, status.Errorf(codes.Internal, "failed to list account types: %v", err)
+	}
+
+	sort.Slice(defs, func(i, j int) bool {
+		return defs[i].Code < defs[j].Code
+	})
+
+	page, nextPageToken := paginateDefinitions(defs, int(req.GetPageSize()), req.GetPageToken())
+
+	definitions := make([]*pb.AccountTypeDefinition, len(page))
+	for i, def := range page {
+		definitions[i] = accountTypeToProto(def)
+	}
+
+	return &pb.ListAllResponse{
+		Definitions:   definitions,
+		NextPageToken: nextPageToken,
+	}, nil
+}
+
 func filterByBehaviorClass(defs []*accounttype.Definition, filter pb.BehaviorClass) []*accounttype.Definition {
 	if filter == pb.BehaviorClass_BEHAVIOR_CLASS_UNSPECIFIED {
 		return defs

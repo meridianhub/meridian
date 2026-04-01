@@ -37,6 +37,10 @@ type Registry interface {
 	// ListActive retrieves all account type definitions with ACTIVE status.
 	ListActive(ctx context.Context) ([]*Definition, error)
 
+	// ListAll retrieves account type definitions across all statuses.
+	// Pass statusFilter to restrict results; an empty slice returns all statuses.
+	ListAll(ctx context.Context, statusFilter []Status) ([]*Definition, error)
+
 	// CreateDraft creates a new account type definition in DRAFT status.
 	// Uses INSERT ... ON CONFLICT (code, version) DO NOTHING returning existing row.
 	// Returns the existing definition if conflict (idempotent).
