@@ -32,7 +32,7 @@ export function StarlarkConfigPage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   const { data } = useQuery({
-    queryKey: [...queryKey, {}],
+    queryKey,
     queryFn: () => queryFn({ pageSize: 25 }),
   })
 
