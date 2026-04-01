@@ -136,6 +136,10 @@ func TestMigrationsMatchEntities(t *testing.T) {
 	t.Run("FinancialAccounting/LedgerPostingEntity", func(t *testing.T) {
 		testLedgerPostingEntity(t, gormDB)
 	})
+
+	t.Run("ControlPlane/ManifestVersionEntity", func(t *testing.T) {
+		testManifestVersionEntity(t, gormDB)
+	})
 }
 
 // migrationFile represents a migration with its schema and filename
@@ -156,6 +160,7 @@ func applyMigrations(ctx context.Context, t *testing.T, db *sql.DB) {
 
 	// Services to include in migration (maps service dir name to schema name)
 	services := map[string]string{
+		"control-plane":        "control_plane",
 		"current-account":      "current_account",
 		"position-keeping":     "position_keeping",
 		"payment-order":        "payment_order",
@@ -706,4 +711,37 @@ func testLedgerPostingEntity(t *testing.T, db *gorm.DB) {
 	assert.Equal(t, entity.DimensionType, retrieved.DimensionType)
 	assert.Equal(t, entity.InstrumentVersion, retrieved.InstrumentVersion)
 	assert.Equal(t, entity.InstrumentPrecision, retrieved.InstrumentPrecision)
+}
+
+// testManifestVersionEntity tests that the control-plane manifest_version table
+// accepts string versions after migrations. This catches drift between the GORM
+// model (varchar version) and the migration DDL - the exact bug from PR #914
+// where the migration used INTEGER but the code expected VARCHAR(50).
+//
+// Uses raw SQL because the entity is in an internal package.
+func testManifestVersionEntity(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	id := uuid.New()
+	now := time.Now()
+
+	// Insert with a semver string version - this is what the bootstrap does.
+	// If the column is INTEGER, this will fail with "invalid input syntax".
+	err := db.Exec(`INSERT INTO manifest_version
+		(id, version, manifest_json, applied_at, applied_by, apply_status, sequence_number, created_at)
+		VALUES (?, ?, ?::jsonb, ?, ?, ?, ?, ?)`,
+		id, "1.0", `{"version":"1.0"}`, now, "system:test", "APPLIED", 1, now,
+	).Error
+	if err != nil {
+		t.Fatalf("Failed to insert manifest_version with string version - schema mismatch: %v", err)
+	}
+
+	// Read back and verify the string round-trips correctly
+	var version string
+	err = db.Raw(`SELECT version FROM manifest_version WHERE id = ?`, id).Scan(&version).Error
+	if err != nil {
+		t.Fatalf("Failed to read manifest_version - schema mismatch: %v", err)
+	}
+
+	assert.Equal(t, "1.0", version)
 }
