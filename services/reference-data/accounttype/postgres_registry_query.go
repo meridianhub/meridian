@@ -129,6 +129,36 @@ func (r *PostgresRegistry) GetActiveDefinition(ctx context.Context, code string)
 	return result, nil
 }
 
+// collectAndEnrich drains rows into a []*Definition slice and then loads
+// ValuationMethods for each entry. Rows are fully consumed (and closed) before
+// any valuation query runs, which avoids "conn busy" errors when a second query
+// is issued on the same pgx connection while the first cursor is still open.
+func (r *PostgresRegistry) collectAndEnrich(ctx context.Context, tx pgx.Tx, rows pgx.Rows) ([]*Definition, error) {
+	var defs []*Definition
+	for rows.Next() {
+		def, err := r.scanDefinitionFromRows(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		defs = append(defs, def)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	for _, def := range defs {
+		methods, err := r.loadValuationMethods(ctx, tx, def.ID)
+		if err != nil {
+			return nil, err
+		}
+		def.ValuationMethods = methods
+	}
+	return defs, nil
+}
+
 // ListActive retrieves all account type definitions with ACTIVE status.
 func (r *PostgresRegistry) ListActive(ctx context.Context) ([]*Definition, error) {
 	var result []*Definition
@@ -150,22 +180,13 @@ func (r *PostgresRegistry) ListActive(ctx context.Context) ([]*Definition, error
 		if err != nil {
 			return fmt.Errorf("failed to query active account types: %w", err)
 		}
-		defer rows.Close()
 
-		for rows.Next() {
-			def, err := r.scanDefinitionFromRows(rows)
-			if err != nil {
-				return err
-			}
-			methods, err := r.loadValuationMethods(ctx, tx, def.ID)
-			if err != nil {
-				return err
-			}
-			def.ValuationMethods = methods
-			result = append(result, def)
+		defs, err := r.collectAndEnrich(ctx, tx, rows)
+		if err != nil {
+			return err
 		}
-
-		return rows.Err()
+		result = defs
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -217,22 +238,13 @@ func (r *PostgresRegistry) ListAll(ctx context.Context, statusFilter []Status) (
 		if err != nil {
 			return fmt.Errorf("failed to query account types: %w", err)
 		}
-		defer rows.Close()
 
-		for rows.Next() {
-			def, err := r.scanDefinitionFromRows(rows)
-			if err != nil {
-				return err
-			}
-			methods, err := r.loadValuationMethods(ctx, tx, def.ID)
-			if err != nil {
-				return err
-			}
-			def.ValuationMethods = methods
-			result = append(result, def)
+		defs, err := r.collectAndEnrich(ctx, tx, rows)
+		if err != nil {
+			return err
 		}
-
-		return rows.Err()
+		result = defs
+		return nil
 	})
 	if err != nil {
 		return nil, err
