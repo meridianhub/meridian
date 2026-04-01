@@ -3,7 +3,9 @@ package saga
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,39 +17,31 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
-// setupTestPostgres starts a PostgreSQL container and returns the pool and cleanup function.
+// setupTestPostgres creates a unique tenant schema in the shared PostgreSQL container
+// for test isolation. Each test gets its own schema with fresh tables.
 func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 	ctx := context.Background()
+	pool := sharedPgPool
 
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("testdb"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
-		),
-	)
-	require.NoError(t, err)
-
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	pool, err := pgxpool.New(ctx, connStr)
-	require.NoError(t, err)
-
-	// Create tenant schema and saga_definition table
-	tenantID, err := tenant.NewTenantID("test_grpc_handler")
+	// Create a unique tenant ID per test to avoid cross-test interference
+	suffix := strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_")
+	// Replace any non-alphanumeric chars (tenant IDs only allow [a-z0-9_])
+	suffix = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			return r
+		}
+		return '_'
+	}, suffix)
+	if len(suffix) > 30 {
+		suffix = suffix[:30]
+	}
+	tenantName := fmt.Sprintf("t_%s_%s", suffix, strings.ReplaceAll(uuid.New().String(), "-", "")[:8])
+	tenantID, err := tenant.NewTenantID(tenantName)
 	require.NoError(t, err)
 
 	schemaName := tenantID.SchemaName()
@@ -105,8 +99,7 @@ func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 	require.NoError(t, err)
 
 	cleanup := func() {
-		pool.Close()
-		_ = pgContainer.Terminate(ctx)
+		_, _ = pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+schemaName+" CASCADE")
 	}
 
 	return pool, tenantID, cleanup

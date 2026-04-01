@@ -2,8 +2,10 @@ package saga
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
 )
 
 func TestExtractVersionFromScript(t *testing.T) {
@@ -223,22 +224,32 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 
 	ctx := context.Background()
 
-	// Start CockroachDB container in insecure mode to avoid TLS connection issues.
-	// The module's default wait strategy properly waits for database readiness.
-	container, err := cockroachdb.Run(ctx,
-		"cockroachdb/cockroach:v24.3.0",
-		cockroachdb.WithDatabase("test_platform_sync"),
-		cockroachdb.WithInsecure(),
-	)
+	// Create a unique database per test for isolation (tests write to public schema tables).
+	suffix := strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_")
+	suffix = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			return r
+		}
+		return '_'
+	}, suffix)
+	if len(suffix) > 30 {
+		suffix = suffix[:30]
+	}
+	dbName := fmt.Sprintf("t_%s_%s", suffix, strings.ReplaceAll(uuid.New().String(), "-", "")[:8])
+
+	// Connect to shared CockroachDB container to create per-test database
+	adminPool, err := pgxpool.New(ctx, sharedCrdbDSN)
+	require.NoError(t, err)
+	t.Cleanup(func() { adminPool.Close() })
+
+	_, err = adminPool.Exec(ctx, "CREATE DATABASE "+dbName)
 	require.NoError(t, err)
 
-	// Use ConnectionConfig to get a proper connection string.
-	// ConnectionString() returns a registered pgx config reference that pgxpool cannot parse.
-	connConfig, err := container.ConnectionConfig(ctx)
+	// Build DSN for the per-test database
+	testDSN := replaceDatabaseInDSN(sharedCrdbDSN, dbName)
+	pool, err := pgxpool.New(ctx, testDSN)
 	require.NoError(t, err)
-
-	pool, err := pgxpool.New(ctx, connConfig.ConnString())
-	require.NoError(t, err)
+	t.Cleanup(func() { pool.Close() })
 
 	// Apply migrations in order
 	migrations := []string{
@@ -259,12 +270,25 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 		require.NoError(t, err, "failed to apply migration %s", migration)
 	}
 
-	cleanup := func() {
-		pool.Close()
-		_ = container.Terminate(ctx)
-	}
+	return pool, func() {}
+}
 
-	return pool, cleanup
+// replaceDatabaseInDSN swaps the database name in a PostgreSQL DSN.
+func replaceDatabaseInDSN(dsn, newDB string) string {
+	// DSN format: postgres://user@host:port/database?params
+	// Find the last / before ? and replace the database name
+	qIdx := strings.Index(dsn, "?")
+	base := dsn
+	query := ""
+	if qIdx >= 0 {
+		base = dsn[:qIdx]
+		query = dsn[qIdx:]
+	}
+	lastSlash := strings.LastIndex(base, "/")
+	if lastSlash >= 0 {
+		return base[:lastSlash+1] + newDB + query
+	}
+	return dsn
 }
 
 func TestPlatformSync_SyncPlatformDefaults(t *testing.T) {
