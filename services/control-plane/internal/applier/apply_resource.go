@@ -180,7 +180,7 @@ func (h *ApplyManifestHandler) applyResourceExecute(
 	execResult := h.execute(ctx, &controlplanev1.ApplyManifestRequest{
 		Manifest:  patchedManifest,
 		AppliedBy: req.GetAppliedBy(),
-	}, execPlan)
+	}, execPlan, nil)
 	response.StepResults = append(response.StepResults, execResult.stepResult)
 
 	if execResult.err != nil {
