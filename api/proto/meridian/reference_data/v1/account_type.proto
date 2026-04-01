@@ -249,6 +249,10 @@ service AccountTypeRegistryService {
   // Compiles and evaluates CEL expressions, validates attribute schema, and checks
   // structural constraints. Returns detailed validation errors if invalid.
   rpc ValidateProductDefinition(ValidateProductDefinitionRequest) returns (ValidateProductDefinitionResponse);
+
+  // ListAll returns account type definitions across all statuses (DRAFT, ACTIVE, DEPRECATED).
+  // Supports optional status filtering and pagination. Used for live-state diffing.
+  rpc ListAll(ListAllRequest) returns (ListAllResponse);
 }
 
 // ========================================
@@ -508,4 +512,29 @@ message ValidateProductDefinitionResponse {
 
   // errors contains the list of validation failures. Empty if valid is true.
   repeated ValidationError errors = 2;
+}
+
+// ListAllRequest specifies filtering and pagination for listing account types across all statuses.
+message ListAllRequest {
+  // page_size limits the number of results (max 100).
+  int32 page_size = 1 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
+
+  // page_token for pagination (from previous response).
+  string page_token = 2;
+
+  // status_filter limits results to definitions with one of the given statuses.
+  // If empty, returns definitions in all statuses.
+  repeated AccountTypeStatus status_filter = 3;
+}
+
+// ListAllResponse returns a page of account type definitions across all statuses.
+message ListAllResponse {
+  // definitions is the list of matching account type definitions.
+  repeated AccountTypeDefinition definitions = 1;
+
+  // next_page_token for pagination (empty if no more results).
+  string next_page_token = 2;
 }

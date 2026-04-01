@@ -71,6 +71,27 @@ func (m *mockAccountTypeRegistry) ListActive(_ context.Context) ([]*accounttype.
 	return result, nil
 }
 
+func (m *mockAccountTypeRegistry) ListAll(_ context.Context, statusFilter []accounttype.Status) ([]*accounttype.Definition, error) {
+	if len(statusFilter) == 0 {
+		result := make([]*accounttype.Definition, 0, len(m.definitions))
+		for _, def := range m.definitions {
+			result = append(result, def)
+		}
+		return result, nil
+	}
+	filterSet := make(map[accounttype.Status]bool, len(statusFilter))
+	for _, s := range statusFilter {
+		filterSet[s] = true
+	}
+	var result []*accounttype.Definition
+	for _, def := range m.definitions {
+		if filterSet[def.Status] {
+			result = append(result, def)
+		}
+	}
+	return result, nil
+}
+
 func (m *mockAccountTypeRegistry) CreateDraft(_ context.Context, def *accounttype.Definition) error {
 	if m.createErr != nil {
 		return m.createErr
@@ -507,4 +528,122 @@ func TestAccountTypeToProto_RoundTrip(t *testing.T) {
 	assert.Len(t, proto.ValuationMethods, 1)
 	assert.Equal(t, "GBP", proto.ValuationMethods[0].InputInstrument)
 	assert.Equal(t, "gold", proto.Attributes["tier"])
+}
+
+func TestAccountTypeService_ListAll_ReturnsAllStatuses(t *testing.T) {
+	svc, reg := newTestAccountTypeService(t)
+	ctx := context.Background()
+
+	draft := makeDraftDef("DRAFT_TYPE")
+	draft.Status = accounttype.StatusDraft
+	reg.definitions[draft.ID] = draft
+
+	active := makeDraftDef("ACTIVE_TYPE")
+	active.Status = accounttype.StatusActive
+	reg.definitions[active.ID] = active
+
+	deprecated := makeDraftDef("DEPRECATED_TYPE")
+	deprecated.Status = accounttype.StatusDeprecated
+	reg.definitions[deprecated.ID] = deprecated
+
+	resp, err := svc.ListAll(ctx, &pb.ListAllRequest{})
+	require.NoError(t, err)
+
+	codes := make(map[string]bool)
+	for _, d := range resp.Definitions {
+		codes[d.Code] = true
+	}
+	assert.True(t, codes["DRAFT_TYPE"])
+	assert.True(t, codes["ACTIVE_TYPE"])
+	assert.True(t, codes["DEPRECATED_TYPE"])
+}
+
+func TestAccountTypeService_ListAll_StatusFilterWorks(t *testing.T) {
+	svc, reg := newTestAccountTypeService(t)
+	ctx := context.Background()
+
+	draft := makeDraftDef("FILTER_DRAFT")
+	draft.Status = accounttype.StatusDraft
+	reg.definitions[draft.ID] = draft
+
+	active := makeDraftDef("FILTER_ACTIVE")
+	active.Status = accounttype.StatusActive
+	reg.definitions[active.ID] = active
+
+	deprecated := makeDraftDef("FILTER_DEPRECATED")
+	deprecated.Status = accounttype.StatusDeprecated
+	reg.definitions[deprecated.ID] = deprecated
+
+	resp, err := svc.ListAll(ctx, &pb.ListAllRequest{
+		StatusFilter: []pb.AccountTypeStatus{pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE},
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Definitions, 1)
+	assert.Equal(t, "FILTER_ACTIVE", resp.Definitions[0].Code)
+	assert.Equal(t, pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE, resp.Definitions[0].Status)
+}
+
+func TestAccountTypeService_ListAll_EmptyResult(t *testing.T) {
+	svc, _ := newTestAccountTypeService(t)
+	ctx := context.Background()
+
+	resp, err := svc.ListAll(ctx, &pb.ListAllRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Definitions)
+	assert.Empty(t, resp.NextPageToken)
+}
+
+func TestAccountTypeService_ListAll_UnspecifiedFilterReturnsInvalidArgument(t *testing.T) {
+	svc, _ := newTestAccountTypeService(t)
+	ctx := context.Background()
+
+	_, err := svc.ListAll(ctx, &pb.ListAllRequest{
+		StatusFilter: []pb.AccountTypeStatus{pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_UNSPECIFIED},
+	})
+	require.Error(t, err)
+	s, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.InvalidArgument, s.Code())
+}
+
+func TestAccountTypeService_ListAll_PaginatesMultipleVersionsPerCode(t *testing.T) {
+	svc, reg := newTestAccountTypeService(t)
+	ctx := context.Background()
+
+	// Two versions of the same code with different statuses.
+	v1 := makeDraftDef("MULTI_VER")
+	v1.Version = 1
+	v1.Status = accounttype.StatusDeprecated
+	reg.definitions[v1.ID] = v1
+
+	v2 := makeDraftDef("MULTI_VER")
+	v2.Version = 2
+	v2.Status = accounttype.StatusActive
+	reg.definitions[v2.ID] = v2
+
+	single := makeDraftDef("SINGLE_CODE")
+	single.Status = accounttype.StatusActive
+	reg.definitions[single.ID] = single
+
+	// Page size 1: first page returns MULTI_VER v2.
+	resp1, err := svc.ListAll(ctx, &pb.ListAllRequest{PageSize: 1})
+	require.NoError(t, err)
+	require.Len(t, resp1.Definitions, 1)
+	assert.NotEmpty(t, resp1.NextPageToken)
+
+	// Second page continues from token.
+	resp2, err := svc.ListAll(ctx, &pb.ListAllRequest{PageSize: 1, PageToken: resp1.NextPageToken})
+	require.NoError(t, err)
+	require.Len(t, resp2.Definitions, 1)
+	assert.NotEmpty(t, resp2.NextPageToken)
+
+	// Third page - last entry.
+	resp3, err := svc.ListAll(ctx, &pb.ListAllRequest{PageSize: 1, PageToken: resp2.NextPageToken})
+	require.NoError(t, err)
+	require.Len(t, resp3.Definitions, 1)
+	assert.Empty(t, resp3.NextPageToken)
+
+	// Collect all codes+versions across pages.
+	allDefs := append(resp1.Definitions, append(resp2.Definitions, resp3.Definitions...)...)
+	assert.Len(t, allDefs, 3)
 }
