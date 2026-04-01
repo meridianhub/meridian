@@ -8,6 +8,9 @@ import (
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 )
 
+// defaultDimension is the fallback dimension for instruments when the type cannot be derived.
+const defaultDimension = "CURRENCY"
+
 // buildExecutorInput converts a Manifest proto into the ApplyManifestInput
 // consumed by the saga-based ManifestExecutor.
 func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
@@ -22,7 +25,7 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 			// kicks in when the key is absent, not when it's empty. Use CURRENCY
 			// as a safe default so the saga can proceed. A future manifest proto
 			// change should add an explicit dimension field.
-			dim = "CURRENCY"
+			dim = defaultDimension
 		}
 		input.Instruments = append(input.Instruments, InstrumentInput{
 			Code:          inst.GetCode(),
@@ -80,7 +83,26 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 // UPDATE, DEPRECATE) are included. NO_CHANGE and DELETE resources are excluded.
 // Each included resource carries its Action field so handlers can behave differently.
 func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPlan) *ApplyManifestInput {
-	// Build a lookup of actionable resources: resourceType+code -> action
+	actionable := buildActionableMap(plan)
+
+	input := &ApplyManifestInput{
+		ManifestVersion: mf.GetVersion(),
+	}
+
+	extractInstrumentsFromPlan(mf, input, actionable)
+	extractAccountTypesFromPlan(mf, input, actionable)
+	extractValuationRulesFromPlan(mf, input, actionable)
+	extractMarketDataFromPlan(mf, input, actionable)
+	extractPartyAndAccountsFromPlan(mf, input, actionable)
+	extractSagasFromPlan(mf, input, actionable)
+	extractOperationalGatewayFromPlan(mf, input, actionable)
+
+	return input
+}
+
+// buildActionableMap builds a lookup of resources with actionable changes from a DiffPlan.
+// Only CREATE, UPDATE, and DEPRECATE actions are included; NO_CHANGE and DELETE are excluded.
+func buildActionableMap(plan *differ.DiffPlan) map[string]differ.ActionType {
 	actionable := make(map[string]differ.ActionType, len(plan.Actions))
 	for _, a := range plan.Actions {
 		if a.Action == differ.ActionNoChange || a.Action == differ.ActionDelete {
@@ -88,12 +110,11 @@ func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPl
 		}
 		actionable[resourceKey(a.ResourceType, a.ResourceCode)] = a.Action
 	}
+	return actionable
+}
 
-	input := &ApplyManifestInput{
-		ManifestVersion: mf.GetVersion(),
-	}
-
-	// Instruments
+// extractInstrumentsFromPlan adds instruments with actionable changes to the input.
+func extractInstrumentsFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
 	for _, inst := range mf.GetInstruments() {
 		action, ok := actionable[resourceKey(differ.ResourceInstrument, inst.GetCode())]
 		if !ok {
@@ -101,7 +122,7 @@ func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPl
 		}
 		dim := instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit())
 		if dim == "" {
-			dim = "CURRENCY"
+			dim = defaultDimension
 		}
 		input.Instruments = append(input.Instruments, InstrumentInput{
 			Code:          inst.GetCode(),
@@ -111,8 +132,10 @@ func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPl
 			Action:        string(action),
 		})
 	}
+}
 
-	// Account Types
+// extractAccountTypesFromPlan adds account types with actionable changes to the input.
+func extractAccountTypesFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
 	for _, acct := range mf.GetAccountTypes() {
 		action, ok := actionable[resourceKey(differ.ResourceAccountType, acct.GetCode())]
 		if !ok {
@@ -136,8 +159,10 @@ func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPl
 			Action:         string(action),
 		})
 	}
+}
 
-	// Valuation Rules
+// extractValuationRulesFromPlan adds valuation rules with actionable changes to the input.
+func extractValuationRulesFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
 	for _, vr := range mf.GetValuationRules() {
 		key := valRuleKeyForMapper(vr.GetFromInstrument(), vr.GetToInstrument())
 		action, ok := actionable[resourceKey(differ.ResourceValuationRule, key)]
@@ -151,14 +176,10 @@ func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPl
 			Action:         string(action),
 		})
 	}
+}
 
-	// Market Data
-	extractMarketDataFromPlan(mf, input, actionable)
-
-	// Organizations and Internal Accounts
-	extractPartyAndAccountsFromPlan(mf, input, actionable)
-
-	// Saga Definitions
+// extractSagasFromPlan adds saga definitions with actionable changes to the input.
+func extractSagasFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
 	for _, saga := range mf.GetSagas() {
 		action, ok := actionable[resourceKey(differ.ResourceSaga, saga.GetName())]
 		if !ok {
@@ -170,11 +191,6 @@ func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPl
 			Action: string(action),
 		})
 	}
-
-	// Operational Gateway
-	extractOperationalGatewayFromPlan(mf, input, actionable)
-
-	return input
 }
 
 // resourceKey builds a lookup key for matching diff actions to manifest resources.
@@ -480,7 +496,7 @@ var unitToDimension = map[string]string{
 func instrumentTypeToDimension(instType controlplanev1.InstrumentType, unit string) string {
 	switch instType {
 	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT:
-		return "CURRENCY"
+		return defaultDimension
 	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_VOUCHER:
 		return "COUNT"
 	case controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY,
