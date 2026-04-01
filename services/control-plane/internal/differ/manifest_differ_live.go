@@ -30,6 +30,8 @@ func (d *ManifestDiffer) DiffAgainstLiveState(ctx context.Context, tenantID stri
 		return nil, fmt.Errorf("query live state: %w", err)
 	}
 
+	live = filterTenantOwned(live)
+
 	plan := &DiffPlan{}
 
 	d.diffInstrumentsAgainstLive(live, manifest, plan)
@@ -52,24 +54,10 @@ func (d *ManifestDiffer) DiffAgainstLiveState(ctx context.Context, tenantID stri
 	return plan, nil
 }
 
-// isSystemResource checks whether a resource code is marked as system-managed in the live state.
-func isSystemResource(live *LiveState, rt ResourceType, code string) bool {
-	if live.SystemCodes == nil {
-		return false
-	}
-	codes, ok := live.SystemCodes[rt]
-	if !ok {
-		return false
-	}
-	return codes[code]
-}
 
 func (d *ManifestDiffer) diffInstrumentsAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.InstrumentDefinition)
 	for _, inst := range live.Instruments {
-		if isSystemResource(live, ResourceInstrument, inst.GetCode()) {
-			continue
-		}
 		liveMap[inst.GetCode()] = inst
 	}
 	desiredMap := instrumentMap(manifest.GetInstruments())
@@ -117,9 +105,6 @@ func (d *ManifestDiffer) diffInstrumentsAgainstLive(live *LiveState, manifest *c
 func (d *ManifestDiffer) diffAccountTypesAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.AccountTypeDefinition)
 	for _, at := range live.AccountTypes {
-		if isSystemResource(live, ResourceAccountType, at.GetCode()) {
-			continue
-		}
 		liveMap[at.GetCode()] = at
 	}
 	desiredMap := accountTypeMap(manifest.GetAccountTypes())
@@ -167,9 +152,6 @@ func (d *ManifestDiffer) diffAccountTypesAgainstLive(live *LiveState, manifest *
 func (d *ManifestDiffer) diffSagasAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.SagaDefinition)
 	for _, s := range live.Sagas {
-		if isSystemResource(live, ResourceSaga, s.GetName()) {
-			continue
-		}
 		liveMap[s.GetName()] = s
 	}
 	desiredMap := sagaMap(manifest.GetSagas())
@@ -217,9 +199,6 @@ func (d *ManifestDiffer) diffSagasAgainstLive(live *LiveState, manifest *control
 func (d *ManifestDiffer) diffMarketDataSourcesAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.MarketDataSourceDefinition)
 	for _, s := range live.MarketDataSources {
-		if isSystemResource(live, ResourceMarketDataSource, s.GetCode()) {
-			continue
-		}
 		liveMap[s.GetCode()] = s
 	}
 	desiredMap := marketDataSourceMap(manifest.GetMarketData().GetSources())
@@ -267,9 +246,6 @@ func (d *ManifestDiffer) diffMarketDataSourcesAgainstLive(live *LiveState, manif
 func (d *ManifestDiffer) diffMarketDataSetsAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.MarketDataSetDefinition)
 	for _, ds := range live.MarketDataSets {
-		if isSystemResource(live, ResourceMarketDataSet, ds.GetCode()) {
-			continue
-		}
 		liveMap[ds.GetCode()] = ds
 	}
 	desiredMap := marketDataSetMap(manifest.GetMarketData().GetDatasets())
@@ -317,9 +293,6 @@ func (d *ManifestDiffer) diffMarketDataSetsAgainstLive(live *LiveState, manifest
 func (d *ManifestDiffer) diffOrganizationsAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.OrganizationDefinition)
 	for _, o := range live.Organizations {
-		if isSystemResource(live, ResourceOrganization, o.GetCode()) {
-			continue
-		}
 		liveMap[o.GetCode()] = o
 	}
 	desiredMap := organizationMap(manifest.GetOrganizations())
@@ -367,9 +340,6 @@ func (d *ManifestDiffer) diffOrganizationsAgainstLive(live *LiveState, manifest 
 func (d *ManifestDiffer) diffInternalAccountsAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.InternalAccountDefinition)
 	for _, a := range live.InternalAccounts {
-		if isSystemResource(live, ResourceInternalAccount, a.GetCode()) {
-			continue
-		}
 		liveMap[a.GetCode()] = a
 	}
 	desiredMap := internalAccountMap(manifest.GetInternalAccounts())
@@ -417,9 +387,6 @@ func (d *ManifestDiffer) diffInternalAccountsAgainstLive(live *LiveState, manife
 func (d *ManifestDiffer) diffProviderConnectionsAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.ProviderConnectionConfig)
 	for _, c := range live.ProviderConnections {
-		if isSystemResource(live, ResourceProviderConnection, c.GetConnectionId()) {
-			continue
-		}
 		liveMap[c.GetConnectionId()] = c
 	}
 	desiredMap := providerConnectionMap(manifest.GetOperationalGateway().GetProviderConnections())
@@ -467,9 +434,6 @@ func (d *ManifestDiffer) diffProviderConnectionsAgainstLive(live *LiveState, man
 func (d *ManifestDiffer) diffInstructionRoutesAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.InstructionRouteConfig)
 	for _, r := range live.InstructionRoutes {
-		if isSystemResource(live, ResourceInstructionRoute, r.GetInstructionType()) {
-			continue
-		}
 		liveMap[r.GetInstructionType()] = r
 	}
 	desiredMap := instructionRouteMap(manifest.GetOperationalGateway().GetInstructionRoutes())
