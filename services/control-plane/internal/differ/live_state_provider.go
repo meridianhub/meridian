@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/metadata"
 )
 
 // Service-specific client interfaces, decoupled from generated gRPC stubs.
@@ -95,9 +97,12 @@ func NewGRPCLiveStateProvider(
 }
 
 // QueryLiveState queries all downstream services concurrently and returns the aggregated live state.
-// The tenantID parameter is passed through context by the caller (tenant middleware).
+// tenantID is propagated via gRPC metadata so downstream services scope queries to the correct tenant.
 // Returns an error if any service query fails.
-func (p *GRPCLiveStateProvider) QueryLiveState(ctx context.Context, _ string) (*LiveState, error) {
+func (p *GRPCLiveStateProvider) QueryLiveState(ctx context.Context, tenantID string) (*LiveState, error) {
+	// Enrich context with tenant metadata for outgoing gRPC calls.
+	ctx = metadata.AppendToOutgoingContext(ctx, tenant.TenantIDKey, tenantID)
+
 	state := &LiveState{}
 	g, gctx := errgroup.WithContext(ctx)
 
