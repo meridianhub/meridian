@@ -13,7 +13,7 @@ import '@xyflow/react/dist/style.css'
 import Dagre from '@dagrejs/dagre'
 import type { SagaFlow } from '../lib/star-parser'
 import { parseTriggerService } from '../lib/star-parser'
-import { estimateDecisionSize, estimateStartNodeWidth } from './saga-flow-sizing'
+import { estimateDecisionSize, getNodeDimensions } from './saga-flow-sizing'
 
 // Curated palette of visually distinct service colors using CSS custom properties
 const SERVICE_PALETTE = [
@@ -276,29 +276,6 @@ const nodeTypes = {
 
 // --- Layout ---
 
-const DEFAULT_NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
-  sagaStart: { width: 160, height: 50 },
-  sagaStep: { width: 200, height: 60 },
-  sagaDecision: { width: 120, height: 80 },
-  sagaExit: { width: 120, height: 36 },
-  sagaEnd: { width: 140, height: 44 },
-}
-
-/** Get node dimensions, using dynamic sizing for decision and start nodes. */
-function getNodeDimensions(node: Node): { width: number; height: number } {
-  if (node.type === 'sagaDecision') {
-    return estimateDecisionSize(String(node.data?.label ?? ''))
-  }
-  if (node.type === 'sagaStart') {
-    const width = estimateStartNodeWidth(
-      String(node.data?.label ?? ''),
-      (node.data?.trigger as string | null) ?? null,
-    )
-    return { width, height: node.data?.trigger ? 56 : 44 }
-  }
-  return DEFAULT_NODE_DIMENSIONS[node.type ?? 'sagaStep'] ?? { width: 200, height: 60 }
-}
-
 export type FlowDirection = 'LR' | 'TB'
 
 function layoutNodes(nodes: Node[], edges: Edge[], direction: FlowDirection = 'LR'): Node[] {
@@ -306,7 +283,7 @@ function layoutNodes(nodes: Node[], edges: Edge[], direction: FlowDirection = 'L
   g.setGraph({ rankdir: direction, nodesep: 60, ranksep: 100 })
 
   for (const n of nodes) {
-    const dims = getNodeDimensions(n)
+    const dims = getNodeDimensions(n.type, String(n.data?.label ?? ''), (n.data?.trigger as string | null) ?? null)
     g.setNode(n.id, { width: dims.width, height: dims.height })
   }
 
@@ -318,7 +295,7 @@ function layoutNodes(nodes: Node[], edges: Edge[], direction: FlowDirection = 'L
 
   return nodes.map((n) => {
     const nodeWithPos = g.node(n.id)
-    const dims = getNodeDimensions(n)
+    const dims = getNodeDimensions(n.type, String(n.data?.label ?? ''), (n.data?.trigger as string | null) ?? null)
     return {
       ...n,
       position: {

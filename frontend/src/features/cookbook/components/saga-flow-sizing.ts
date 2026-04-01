@@ -16,3 +16,27 @@ export function estimateStartNodeWidth(label: string, trigger: string | null): n
   const triggerWidth = trigger ? trigger.length * charWidth + 16 : 0
   return Math.max(160, Math.min(300, Math.max(labelWidth, triggerWidth)))
 }
+
+const DEFAULT_NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
+  sagaStart: { width: 160, height: 50 },
+  sagaStep: { width: 200, height: 60 },
+  sagaDecision: { width: 120, height: 80 },
+  sagaExit: { width: 120, height: 36 },
+  sagaEnd: { width: 140, height: 44 },
+}
+
+/** Get node dimensions, using dynamic sizing for decision and start nodes. */
+export function getNodeDimensions(
+  type: string | undefined,
+  label: string,
+  trigger: string | null,
+): { width: number; height: number } {
+  if (type === 'sagaDecision') {
+    return estimateDecisionSize(label)
+  }
+  if (type === 'sagaStart') {
+    const width = estimateStartNodeWidth(label, trigger)
+    return { width, height: trigger ? 56 : 44 }
+  }
+  return DEFAULT_NODE_DIMENSIONS[type ?? 'sagaStep'] ?? { width: 200, height: 60 }
+}
