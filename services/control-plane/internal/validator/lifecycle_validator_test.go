@@ -164,91 +164,37 @@ func TestDetectOrphanInstructionRoutes_NotUsed(t *testing.T) {
 	assert.Contains(t, orphanRoutes[0].Message, "REFUND")
 }
 
-// ─── Immutability checks ─────────────────────────────────────────────────────
+// ─── Immutability checks (now a no-op; removals caught by destructive changes) ─
 
-func TestValidateImmutability_NoChange(t *testing.T) {
+func TestValidateImmutability_IsNoOp(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)
 
-	manifest := &controlplanev1.Manifest{
+	// validateImmutability is intentionally a no-op. Different instrument/account
+	// compositions between manifests should not produce false "code changed" errors.
+	// Removals are caught by validateDestructiveChanges instead.
+	previous := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
 			{Code: "GBP", Name: "British Pound"},
+			{Code: "EUR", Name: "Euro"},
 		},
 		AccountTypes: []*controlplanev1.AccountTypeDefinition{
 			{Code: "SETTLEMENT", Name: "Settlement"},
 		},
 	}
-
-	result := &ValidationResult{Valid: true}
-	v.validateImmutability(manifest, manifest, result)
-	assert.Empty(t, result.Errors)
-}
-
-func TestValidateImmutability_InstrumentCodeChanged_Direct(t *testing.T) {
-	v, err := New()
-	require.NoError(t, err)
-
-	previous := &controlplanev1.Manifest{
-		Instruments: []*controlplanev1.InstrumentDefinition{
-			{Code: "GBP", Name: "British Pound"},
-		},
-	}
 	current := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
-			{Code: "USD", Name: "US Dollar"},
+			{Code: "GBP", Name: "British Pound"},
+			{Code: "KWH", Name: "Kilowatt Hour"},
 		},
-	}
-
-	result := &ValidationResult{Valid: true}
-	v.validateImmutability(current, previous, result)
-
-	require.Len(t, result.Errors, 1)
-	assert.Equal(t, "IMMUTABLE_FIELD_CHANGED", result.Errors[0].Code)
-	assert.Contains(t, result.Errors[0].Message, "GBP")
-	assert.Contains(t, result.Errors[0].Message, "USD")
-}
-
-func TestValidateImmutability_AccountTypeCodeChanged_Direct(t *testing.T) {
-	v, err := New()
-	require.NoError(t, err)
-
-	previous := &controlplanev1.Manifest{
 		AccountTypes: []*controlplanev1.AccountTypeDefinition{
-			{Code: "SETTLEMENT", Name: "Settlement"},
-		},
-	}
-	current := &controlplanev1.Manifest{
-		AccountTypes: []*controlplanev1.AccountTypeDefinition{
-			{Code: "CLEARING", Name: "Clearing"},
+			{Code: "ENERGY_TRADING", Name: "Energy Trading"},
 		},
 	}
 
 	result := &ValidationResult{Valid: true}
 	v.validateImmutability(current, previous, result)
-
-	require.Len(t, result.Errors, 1)
-	assert.Equal(t, "IMMUTABLE_FIELD_CHANGED", result.Errors[0].Code)
-}
-
-func TestValidateImmutability_AddingNewInstrument(t *testing.T) {
-	v, err := New()
-	require.NoError(t, err)
-
-	previous := &controlplanev1.Manifest{
-		Instruments: []*controlplanev1.InstrumentDefinition{
-			{Code: "GBP", Name: "British Pound"},
-		},
-	}
-	current := &controlplanev1.Manifest{
-		Instruments: []*controlplanev1.InstrumentDefinition{
-			{Code: "GBP", Name: "British Pound"},
-			{Code: "USD", Name: "US Dollar"},
-		},
-	}
-
-	result := &ValidationResult{Valid: true}
-	v.validateImmutability(current, previous, result)
-	assert.Empty(t, result.Errors)
+	assert.Empty(t, result.Errors, "validateImmutability should be a no-op")
 }
 
 // ─── dispatchInstructionRegex ────────────────────────────────────────────────
