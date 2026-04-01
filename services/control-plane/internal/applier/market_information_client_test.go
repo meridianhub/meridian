@@ -23,12 +23,19 @@ var _ MarketInformationService = (*MarketInformationClient)(nil)
 type fakeMarketInformationServer struct {
 	marketinformationv1.UnimplementedMarketInformationServiceServer
 	registerDataSourceErr error
+	registerDataSourceFn  func(context.Context, *marketinformationv1.RegisterDataSourceRequest) (*marketinformationv1.RegisterDataSourceResponse, error)
 	registerDataSetErr    error
+	registerDataSetFn     func(context.Context, *marketinformationv1.RegisterDataSetRequest) (*marketinformationv1.RegisterDataSetResponse, error)
 	activateDataSetErr    error
+	activateDataSetFn     func(context.Context, *marketinformationv1.ActivateDataSetRequest) (*marketinformationv1.ActivateDataSetResponse, error)
 	retrieveDataSetFn     func(context.Context, *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error)
+	listDataSourcesFn     func(context.Context, *marketinformationv1.ListDataSourcesRequest) (*marketinformationv1.ListDataSourcesResponse, error)
 }
 
-func (f *fakeMarketInformationServer) RegisterDataSource(_ context.Context, req *marketinformationv1.RegisterDataSourceRequest) (*marketinformationv1.RegisterDataSourceResponse, error) {
+func (f *fakeMarketInformationServer) RegisterDataSource(ctx context.Context, req *marketinformationv1.RegisterDataSourceRequest) (*marketinformationv1.RegisterDataSourceResponse, error) {
+	if f.registerDataSourceFn != nil {
+		return f.registerDataSourceFn(ctx, req)
+	}
 	if f.registerDataSourceErr != nil {
 		return nil, f.registerDataSourceErr
 	}
@@ -40,7 +47,18 @@ func (f *fakeMarketInformationServer) RegisterDataSource(_ context.Context, req 
 	}, nil
 }
 
-func (f *fakeMarketInformationServer) RegisterDataSet(_ context.Context, req *marketinformationv1.RegisterDataSetRequest) (*marketinformationv1.RegisterDataSetResponse, error) {
+func (f *fakeMarketInformationServer) ListDataSources(ctx context.Context, req *marketinformationv1.ListDataSourcesRequest) (*marketinformationv1.ListDataSourcesResponse, error) {
+	if f.listDataSourcesFn != nil {
+		return f.listDataSourcesFn(ctx, req)
+	}
+	// Default: no data sources found (proactive check falls through to create).
+	return &marketinformationv1.ListDataSourcesResponse{}, nil
+}
+
+func (f *fakeMarketInformationServer) RegisterDataSet(ctx context.Context, req *marketinformationv1.RegisterDataSetRequest) (*marketinformationv1.RegisterDataSetResponse, error) {
+	if f.registerDataSetFn != nil {
+		return f.registerDataSetFn(ctx, req)
+	}
 	if f.registerDataSetErr != nil {
 		return nil, f.registerDataSetErr
 	}
@@ -54,7 +72,10 @@ func (f *fakeMarketInformationServer) RegisterDataSet(_ context.Context, req *ma
 	}, nil
 }
 
-func (f *fakeMarketInformationServer) ActivateDataSet(_ context.Context, req *marketinformationv1.ActivateDataSetRequest) (*marketinformationv1.ActivateDataSetResponse, error) {
+func (f *fakeMarketInformationServer) ActivateDataSet(ctx context.Context, req *marketinformationv1.ActivateDataSetRequest) (*marketinformationv1.ActivateDataSetResponse, error) {
+	if f.activateDataSetFn != nil {
+		return f.activateDataSetFn(ctx, req)
+	}
 	if f.activateDataSetErr != nil {
 		return nil, f.activateDataSetErr
 	}
@@ -72,14 +93,8 @@ func (f *fakeMarketInformationServer) RetrieveDataSet(ctx context.Context, req *
 	if f.retrieveDataSetFn != nil {
 		return f.retrieveDataSetFn(ctx, req)
 	}
-	return &marketinformationv1.RetrieveDataSetResponse{
-		Dataset: &marketinformationv1.DataSetDefinition{
-			Id:      "ds-existing-uuid",
-			Code:    req.Code,
-			Version: 1,
-			Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE,
-		},
-	}, nil
+	// Default: not found (proactive check falls through to create/activate).
+	return nil, status.Error(codes.NotFound, "dataset not found")
 }
 
 // ─── Test setup ────────────────────────────────────────────────────────────
@@ -339,8 +354,25 @@ func TestMarketInformationClient_ActivateDataSet_GRPCError(t *testing.T) {
 // ─── Idempotency tests ──────────────────────────────────────────────────────
 
 func TestMarketInformationClient_RegisterDataSet_AlreadyExists_TreatedAsSuccess(t *testing.T) {
+	// Proactive check returns NotFound, RegisterDataSet returns AlreadyExists,
+	// reactive fallback calls RetrieveDataSet again and finds the dataset.
+	callCount := 0
 	srv := &fakeMarketInformationServer{
 		registerDataSetErr: status.Error(codes.AlreadyExists, "dataset already exists"),
+		retrieveDataSetFn: func(_ context.Context, req *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, status.Error(codes.NotFound, "dataset not found")
+			}
+			return &marketinformationv1.RetrieveDataSetResponse{
+				Dataset: &marketinformationv1.DataSetDefinition{
+					Id:      "ds-existing-uuid",
+					Code:    req.Code,
+					Version: 1,
+					Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE,
+				},
+			}, nil
+		},
 	}
 	conn := newMarketInformationTestServer(t, srv)
 	client := NewMarketInformationClient(conn)
@@ -373,9 +405,25 @@ func TestMarketInformationClient_RegisterDataSet_AlreadyExists_LookupFails(t *te
 }
 
 func TestMarketInformationClient_ActivateDataSet_AlreadyActive_TreatedAsSuccess(t *testing.T) {
+	// Proactive check returns NotFound, ActivateDataSet returns FailedPrecondition,
+	// reactive fallback calls RetrieveDataSet again and finds ACTIVE.
+	callCount := 0
 	srv := &fakeMarketInformationServer{
 		activateDataSetErr: status.Error(codes.FailedPrecondition, "invalid status transition: ACTIVE to ACTIVE"),
-		// RetrieveDataSet returns ACTIVE status, confirming idempotent completion
+		retrieveDataSetFn: func(_ context.Context, req *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, status.Error(codes.NotFound, "dataset not found")
+			}
+			return &marketinformationv1.RetrieveDataSetResponse{
+				Dataset: &marketinformationv1.DataSetDefinition{
+					Id:      "ds-existing-uuid",
+					Code:    req.Code,
+					Version: 1,
+					Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE,
+				},
+			}, nil
+		},
 	}
 	conn := newMarketInformationTestServer(t, srv)
 	client := NewMarketInformationClient(conn)
@@ -413,4 +461,211 @@ func TestMarketInformationClient_ActivateDataSet_NotActive_ErrorPropagated(t *te
 	})
 	require.Error(t, err, "FailedPrecondition for non-ACTIVE should propagate")
 	assert.Contains(t, err.Error(), "activate data set")
+}
+
+// ─── Proactive idempotency tests ──────────────────────────────────────────
+
+func TestMarketInformationClient_RegisterDataSource_ProactiveCheck_AlreadyExists(t *testing.T) {
+	// ListDataSources returns the source, so RegisterDataSource should never be called.
+	registerCalled := false
+	srv := &fakeMarketInformationServer{
+		listDataSourcesFn: func(_ context.Context, _ *marketinformationv1.ListDataSourcesRequest) (*marketinformationv1.ListDataSourcesResponse, error) {
+			return &marketinformationv1.ListDataSourcesResponse{
+				Sources: []*marketinformationv1.DataSource{
+					{Id: "existing-src-uuid", Code: "BLOOMBERG"},
+				},
+			}, nil
+		},
+		registerDataSourceFn: func(_ context.Context, _ *marketinformationv1.RegisterDataSourceRequest) (*marketinformationv1.RegisterDataSourceResponse, error) {
+			registerCalled = true
+			return nil, status.Error(codes.AlreadyExists, "should not be called")
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.RegisterDataSource(testStarlarkCtx(), map[string]any{
+		"code": "BLOOMBERG",
+	})
+	require.NoError(t, err, "proactive check should return success for existing data source")
+	assert.False(t, registerCalled, "RegisterDataSource gRPC should not be called when proactive check finds source")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "existing-src-uuid", m["source_id"])
+	assert.Equal(t, "BLOOMBERG", m["code"])
+	assert.Equal(t, "REGISTERED", m["status"])
+}
+
+func TestMarketInformationClient_RegisterDataSource_ProactiveCheck_NotFound_ProceedsToCreate(t *testing.T) {
+	// ListDataSources returns empty, so handler proceeds to RegisterDataSource.
+	srv := &fakeMarketInformationServer{
+		listDataSourcesFn: func(_ context.Context, _ *marketinformationv1.ListDataSourcesRequest) (*marketinformationv1.ListDataSourcesResponse, error) {
+			return &marketinformationv1.ListDataSourcesResponse{}, nil
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.RegisterDataSource(testStarlarkCtx(), map[string]any{
+		"code": "NEW_SOURCE",
+	})
+	require.NoError(t, err, "should proceed to create when proactive check finds no source")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "src-uuid-1", m["source_id"])
+	assert.Equal(t, "NEW_SOURCE", m["code"])
+}
+
+func TestMarketInformationClient_RegisterDataSource_ProactiveCheck_ListFails_ProceedsToCreate(t *testing.T) {
+	// ListDataSources returns an error, so handler proceeds to RegisterDataSource.
+	srv := &fakeMarketInformationServer{
+		listDataSourcesFn: func(_ context.Context, _ *marketinformationv1.ListDataSourcesRequest) (*marketinformationv1.ListDataSourcesResponse, error) {
+			return nil, status.Error(codes.Internal, "database unavailable")
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.RegisterDataSource(testStarlarkCtx(), map[string]any{
+		"code": "FALLTHROUGH",
+	})
+	require.NoError(t, err, "should proceed to create when proactive check fails")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "src-uuid-1", m["source_id"])
+}
+
+func TestMarketInformationClient_RegisterDataSet_ProactiveCheck_AlreadyExists(t *testing.T) {
+	// RetrieveDataSet returns the existing dataset, so RegisterDataSet should never be called.
+	registerCalled := false
+	srv := &fakeMarketInformationServer{
+		retrieveDataSetFn: func(_ context.Context, req *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return &marketinformationv1.RetrieveDataSetResponse{
+				Dataset: &marketinformationv1.DataSetDefinition{
+					Id:      "ds-existing-uuid",
+					Code:    req.Code,
+					Version: 1,
+					Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_DRAFT,
+				},
+			}, nil
+		},
+		registerDataSetFn: func(_ context.Context, _ *marketinformationv1.RegisterDataSetRequest) (*marketinformationv1.RegisterDataSetResponse, error) {
+			registerCalled = true
+			return nil, status.Error(codes.AlreadyExists, "should not be called")
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.RegisterDataSet(testStarlarkCtx(), map[string]any{
+		"code": "EXISTING_DS",
+	})
+	require.NoError(t, err, "proactive check should return success for existing data set")
+	assert.False(t, registerCalled, "RegisterDataSet gRPC should not be called when proactive check finds dataset")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "ds-existing-uuid", m["dataset_id"])
+	assert.Equal(t, "EXISTING_DS", m["code"])
+}
+
+func TestMarketInformationClient_RegisterDataSet_ProactiveCheck_NotFound_ProceedsToCreate(t *testing.T) {
+	// RetrieveDataSet returns NotFound, so handler proceeds to RegisterDataSet.
+	srv := &fakeMarketInformationServer{
+		retrieveDataSetFn: func(_ context.Context, _ *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return nil, status.Error(codes.NotFound, "dataset not found")
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.RegisterDataSet(testStarlarkCtx(), map[string]any{
+		"code": "NEW_DS",
+	})
+	require.NoError(t, err, "should proceed to create when proactive check returns NotFound")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "ds-uuid-1", m["dataset_id"])
+	assert.Equal(t, "NEW_DS", m["code"])
+}
+
+func TestMarketInformationClient_ActivateDataSet_ProactiveCheck_AlreadyActive(t *testing.T) {
+	// RetrieveDataSet returns ACTIVE, so ActivateDataSet should never be called.
+	activateCalled := false
+	srv := &fakeMarketInformationServer{
+		retrieveDataSetFn: func(_ context.Context, req *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return &marketinformationv1.RetrieveDataSetResponse{
+				Dataset: &marketinformationv1.DataSetDefinition{
+					Id:      "ds-existing-uuid",
+					Code:    req.Code,
+					Version: 1,
+					Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE,
+				},
+			}, nil
+		},
+		activateDataSetFn: func(_ context.Context, _ *marketinformationv1.ActivateDataSetRequest) (*marketinformationv1.ActivateDataSetResponse, error) {
+			activateCalled = true
+			return nil, status.Error(codes.FailedPrecondition, "should not be called")
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.ActivateDataSet(testStarlarkCtx(), map[string]any{
+		"code":    "ALREADY_ACTIVE",
+		"version": int32(1),
+	})
+	require.NoError(t, err, "proactive check should return success for already-ACTIVE data set")
+	assert.False(t, activateCalled, "ActivateDataSet gRPC should not be called when proactive check finds ACTIVE")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "ds-existing-uuid", m["dataset_id"])
+	assert.Equal(t, "ALREADY_ACTIVE", m["code"])
+	assert.Contains(t, m["status"].(string), "ACTIVE")
+}
+
+func TestMarketInformationClient_ActivateDataSet_ProactiveCheck_Draft_ProceedsToActivate(t *testing.T) {
+	// RetrieveDataSet returns DRAFT, so handler proceeds to ActivateDataSet.
+	srv := &fakeMarketInformationServer{
+		retrieveDataSetFn: func(_ context.Context, req *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return &marketinformationv1.RetrieveDataSetResponse{
+				Dataset: &marketinformationv1.DataSetDefinition{
+					Id:      "ds-uuid-1",
+					Code:    req.Code,
+					Version: 1,
+					Status:  marketinformationv1.DataSetStatus_DATA_SET_STATUS_DRAFT,
+				},
+			}, nil
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.ActivateDataSet(testStarlarkCtx(), map[string]any{
+		"code":    "DRAFT_DS",
+		"version": int32(1),
+	})
+	require.NoError(t, err, "should proceed to activate when data set is DRAFT")
+
+	m := result.(map[string]any)
+	assert.Contains(t, m["status"].(string), "ACTIVE")
+}
+
+func TestMarketInformationClient_ActivateDataSet_ProactiveCheck_LookupFails_ProceedsToActivate(t *testing.T) {
+	// RetrieveDataSet fails, so handler proceeds to ActivateDataSet.
+	srv := &fakeMarketInformationServer{
+		retrieveDataSetFn: func(_ context.Context, _ *marketinformationv1.RetrieveDataSetRequest) (*marketinformationv1.RetrieveDataSetResponse, error) {
+			return nil, status.Error(codes.NotFound, "dataset not found")
+		},
+	}
+	conn := newMarketInformationTestServer(t, srv)
+	client := NewMarketInformationClient(conn)
+
+	result, err := client.ActivateDataSet(testStarlarkCtx(), map[string]any{
+		"code":    "MISSING_DS",
+		"version": int32(1),
+	})
+	require.NoError(t, err, "should proceed to activate when proactive lookup fails")
+
+	m := result.(map[string]any)
+	assert.Contains(t, m["status"].(string), "ACTIVE")
 }
