@@ -535,11 +535,12 @@ func TestApplyManifest_ExpectedSequenceNumber_NoHistoryService_SkipsCheck(t *tes
 	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN, resp.Status)
 }
 
-func TestApplyManifest_SkipImmutabilityChecks_NotDryRun_StillEnforces(t *testing.T) {
+func TestApplyManifest_SkipImmutabilityChecks_NotDryRun_NoImmutabilityErrors(t *testing.T) {
 	prev := newTestManifest()
 	handler := newTestHandlerWithVersionStore(t, prev)
 
-	// Change instrument code — triggers IMMUTABLE_FIELD_CHANGED
+	// Change instrument code - validateImmutability is now a no-op, so this
+	// should not produce IMMUTABLE_FIELD_CHANGED errors regardless of flags.
 	curr := newTestManifest()
 	curr.Instruments[0].Code = "USD"
 	curr.AccountTypes[0].AllowedInstruments = []string{"USD"}
@@ -548,24 +549,17 @@ func TestApplyManifest_SkipImmutabilityChecks_NotDryRun_StillEnforces(t *testing
 		Manifest:               curr,
 		DryRun:                 false,
 		AppliedBy:              "test-user",
-		SkipImmutabilityChecks: true, // should be ignored because dry_run=false
+		SkipImmutabilityChecks: true,
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Should fail validation because skip_immutability_checks is ignored when dry_run=false
-	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_VALIDATION_FAILED, resp.Status,
-		"expected VALIDATION_FAILED when skip_immutability_checks is set but dry_run=false")
-
-	found := false
+	// No IMMUTABLE_FIELD_CHANGED errors since the check is a no-op
 	for _, ve := range resp.ValidationErrors {
-		if ve.Code == "IMMUTABLE_FIELD_CHANGED" {
-			found = true
-			break
-		}
+		assert.NotEqual(t, "IMMUTABLE_FIELD_CHANGED", ve.Code,
+			"unexpected IMMUTABLE_FIELD_CHANGED error: %s", ve.Message)
 	}
-	assert.True(t, found, "expected IMMUTABLE_FIELD_CHANGED error when dry_run=false, regardless of skip flag")
 }
 
 // --- Phase Status Tests ---

@@ -797,7 +797,7 @@ func TestValidateCrossRef_WithSuggestion(t *testing.T) {
 	}
 }
 
-func TestValidateImmutability_InstrumentCodeChanged(t *testing.T) {
+func TestValidateImmutability_InstrumentCodeChanged_NoImmutabilityError(t *testing.T) {
 	v, err := New()
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
@@ -808,26 +808,16 @@ func TestValidateImmutability_InstrumentCodeChanged(t *testing.T) {
 	curr.Instruments[0].Code = "USD" // Changed from GBP
 
 	result := v.Validate(curr, prev)
-	if result.Valid {
-		t.Error("expected invalid manifest for changed instrument code")
-	}
-
-	found := false
+	// validateImmutability is now a no-op - removals are caught by destructive changes.
+	// There should be no IMMUTABLE_FIELD_CHANGED errors.
 	for _, e := range result.Errors {
-		if e.Code == "IMMUTABLE_FIELD_CHANGED" && strings.Contains(e.Path, "instruments") {
-			found = true
-			if !strings.Contains(e.Message, "GBP") || !strings.Contains(e.Message, "USD") {
-				t.Errorf("expected message to mention old and new codes, got: %s", e.Message)
-			}
-			break
+		if e.Code == "IMMUTABLE_FIELD_CHANGED" {
+			t.Errorf("unexpected IMMUTABLE_FIELD_CHANGED error: %s", e.Message)
 		}
-	}
-	if !found {
-		t.Error("expected IMMUTABLE_FIELD_CHANGED error for instruments")
 	}
 }
 
-func TestValidateImmutability_AccountTypeCodeChanged(t *testing.T) {
+func TestValidateImmutability_AccountTypeCodeChanged_NoImmutabilityError(t *testing.T) {
 	v, err := New()
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
@@ -838,19 +828,11 @@ func TestValidateImmutability_AccountTypeCodeChanged(t *testing.T) {
 	curr.AccountTypes[0].Code = "SAVINGS" // Changed from SETTLEMENT
 
 	result := v.Validate(curr, prev)
-	if result.Valid {
-		t.Error("expected invalid manifest for changed account type code")
-	}
-
-	found := false
+	// validateImmutability is now a no-op - removals are caught by destructive changes.
 	for _, e := range result.Errors {
-		if e.Code == "IMMUTABLE_FIELD_CHANGED" && strings.Contains(e.Path, "account_types") {
-			found = true
-			break
+		if e.Code == "IMMUTABLE_FIELD_CHANGED" {
+			t.Errorf("unexpected IMMUTABLE_FIELD_CHANGED error: %s", e.Message)
 		}
-	}
-	if !found {
-		t.Error("expected IMMUTABLE_FIELD_CHANGED error for account_types")
 	}
 }
 
@@ -2966,7 +2948,7 @@ func TestWithSkipImmutabilityChecks_SkipsDestructiveRemoval(t *testing.T) {
 	}
 }
 
-func TestWithoutSkipImmutabilityChecks_StillEnforcesImmutability(t *testing.T) {
+func TestWithoutSkipImmutabilityChecks_NoImmutabilityErrors(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)
 
@@ -2975,16 +2957,10 @@ func TestWithoutSkipImmutabilityChecks_StillEnforcesImmutability(t *testing.T) {
 	curr.Instruments[0].Code = "USD" // Changed from GBP
 
 	result := v.Validate(curr, prev)
-	assert.False(t, result.Valid)
-
-	found := false
+	// validateImmutability is now a no-op - no IMMUTABLE_FIELD_CHANGED errors expected.
 	for _, e := range result.Errors {
-		if e.Code == "IMMUTABLE_FIELD_CHANGED" {
-			found = true
-			break
-		}
+		assert.NotEqual(t, "IMMUTABLE_FIELD_CHANGED", e.Code, "unexpected IMMUTABLE_FIELD_CHANGED error: %s", e.Message)
 	}
-	assert.True(t, found, "expected IMMUTABLE_FIELD_CHANGED error without skip option")
 }
 
 // --- Market Data validation tests ---

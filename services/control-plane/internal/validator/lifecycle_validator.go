@@ -97,50 +97,16 @@ func (v *ManifestValidator) detectOrphanInstructionRoutes(
 	}
 }
 
-// validateImmutability checks that immutable code fields have not been changed.
+// validateImmutability is intentionally a no-op. The previous implementation matched
+// instruments and account types by array index position, which produced false positives
+// whenever manifests had different compositions (e.g. applying an energy manifest after
+// a banking manifest). Codes are primary keys and identity is code-based, so a "rename"
+// is actually a removal + addition - already caught by validateDestructiveChanges.
 func (v *ManifestValidator) validateImmutability(
-	current *controlplanev1.Manifest,
-	previous *controlplanev1.Manifest,
-	result *ValidationResult,
+	_ *controlplanev1.Manifest,
+	_ *controlplanev1.Manifest,
+	_ *ValidationResult,
 ) {
-	// Build maps of previous codes by index position to detect renames
-	prevInstrumentsByIdx := make(map[int]string)
-	for i, inst := range previous.GetInstruments() {
-		prevInstrumentsByIdx[i] = inst.GetCode()
-	}
-
-	prevAccountTypesByIdx := make(map[int]string)
-	for i, acct := range previous.GetAccountTypes() {
-		prevAccountTypesByIdx[i] = acct.GetCode()
-	}
-
-	// Check instruments: detect code changes at same index position
-	for i, inst := range current.GetInstruments() {
-		if prevCode, existed := prevInstrumentsByIdx[i]; existed {
-			if inst.GetCode() != prevCode {
-				addError(result, ValidationError{
-					Severity: SeverityError,
-					Path:     fmt.Sprintf("instruments[%d].code", i),
-					Code:     "IMMUTABLE_FIELD_CHANGED",
-					Message:  fmt.Sprintf("instrument code changed from %q to %q; codes are immutable primary keys", prevCode, inst.GetCode()),
-				})
-			}
-		}
-	}
-
-	// Check account types: detect code changes at same index position
-	for i, acct := range current.GetAccountTypes() {
-		if prevCode, existed := prevAccountTypesByIdx[i]; existed {
-			if acct.GetCode() != prevCode {
-				addError(result, ValidationError{
-					Severity: SeverityError,
-					Path:     fmt.Sprintf("account_types[%d].code", i),
-					Code:     "IMMUTABLE_FIELD_CHANGED",
-					Message:  fmt.Sprintf("account type code changed from %q to %q; codes are immutable primary keys", prevCode, acct.GetCode()),
-				})
-			}
-		}
-	}
 }
 
 // validateDestructiveChanges detects removal of resources that have dependencies in the
