@@ -111,7 +111,10 @@ func NewGRPCLiveStateProvider(
 // tenantID is propagated via gRPC metadata so downstream services scope queries to the correct tenant.
 // Returns an error if any service query fails.
 func (p *GRPCLiveStateProvider) QueryLiveState(ctx context.Context, tenantID string) (*LiveState, error) {
-	ctx = metadata.AppendToOutgoingContext(ctx, tenant.TenantIDKey, tenantID)
+	md, _ := metadata.FromOutgoingContext(ctx)
+	md = md.Copy()
+	md.Set(tenant.TenantIDKey, tenantID)
+	ctx = metadata.NewOutgoingContext(ctx, md)
 
 	state := &LiveState{}
 	g, gctx := errgroup.WithContext(ctx)
