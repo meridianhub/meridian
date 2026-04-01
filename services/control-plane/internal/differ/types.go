@@ -81,6 +81,16 @@ func (p *DiffPlan) Summary() string {
 	for _, a := range p.Actions {
 		counts[a.Action]++
 	}
+	if counts[ActionDeprecate] > 0 {
+		return fmt.Sprintf(
+			"%d to create, %d to update, %d to delete, %d to deprecate, %d no-change",
+			counts[ActionCreate],
+			counts[ActionUpdate],
+			counts[ActionDelete],
+			counts[ActionDeprecate],
+			counts[ActionNoChange],
+		)
+	}
 	return fmt.Sprintf(
 		"%d to create, %d to update, %d to delete, %d no-change",
 		counts[ActionCreate],
