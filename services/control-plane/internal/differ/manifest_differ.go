@@ -39,6 +39,11 @@ func New(safety SafetyChecker, drift DriftDetector, liveState LiveStateProvider)
 	}
 }
 
+// HasLiveState reports whether the differ is configured with a LiveStateProvider.
+func (d *ManifestDiffer) HasLiveState() bool {
+	return d.liveState != nil
+}
+
 // DiffOption configures optional behavior of a Diff call.
 type DiffOption func(*diffConfig)
 

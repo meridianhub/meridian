@@ -180,7 +180,7 @@ func (h *ApplyManifestHandler) applyPlanAndExecute(
 	}
 
 	logger.Info("step 4: executing manifest apply")
-	execResult := h.execute(ctx, req, execPlan)
+	execResult := h.execute(ctx, req, execPlan, diffResult.plan)
 	response.StepResults = append(response.StepResults, execResult.stepResult)
 	response.JobId = execResult.jobID
 
@@ -383,8 +383,48 @@ type diffOutput struct {
 	err        error
 }
 
-// diff compares the new manifest against the last-applied manifest.
+// diff compares the new manifest against live state (convergent) or the last-applied
+// manifest (legacy). When a LiveStateProvider is configured, uses DiffAgainstLiveState
+// for three-way comparison; otherwise falls back to stored-manifest diff.
 func (h *ApplyManifestHandler) diff(
+	ctx context.Context,
+	mf *controlplanev1.Manifest,
+	skipImmutability bool,
+) diffOutput {
+	// Use live-state diff when the differ has a provider configured and we're not
+	// skipping immutability (skipImmutability means new-tenant mode where everything is CREATE).
+	if h.differ.HasLiveState() && !skipImmutability {
+		return h.diffAgainstLiveState(ctx, mf)
+	}
+
+	return h.diffAgainstStoredManifest(ctx, mf, skipImmutability)
+}
+
+// diffAgainstLiveState queries downstream services and diffs the desired manifest
+// against the actual live state, enabling convergent apply semantics.
+func (h *ApplyManifestHandler) diffAgainstLiveState(
+	ctx context.Context,
+	mf *controlplanev1.Manifest,
+) diffOutput {
+	tenantID, _ := tenant.FromContext(ctx)
+
+	diffPlan, err := h.differ.DiffAgainstLiveState(ctx, string(tenantID), mf)
+	if err != nil {
+		return diffOutput{
+			err: err,
+			stepResult: &controlplanev1.StepResult{
+				StepName: "diff",
+				Status:   controlplanev1.StepResultStatus_STEP_RESULT_STATUS_FAILED,
+				Message:  fmt.Sprintf("Live-state diff failed: %s", err.Error()),
+			},
+		}
+	}
+
+	return buildDiffOutput(diffPlan)
+}
+
+// diffAgainstStoredManifest compares against the last-applied stored manifest (legacy path).
+func (h *ApplyManifestHandler) diffAgainstStoredManifest(
 	ctx context.Context,
 	mf *controlplanev1.Manifest,
 	skipImmutability bool,
@@ -422,6 +462,11 @@ func (h *ApplyManifestHandler) diff(
 		}
 	}
 
+	return buildDiffOutput(diffPlan)
+}
+
+// buildDiffOutput constructs a diffOutput from a successful DiffPlan.
+func buildDiffOutput(diffPlan *differ.DiffPlan) diffOutput {
 	summary := diffPlan.Summary()
 	step := &controlplanev1.StepResult{
 		StepName: "diff",
@@ -480,6 +525,7 @@ func (h *ApplyManifestHandler) execute(
 	ctx context.Context,
 	req *controlplanev1.ApplyManifestRequest,
 	execPlan *planner.ExecutionPlan,
+	diffPlan *differ.DiffPlan,
 ) executeOutput {
 	if h.executor == nil {
 		return executeOutput{
@@ -492,11 +538,8 @@ func (h *ApplyManifestHandler) execute(
 		}
 	}
 
-	// Build executor input from the manifest
-	input := buildExecutorInput(req.GetManifest())
+	input := buildInput(req.GetManifest(), diffPlan)
 	input.TenantID = execPlan.TenantID
-
-	// Derive phase status from execution plan phases
 	phaseStatus := buildInitialPhaseStatus(execPlan)
 
 	result, err := h.executor.Apply(ctx, input)

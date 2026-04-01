@@ -11,6 +11,16 @@ import (
 // defaultDimension is the fallback dimension for instruments when the type cannot be derived.
 const defaultDimension = "CURRENCY"
 
+// buildInput selects the appropriate executor input builder. When a diff plan is
+// available, only actionable resources (CREATE/UPDATE/DEPRECATE) are included;
+// otherwise all manifest resources are sent (legacy path).
+func buildInput(mf *controlplanev1.Manifest, diffPlan *differ.DiffPlan) *ApplyManifestInput {
+	if diffPlan != nil {
+		return buildExecutorInputFromPlan(mf, diffPlan)
+	}
+	return buildExecutorInput(mf)
+}
+
 // buildExecutorInput converts a Manifest proto into the ApplyManifestInput
 // consumed by the saga-based ManifestExecutor.
 func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {

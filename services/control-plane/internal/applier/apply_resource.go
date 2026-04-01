@@ -177,10 +177,12 @@ func (h *ApplyManifestHandler) applyResourceExecute(
 	logger *slog.Logger,
 ) (*controlplanev1.ApplyResourceResponse, error) {
 	logger.Info("executing resource apply")
+	// ApplyResource sends the full patched manifest (nil diffPlan) because
+	// the resource patch path does not compute a live-state diff.
 	execResult := h.execute(ctx, &controlplanev1.ApplyManifestRequest{
 		Manifest:  patchedManifest,
 		AppliedBy: req.GetAppliedBy(),
-	}, execPlan)
+	}, execPlan, nil)
 	response.StepResults = append(response.StepResults, execResult.stepResult)
 
 	if execResult.err != nil {

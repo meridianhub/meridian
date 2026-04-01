@@ -1178,7 +1178,7 @@ func TestExecute_NilExecutor(t *testing.T) {
 	result := handler.execute(context.Background(), &controlplanev1.ApplyManifestRequest{
 		Manifest:  newTestManifest(),
 		AppliedBy: "test",
-	}, plan)
+	}, plan, nil)
 
 	assert.Error(t, result.err)
 	assert.ErrorIs(t, result.err, ErrExecutorNotConfigured)
