@@ -400,7 +400,12 @@ func applyDatabaseMigrations(ctx context.Context, dsn, dbName string, migrations
 
 		logger.Info("applying migration", "database", dbName, "service", m.service, "file", m.filename)
 
-		if _, err := conn.Exec(ctx, m.sql); err != nil {
+		sql := m.sql
+		if driver == DriverPostgres {
+			sql = adaptCockroachDDLForPostgres(sql)
+		}
+
+		if _, err := conn.Exec(ctx, sql); err != nil {
 			return fmt.Errorf("execute %s/%s: %w", m.service, m.filename, err)
 		}
 
@@ -589,4 +594,23 @@ func runPostgresPreMigrationFixups(ctx context.Context, superuserDSN string, dri
 	}
 
 	return nil
+}
+
+// adaptCockroachDDLForPostgres rewrites CockroachDB-specific DDL to work on PostgreSQL.
+//
+// Migrations are written for CockroachDB (production). When running against
+// PostgreSQL (demo, local dev), this function translates known incompatibilities:
+//   - DROP INDEX CASCADE for unique constraints -> ALTER TABLE DROP CONSTRAINT
+func adaptCockroachDDLForPostgres(sql string) string {
+	// CockroachDB uses DROP INDEX CASCADE for unique constraints;
+	// PostgreSQL requires ALTER TABLE DROP CONSTRAINT.
+	sql = strings.ReplaceAll(sql,
+		`DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`,
+		`ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`,
+	)
+	sql = strings.ReplaceAll(sql,
+		`DROP INDEX IF EXISTS uq_manifest_version_version CASCADE`,
+		`ALTER TABLE manifest_version DROP CONSTRAINT IF EXISTS uq_manifest_version_version`,
+	)
+	return sql
 }
