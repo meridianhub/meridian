@@ -174,6 +174,7 @@ export function InstrumentsPage() {
     },
   ]
 
+  const hasFiredBadgeRef = React.useRef(false)
   const queryFn = async (params: ListInstrumentsParams): Promise<ListInstrumentsResult> => {
     const statusValue = params.filters?.status
     const dimValue = params.filters?.dimension
@@ -183,10 +184,9 @@ export function InstrumentsPage() {
       pageSize: params.pageSize,
       pageToken: params.pageToken ?? '',
     })
-    if (!params.pageToken) { const pc = instruments.filter((i) => i.isSystem).length; if (pc) track('economy.platform_badge_visible', { page: 'instruments', platform_count: pc, tenant_count: instruments.length - pc }) }
+    if (!hasFiredBadgeRef.current) { hasFiredBadgeRef.current = true; const pc = instruments.filter((i) => i.isSystem).length; if (pc) track('economy.platform_badge_visible', { page: 'instruments', platform_count: pc, tenant_count: instruments.length - pc }) }
     return { items: instruments, nextPageToken }
   }
-
   return (
     <PageShell>
       <Breadcrumbs items={[
