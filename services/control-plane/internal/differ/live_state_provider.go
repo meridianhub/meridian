@@ -119,12 +119,12 @@ func (p *GRPCLiveStateProvider) QueryLiveState(ctx context.Context, tenantID str
 	state := &LiveState{}
 	g, gctx := errgroup.WithContext(ctx)
 
-	p.scheduleReferenceDataQueries(g, gctx, state)
-	p.scheduleSagaQuery(g, gctx, state)
-	p.scheduleMarketDataQueries(g, gctx, state)
-	p.schedulePartyQuery(g, gctx, state)
-	p.scheduleInternalAccountQuery(g, gctx, state)
-	p.scheduleOperationalGatewayQueries(g, gctx, state)
+	p.scheduleReferenceDataQueries(gctx, g, state)
+	p.scheduleSagaQuery(gctx, g, state)
+	p.scheduleMarketDataQueries(gctx, g, state)
+	p.schedulePartyQuery(gctx, g, state)
+	p.scheduleInternalAccountQuery(gctx, g, state)
+	p.scheduleOperationalGatewayQueries(gctx, g, state)
 
 	if err := g.Wait(); err != nil {
 		return nil, fmt.Errorf("query live state: %w", err)
@@ -132,7 +132,7 @@ func (p *GRPCLiveStateProvider) QueryLiveState(ctx context.Context, tenantID str
 	return state, nil
 }
 
-func (p *GRPCLiveStateProvider) scheduleReferenceDataQueries(g *errgroup.Group, ctx context.Context, state *LiveState) {
+func (p *GRPCLiveStateProvider) scheduleReferenceDataQueries(ctx context.Context, g *errgroup.Group, state *LiveState) {
 	g.Go(func() error {
 		instruments, err := p.referenceData.ListInstruments(ctx)
 		if err != nil {
@@ -151,7 +151,7 @@ func (p *GRPCLiveStateProvider) scheduleReferenceDataQueries(g *errgroup.Group, 
 	})
 }
 
-func (p *GRPCLiveStateProvider) scheduleSagaQuery(g *errgroup.Group, ctx context.Context, state *LiveState) {
+func (p *GRPCLiveStateProvider) scheduleSagaQuery(ctx context.Context, g *errgroup.Group, state *LiveState) {
 	g.Go(func() error {
 		sagas, err := p.sagaRegistry.ListSagas(ctx)
 		if err != nil {
@@ -162,7 +162,7 @@ func (p *GRPCLiveStateProvider) scheduleSagaQuery(g *errgroup.Group, ctx context
 	})
 }
 
-func (p *GRPCLiveStateProvider) scheduleMarketDataQueries(g *errgroup.Group, ctx context.Context, state *LiveState) {
+func (p *GRPCLiveStateProvider) scheduleMarketDataQueries(ctx context.Context, g *errgroup.Group, state *LiveState) {
 	g.Go(func() error {
 		sources, err := p.marketInformation.ListMarketDataSources(ctx)
 		if err != nil {
@@ -181,7 +181,7 @@ func (p *GRPCLiveStateProvider) scheduleMarketDataQueries(g *errgroup.Group, ctx
 	})
 }
 
-func (p *GRPCLiveStateProvider) schedulePartyQuery(g *errgroup.Group, ctx context.Context, state *LiveState) {
+func (p *GRPCLiveStateProvider) schedulePartyQuery(ctx context.Context, g *errgroup.Group, state *LiveState) {
 	g.Go(func() error {
 		orgs, err := p.party.ListOrganizations(ctx)
 		if err != nil {
@@ -192,7 +192,7 @@ func (p *GRPCLiveStateProvider) schedulePartyQuery(g *errgroup.Group, ctx contex
 	})
 }
 
-func (p *GRPCLiveStateProvider) scheduleInternalAccountQuery(g *errgroup.Group, ctx context.Context, state *LiveState) {
+func (p *GRPCLiveStateProvider) scheduleInternalAccountQuery(ctx context.Context, g *errgroup.Group, state *LiveState) {
 	g.Go(func() error {
 		accounts, err := p.internalAccount.ListInternalAccounts(ctx)
 		if err != nil {
@@ -203,7 +203,7 @@ func (p *GRPCLiveStateProvider) scheduleInternalAccountQuery(g *errgroup.Group, 
 	})
 }
 
-func (p *GRPCLiveStateProvider) scheduleOperationalGatewayQueries(g *errgroup.Group, ctx context.Context, state *LiveState) {
+func (p *GRPCLiveStateProvider) scheduleOperationalGatewayQueries(ctx context.Context, g *errgroup.Group, state *LiveState) {
 	g.Go(func() error {
 		connections, err := p.operationalGateway.ListProviderConnections(ctx)
 		if err != nil {
