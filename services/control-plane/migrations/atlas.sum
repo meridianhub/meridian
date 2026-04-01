@@ -1,4 +1,4 @@
-h1:yZaI3WLJRpooHF2QvEq90phtGltUlW4pl/CV3bERLqU=
+h1:+dKKPQpmYoOWAuo+P6A7noRoAmaOi/61IH3INIWGqLQ=
 20260209000001_staff_identity.sql h1:OR9Cq4l2MfrW7It8jLDt0Kzg/z1th9KJdSlZEVpOhqA=
 20260209000002_create_manifest_versions.sql h1:+HzLzVoK1e/nPNN9wb56hb1yxxC9K2I53CpwAks6nCE=
 20260209000004_manifest_apply_jobs.sql h1:nq4MOflgbXAfdltITMKqKWHg9RuUXVs0mrIa2CDkIig=
@@ -10,4 +10,4 @@ h1:yZaI3WLJRpooHF2QvEq90phtGltUlW4pl/CV3bERLqU=
 20260317000001_platform_saga_definition.sql h1:f+CQuqVahzjjbNzUsDaYcYpBz5MvUHUOF4qwrrXtbJE=
 20260330000001_align_platform_saga_definition_columns.sql h1:LRJ0XLwdUYXTKWsAXvvQiXWnUMb7QUcvlrKdKG3q5Kk=
 20260330000002_align_platform_saga_definition_constraints.sql h1:Pv0/g8x8AVQYqu+5WmPOQvH1tQjdlnSm/TSEnm5K1mE=
-20260401000001_fix_version_column_type.sql h1:0jwsbCDfnteezAm/Rq/rGFWTpB8a7gszIy5MTxLztYQ=
+20260401000001_fix_version_column_type.sql h1:+kJk2qQJFnJNtWaw5uGquQhnLMu0nSbMinoYLQZuil0=

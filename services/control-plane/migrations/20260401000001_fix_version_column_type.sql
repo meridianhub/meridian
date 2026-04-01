@@ -10,6 +10,10 @@
 -- The test adapter (adaptCockroachDDLForPostgres) rewrites this for Postgres.
 DROP INDEX IF EXISTS uq_manifest_version_version CASCADE;
 
+-- CockroachDB requires enabling experimental support for int -> varchar type changes.
+-- This is a no-op on PostgreSQL (unrecognized variable is silently ignored by the adapter).
+SET enable_experimental_alter_column_type_general = true;
+
 -- Change the column type from INTEGER to VARCHAR(50) to match the GORM model.
 ALTER TABLE manifest_version ALTER COLUMN version SET DATA TYPE VARCHAR(50);
 
