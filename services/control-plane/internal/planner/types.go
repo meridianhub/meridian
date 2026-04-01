@@ -275,6 +275,8 @@ func actionSymbol(action differ.ActionType) string {
 		return "-"
 	case differ.ActionNoChange:
 		return "="
+	case differ.ActionDeprecate:
+		return "!"
 	}
 	return "?"
 }

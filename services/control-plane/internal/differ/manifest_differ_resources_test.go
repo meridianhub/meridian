@@ -13,7 +13,7 @@ import (
 // ─── diffInstruments ─────────────────────────────────────────────────────────
 
 func TestDiffInstruments_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
 			{Code: "GBP", Name: "British Pound", Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT},
@@ -29,7 +29,7 @@ func TestDiffInstruments_Create(t *testing.T) {
 }
 
 func TestDiffInstruments_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	last := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
 			{Code: "GBP", Name: "British Pound"},
@@ -51,7 +51,7 @@ func TestDiffInstruments_Delete(t *testing.T) {
 }
 
 func TestDiffInstruments_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	last := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
 			{Code: "GBP", Name: "Pound"},
@@ -72,7 +72,7 @@ func TestDiffInstruments_Update(t *testing.T) {
 }
 
 func TestDiffInstruments_NoChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
 			{Code: "GBP", Name: "British Pound"},
@@ -89,7 +89,7 @@ func TestDiffInstruments_NoChange(t *testing.T) {
 // ─── diffAccountTypes ────────────────────────────────────────────────────────
 
 func TestDiffAccountTypes_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		AccountTypes: []*controlplanev1.AccountTypeDefinition{
 			{Code: "SETTLEMENT", Name: "Settlement"},
@@ -105,7 +105,7 @@ func TestDiffAccountTypes_Create(t *testing.T) {
 }
 
 func TestDiffAccountTypes_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	last := &controlplanev1.Manifest{
 		AccountTypes: []*controlplanev1.AccountTypeDefinition{
 			{Code: "SETTLEMENT", Name: "Settlement"},
@@ -129,7 +129,7 @@ func TestDiffAccountTypes_Delete(t *testing.T) {
 // ─── diffValuationRules ──────────────────────────────────────────────────────
 
 func TestDiffValuationRules_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		ValuationRules: []*controlplanev1.ValuationRule{
 			{
@@ -149,7 +149,7 @@ func TestDiffValuationRules_Create(t *testing.T) {
 }
 
 func TestDiffValuationRules_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	last := &controlplanev1.Manifest{
 		ValuationRules: []*controlplanev1.ValuationRule{
 			{FromInstrument: "KWH", ToInstrument: "GBP"},
@@ -173,7 +173,7 @@ func TestDiffValuationRules_Delete(t *testing.T) {
 // ─── diffSagas ───────────────────────────────────────────────────────────────
 
 func TestDiffSagas_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		Sagas: []*controlplanev1.SagaDefinition{
 			{Name: "process_order", Trigger: "api:/v1/orders", Script: "def execute(ctx): pass"},
@@ -189,7 +189,7 @@ func TestDiffSagas_Create(t *testing.T) {
 }
 
 func TestDiffSagas_Update_ScriptChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	last := &controlplanev1.Manifest{
 		Sagas: []*controlplanev1.SagaDefinition{
 			{Name: "process_order", Trigger: "api:/v1/orders", Script: "old script"},
@@ -212,7 +212,7 @@ func TestDiffSagas_Update_ScriptChange(t *testing.T) {
 // ─── diffPartyTypes ──────────────────────────────────────────────────────────
 
 func TestDiffPartyTypes_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		PartyTypes: []*partyv1.PartyTypeDefinition{
 			{TenantId: "t1", PartyType: "CUSTOMER"},
@@ -230,7 +230,7 @@ func TestDiffPartyTypes_Create(t *testing.T) {
 // ─── diffOrganizations ───────────────────────────────────────────────────────
 
 func TestDiffOrganizations_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		Organizations: []*controlplanev1.OrganizationDefinition{
 			{Code: "PLATFORM", Name: "Platform", PartyType: "OPERATOR"},
@@ -246,7 +246,7 @@ func TestDiffOrganizations_Create(t *testing.T) {
 }
 
 func TestDiffOrganizations_Update_AttributeChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	last := &controlplanev1.Manifest{
 		Organizations: []*controlplanev1.OrganizationDefinition{
 			{Code: "PLATFORM", Name: "Platform", Attributes: map[string]string{"region": "EU"}},
@@ -268,7 +268,7 @@ func TestDiffOrganizations_Update_AttributeChange(t *testing.T) {
 // ─── diffMarketDataSources ───────────────────────────────────────────────────
 
 func TestDiffMarketDataSources_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		MarketData: &controlplanev1.MarketDataConfig{
 			Sources: []*controlplanev1.MarketDataSourceDefinition{
@@ -292,7 +292,7 @@ func TestDiffMarketDataSources_Create(t *testing.T) {
 // ─── diffInternalAccounts ────────────────────────────────────────────────────
 
 func TestDiffInternalAccounts_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := &controlplanev1.Manifest{
 		InternalAccounts: []*controlplanev1.InternalAccountDefinition{
 			{Code: "PLATFORM_REVENUE", AccountType: "REVENUE", Instrument: "GBP"},
@@ -310,7 +310,7 @@ func TestDiffInternalAccounts_Create(t *testing.T) {
 // ─── WithSkipSafetyChecks ────────────────────────────────────────────────────
 
 func TestDiffWithSkipSafetyChecks_AllowsDeletion(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	last := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
 			{Code: "OLD"},
@@ -329,7 +329,7 @@ func TestDiffWithSkipSafetyChecks_AllowsDeletion(t *testing.T) {
 // ─── DiffPlan.HasBreakingChanges ─────────────────────────────────────────────
 
 func TestDiffPlan_BreakingChangesFlaggedOnDelete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	last := &controlplanev1.Manifest{
 		Instruments: []*controlplanev1.InstrumentDefinition{
 			{Code: "GBP", Name: "British Pound"},

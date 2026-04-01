@@ -70,7 +70,7 @@ func testManifest() *controlplanev1.Manifest {
 }
 
 func TestDiff_NilLastApplied_AllCreates(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := testManifest()
 
 	plan, err := d.Diff(context.Background(), nil, manifest)
@@ -87,14 +87,14 @@ func TestDiff_NilLastApplied_AllCreates(t *testing.T) {
 }
 
 func TestDiff_NilNewManifest_ReturnsError(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	_, err := d.Diff(context.Background(), testManifest(), nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "new manifest cannot be nil")
 }
 
 func TestDiff_IdenticalManifests_AllNoChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := testManifest()
 
 	plan, err := d.Diff(context.Background(), manifest, manifest)
@@ -110,7 +110,7 @@ func TestDiff_IdenticalManifests_AllNoChange(t *testing.T) {
 }
 
 func TestDiff_AddedInstrument_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -134,7 +134,7 @@ func TestDiff_AddedInstrument_Create(t *testing.T) {
 }
 
 func TestDiff_RemovedInstrument_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -151,7 +151,7 @@ func TestDiff_RemovedInstrument_Delete(t *testing.T) {
 }
 
 func TestDiff_ModifiedInstrument_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -167,7 +167,7 @@ func TestDiff_ModifiedInstrument_Update(t *testing.T) {
 }
 
 func TestDiff_ModifiedInstrumentType_DescribesChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -183,7 +183,7 @@ func TestDiff_ModifiedInstrumentType_DescribesChange(t *testing.T) {
 }
 
 func TestDiff_ModifiedAccountType_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -199,7 +199,7 @@ func TestDiff_ModifiedAccountType_Update(t *testing.T) {
 }
 
 func TestDiff_ModifiedAccountTypeName_DescribesChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -214,7 +214,7 @@ func TestDiff_ModifiedAccountTypeName_DescribesChange(t *testing.T) {
 }
 
 func TestDiff_ModifiedSaga_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -230,7 +230,7 @@ func TestDiff_ModifiedSaga_Update(t *testing.T) {
 }
 
 func TestDiff_ModifiedSagaTrigger_DescribesChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -245,7 +245,7 @@ func TestDiff_ModifiedSagaTrigger_DescribesChange(t *testing.T) {
 }
 
 func TestDiff_AddedSaga_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -265,7 +265,7 @@ func TestDiff_AddedSaga_Create(t *testing.T) {
 }
 
 func TestDiff_RemovedSaga_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -281,7 +281,7 @@ func TestDiff_RemovedSaga_Delete(t *testing.T) {
 }
 
 func TestDiff_RemovedAccountType_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -296,7 +296,7 @@ func TestDiff_RemovedAccountType_Delete(t *testing.T) {
 }
 
 func TestDiff_ValuationRuleAdded(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -316,7 +316,7 @@ func TestDiff_ValuationRuleAdded(t *testing.T) {
 }
 
 func TestDiff_ValuationRuleModified(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -331,7 +331,7 @@ func TestDiff_ValuationRuleModified(t *testing.T) {
 }
 
 func TestDiff_ValuationRuleRemoved(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -346,7 +346,7 @@ func TestDiff_ValuationRuleRemoved(t *testing.T) {
 }
 
 func TestDiff_MultipleChanges_MixedActions(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -388,7 +388,7 @@ func TestDiff_MultipleChanges_MixedActions(t *testing.T) {
 }
 
 func TestDiff_EmptyManifests_NoActions(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	empty := &controlplanev1.Manifest{
 		Version:  "1.0",
 		Metadata: &controlplanev1.ManifestMetadata{Name: "Empty"},
@@ -410,7 +410,7 @@ func TestDiff_SafetyChecker_BlocksDeletion(t *testing.T) {
 			},
 		},
 	}
-	d := New(checker, nil)
+	d := New(checker, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -435,7 +435,7 @@ func TestDiff_SafetyChecker_BlocksInstrumentDeletion(t *testing.T) {
 			},
 		},
 	}
-	d := New(checker, nil)
+	d := New(checker, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -459,7 +459,7 @@ func TestDiff_SafetyChecker_BlocksSagaDeletion(t *testing.T) {
 			},
 		},
 	}
-	d := New(checker, nil)
+	d := New(checker, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -475,7 +475,7 @@ func TestDiff_SafetyChecker_BlocksSagaDeletion(t *testing.T) {
 
 func TestDiff_SafetyChecker_AllowsDeletionWhenNothingBlocked(t *testing.T) {
 	checker := &mockSafetyChecker{} // no blocked resources
-	d := New(checker, nil)
+	d := New(checker, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -492,7 +492,7 @@ func TestDiff_SafetyChecker_ErrorPropagates(t *testing.T) {
 	checker := &mockSafetyChecker{
 		err: fmt.Errorf("connection refused"),
 	}
-	d := New(checker, nil)
+	d := New(checker, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -513,7 +513,7 @@ func TestDiff_DriftDetector_WarningsIncluded(t *testing.T) {
 			},
 		},
 	}
-	d := New(nil, detector)
+	d := New(nil, detector, nil)
 	manifest := testManifest()
 
 	plan, err := d.Diff(context.Background(), manifest, manifest)
@@ -528,7 +528,7 @@ func TestDiff_DriftDetector_NotCalledWhenNoLastApplied(t *testing.T) {
 	detector := &mockDriftDetector{
 		called: false,
 	}
-	d := New(nil, detector)
+	d := New(nil, detector, nil)
 
 	plan, err := d.Diff(context.Background(), nil, testManifest())
 	require.NoError(t, err)
@@ -541,7 +541,7 @@ func TestDiff_DriftDetector_ErrorPropagates(t *testing.T) {
 	detector := &mockDriftDetector{
 		err: fmt.Errorf("database unreachable"),
 	}
-	d := New(nil, detector)
+	d := New(nil, detector, nil)
 	manifest := testManifest()
 
 	_, err := d.Diff(context.Background(), manifest, manifest)
@@ -550,7 +550,7 @@ func TestDiff_DriftDetector_ErrorPropagates(t *testing.T) {
 }
 
 func TestDiff_DeterministicOrdering(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 
 	plan, err := d.Diff(context.Background(), nil, testManifest())
 	require.NoError(t, err)
@@ -605,7 +605,7 @@ func TestDiffPlan_BlockedDeletionErrors(t *testing.T) {
 }
 
 func TestDiff_BreakingChangeFlagging(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -718,7 +718,7 @@ func testPartyTypeDefinition(tenantID, partyType, schema string) *partyv1.PartyT
 }
 
 func TestDiff_PartyTypeAdded_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -736,7 +736,7 @@ func TestDiff_PartyTypeAdded_Create(t *testing.T) {
 }
 
 func TestDiff_PartyTypeRemoved_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
 		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object"}`),
@@ -756,7 +756,7 @@ func TestDiff_PartyTypeRemoved_Delete(t *testing.T) {
 }
 
 func TestDiff_PartyTypeUnchanged_NoChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	partyType := testPartyTypeDefinition("tenant-1", "ORGANIZATION", `{"type":"object","properties":{}}`)
 	manifest := testManifest()
 	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{partyType}
@@ -770,7 +770,7 @@ func TestDiff_PartyTypeUnchanged_NoChange(t *testing.T) {
 }
 
 func TestDiff_PartyTypeModifiedSchema_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
 		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object"}`),
@@ -791,7 +791,7 @@ func TestDiff_PartyTypeModifiedSchema_Update(t *testing.T) {
 }
 
 func TestDiff_PartyTypeModifiedCEL_DescribesChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.PartyTypes = []*partyv1.PartyTypeDefinition{
 		{
@@ -821,7 +821,7 @@ func TestDiff_PartyTypeModifiedCEL_DescribesChange(t *testing.T) {
 }
 
 func TestDiff_MultiplePartyTypes_DifferentTenants(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -848,7 +848,7 @@ func TestDiff_PartyTypeKey_IsCompositeOfTenantAndType(t *testing.T) {
 }
 
 func TestDiff_NilLastApplied_WithPartyTypes_AllCreates(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := testManifest()
 	manifest.PartyTypes = []*partyv1.PartyTypeDefinition{
 		testPartyTypeDefinition("tenant-1", "PERSON", `{"type":"object"}`),
@@ -863,7 +863,7 @@ func TestDiff_NilLastApplied_WithPartyTypes_AllCreates(t *testing.T) {
 }
 
 func TestDiff_AddedEventSaga_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	filter := `event.amount > 0 && event.currency == "GBP"`
@@ -885,7 +885,7 @@ func TestDiff_AddedEventSaga_Create(t *testing.T) {
 }
 
 func TestDiff_ModifiedSagaFilter_DescribesChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 
 	filter := `event.amount > 0`
 	oldManifest := testManifest()
@@ -915,7 +915,7 @@ func TestDiff_WithSkipSafetyChecks_SkipsSafetyChecksAndBreakingFlags(t *testing.
 			},
 		},
 	}
-	d := New(checker, nil)
+	d := New(checker, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -942,7 +942,7 @@ func TestDiff_WithSkipSafetyChecks_SafetyCheckerErrorNotReturned(t *testing.T) {
 	checker := &mockSafetyChecker{
 		err: fmt.Errorf("connection refused"),
 	}
-	d := New(checker, nil)
+	d := New(checker, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -964,7 +964,7 @@ func TestDiff_WithoutSkipSafetyChecks_SafetyChecksStillRun(t *testing.T) {
 			},
 		},
 	}
-	d := New(checker, nil)
+	d := New(checker, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -981,7 +981,7 @@ func TestDiff_WithoutSkipSafetyChecks_SafetyChecksStillRun(t *testing.T) {
 // --- Market Data Source differ tests ---
 
 func TestDiff_MarketDataSourceAdded_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -1001,7 +1001,7 @@ func TestDiff_MarketDataSourceAdded_Create(t *testing.T) {
 }
 
 func TestDiff_MarketDataSourceRemoved_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.MarketData = &controlplanev1.MarketDataConfig{
 		Sources: []*controlplanev1.MarketDataSourceDefinition{
@@ -1020,7 +1020,7 @@ func TestDiff_MarketDataSourceRemoved_Delete(t *testing.T) {
 }
 
 func TestDiff_MarketDataSourceModified_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.MarketData = &controlplanev1.MarketDataConfig{
 		Sources: []*controlplanev1.MarketDataSourceDefinition{
@@ -1046,7 +1046,7 @@ func TestDiff_MarketDataSourceModified_Update(t *testing.T) {
 }
 
 func TestDiff_MarketDataSourceUnchanged_NoChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := testManifest()
 	manifest.MarketData = &controlplanev1.MarketDataConfig{
 		Sources: []*controlplanev1.MarketDataSourceDefinition{
@@ -1065,7 +1065,7 @@ func TestDiff_MarketDataSourceUnchanged_NoChange(t *testing.T) {
 // --- Market Data Set differ tests ---
 
 func TestDiff_MarketDataSetAdded_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -1090,7 +1090,7 @@ func TestDiff_MarketDataSetAdded_Create(t *testing.T) {
 }
 
 func TestDiff_MarketDataSetRemoved_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.MarketData = &controlplanev1.MarketDataConfig{
 		Datasets: []*controlplanev1.MarketDataSetDefinition{
@@ -1114,7 +1114,7 @@ func TestDiff_MarketDataSetRemoved_Delete(t *testing.T) {
 }
 
 func TestDiff_MarketDataSetModified_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.MarketData = &controlplanev1.MarketDataConfig{
 		Datasets: []*controlplanev1.MarketDataSetDefinition{
@@ -1152,7 +1152,7 @@ func TestDiff_MarketDataSetModified_Update(t *testing.T) {
 // --- Organization differ tests ---
 
 func TestDiff_OrganizationAdded_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -1170,7 +1170,7 @@ func TestDiff_OrganizationAdded_Create(t *testing.T) {
 }
 
 func TestDiff_OrganizationRemoved_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.Organizations = []*controlplanev1.OrganizationDefinition{
 		{Code: "GRID_OPS", Name: "Grid Operations", PartyType: "ORGANIZATION"},
@@ -1187,7 +1187,7 @@ func TestDiff_OrganizationRemoved_Delete(t *testing.T) {
 }
 
 func TestDiff_OrganizationModified_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.Organizations = []*controlplanev1.OrganizationDefinition{
 		{Code: "ACME_ENERGY", Name: "Acme Energy Ltd", PartyType: "ORGANIZATION"},
@@ -1209,7 +1209,7 @@ func TestDiff_OrganizationModified_Update(t *testing.T) {
 }
 
 func TestDiff_OrganizationUnchanged_NoChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := testManifest()
 	manifest.Organizations = []*controlplanev1.OrganizationDefinition{
 		{Code: "ACME_ENERGY", Name: "Acme Energy Ltd", PartyType: "ORGANIZATION"},
@@ -1226,7 +1226,7 @@ func TestDiff_OrganizationUnchanged_NoChange(t *testing.T) {
 // --- Internal Account differ tests ---
 
 func TestDiff_InternalAccountAdded_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 
 	newManifest := testManifest()
@@ -1245,7 +1245,7 @@ func TestDiff_InternalAccountAdded_Create(t *testing.T) {
 }
 
 func TestDiff_InternalAccountRemoved_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
 		{Code: "SETTLEMENT_KWH", AccountType: "SETTLEMENT", Instrument: "KWH"},
@@ -1262,7 +1262,7 @@ func TestDiff_InternalAccountRemoved_Delete(t *testing.T) {
 }
 
 func TestDiff_InternalAccountModified_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
 		{Code: "REVENUE_GBP", AccountType: "REVENUE", Instrument: "GBP"},
@@ -1284,7 +1284,7 @@ func TestDiff_InternalAccountModified_Update(t *testing.T) {
 }
 
 func TestDiff_InternalAccountUnchanged_NoChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := testManifest()
 	manifest.InternalAccounts = []*controlplanev1.InternalAccountDefinition{
 		{Code: "REVENUE_GBP", AccountType: "REVENUE", Instrument: "GBP"},

@@ -308,7 +308,7 @@ func TestReconcile_EndToEnd_NoDrift(t *testing.T) {
 	stored := testManifest("1.0")
 	live := testManifest("1.0")
 
-	d := differ.New(nil, nil)
+	d := differ.New(nil, nil, nil)
 	plan, err := d.Diff(context.Background(), stored, live, differ.WithSkipSafetyChecks())
 	require.NoError(t, err)
 
@@ -325,7 +325,7 @@ func TestReconcile_EndToEnd_MissingInstrument(t *testing.T) {
 	live := testManifest("1.0")
 	live.Instruments = live.Instruments[:1] // Remove KWH
 
-	d := differ.New(nil, nil)
+	d := differ.New(nil, nil, nil)
 	plan, err := d.Diff(context.Background(), stored, live, differ.WithSkipSafetyChecks())
 	require.NoError(t, err)
 
@@ -351,7 +351,7 @@ func TestReconcile_EndToEnd_ExtraInstrument(t *testing.T) {
 		Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
 	})
 
-	d := differ.New(nil, nil)
+	d := differ.New(nil, nil, nil)
 	plan, err := d.Diff(context.Background(), stored, live, differ.WithSkipSafetyChecks())
 	require.NoError(t, err)
 
@@ -381,7 +381,7 @@ func TestReconcile_EndToEnd_ModifiedInstrument(t *testing.T) {
 		},
 	}
 
-	d := differ.New(nil, nil)
+	d := differ.New(nil, nil, nil)
 	plan, err := d.Diff(context.Background(), stored, live, differ.WithSkipSafetyChecks())
 	require.NoError(t, err)
 

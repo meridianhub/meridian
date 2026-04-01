@@ -219,6 +219,8 @@ func diffPlanToProtoSummary(plan *differ.DiffPlan) *controlplanev1.DiffSummary {
 			summary.Deletes++
 		case differ.ActionNoChange:
 			summary.NoChanges++
+		case differ.ActionDeprecate:
+			summary.Deletes++
 		}
 	}
 	return summary

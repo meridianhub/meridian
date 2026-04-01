@@ -40,7 +40,7 @@ func NewHistoryService(repo *Repository) (*HistoryService, error) {
 	}
 	return &HistoryService{
 		repo:   repo,
-		differ: differ.New(nil, nil),
+		differ: differ.New(nil, nil, nil),
 	}, nil
 }
 
@@ -51,7 +51,7 @@ func NewHistoryServiceWithDiffer(repo *Repository, d *differ.ManifestDiffer) (*H
 		return nil, ErrNilRepository
 	}
 	if d == nil {
-		d = differ.New(nil, nil)
+		d = differ.New(nil, nil, nil)
 	}
 	return &HistoryService{
 		repo:   repo,

@@ -18,6 +18,11 @@ type LiveState struct {
 	InternalAccounts    []*controlplanev1.InternalAccountDefinition
 	ProviderConnections []*controlplanev1.ProviderConnectionConfig
 	InstructionRoutes   []*controlplanev1.InstructionRouteConfig
+
+	// SystemCodes tracks resources that are system-managed (is_system=true).
+	// Outer key is ResourceType, inner key is the resource code/name.
+	// Resources in this set are excluded from diff planning in DiffAgainstLiveState.
+	SystemCodes map[ResourceType]map[string]bool
 }
 
 // LiveStateProvider queries downstream services and returns the current live state

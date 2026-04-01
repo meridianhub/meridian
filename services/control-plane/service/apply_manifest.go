@@ -51,7 +51,7 @@ func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceC
 	}
 
 	versionStore := persistence.NewPostgresManifestVersionStore(cfg.Pool)
-	d := differ.New(nil, nil) // NoOp safety checker and drift detector
+	d := differ.New(nil, nil, nil) // NoOp safety checker, drift detector, and live state provider
 	p := planner.NewManifestPlanner()
 
 	var executor *applier.ManifestExecutor
