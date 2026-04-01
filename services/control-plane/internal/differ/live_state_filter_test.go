@@ -152,40 +152,78 @@ func TestFilterTenantOwned_MultipleTypes(t *testing.T) {
 	assert.Equal(t, "tenant_saga", result.Sagas[0].GetName())
 }
 
-func TestFilterTenantOwned_NonFilteredResourcesPreserved(t *testing.T) {
-	// MarketDataSources, MarketDataSets, Organizations, etc. are passed through unchanged.
+func TestFilterTenantOwned_AllResourceTypesFiltered(t *testing.T) {
+	// SystemCodes can filter any resource type. Verify all 9 types are filtered.
 	live := &LiveState{
+		Instruments: []*controlplanev1.InstrumentDefinition{
+			{Code: "TENANT_GBP"},
+			{Code: "SYS_GBP"},
+		},
+		AccountTypes: []*controlplanev1.AccountTypeDefinition{
+			{Code: "TENANT_AT"},
+			{Code: "SYS_AT"},
+		},
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "tenant_saga"},
+			{Name: "sys_saga"},
+		},
 		MarketDataSources: []*controlplanev1.MarketDataSourceDefinition{
-			{Code: "ECB"},
+			{Code: "TENANT_SRC"},
+			{Code: "SYS_SRC"},
 		},
 		MarketDataSets: []*controlplanev1.MarketDataSetDefinition{
-			{Code: "FX_RATES"},
+			{Code: "TENANT_SET"},
+			{Code: "SYS_SET"},
 		},
 		Organizations: []*controlplanev1.OrganizationDefinition{
-			{Code: "ACME"},
+			{Code: "TENANT_ORG"},
+			{Code: "SYS_ORG"},
 		},
 		InternalAccounts: []*controlplanev1.InternalAccountDefinition{
-			{Code: "SUSPENSE"},
+			{Code: "TENANT_ACCT"},
+			{Code: "SYS_ACCT"},
 		},
 		ProviderConnections: []*controlplanev1.ProviderConnectionConfig{
-			{ConnectionId: "stripe-1"},
+			{ConnectionId: "tenant-conn"},
+			{ConnectionId: "sys-conn"},
 		},
 		InstructionRoutes: []*controlplanev1.InstructionRouteConfig{
-			{InstructionType: "payment"},
+			{InstructionType: "tenant-route"},
+			{InstructionType: "sys-route"},
 		},
 		SystemCodes: map[ResourceType]map[string]bool{
-			ResourceInstrument: {"SYS_GBP": true}, // only instruments filtered
+			ResourceInstrument:         {"SYS_GBP": true},
+			ResourceAccountType:        {"SYS_AT": true},
+			ResourceSaga:               {"sys_saga": true},
+			ResourceMarketDataSource:   {"SYS_SRC": true},
+			ResourceMarketDataSet:      {"SYS_SET": true},
+			ResourceOrganization:       {"SYS_ORG": true},
+			ResourceInternalAccount:    {"SYS_ACCT": true},
+			ResourceProviderConnection: {"sys-conn": true},
+			ResourceInstructionRoute:   {"sys-route": true},
 		},
 	}
 	result := filterTenantOwned(live)
 	require.NotNil(t, result)
 
+	assert.Len(t, result.Instruments, 1)
+	assert.Equal(t, "TENANT_GBP", result.Instruments[0].GetCode())
+	assert.Len(t, result.AccountTypes, 1)
+	assert.Equal(t, "TENANT_AT", result.AccountTypes[0].GetCode())
+	assert.Len(t, result.Sagas, 1)
+	assert.Equal(t, "tenant_saga", result.Sagas[0].GetName())
 	assert.Len(t, result.MarketDataSources, 1)
+	assert.Equal(t, "TENANT_SRC", result.MarketDataSources[0].GetCode())
 	assert.Len(t, result.MarketDataSets, 1)
+	assert.Equal(t, "TENANT_SET", result.MarketDataSets[0].GetCode())
 	assert.Len(t, result.Organizations, 1)
+	assert.Equal(t, "TENANT_ORG", result.Organizations[0].GetCode())
 	assert.Len(t, result.InternalAccounts, 1)
+	assert.Equal(t, "TENANT_ACCT", result.InternalAccounts[0].GetCode())
 	assert.Len(t, result.ProviderConnections, 1)
+	assert.Equal(t, "tenant-conn", result.ProviderConnections[0].GetConnectionId())
 	assert.Len(t, result.InstructionRoutes, 1)
+	assert.Equal(t, "tenant-route", result.InstructionRoutes[0].GetInstructionType())
 }
 
 func TestFilterTenantOwned_PreservesSystemAndPlatformRefMaps(t *testing.T) {

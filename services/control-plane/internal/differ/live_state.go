@@ -32,7 +32,7 @@ type LiveState struct {
 }
 
 // filterTenantOwned returns a copy of live with platform default resources removed.
-// Resources present in SystemCodes (is_system=true) are excluded from the resource slices.
+// Resources present in SystemCodes (is_system=true) are excluded from all resource slices.
 // Resources present in PlatformRefs (is_system=false with platform_ref) are tenant overrides
 // and are naturally retained - they are not in SystemCodes and pass through unchanged.
 // This function must be called before DiffAgainstLiveState to ensure system resources
@@ -41,25 +41,28 @@ func filterTenantOwned(live *LiveState) *LiveState {
 	if live == nil {
 		return nil
 	}
-	filtered := &LiveState{
-		SystemCodes:         live.SystemCodes,
-		PlatformRefs:        live.PlatformRefs,
-		MarketDataSources:   live.MarketDataSources,
-		MarketDataSets:      live.MarketDataSets,
-		Organizations:       live.Organizations,
-		InternalAccounts:    live.InternalAccounts,
-		ProviderConnections: live.ProviderConnections,
-		InstructionRoutes:   live.InstructionRoutes,
+	return &LiveState{
+		SystemCodes:  live.SystemCodes,
+		PlatformRefs: live.PlatformRefs,
+		Instruments: filterBySystemCodes(live.Instruments, live.SystemCodes, ResourceInstrument,
+			func(r *controlplanev1.InstrumentDefinition) string { return r.GetCode() }),
+		AccountTypes: filterBySystemCodes(live.AccountTypes, live.SystemCodes, ResourceAccountType,
+			func(r *controlplanev1.AccountTypeDefinition) string { return r.GetCode() }),
+		Sagas: filterBySystemCodes(live.Sagas, live.SystemCodes, ResourceSaga,
+			func(r *controlplanev1.SagaDefinition) string { return r.GetName() }),
+		MarketDataSources: filterBySystemCodes(live.MarketDataSources, live.SystemCodes, ResourceMarketDataSource,
+			func(r *controlplanev1.MarketDataSourceDefinition) string { return r.GetCode() }),
+		MarketDataSets: filterBySystemCodes(live.MarketDataSets, live.SystemCodes, ResourceMarketDataSet,
+			func(r *controlplanev1.MarketDataSetDefinition) string { return r.GetCode() }),
+		Organizations: filterBySystemCodes(live.Organizations, live.SystemCodes, ResourceOrganization,
+			func(r *controlplanev1.OrganizationDefinition) string { return r.GetCode() }),
+		InternalAccounts: filterBySystemCodes(live.InternalAccounts, live.SystemCodes, ResourceInternalAccount,
+			func(r *controlplanev1.InternalAccountDefinition) string { return r.GetCode() }),
+		ProviderConnections: filterBySystemCodes(live.ProviderConnections, live.SystemCodes, ResourceProviderConnection,
+			func(r *controlplanev1.ProviderConnectionConfig) string { return r.GetConnectionId() }),
+		InstructionRoutes: filterBySystemCodes(live.InstructionRoutes, live.SystemCodes, ResourceInstructionRoute,
+			func(r *controlplanev1.InstructionRouteConfig) string { return r.GetInstructionType() }),
 	}
-
-	filtered.Instruments = filterBySystemCodes(live.Instruments, live.SystemCodes, ResourceInstrument,
-		func(r *controlplanev1.InstrumentDefinition) string { return r.GetCode() })
-	filtered.AccountTypes = filterBySystemCodes(live.AccountTypes, live.SystemCodes, ResourceAccountType,
-		func(r *controlplanev1.AccountTypeDefinition) string { return r.GetCode() })
-	filtered.Sagas = filterBySystemCodes(live.Sagas, live.SystemCodes, ResourceSaga,
-		func(r *controlplanev1.SagaDefinition) string { return r.GetName() })
-
-	return filtered
 }
 
 // filterBySystemCodes returns a slice with system-managed resources removed.
