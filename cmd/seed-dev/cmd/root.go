@@ -44,6 +44,7 @@ var (
 	timeout          time.Duration
 	skipManifest     bool
 	withFixtures     bool
+	forceApply       bool
 	displayName      string
 	subdomain        string
 )
@@ -107,6 +108,8 @@ func init() {
 		"Skip manifest application (tenant creation only)")
 	rootCmd.Flags().BoolVar(&withFixtures, "with-fixtures", false,
 		"Seed demo fixture data (customers, accounts, balances, market data) after manifest application")
+	rootCmd.Flags().BoolVar(&forceApply, "force", false,
+		"Force manifest apply, converting destructive change errors into warnings")
 	rootCmd.Flags().StringVar(&displayName, "display-name", "",
 		"Tenant display name (default: derived from tenant slug)")
 	rootCmd.Flags().StringVar(&subdomain, "subdomain", "",
@@ -168,7 +171,7 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		}
 
 		fmt.Printf("Applying manifest from %s ...\n", manifestPath)
-		if err := applyManifest(ctx, manifestConn, tenantID, manifestPath); err != nil {
+		if err := applyManifest(ctx, manifestConn, tenantID, manifestPath, forceApply); err != nil {
 			return fmt.Errorf("apply manifest: %w", err)
 		}
 	}
@@ -258,7 +261,7 @@ func unmarshalManifestFile(path string) error {
 }
 
 // applyManifest reads a manifest JSON file and calls ApplyManifest.
-func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string) error {
+func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string, force bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read manifest file: %w", err)
@@ -279,6 +282,7 @@ func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string)
 		Manifest:  &manifest,
 		DryRun:    false,
 		AppliedBy: "seed-dev",
+		Force:     force,
 	}
 
 	resp, err := client.ApplyManifest(callCtx, req)

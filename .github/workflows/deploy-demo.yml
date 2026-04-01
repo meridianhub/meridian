@@ -298,6 +298,7 @@ jobs:
               --display-name='Volterra Energy' \
               --subdomain=volterra.demo.meridianhub.cloud \
               --manifest=/app/examples/manifests/energy.json \
+              --force \
               --with-fixtures
 
       - name: Verify deployment health
