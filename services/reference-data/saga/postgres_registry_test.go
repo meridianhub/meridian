@@ -18,7 +18,12 @@ import (
 func setupTestRegistry(t *testing.T) (*saga.PostgresRegistry, *pgxpool.Pool) {
 	t.Helper()
 
-	pool := testdb.NewTestPool(t)
+	// Use the shared PostgreSQL container started in TestMain (testmain_test.go).
+	// Create a fresh pool from the shared connection string so each test
+	// gets its own pool lifecycle while reusing the same container.
+	pool, err := pgxpool.New(context.Background(), saga.SharedPgConnStr)
+	require.NoError(t, err)
+	t.Cleanup(func() { pool.Close() })
 
 	reg := saga.NewPostgresRegistry(pool, nil)
 

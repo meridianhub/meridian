@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -59,4 +60,54 @@ func StartSharedPostgres() (string, func()) {
 	}
 
 	return connStr, cleanup
+}
+
+// StartSharedCockroachDB starts a single CockroachDB testcontainer for sharing
+// across all tests in a package via TestMain. Returns the connection string
+// and a cleanup function that terminates the container.
+//
+// Usage in TestMain:
+//
+//	var sharedCockroachDSN string
+//
+//	func TestMain(m *testing.M) {
+//	    dsn, cleanup := testdb.StartSharedCockroachDB()
+//	    sharedCockroachDSN = dsn
+//	    code := m.Run()
+//	    cleanup()
+//	    os.Exit(code)
+//	}
+//
+// Then in each test, create a unique database for isolation:
+//
+//	dbName := "test_" + strings.ReplaceAll(t.Name(), "/", "_")
+//	pool.Exec(ctx, "CREATE DATABASE "+dbName)
+func StartSharedCockroachDB() (string, func()) {
+	ctx, cancel := context.WithTimeout(context.Background(), cockroachStartupTimeout)
+	defer cancel()
+
+	container, err := cockroachdb.Run(ctx,
+		CockroachDBImage,
+		cockroachdb.WithDatabase("defaultdb"),
+		cockroachdb.WithUser("root"),
+		cockroachdb.WithInsecure(),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("testdb: failed to start shared CockroachDB container: %v", err))
+	}
+
+	connConfig, err := container.ConnectionConfig(ctx)
+	if err != nil {
+		panic(fmt.Sprintf("testdb: failed to get CockroachDB connection config: %v", err))
+	}
+
+	dsn := connConfig.ConnString()
+
+	cleanup := func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_ = container.Terminate(cleanupCtx)
+	}
+
+	return dsn, cleanup
 }
