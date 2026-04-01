@@ -54,7 +54,6 @@ func (d *ManifestDiffer) DiffAgainstLiveState(ctx context.Context, tenantID stri
 	return plan, nil
 }
 
-
 func (d *ManifestDiffer) diffInstrumentsAgainstLive(live *LiveState, manifest *controlplanev1.Manifest, plan *DiffPlan) {
 	liveMap := make(map[string]*controlplanev1.InstrumentDefinition)
 	for _, inst := range live.Instruments {
