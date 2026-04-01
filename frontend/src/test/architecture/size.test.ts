@@ -31,7 +31,7 @@ const knownOversizedFiles: Record<string, number> = {
   'src/features/manifests/components/manifest-graph.tsx': 1090,
   'src/features/manifests/components/manifest-diff-graph.tsx': 657,
   'src/features/reconciliation/pages/detail.tsx': 638,
-  'src/features/cookbook/components/saga-flow.tsx': 614,
+  'src/features/cookbook/components/saga-flow.tsx': 611,
   'src/App.tsx': 390,
   'src/features/reference-data/pages/account-types/create-account-type-dialog.tsx': 516,
   'src/features/accounts/pages/[accountId].tsx': 497,
