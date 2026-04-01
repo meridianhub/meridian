@@ -1,6 +1,6 @@
 import * as React from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { DataTable } from '@/shared/data-table'
 import { StatusBadge } from '@/shared/status-badge'
 import { Breadcrumbs } from '@/shared/breadcrumbs'
@@ -177,35 +177,15 @@ export function InstrumentsPage() {
   const queryFn = async (params: ListInstrumentsParams): Promise<ListInstrumentsResult> => {
     const statusValue = params.filters?.status
     const dimValue = params.filters?.dimension
-
-    const response = await clients.referenceData.listInstruments({
+    const { instruments = [], nextPageToken } = await clients.referenceData.listInstruments({
       statusFilter: statusValue ? (Number(statusValue) as InstrumentStatus) : InstrumentStatus.UNSPECIFIED,
       dimensionFilter: dimValue ? (Number(dimValue) as Dimension) : Dimension.UNSPECIFIED,
       pageSize: params.pageSize,
       pageToken: params.pageToken ?? '',
     })
-
-    return {
-      items: response.instruments ?? [],
-      nextPageToken: response.nextPageToken,
-    }
+    if (!params.pageToken) { const pc = instruments.filter((i) => i.isSystem).length; if (pc) track('economy.platform_badge_visible', { page: 'instruments', platform_count: pc, tenant_count: instruments.length - pc }) }
+    return { items: instruments, nextPageToken }
   }
-
-  const { data: analyticsData } = useQuery({
-    queryKey: [...referenceKeys.instruments(), {}],
-    queryFn: () => queryFn({ pageSize: 25 }),
-  })
-
-  React.useEffect(() => {
-    if (!analyticsData?.items) return
-    const platformCount = analyticsData.items.filter((i) => i.isSystem).length
-    if (platformCount === 0) return
-    track('economy.platform_badge_visible', {
-      page: 'instruments',
-      platform_count: platformCount,
-      tenant_count: analyticsData.items.length - platformCount,
-    })
-  }, [analyticsData])
 
   return (
     <PageShell>
@@ -239,13 +219,7 @@ export function InstrumentsPage() {
           filters={filters}
           onRowClick={(inst) => {
             setSelectedInstrument(inst)
-            if (inst.isSystem) {
-              track('economy.platform_resource_clicked', {
-                resource_type: 'instrument',
-                resource_code: inst.code,
-                page: 'instruments',
-              })
-            }
+            if (inst.isSystem) track('economy.platform_resource_clicked', { resource_type: 'instrument', resource_code: inst.code, page: 'instruments' })
           }}
         />
       </Card>
