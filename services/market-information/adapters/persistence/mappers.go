@@ -87,12 +87,12 @@ func EntityToDataSetDefinition(e DataSetDefinitionEntity) domain.DataSetDefiniti
 
 // parseDataSetStatus converts a string status to domain.DataSetStatus.
 func parseDataSetStatus(s string) domain.DataSetStatus {
-	switch s {
-	case "DRAFT":
+	switch domain.DataSetStatus(s) {
+	case domain.DataSetStatusDraft:
 		return domain.DataSetStatusDraft
-	case "ACTIVE":
+	case domain.DataSetStatusActive:
 		return domain.DataSetStatusActive
-	case "DEPRECATED":
+	case domain.DataSetStatusDeprecated:
 		return domain.DataSetStatusDeprecated
 	default:
 		return domain.DataSetStatusDraft
@@ -161,10 +161,10 @@ func EntityToDataSource(e DataSourceEntity) domain.DataSource {
 
 // parseDataSourceStatus converts a string status to domain.DataSourceStatus.
 func parseDataSourceStatus(s string) domain.DataSourceStatus {
-	switch s {
-	case "ACTIVE":
+	switch domain.DataSourceStatus(s) {
+	case domain.DataSourceStatusActive:
 		return domain.DataSourceStatusActive
-	case "DEPRECATED":
+	case domain.DataSourceStatusDeprecated:
 		return domain.DataSourceStatusDeprecated
 	default:
 		return domain.DataSourceStatusActive
