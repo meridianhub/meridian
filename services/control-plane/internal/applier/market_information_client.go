@@ -17,6 +17,9 @@ import (
 // ErrUnknownDataCategory is returned when an unrecognized data category string is provided.
 var ErrUnknownDataCategory = errors.New("unknown data category")
 
+// errDataSourceNotFound is returned when a data source lookup finds no matching source.
+var errDataSourceNotFound = errors.New("data source not found")
+
 // MarketInformationClient wraps the market-information gRPC client to implement
 // MarketInformationService for use as a saga handler dependency.
 //
@@ -87,7 +90,7 @@ func (c *MarketInformationClient) RegisterDataSource(ctx *saga.StarlarkContext, 
 }
 
 // findDataSourceByCode pages through ListDataSources to locate a data source by code.
-// Returns nil, nil if not found. Returns nil, error on RPC failure.
+// Returns errDataSourceNotFound if no matching source is found.
 func (c *MarketInformationClient) findDataSourceByCode(ctx context.Context, code string) (*marketinformationv1.DataSource, error) {
 	pageToken := ""
 	for {
@@ -105,7 +108,7 @@ func (c *MarketInformationClient) findDataSourceByCode(ctx context.Context, code
 		}
 		pageToken = resp.GetNextPageToken()
 		if pageToken == "" {
-			return nil, nil
+			return nil, errDataSourceNotFound
 		}
 	}
 }
