@@ -30,10 +30,18 @@ function LoadingSkeleton() {
 function EmptyState() {
   return (
     <div data-testid="explorer-empty" className="p-6 flex flex-col items-center gap-4 py-16 text-muted-foreground">
-      <span className="text-lg font-medium">No economy configured</span>
+      <span className="text-lg font-medium">No custom economy configured</span>
       <span className="text-sm text-center max-w-md">
-        Apply a manifest to configure instruments, sagas, event channels, and more.
+        Your tenant includes 28 platform capabilities out of the box - 8 sagas, 12 account types,
+        5 valuation methods, and 3 policies. Apply a manifest to add custom configurations.
       </span>
+      <div className="flex flex-wrap gap-2 mt-2 text-sm">
+        <a href="/starlark-config" className="text-primary hover:underline">View Sagas</a>
+        <span className="text-muted-foreground">·</span>
+        <a href="/reference-data/account-types" className="text-primary hover:underline">View Account Types</a>
+        <span className="text-muted-foreground">·</span>
+        <a href="/reference-data/valuation-rules" className="text-primary hover:underline">View Valuation Rules</a>
+      </div>
     </div>
   )
 }
