@@ -10,9 +10,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 )
+
+// PlannedResourceAction pairs a resource identifier with the diff action
+// computed by the manifest differ. It is used to communicate which resources
+// need to be acted upon and what kind of change is required.
+type PlannedResourceAction struct {
+	ResourceType differ.ResourceType
+	ResourceCode string
+	Action       differ.ActionType
+}
 
 // ManifestExecutor orchestrates the ApplyManifest saga for a tenant.
 // It loads the saga definition (with platform default fallback per ADR-0028),
@@ -144,6 +154,7 @@ type InstrumentInput struct {
 	Dimension     string
 	DecimalPlaces int
 	Description   string
+	Action        string // Diff action: CREATE, UPDATE, DEPRECATE (empty for legacy path)
 }
 
 // AccountTypeInput represents an account type to register and provision.
@@ -161,6 +172,7 @@ type AccountTypeInput struct {
 	EligibilityCEL          string
 	AttributeSchema         string
 	ValuationMethods        []ValuationMethodInput
+	Action                  string
 }
 
 // ValuationMethodInput represents a valuation method template for an account type.
@@ -176,6 +188,7 @@ type ValuationRuleInput struct {
 	RuleType       string
 	Expression     string
 	Description    string
+	Action         string
 }
 
 // SagaDefinitionInput represents a saga definition to register.
@@ -185,6 +198,7 @@ type SagaDefinitionInput struct {
 	Description string
 	Script      string
 	Version     string
+	Action      string
 }
 
 // ProviderConnectionInput represents a provider connection to upsert.
@@ -198,6 +212,7 @@ type ProviderConnectionInput struct {
 	AuthConfig      map[string]any
 	RetryPolicy     map[string]any
 	RateLimitConfig map[string]any
+	Action          string
 }
 
 // InstructionRouteInput represents an instruction route to upsert.
@@ -209,6 +224,7 @@ type InstructionRouteInput struct {
 	InboundMapping       string
 	HTTPMethod           string
 	PathTemplate         string
+	Action               string
 }
 
 // MarketDataSourceInput represents a market data source to register.
@@ -217,6 +233,7 @@ type MarketDataSourceInput struct {
 	Name        string
 	Description string
 	TrustLevel  int
+	Action      string
 }
 
 // MarketDataSetInput represents a market data set to register and activate.
@@ -229,6 +246,7 @@ type MarketDataSetInput struct {
 	Description             string
 	ValidationExpression    string
 	ResolutionKeyExpression string
+	Action                  string
 }
 
 // OrganizationInput represents an organization to register.
@@ -241,6 +259,7 @@ type OrganizationInput struct {
 	ExternalReferenceType string
 	PartyType             string
 	Attributes            map[string]string
+	Action                string
 }
 
 // InternalAccountInput represents an internal account to initiate.
@@ -250,6 +269,7 @@ type InternalAccountInput struct {
 	InstrumentCode    string
 	OwnerOrganization string
 	Description       string
+	Action            string
 }
 
 // ApplyManifestResult contains the result of a manifest application.
@@ -461,6 +481,7 @@ func convertInstruments(instruments []InstrumentInput) []interface{} {
 			"dimension":      inst.Dimension,
 			"decimal_places": inst.DecimalPlaces,
 			"description":    inst.Description,
+			"action":         inst.Action,
 		}
 	}
 	return result
@@ -490,6 +511,7 @@ func convertAccountTypes(accountTypes []AccountTypeInput) []interface{} {
 			"eligibility_cel":           at.EligibilityCEL,
 			"attribute_schema":          at.AttributeSchema,
 			"valuation_methods":         vmethods,
+			"action":                    at.Action,
 		}
 	}
 	return result
@@ -503,6 +525,7 @@ func convertMarketDataSources(sources []MarketDataSourceInput) []interface{} {
 			"name":        src.Name,
 			"description": src.Description,
 			"trust_level": src.TrustLevel,
+			"action":      src.Action,
 		}
 	}
 	return result
@@ -520,6 +543,7 @@ func convertMarketDataSets(dataSets []MarketDataSetInput) []interface{} {
 			"description":               ds.Description,
 			"validation_expression":     ds.ValidationExpression,
 			"resolution_key_expression": ds.ResolutionKeyExpression,
+			"action":                    ds.Action,
 		}
 	}
 	return result
@@ -534,6 +558,7 @@ func convertValuationRules(rules []ValuationRuleInput) []interface{} {
 			"rule_type":       vr.RuleType,
 			"expression":      vr.Expression,
 			"description":     vr.Description,
+			"action":          vr.Action,
 		}
 	}
 	return result
@@ -555,6 +580,7 @@ func convertOrganizations(organizations []OrganizationInput) []interface{} {
 			"external_reference_type": org.ExternalReferenceType,
 			"party_type":              org.PartyType,
 			"attributes":              attrs,
+			"action":                  org.Action,
 		}
 	}
 	return result
@@ -569,6 +595,7 @@ func convertInternalAccounts(accounts []InternalAccountInput) []interface{} {
 			"instrument_code":    ia.InstrumentCode,
 			"owner_organization": ia.OwnerOrganization,
 			"description":        ia.Description,
+			"action":             ia.Action,
 		}
 	}
 	return result
@@ -583,6 +610,7 @@ func convertSagaDefinitions(defs []SagaDefinitionInput) []interface{} {
 			"description":  sd.Description,
 			"script":       sd.Script,
 			"version":      sd.Version,
+			"action":       sd.Action,
 		}
 	}
 	return result
@@ -601,6 +629,7 @@ func convertProviderConnections(conns []ProviderConnectionInput) []interface{} {
 			"auth_config":       pc.AuthConfig,
 			"retry_policy":      pc.RetryPolicy,
 			"rate_limit_config": pc.RateLimitConfig,
+			"action":            pc.Action,
 		}
 	}
 	return result
@@ -617,6 +646,7 @@ func convertInstructionRoutes(routes []InstructionRouteInput) []interface{} {
 			"inbound_mapping":        r.InboundMapping,
 			"http_method":            r.HTTPMethod,
 			"path_template":          r.PathTemplate,
+			"action":                 r.Action,
 		}
 	}
 	return result
