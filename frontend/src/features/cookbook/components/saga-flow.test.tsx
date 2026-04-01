@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { SagaFlowDiagram, estimateDecisionSize, estimateStartNodeWidth } from './saga-flow'
+import { SagaFlowDiagram } from './saga-flow'
+import { estimateDecisionSize, estimateStartNodeWidth } from './saga-flow-sizing'
 import { parseTriggerService } from '../lib/star-parser'
 import type { SagaFlow } from '../lib/star-parser'
 
