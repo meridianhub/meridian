@@ -5,6 +5,7 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
+	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 )
 
 // buildExecutorInput converts a Manifest proto into the ApplyManifestInput
@@ -72,6 +73,261 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 	extractOperationalGateway(mf, input)
 
 	return input
+}
+
+// buildExecutorInputFromPlan converts a Manifest proto into ApplyManifestInput using
+// a DiffPlan to filter resources. Only resources with actionable changes (CREATE,
+// UPDATE, DEPRECATE) are included. NO_CHANGE and DELETE resources are excluded.
+// Each included resource carries its Action field so handlers can behave differently.
+func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPlan) *ApplyManifestInput {
+	// Build a lookup of actionable resources: resourceType+code -> action
+	actionable := make(map[string]differ.ActionType, len(plan.Actions))
+	for _, a := range plan.Actions {
+		if a.Action == differ.ActionNoChange || a.Action == differ.ActionDelete {
+			continue
+		}
+		actionable[resourceKey(a.ResourceType, a.ResourceCode)] = a.Action
+	}
+
+	input := &ApplyManifestInput{
+		ManifestVersion: mf.GetVersion(),
+	}
+
+	// Instruments
+	for _, inst := range mf.GetInstruments() {
+		action, ok := actionable[resourceKey(differ.ResourceInstrument, inst.GetCode())]
+		if !ok {
+			continue
+		}
+		dim := instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit())
+		if dim == "" {
+			dim = "CURRENCY"
+		}
+		input.Instruments = append(input.Instruments, InstrumentInput{
+			Code:          inst.GetCode(),
+			DisplayName:   inst.GetName(),
+			Dimension:     dim,
+			DecimalPlaces: int(inst.GetDimensions().GetPrecision()),
+			Action:        string(action),
+		})
+	}
+
+	// Account Types
+	for _, acct := range mf.GetAccountTypes() {
+		action, ok := actionable[resourceKey(differ.ResourceAccountType, acct.GetCode())]
+		if !ok {
+			continue
+		}
+		nb := stripEnumPrefix(acct.GetNormalBalance().String(), "NORMAL_BALANCE_")
+		if nb == "UNSPECIFIED" {
+			nb = "DEBIT"
+		}
+		var instrumentCode string
+		if instruments := acct.GetAllowedInstruments(); len(instruments) > 0 {
+			instrumentCode = instruments[0]
+		}
+		input.AccountTypes = append(input.AccountTypes, AccountTypeInput{
+			Code:           acct.GetCode(),
+			DisplayName:    acct.GetName(),
+			NormalBalance:  nb,
+			BehaviorClass:  "HOLDING",
+			InstrumentCode: instrumentCode,
+			AccountType:    acct.GetCode(),
+			Action:         string(action),
+		})
+	}
+
+	// Valuation Rules
+	for _, vr := range mf.GetValuationRules() {
+		key := valRuleKeyForMapper(vr.GetFromInstrument(), vr.GetToInstrument())
+		action, ok := actionable[resourceKey(differ.ResourceValuationRule, key)]
+		if !ok {
+			continue
+		}
+		input.ValuationRules = append(input.ValuationRules, ValuationRuleInput{
+			FromInstrument: vr.GetFromInstrument(),
+			ToInstrument:   vr.GetToInstrument(),
+			RuleType:       vr.GetMethod().String(),
+			Action:         string(action),
+		})
+	}
+
+	// Market Data
+	extractMarketDataFromPlan(mf, input, actionable)
+
+	// Organizations and Internal Accounts
+	extractPartyAndAccountsFromPlan(mf, input, actionable)
+
+	// Saga Definitions
+	for _, saga := range mf.GetSagas() {
+		action, ok := actionable[resourceKey(differ.ResourceSaga, saga.GetName())]
+		if !ok {
+			continue
+		}
+		input.SagaDefinitions = append(input.SagaDefinitions, SagaDefinitionInput{
+			Name:   saga.GetName(),
+			Script: saga.GetScript(),
+			Action: string(action),
+		})
+	}
+
+	// Operational Gateway
+	extractOperationalGatewayFromPlan(mf, input, actionable)
+
+	return input
+}
+
+// resourceKey builds a lookup key for matching diff actions to manifest resources.
+func resourceKey(rt differ.ResourceType, code string) string {
+	return string(rt) + ":" + code
+}
+
+// extractMarketDataFromPlan converts market data resources filtered by the action map.
+func extractMarketDataFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
+	md := mf.GetMarketData()
+	if md == nil {
+		return
+	}
+	for _, src := range md.GetSources() {
+		action, ok := actionable[resourceKey(differ.ResourceMarketDataSource, src.GetCode())]
+		if !ok {
+			continue
+		}
+		input.MarketDataSources = append(input.MarketDataSources, MarketDataSourceInput{
+			Code:        src.GetCode(),
+			Name:        src.GetName(),
+			Description: src.GetDescription(),
+			TrustLevel:  int(src.GetTrustLevel()),
+			Action:      string(action),
+		})
+	}
+	for _, ds := range md.GetDatasets() {
+		action, ok := actionable[resourceKey(differ.ResourceMarketDataSet, ds.GetCode())]
+		if !ok {
+			continue
+		}
+		input.MarketDataSets = append(input.MarketDataSets, MarketDataSetInput{
+			Code:                    ds.GetCode(),
+			Category:                stripEnumPrefix(ds.GetCategory().String(), "DATA_CATEGORY_"),
+			Unit:                    ds.GetUnit(),
+			SourceCode:              ds.GetSourceCode(),
+			DisplayName:             ds.GetDisplayName(),
+			Description:             ds.GetDescription(),
+			ValidationExpression:    ds.GetValidationExpression(),
+			ResolutionKeyExpression: ds.GetResolutionKeyExpression(),
+			Action:                  string(action),
+		})
+	}
+}
+
+// extractPartyAndAccountsFromPlan converts organizations and internal accounts filtered by the action map.
+func extractPartyAndAccountsFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
+	for _, org := range mf.GetOrganizations() {
+		action, ok := actionable[resourceKey(differ.ResourceOrganization, org.GetCode())]
+		if !ok {
+			continue
+		}
+		legalName := org.GetLegalName()
+		if legalName == "" {
+			legalName = org.GetName()
+		}
+		if legalName == "" {
+			legalName = org.GetCode()
+		}
+		displayName := org.GetDisplayName()
+		if displayName == "" {
+			displayName = legalName
+		}
+		extRef := org.GetExternalReference()
+		if extRef == "" {
+			extRef = org.GetCode()
+		}
+		input.Organizations = append(input.Organizations, OrganizationInput{
+			Code:                  org.GetCode(),
+			Name:                  org.GetName(),
+			LegalName:             legalName,
+			DisplayName:           displayName,
+			ExternalReference:     extRef,
+			ExternalReferenceType: org.GetExternalReferenceType(),
+			PartyType:             org.GetPartyType(),
+			Attributes:            org.GetAttributes(),
+			Action:                string(action),
+		})
+	}
+	for _, ia := range mf.GetInternalAccounts() {
+		action, ok := actionable[resourceKey(differ.ResourceInternalAccount, ia.GetCode())]
+		if !ok {
+			continue
+		}
+		input.InternalAccounts = append(input.InternalAccounts, InternalAccountInput{
+			Code:              ia.GetCode(),
+			AccountType:       ia.GetAccountType(),
+			InstrumentCode:    ia.GetInstrument(),
+			OwnerOrganization: ia.GetOwnerOrganization(),
+			Description:       ia.GetDescription(),
+			Action:            string(action),
+		})
+	}
+}
+
+// extractOperationalGatewayFromPlan converts operational gateway resources filtered by the action map.
+func extractOperationalGatewayFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
+	gw := mf.GetOperationalGateway()
+	if gw == nil {
+		return
+	}
+	for _, conn := range gw.GetProviderConnections() {
+		action, ok := actionable[resourceKey(differ.ResourceProviderConnection, conn.GetConnectionId())]
+		if !ok {
+			continue
+		}
+		pc := ProviderConnectionInput{
+			ConnectionID: conn.GetConnectionId(),
+			ProviderName: conn.GetProviderName(),
+			ProviderType: conn.GetProviderType(),
+			Protocol:     conn.GetProtocol().String(),
+			BaseURL:      conn.GetBaseUrl(),
+			Action:       string(action),
+		}
+		pc.AuthType, pc.AuthConfig = extractAuthConfig(conn.GetAuth())
+		if rp := conn.GetRetryPolicy(); rp != nil {
+			pc.RetryPolicy = map[string]any{
+				"max_attempts":            rp.GetMaxAttempts(),
+				"initial_backoff_seconds": rp.GetInitialBackoffSeconds(),
+				"max_backoff_seconds":     rp.GetMaxBackoffSeconds(),
+				"backoff_multiplier":      rp.GetBackoffMultiplier(),
+			}
+		}
+		if rl := conn.GetRateLimit(); rl != nil {
+			pc.RateLimitConfig = map[string]any{
+				"requests_per_second": rl.GetRequestsPerSecond(),
+				"burst_size":          rl.GetBurstSize(),
+			}
+		}
+		input.ProviderConnections = append(input.ProviderConnections, pc)
+	}
+	for _, route := range gw.GetInstructionRoutes() {
+		action, ok := actionable[resourceKey(differ.ResourceInstructionRoute, route.GetInstructionType())]
+		if !ok {
+			continue
+		}
+		input.InstructionRoutes = append(input.InstructionRoutes, InstructionRouteInput{
+			InstructionType:      route.GetInstructionType(),
+			ConnectionID:         route.GetConnectionId(),
+			FallbackConnectionID: route.GetFallbackConnectionId(),
+			OutboundMapping:      route.GetOutboundMappingId(),
+			InboundMapping:       route.GetInboundMappingId(),
+			HTTPMethod:           route.GetHttpMethod(),
+			PathTemplate:         route.GetPathTemplate(),
+			Action:               string(action),
+		})
+	}
+}
+
+// valRuleKey is imported from differ but we need a local version for the mapper.
+// It produces a stable identifier for a valuation rule (FROM->TO pair).
+func valRuleKeyForMapper(from, to string) string {
+	return strings.ToUpper(from) + "->" + strings.ToUpper(to)
 }
 
 // extractMarketData converts market data sources and data sets from the manifest proto.
