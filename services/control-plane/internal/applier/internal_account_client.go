@@ -29,6 +29,7 @@ func NewInternalAccountClient(conn *grpc.ClientConn) *InternalAccountClient {
 
 // InitiateAccount implements InternalAccountService.
 // Converts Starlark params to an InitiateInternalAccountRequest and calls the gRPC service.
+// Uses proactive idempotency: checks if account already exists before creating.
 func (c *InternalAccountClient) InitiateAccount(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 	req := &internalaccountv1.InitiateInternalAccountRequest{}
 	req.AccountCode, _ = params["account_code"].(string)
@@ -39,11 +40,20 @@ func (c *InternalAccountClient) InitiateAccount(ctx *saga.StarlarkContext, param
 	req.OrgPartyId, _ = params["owner_organization"].(string)
 
 	callCtx := prepareCallContext(ctx)
+
+	// Proactive check: if account already exists, return success immediately.
+	existing, lookupErr := c.client.RetrieveInternalAccount(callCtx, &internalaccountv1.RetrieveInternalAccountRequest{
+		AccountId: req.AccountCode,
+	})
+	if lookupErr == nil {
+		facility := existing.GetFacility()
+		return accountResult(facility), nil
+	}
+
+	// Proceed with account creation.
 	resp, err := c.client.InitiateInternalAccount(callCtx, req)
 	if err != nil {
-		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios
-		// where the account was already created by a previous apply.
-		// Look up the existing account to return account_id (required by the saga script).
+		// Reactive fallback: treat AlreadyExists as success for manifest re-apply scenarios.
 		if status.Code(err) == codes.AlreadyExists {
 			return c.handleAlreadyExists(callCtx, req.AccountCode)
 		}
@@ -57,6 +67,15 @@ func (c *InternalAccountClient) InitiateAccount(ctx *saga.StarlarkContext, param
 	}, nil
 }
 
+// accountResult converts an InternalAccountFacility to a saga result map.
+func accountResult(facility *internalaccountv1.InternalAccountFacility) map[string]any {
+	return map[string]any{
+		"account_id":   facility.GetAccountId(),
+		"account_code": facility.GetAccountCode(),
+		"status":       facility.GetAccountStatus().String(),
+	}
+}
+
 // handleAlreadyExists resolves the existing account by code so that
 // downstream saga steps receive account_id. The RetrieveInternalAccount
 // RPC accepts account_code as well as UUID.
@@ -68,12 +87,7 @@ func (c *InternalAccountClient) handleAlreadyExists(ctx context.Context, account
 		return nil, fmt.Errorf("initiate internal account: account already exists but lookup failed: %w", err)
 	}
 
-	facility := resp.GetFacility()
-	return map[string]any{
-		"account_id":   facility.GetAccountId(),
-		"account_code": facility.GetAccountCode(),
-		"status":       facility.GetAccountStatus().String(),
-	}, nil
+	return accountResult(resp.GetFacility()), nil
 }
 
 // Ensure InternalAccountClient implements InternalAccountService at compile time.
