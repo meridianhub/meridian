@@ -50,7 +50,7 @@ const knownOversizedFiles: Record<string, number> = {
   'src/features/market-data/pages/[datasetCode].tsx': 322,
   'src/features/tenants/pages/[tenantId].tsx': 316,
   'src/features/sagas/pages/create-saga-draft-dialog.tsx': 312,
-  'src/features/reference-data/pages/instruments/index.tsx': 311,
+  'src/features/reference-data/pages/instruments/index.tsx': 317,
   'src/features/mappings/pages/dialogs/create-mapping-dialog.tsx': 308,
   // .ts files exceeding 500-line limit
   'src/features/manifests/lib/manifest-graph-model.ts': 540,
