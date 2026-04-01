@@ -67,7 +67,7 @@ func TestSave_And_GetLatestApplied(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	assert.Equal(t, 1, result.Version)
+	assert.Equal(t, "1.0", result.Version)
 	assert.Equal(t, "test-user", result.AppliedBy)
 	assert.Equal(t, "1.0", result.Manifest.Version)
 	assert.Equal(t, "Test Manifest", result.Manifest.Metadata.Name)
@@ -75,25 +75,26 @@ func TestSave_And_GetLatestApplied(t *testing.T) {
 	assert.False(t, result.AppliedAt.IsZero())
 }
 
-func TestSave_IncrementsVersion(t *testing.T) {
+func TestSave_MultipleVersions(t *testing.T) {
 	store, ctx := setupTestStore(t)
 
 	// Save first version
 	err := store.Save(ctx, testManifest(), "user-a")
 	require.NoError(t, err)
 
-	// Save second version
+	// Save second version with a different version string
 	m2 := testManifest()
+	m2.Version = "2.0"
 	m2.Metadata.Name = "Updated Manifest"
 	err = store.Save(ctx, m2, "user-b")
 	require.NoError(t, err)
 
-	// GetLatestApplied should return version 2
+	// GetLatestApplied should return version 2.0 (most recent by applied_at)
 	result, err := store.GetLatestApplied(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	assert.Equal(t, 2, result.Version)
+	assert.Equal(t, "2.0", result.Version)
 	assert.Equal(t, "user-b", result.AppliedBy)
 	assert.Equal(t, "Updated Manifest", result.Manifest.Metadata.Name)
 }
@@ -125,18 +126,18 @@ func TestMultiTenantIsolation(t *testing.T) {
 	err = store.Save(ctxB, manifestB, "admin-b")
 	require.NoError(t, err)
 
-	// Both tenants should see version 1 (independent counters)
+	// Both tenants should see version "1.0" (independent stores)
 	resultA, err := store.GetLatestApplied(ctxA)
 	require.NoError(t, err)
 	require.NotNil(t, resultA)
-	assert.Equal(t, 1, resultA.Version)
+	assert.Equal(t, "1.0", resultA.Version)
 	assert.Equal(t, "admin-a", resultA.AppliedBy)
 	assert.Equal(t, "Alpha Manifest", resultA.Manifest.Metadata.Name)
 
 	resultB, err := store.GetLatestApplied(ctxB)
 	require.NoError(t, err)
 	require.NotNil(t, resultB)
-	assert.Equal(t, 1, resultB.Version)
+	assert.Equal(t, "1.0", resultB.Version)
 	assert.Equal(t, "admin-b", resultB.AppliedBy)
 	assert.Equal(t, "Beta Manifest", resultB.Manifest.Metadata.Name)
 }

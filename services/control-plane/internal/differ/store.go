@@ -10,7 +10,7 @@ import (
 // ManifestVersion represents a stored snapshot of a previously applied manifest.
 type ManifestVersion struct {
 	ID        string
-	Version   int
+	Version   string
 	Manifest  *controlplanev1.Manifest
 	AppliedAt time.Time
 	AppliedBy string
