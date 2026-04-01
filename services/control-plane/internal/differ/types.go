@@ -17,10 +17,11 @@ type ActionType string
 
 // Action type constants for diff plan entries.
 const (
-	ActionCreate   ActionType = "CREATE"
-	ActionUpdate   ActionType = "UPDATE"
-	ActionDelete   ActionType = "DELETE"
-	ActionNoChange ActionType = "NO_CHANGE"
+	ActionCreate    ActionType = "CREATE"
+	ActionUpdate    ActionType = "UPDATE"
+	ActionDelete    ActionType = "DELETE"
+	ActionNoChange  ActionType = "NO_CHANGE"
+	ActionDeprecate ActionType = "DEPRECATE"
 )
 
 // ResourceType identifies the category of resource being planned.

@@ -55,7 +55,7 @@ func newTestHandler(t *testing.T) *ApplyManifestHandler {
 	v, err := validator.New()
 	require.NoError(t, err)
 
-	d := differ.New(nil, nil)
+	d := differ.New(nil, nil, nil)
 	p := planner.NewManifestPlanner()
 
 	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
@@ -71,7 +71,7 @@ func TestNewApplyManifestHandler_RequiredDependencies(t *testing.T) {
 	v, err := validator.New()
 	require.NoError(t, err)
 
-	d := differ.New(nil, nil)
+	d := differ.New(nil, nil, nil)
 	p := planner.NewManifestPlanner()
 
 	tests := []struct {
@@ -116,7 +116,7 @@ func TestNewApplyManifestHandler_PostApplyHooksStored(t *testing.T) {
 	v, err := validator.New()
 	require.NoError(t, err)
 
-	d := differ.New(nil, nil)
+	d := differ.New(nil, nil, nil)
 	p := planner.NewManifestPlanner()
 
 	called := false
@@ -463,7 +463,7 @@ func newTestHandlerWithVersionStore(t *testing.T, prev *controlplanev1.Manifest)
 	v, err := validator.New()
 	require.NoError(t, err)
 
-	d := differ.New(nil, nil)
+	d := differ.New(nil, nil, nil)
 	p := planner.NewManifestPlanner()
 
 	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
@@ -730,7 +730,7 @@ func TestRunPostApplyHooks_MultipleHooks(t *testing.T) {
 
 	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
 		Validator:      v,
-		Differ:         differ.New(nil, nil),
+		Differ:         differ.New(nil, nil, nil),
 		Planner:        planner.NewManifestPlanner(),
 		PostApplyHooks: []PostApplyHook{hook1, hook2},
 	})
@@ -754,7 +754,7 @@ func TestRunPostApplyHooks_PanicRecovery(t *testing.T) {
 
 	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
 		Validator:      v,
-		Differ:         differ.New(nil, nil),
+		Differ:         differ.New(nil, nil, nil),
 		Planner:        planner.NewManifestPlanner(),
 		PostApplyHooks: []PostApplyHook{panicHook, normalHook},
 	})

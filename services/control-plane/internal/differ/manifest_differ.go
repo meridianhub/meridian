@@ -18,12 +18,14 @@ import (
 //   - Resources present in last-applied but not in new -> DELETE (with safety checks)
 //   - Resources identical in both -> NO_CHANGE
 type ManifestDiffer struct {
-	safety SafetyChecker
-	drift  DriftDetector
+	safety    SafetyChecker
+	drift     DriftDetector
+	liveState LiveStateProvider
 }
 
-// New creates a ManifestDiffer with the given safety checker and drift detector.
-func New(safety SafetyChecker, drift DriftDetector) *ManifestDiffer {
+// New creates a ManifestDiffer with the given safety checker, drift detector,
+// and optional live state provider. Pass nil for any parameter to use no-op defaults.
+func New(safety SafetyChecker, drift DriftDetector, liveState LiveStateProvider) *ManifestDiffer {
 	if safety == nil {
 		safety = &NoOpSafetyChecker{}
 	}
@@ -31,8 +33,9 @@ func New(safety SafetyChecker, drift DriftDetector) *ManifestDiffer {
 		drift = &NoOpDriftDetector{}
 	}
 	return &ManifestDiffer{
-		safety: safety,
-		drift:  drift,
+		safety:    safety,
+		drift:     drift,
+		liveState: liveState,
 	}
 }
 

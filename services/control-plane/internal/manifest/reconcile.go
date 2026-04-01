@@ -78,7 +78,7 @@ func NewReconcileService(history *HistoryService, exporter *ExportService, d *di
 		return nil, ErrNilExporter
 	}
 	if d == nil {
-		d = differ.New(nil, nil)
+		d = differ.New(nil, nil, nil)
 	}
 	return &ReconcileService{
 		history:  history,

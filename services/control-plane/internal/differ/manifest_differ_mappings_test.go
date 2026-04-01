@@ -31,7 +31,7 @@ func testManifestWithMappings() *controlplanev1.Manifest {
 }
 
 func TestDiff_MappingAdded_Create(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	newManifest := testManifestWithMappings()
 
@@ -46,7 +46,7 @@ func TestDiff_MappingAdded_Create(t *testing.T) {
 }
 
 func TestDiff_MappingRemoved_Delete(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifestWithMappings()
 	newManifest := testManifest()
 	newManifest.Mappings = nil
@@ -62,7 +62,7 @@ func TestDiff_MappingRemoved_Delete(t *testing.T) {
 }
 
 func TestDiff_MappingUnchanged_NoChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := testManifestWithMappings()
 
 	plan, err := d.Diff(context.Background(), manifest, manifest)
@@ -74,7 +74,7 @@ func TestDiff_MappingUnchanged_NoChange(t *testing.T) {
 }
 
 func TestDiff_MappingModified_Update(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifestWithMappings()
 
 	newManifest := testManifestWithMappings()
@@ -90,7 +90,7 @@ func TestDiff_MappingModified_Update(t *testing.T) {
 }
 
 func TestDiff_MappingModifiedTargetService_DescribesChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifestWithMappings()
 
 	newManifest := testManifestWithMappings()
@@ -105,7 +105,7 @@ func TestDiff_MappingModifiedTargetService_DescribesChange(t *testing.T) {
 }
 
 func TestDiff_MappingModifiedStatus_DescribesChange(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifestWithMappings()
 
 	newManifest := testManifestWithMappings()
@@ -121,7 +121,7 @@ func TestDiff_MappingModifiedStatus_DescribesChange(t *testing.T) {
 
 func TestDiff_MappingKey_NameVersionComposite(t *testing.T) {
 	// Two mappings with same name but different versions are distinct resources
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	oldManifest := testManifest()
 	oldManifest.Mappings = []*mappingv1.MappingDefinition{
 		testMapping("stripe_webhook", 1),
@@ -146,7 +146,7 @@ func TestDiff_MappingKey_NameVersionComposite(t *testing.T) {
 }
 
 func TestDiff_NilLastApplied_MappingCreated(t *testing.T) {
-	d := New(nil, nil)
+	d := New(nil, nil, nil)
 	manifest := testManifestWithMappings()
 
 	plan, err := d.Diff(context.Background(), nil, manifest)

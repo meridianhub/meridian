@@ -19,7 +19,7 @@ func TestNewHistoryService_NilRepository(t *testing.T) {
 }
 
 func TestNewHistoryServiceWithDiffer_NilRepository(t *testing.T) {
-	_, err := NewHistoryServiceWithDiffer(nil, differ.New(nil, nil))
+	_, err := NewHistoryServiceWithDiffer(nil, differ.New(nil, nil, nil))
 	assert.ErrorIs(t, err, ErrNilRepository)
 }
 

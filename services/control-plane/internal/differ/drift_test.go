@@ -36,7 +36,7 @@ func TestDriftWarning_Fields(t *testing.T) {
 
 func TestManifestDiffer_WithNoOpDriftDetector(t *testing.T) {
 	drift := &NoOpDriftDetector{}
-	d := New(nil, drift)
+	d := New(nil, drift, nil)
 	require.NotNil(t, d)
 
 	plan, err := d.Diff(context.Background(), nil, &controlplanev1.Manifest{})
