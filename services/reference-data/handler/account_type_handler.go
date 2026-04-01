@@ -187,6 +187,8 @@ func domainAccountTypeStatusToProto(s accounttype.Status) pb.AccountTypeStatus {
 
 func protoAccountTypeStatusToDomain(s pb.AccountTypeStatus) accounttype.Status {
 	switch s {
+	case pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_UNSPECIFIED:
+		return ""
 	case pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_DRAFT:
 		return accounttype.StatusDraft
 	case pb.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE:
