@@ -2,23 +2,28 @@
 -- original migration (20260209000002) created it as INTEGER. This caused
 -- bootstrap failures inserting semver strings like "1.0".
 --
--- CockroachDB requires ALTER COLUMN TYPE to run outside explicit transactions
--- and cannot alter indexed columns. All indexes on the version column must be
--- dropped first, then recreated after the type change.
--- atlas:txn false
+-- CockroachDB cannot ALTER COLUMN TYPE inside a transaction, so we use the
+-- add-column/copy/drop/rename pattern instead.
 
--- Drop all indexes on the version column.
+-- Step 1: Add a new VARCHAR column.
+ALTER TABLE manifest_version ADD COLUMN version_new VARCHAR(50);
+
+-- Step 2: Copy existing integer values as strings.
+UPDATE manifest_version SET version_new = version::TEXT;
+
+-- Step 3: Apply NOT NULL after data is copied.
+ALTER TABLE manifest_version ALTER COLUMN version_new SET NOT NULL;
+
+-- Step 4: Drop old indexes and the old column.
 -- CockroachDB requires DROP INDEX CASCADE for unique constraints.
 -- The test adapter (adaptCockroachDDLForPostgres) rewrites these for Postgres.
 DROP INDEX IF EXISTS uq_manifest_version_version CASCADE;
-DROP INDEX IF EXISTS idx_manifest_version_version CASCADE;
+DROP INDEX IF EXISTS idx_manifest_version_version;
+ALTER TABLE manifest_version DROP COLUMN version;
 
--- CockroachDB requires enabling experimental support for int -> varchar type changes.
-SET enable_experimental_alter_column_type_general = true;
+-- Step 5: Rename the new column.
+ALTER TABLE manifest_version RENAME COLUMN version_new TO version;
 
--- Change the column type from INTEGER to VARCHAR(50) to match the GORM model.
-ALTER TABLE manifest_version ALTER COLUMN version SET DATA TYPE VARCHAR(50);
-
--- Recreate the indexes.
+-- Step 6: Recreate indexes on the new column.
 ALTER TABLE manifest_version ADD CONSTRAINT uq_manifest_version_version UNIQUE (version);
 CREATE INDEX idx_manifest_version_version ON manifest_version (version DESC);

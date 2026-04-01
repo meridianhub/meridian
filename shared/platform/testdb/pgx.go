@@ -284,11 +284,6 @@ func adaptCockroachDDLForPostgres(sql string) string {
 		`DROP INDEX IF EXISTS uq_manifest_version_version CASCADE`,
 		`ALTER TABLE manifest_version DROP CONSTRAINT IF EXISTS uq_manifest_version_version`,
 	)
-	// Remove CockroachDB-specific session variable that Postgres doesn't recognize.
-	result = strings.ReplaceAll(result,
-		"SET enable_experimental_alter_column_type_general = true;",
-		"",
-	)
 	// Wrap ADD CONSTRAINT ... CHECK statements targeting public-schema tables in a
 	// DO block that ignores duplicate_object errors. This handles both:
 	//   - "ADD CONSTRAINT IF NOT EXISTS" (CockroachDB extension, removed for PG16 compat)
