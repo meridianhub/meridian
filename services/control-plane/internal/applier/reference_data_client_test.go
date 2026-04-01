@@ -80,9 +80,21 @@ func (f *fakeReferenceDataServer) DeprecateInstrument(_ context.Context, req *re
 
 type fakeAccountTypeServer struct {
 	referencedatav1.UnimplementedAccountTypeRegistryServiceServer
+	getActiveDefinitionFn func(context.Context, *referencedatav1.GetActiveDefinitionRequest) (*referencedatav1.GetActiveDefinitionResponse, error)
+	createDraftFn         func(context.Context, *referencedatav1.CreateDraftRequest) (*referencedatav1.CreateDraftResponse, error)
 }
 
-func (f *fakeAccountTypeServer) CreateDraft(_ context.Context, req *referencedatav1.CreateDraftRequest) (*referencedatav1.CreateDraftResponse, error) {
+func (f *fakeAccountTypeServer) GetActiveDefinition(ctx context.Context, req *referencedatav1.GetActiveDefinitionRequest) (*referencedatav1.GetActiveDefinitionResponse, error) {
+	if f.getActiveDefinitionFn != nil {
+		return f.getActiveDefinitionFn(ctx, req)
+	}
+	return nil, status.Error(codes.NotFound, "no active definition found")
+}
+
+func (f *fakeAccountTypeServer) CreateDraft(ctx context.Context, req *referencedatav1.CreateDraftRequest) (*referencedatav1.CreateDraftResponse, error) {
+	if f.createDraftFn != nil {
+		return f.createDraftFn(ctx, req)
+	}
 	return &referencedatav1.CreateDraftResponse{
 		Definition: &referencedatav1.AccountTypeDefinition{
 			Id:      "at-uuid-1",
@@ -148,13 +160,8 @@ func (f *fakeSagaRegistryServer) GetActiveSaga(ctx context.Context, req *sagav1.
 	if f.getActiveFn != nil {
 		return f.getActiveFn(ctx, req)
 	}
-	return &sagav1.GetActiveSagaResponse{
-		Saga: &sagav1.SagaDefinition{
-			Id:     "existing-saga-uuid",
-			Name:   req.Name,
-			Status: sagav1.SagaStatus_SAGA_STATUS_ACTIVE,
-		},
-	}, nil
+	// Default: no active saga found (proactive check falls through to create).
+	return nil, status.Error(codes.NotFound, "no active saga found")
 }
 
 // ─── Test setup ────────────────────────────────────────────────────────────
@@ -193,6 +200,28 @@ func newRefDataTestServerWith(t *testing.T, sagaSrv *fakeSagaRegistryServer) *gr
 	referencedatav1.RegisterReferenceDataServiceServer(srv, &fakeReferenceDataServer{})
 	referencedatav1.RegisterAccountTypeRegistryServiceServer(srv, &fakeAccountTypeServer{})
 	sagav1.RegisterSagaRegistryServiceServer(srv, sagaSrv)
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.GracefulStop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return lis.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return conn
+}
+
+func newRefDataTestServerWithAccountType(t *testing.T, atSrv *fakeAccountTypeServer) *grpc.ClientConn {
+	t.Helper()
+
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	referencedatav1.RegisterReferenceDataServiceServer(srv, &fakeReferenceDataServer{})
+	referencedatav1.RegisterAccountTypeRegistryServiceServer(srv, atSrv)
+	sagav1.RegisterSagaRegistryServiceServer(srv, &fakeSagaRegistryServer{})
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.GracefulStop)
@@ -383,7 +412,23 @@ func TestParseNormalBalance(t *testing.T) {
 // ─── Idempotency tests ──────────────────────────────────────────────────────
 
 func TestReferenceDataClient_RegisterSagaDefinition_AlreadyExists_TreatedAsSuccess(t *testing.T) {
+	// Proactive check returns NotFound (first call), but CreateSagaDraft returns AlreadyExists.
+	// The reactive fallback calls GetActiveSaga again (second call) and finds the saga.
+	callCount := 0
 	sagaSrv := &fakeSagaRegistryServer{
+		getActiveFn: func(_ context.Context, req *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, status.Error(codes.NotFound, "no active saga found")
+			}
+			return &sagav1.GetActiveSagaResponse{
+				Saga: &sagav1.SagaDefinition{
+					Id:     "existing-saga-uuid",
+					Name:   req.Name,
+					Status: sagav1.SagaStatus_SAGA_STATUS_ACTIVE,
+				},
+			}, nil
+		},
 		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
 			return nil, status.Error(codes.AlreadyExists, "saga already exists: test-saga")
 		},
@@ -404,11 +449,14 @@ func TestReferenceDataClient_RegisterSagaDefinition_AlreadyExists_TreatedAsSucce
 }
 
 func TestReferenceDataClient_RegisterSagaDefinition_AlreadyExists_LookupFails(t *testing.T) {
+	// Both proactive and reactive GetActiveSaga calls return NotFound.
+	// CreateSagaDraft returns AlreadyExists. The reactive fallback lookup also fails.
 	sagaSrv := &fakeSagaRegistryServer{
 		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
 			return nil, status.Error(codes.AlreadyExists, "saga already exists")
 		},
 		getActiveFn: func(_ context.Context, _ *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error) {
+			// Both calls (proactive + reactive fallback) return NotFound.
 			return nil, status.Error(codes.NotFound, "no active saga found")
 		},
 	}
@@ -424,6 +472,10 @@ func TestReferenceDataClient_RegisterSagaDefinition_AlreadyExists_LookupFails(t 
 
 func TestReferenceDataClient_RegisterSagaDefinition_OtherError_Propagated(t *testing.T) {
 	sagaSrv := &fakeSagaRegistryServer{
+		// Proactive check returns NotFound, so we proceed to CreateSagaDraft.
+		getActiveFn: func(_ context.Context, _ *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error) {
+			return nil, status.Error(codes.NotFound, "no active saga found")
+		},
 		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
 			return nil, status.Error(codes.Internal, "database unavailable")
 		},
@@ -490,4 +542,255 @@ func TestReferenceDataClient_ActivateInstrument_NotActive_ErrorPropagated(t *tes
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "activate instrument")
+}
+
+// ─── Task 1: Proactive ActivateInstrument idempotency ─────────────────────
+
+func TestReferenceDataClient_ActivateInstrument_ProactiveCheck_AlreadyActive(t *testing.T) {
+	// RetrieveInstrument returns ACTIVE on the proactive check,
+	// so ActivateInstrument should never be called.
+	activateCalled := false
+	refDataSrv := &fakeReferenceDataServer{
+		retrieveInstrumentFn: func(_ context.Context, req *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error) {
+			return &referencedatav1.RetrieveInstrumentResponse{
+				Instrument: &referencedatav1.InstrumentDefinition{
+					Id:      "inst-uuid-1",
+					Code:    req.Code,
+					Version: req.Version,
+					Status:  referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE,
+				},
+			}, nil
+		},
+		activateInstrumentFn: func(_ context.Context, _ *referencedatav1.ActivateInstrumentRequest) (*referencedatav1.ActivateInstrumentResponse, error) {
+			activateCalled = true
+			return nil, status.Error(codes.FailedPrecondition, "should not be called")
+		},
+	}
+	conn := newRefDataTestServerWithRefData(t, refDataSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.ActivateInstrument(testStarlarkCtx(), map[string]any{
+		"instrument_code": "GBP",
+		"version":         int32(1),
+	})
+	require.NoError(t, err, "proactive check should return success for already-ACTIVE instrument")
+	assert.False(t, activateCalled, "ActivateInstrument gRPC should not be called when proactive check finds ACTIVE")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "GBP", m["instrument_code"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestReferenceDataClient_ActivateInstrument_ProactiveCheck_LookupFails_ProceedsToActivate(t *testing.T) {
+	// RetrieveInstrument fails (e.g., NotFound), so the handler proceeds to activate normally.
+	refDataSrv := &fakeReferenceDataServer{
+		retrieveInstrumentFn: func(_ context.Context, _ *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error) {
+			return nil, status.Error(codes.NotFound, "instrument not found")
+		},
+	}
+	conn := newRefDataTestServerWithRefData(t, refDataSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.ActivateInstrument(testStarlarkCtx(), map[string]any{
+		"instrument_code": "GBP",
+	})
+	require.NoError(t, err, "should proceed to activate when proactive lookup fails")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "GBP", m["instrument_code"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestReferenceDataClient_ActivateInstrument_ProactiveCheck_DraftState_ProceedsToActivate(t *testing.T) {
+	// RetrieveInstrument returns DRAFT, so the handler proceeds to activate.
+	refDataSrv := &fakeReferenceDataServer{
+		retrieveInstrumentFn: func(_ context.Context, req *referencedatav1.RetrieveInstrumentRequest) (*referencedatav1.RetrieveInstrumentResponse, error) {
+			return &referencedatav1.RetrieveInstrumentResponse{
+				Instrument: &referencedatav1.InstrumentDefinition{
+					Id:      "inst-uuid-1",
+					Code:    req.Code,
+					Version: req.Version,
+					Status:  referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_DRAFT,
+				},
+			}, nil
+		},
+	}
+	conn := newRefDataTestServerWithRefData(t, refDataSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.ActivateInstrument(testStarlarkCtx(), map[string]any{
+		"instrument_code": "GBP",
+	})
+	require.NoError(t, err, "should proceed to activate when instrument is DRAFT")
+
+	m := result.(map[string]any)
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+// ─── Task 2: Proactive RegisterAccountType idempotency ────────────────────
+
+func TestReferenceDataClient_RegisterAccountType_AlreadyActive_TreatedAsSuccess(t *testing.T) {
+	atSrv := &fakeAccountTypeServer{
+		getActiveDefinitionFn: func(_ context.Context, req *referencedatav1.GetActiveDefinitionRequest) (*referencedatav1.GetActiveDefinitionResponse, error) {
+			return &referencedatav1.GetActiveDefinitionResponse{
+				Definition: &referencedatav1.AccountTypeDefinition{
+					Id:      "at-uuid-existing",
+					Code:    req.Code,
+					Version: 1,
+					Status:  referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE,
+				},
+			}, nil
+		},
+		createDraftFn: func(_ context.Context, _ *referencedatav1.CreateDraftRequest) (*referencedatav1.CreateDraftResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "should not be called")
+		},
+	}
+	conn := newRefDataTestServerWithAccountType(t, atSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.RegisterAccountType(testStarlarkCtx(), map[string]any{
+		"code":            "ENERGY_TRADING",
+		"display_name":    "Energy Trading Account",
+		"instrument_code": "GBP",
+	})
+	require.NoError(t, err, "already-ACTIVE account type should be treated as idempotent success")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "at-uuid-existing", m["id"])
+	assert.Equal(t, "ENERGY_TRADING", m["code"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestReferenceDataClient_RegisterAccountType_LookupNotFound_ProceedsToCreate(t *testing.T) {
+	// GetActiveDefinition returns NotFound, so the handler proceeds to create + activate.
+	conn := newRefDataTestServerWithAccountType(t, &fakeAccountTypeServer{})
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.RegisterAccountType(testStarlarkCtx(), map[string]any{
+		"code":            "NEW_TYPE",
+		"display_name":    "New Account Type",
+		"instrument_code": "GBP",
+	})
+	require.NoError(t, err, "should proceed to create when GetActiveDefinition returns NotFound")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "at-uuid-1", m["id"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestReferenceDataClient_RegisterAccountType_LookupError_ProceedsToCreate(t *testing.T) {
+	// GetActiveDefinition returns an unexpected error, handler should still proceed.
+	atSrv := &fakeAccountTypeServer{
+		getActiveDefinitionFn: func(_ context.Context, _ *referencedatav1.GetActiveDefinitionRequest) (*referencedatav1.GetActiveDefinitionResponse, error) {
+			return nil, status.Error(codes.Internal, "database unavailable")
+		},
+	}
+	conn := newRefDataTestServerWithAccountType(t, atSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.RegisterAccountType(testStarlarkCtx(), map[string]any{
+		"code":            "NEW_TYPE",
+		"display_name":    "New Account Type",
+		"instrument_code": "GBP",
+	})
+	require.NoError(t, err, "should proceed to create when GetActiveDefinition returns error")
+
+	m := result.(map[string]any)
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+// ─── Task 3: Proactive RegisterSagaDefinition idempotency ─────────────────
+
+func TestReferenceDataClient_RegisterSagaDefinition_ProactiveCheck_AlreadyActive(t *testing.T) {
+	createDraftCalled := false
+	sagaSrv := &fakeSagaRegistryServer{
+		getActiveFn: func(_ context.Context, req *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error) {
+			return &sagav1.GetActiveSagaResponse{
+				Saga: &sagav1.SagaDefinition{
+					Id:     "existing-saga-uuid",
+					Name:   req.Name,
+					Status: sagav1.SagaStatus_SAGA_STATUS_ACTIVE,
+				},
+			}, nil
+		},
+		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
+			createDraftCalled = true
+			return nil, status.Error(codes.AlreadyExists, "should not be called")
+		},
+	}
+	conn := newRefDataTestServerWith(t, sagaSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.RegisterSagaDefinition(testStarlarkCtx(), map[string]any{
+		"saga_name":    "test-saga",
+		"display_name": "Test Saga",
+		"script":       "def execute(): pass",
+	})
+	require.NoError(t, err, "proactive check should return success for already-ACTIVE saga")
+	assert.False(t, createDraftCalled, "CreateSagaDraft should not be called when proactive check finds ACTIVE")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "existing-saga-uuid", m["saga_id"])
+	assert.Equal(t, "test-saga", m["saga_name"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestReferenceDataClient_RegisterSagaDefinition_ProactiveCheck_NotFound_ProceedsToCreate(t *testing.T) {
+	sagaSrv := &fakeSagaRegistryServer{
+		getActiveFn: func(_ context.Context, _ *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error) {
+			return nil, status.Error(codes.NotFound, "no active saga found")
+		},
+	}
+	conn := newRefDataTestServerWith(t, sagaSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.RegisterSagaDefinition(testStarlarkCtx(), map[string]any{
+		"saga_name":    "new-saga",
+		"display_name": "New Saga",
+		"script":       "def execute(): pass",
+	})
+	require.NoError(t, err, "should proceed to create when proactive check returns NotFound")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "saga-uuid-1", m["saga_id"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestReferenceDataClient_RegisterSagaDefinition_ReactiveFallback_AlreadyExists(t *testing.T) {
+	// Proactive check returns NotFound, but CreateSagaDraft returns AlreadyExists (race condition).
+	// The reactive fallback should handle this.
+	callCount := 0
+	sagaSrv := &fakeSagaRegistryServer{
+		getActiveFn: func(_ context.Context, req *sagav1.GetActiveSagaRequest) (*sagav1.GetActiveSagaResponse, error) {
+			callCount++
+			if callCount == 1 {
+				// First call (proactive check): not found
+				return nil, status.Error(codes.NotFound, "no active saga found")
+			}
+			// Second call (reactive fallback): return the saga
+			return &sagav1.GetActiveSagaResponse{
+				Saga: &sagav1.SagaDefinition{
+					Id:     "race-condition-saga-uuid",
+					Name:   req.Name,
+					Status: sagav1.SagaStatus_SAGA_STATUS_ACTIVE,
+				},
+			}, nil
+		},
+		createDraftFn: func(_ context.Context, _ *sagav1.CreateSagaDraftRequest) (*sagav1.CreateSagaDraftResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "saga already exists")
+		},
+	}
+	conn := newRefDataTestServerWith(t, sagaSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.RegisterSagaDefinition(testStarlarkCtx(), map[string]any{
+		"saga_name":    "race-saga",
+		"display_name": "Race Condition Saga",
+		"script":       "def execute(): pass",
+	})
+	require.NoError(t, err, "reactive AlreadyExists fallback should handle race condition")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "race-condition-saga-uuid", m["saga_id"])
+	assert.Contains(t, m["status"], "ACTIVE")
 }

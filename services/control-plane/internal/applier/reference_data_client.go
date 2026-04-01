@@ -92,28 +92,44 @@ func (c *ReferenceDataClient) RegisterInstrument(ctx *saga.StarlarkContext, para
 
 // ActivateInstrument implements ReferenceDataService.
 // Converts Starlark params to an ActivateInstrumentRequest and calls the gRPC service.
+// Uses proactive idempotency: checks current state before attempting activation.
 func (c *ReferenceDataClient) ActivateInstrument(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
-	req := &referencedatav1.ActivateInstrumentRequest{}
-	req.Code, _ = params["instrument_code"].(string)
+	code, _ := params["instrument_code"].(string)
+	var version int32 = 1
 	if v, ok := toInt32(params["version"]); ok {
-		req.Version = v
-	} else {
-		// Default to version 1 — the saga registers then immediately activates,
-		// and RegisterInstrument always creates version 1.
-		req.Version = 1
+		version = v
 	}
 
 	callCtx := prepareCallContext(ctx)
-	resp, err := c.instruments.ActivateInstrument(callCtx, req)
+
+	// Proactive check: if already ACTIVE, return success immediately.
+	existing, lookupErr := c.instruments.RetrieveInstrument(callCtx, &referencedatav1.RetrieveInstrumentRequest{
+		Code:    code,
+		Version: version,
+	})
+	if lookupErr == nil && existing.GetInstrument().GetStatus() == referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
+		inst := existing.GetInstrument()
+		return map[string]any{
+			"instrument_code": inst.GetCode(),
+			"version":         inst.GetVersion(),
+			"status":          inst.GetStatus().String(),
+		}, nil
+	}
+
+	// Proceed with activation.
+	resp, err := c.instruments.ActivateInstrument(callCtx, &referencedatav1.ActivateInstrumentRequest{
+		Code:    code,
+		Version: version,
+	})
 	if err != nil {
-		// Idempotency: if the instrument is already ACTIVE, treat as success.
+		// Reactive fallback: if FailedPrecondition and instrument is ACTIVE, treat as success.
 		if status.Code(err) == codes.FailedPrecondition {
-			existing, lookupErr := c.instruments.RetrieveInstrument(callCtx, &referencedatav1.RetrieveInstrumentRequest{
-				Code:    req.Code,
-				Version: req.Version,
+			retryLookup, retryErr := c.instruments.RetrieveInstrument(callCtx, &referencedatav1.RetrieveInstrumentRequest{
+				Code:    code,
+				Version: version,
 			})
-			if lookupErr == nil && existing.GetInstrument().GetStatus() == referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
-				inst := existing.GetInstrument()
+			if retryErr == nil && retryLookup.GetInstrument().GetStatus() == referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
+				inst := retryLookup.GetInstrument()
 				return map[string]any{
 					"instrument_code": inst.GetCode(),
 					"version":         inst.GetVersion(),
@@ -157,10 +173,32 @@ func (c *ReferenceDataClient) DeleteInstrument(ctx *saga.StarlarkContext, params
 }
 
 // RegisterAccountType implements ReferenceDataService.
-// Creates a draft account type and immediately activates it (idempotent).
+// Creates a draft account type and immediately activates it.
+// Uses proactive idempotency: checks if already ACTIVE before creating a draft.
 func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	code, _ := params["code"].(string)
+
+	callCtx := prepareCallContext(ctx)
+
+	// Proactive check: if already ACTIVE, return success immediately.
+	existing, lookupErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{
+		Code: code,
+	})
+	if lookupErr == nil {
+		def := existing.GetDefinition()
+		if def.GetStatus() == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
+			return map[string]any{
+				"id":      def.GetId(),
+				"code":    def.GetCode(),
+				"version": def.GetVersion(),
+				"status":  def.GetStatus().String(),
+			}, nil
+		}
+	}
+
+	// Proceed with create + activate flow.
 	draftReq := &referencedatav1.CreateDraftRequest{}
-	draftReq.Code, _ = params["code"].(string)
+	draftReq.Code = code
 	draftReq.DisplayName, _ = params["display_name"].(string)
 	draftReq.Description, _ = params["description"].(string)
 	draftReq.InstrumentCode, _ = params["instrument_code"].(string)
@@ -183,7 +221,6 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 		draftReq.DefaultConversionMethodVersion = v
 	}
 
-	callCtx := prepareCallContext(ctx)
 	draftResp, err := c.accountTypes.CreateDraft(callCtx, draftReq)
 	if err != nil {
 		return nil, fmt.Errorf("create account type draft: %w", err)
@@ -192,10 +229,9 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 	def := draftResp.GetDefinition()
 
 	// Activate the draft
-	activateReq := &referencedatav1.ActivateAccountTypeRequest{
+	activateResp, err := c.accountTypes.ActivateAccountType(callCtx, &referencedatav1.ActivateAccountTypeRequest{
 		Id: def.GetId(),
-	}
-	activateResp, err := c.accountTypes.ActivateAccountType(callCtx, activateReq)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("activate account type: %w", err)
 	}
@@ -243,20 +279,39 @@ func (c *ReferenceDataClient) RegisterValuationRule(_ *saga.StarlarkContext, par
 
 // RegisterSagaDefinition implements ReferenceDataService.
 // Creates a saga draft and activates it via the SagaRegistryService.
+// Uses proactive idempotency: checks if already ACTIVE before creating a draft.
 func (c *ReferenceDataClient) RegisterSagaDefinition(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
+	sagaName, _ := params["saga_name"].(string)
+
+	callCtx := prepareCallContext(ctx)
+
+	// Proactive check: if already ACTIVE, return success immediately.
+	existing, lookupErr := c.sagas.GetActiveSaga(callCtx, &sagav1.GetActiveSagaRequest{
+		Name: sagaName,
+	})
+	if lookupErr == nil {
+		s := existing.GetSaga()
+		if s.GetStatus() == sagav1.SagaStatus_SAGA_STATUS_ACTIVE {
+			return map[string]any{
+				"saga_name": s.GetName(),
+				"saga_id":   s.GetId(),
+				"status":    s.GetStatus().String(),
+			}, nil
+		}
+	}
+
+	// Proceed with create + activate flow.
 	draftReq := &sagav1.CreateSagaDraftRequest{}
-	draftReq.Name, _ = params["saga_name"].(string)
+	draftReq.Name = sagaName
 	draftReq.DisplayName, _ = params["display_name"].(string)
 	draftReq.Description, _ = params["description"].(string)
 	draftReq.Script, _ = params["script"].(string)
 
-	callCtx := prepareCallContext(ctx)
 	draftResp, err := c.sagas.CreateSagaDraft(callCtx, draftReq)
 	if err != nil {
-		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios.
-		// Look up the existing active saga by name to return its details.
+		// Reactive fallback: treat AlreadyExists as success (belt and suspenders).
 		if status.Code(err) == codes.AlreadyExists {
-			return c.handleSagaAlreadyExists(callCtx, draftReq.Name)
+			return c.handleSagaAlreadyExists(callCtx, sagaName)
 		}
 		return nil, fmt.Errorf("create saga draft: %w", err)
 	}
