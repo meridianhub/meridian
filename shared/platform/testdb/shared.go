@@ -83,18 +83,43 @@ func StartSharedPostgres() (string, func()) {
 //	dbName := "test_" + strings.ReplaceAll(t.Name(), "/", "_")
 //	pool.Exec(ctx, "CREATE DATABASE "+dbName)
 func StartSharedCockroachDB() (string, func()) {
-	ctx, cancel := context.WithTimeout(context.Background(), cockroachStartupTimeout)
-	defer cancel()
-
-	container, err := cockroachdb.Run(ctx,
-		CockroachDBImage,
+	opts := []testcontainers.ContainerCustomizer{
 		cockroachdb.WithDatabase("defaultdb"),
 		cockroachdb.WithUser("root"),
 		cockroachdb.WithInsecure(),
-	)
-	if err != nil {
-		panic(fmt.Sprintf("testdb: failed to start shared CockroachDB container: %v", err))
 	}
+
+	var container *cockroachdb.CockroachDBContainer
+	var lastErr error
+
+	for attempt := 1; attempt <= cockroachMaxRetries; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), cockroachStartupTimeout)
+
+		var err error
+		container, err = cockroachdb.Run(ctx, CockroachDBImage, opts...)
+		cancel()
+
+		if err == nil {
+			break
+		}
+
+		lastErr = err
+		fmt.Printf("testdb: CockroachDB container start attempt %d/%d failed: %v\n", attempt, cockroachMaxRetries, err)
+
+		if container != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = container.Terminate(cleanupCtx)
+			cleanupCancel()
+			container = nil
+		}
+	}
+
+	if container == nil {
+		panic(fmt.Sprintf("testdb: failed to start shared CockroachDB container after %d attempts: %v", cockroachMaxRetries, lastErr))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	connConfig, err := container.ConnectionConfig(ctx)
 	if err != nil {

@@ -240,15 +240,16 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 	// Connect to shared CockroachDB container to create per-test database
 	adminPool, err := pgxpool.New(ctx, sharedCrdbDSN)
 	require.NoError(t, err)
+	t.Cleanup(func() { adminPool.Close() })
 
 	_, err = adminPool.Exec(ctx, "CREATE DATABASE "+dbName)
 	require.NoError(t, err)
-	adminPool.Close()
 
 	// Build DSN for the per-test database
 	testDSN := replaceDatabaseInDSN(sharedCrdbDSN, dbName)
 	pool, err := pgxpool.New(ctx, testDSN)
 	require.NoError(t, err)
+	t.Cleanup(func() { pool.Close() })
 
 	// Apply migrations in order
 	migrations := []string{
@@ -269,11 +270,7 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 		require.NoError(t, err, "failed to apply migration %s", migration)
 	}
 
-	cleanup := func() {
-		pool.Close()
-	}
-
-	return pool, cleanup
+	return pool, func() {}
 }
 
 // replaceDatabaseInDSN swaps the database name in a PostgreSQL DSN.
