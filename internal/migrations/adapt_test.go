@@ -24,3 +24,21 @@ func TestAdaptCockroachDDLForPostgres_SagaDefinitionUniqueConstraint(t *testing.
 	assert.Contains(t, result, `ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`)
 	assert.NotContains(t, result, "DROP INDEX")
 }
+
+func TestAdaptCockroachDDLForPostgres_MultiStatementMigration(t *testing.T) {
+	input := `UPDATE manifest_version SET version_new = version::TEXT WHERE version_new IS NULL;
+ALTER TABLE manifest_version ALTER COLUMN version_new SET NOT NULL;
+DROP INDEX IF EXISTS uq_manifest_version_version CASCADE;
+DROP INDEX IF EXISTS idx_manifest_version_version;
+ALTER TABLE manifest_version DROP COLUMN version;`
+
+	result := adaptCockroachDDLForPostgres(input)
+
+	// The DROP INDEX CASCADE for the unique constraint should be rewritten
+	assert.Contains(t, result, "ALTER TABLE manifest_version DROP CONSTRAINT IF EXISTS uq_manifest_version_version")
+	// The regular DROP INDEX (non-unique) should be left unchanged
+	assert.Contains(t, result, "DROP INDEX IF EXISTS idx_manifest_version_version")
+	// Other statements should be untouched
+	assert.Contains(t, result, "UPDATE manifest_version SET version_new")
+	assert.Contains(t, result, "ALTER TABLE manifest_version DROP COLUMN version")
+}
