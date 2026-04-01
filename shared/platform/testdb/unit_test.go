@@ -22,6 +22,13 @@ func TestAdaptCockroachDDLForPostgres_DropIndexCascade(t *testing.T) {
 	assert.NotContains(t, result, "DROP INDEX")
 }
 
+func TestAdaptCockroachDDLForPostgres_DropIndexCascade_ManifestVersion(t *testing.T) {
+	input := `DROP INDEX IF EXISTS uq_manifest_version_version CASCADE;`
+	result := adaptCockroachDDLForPostgres(input)
+	assert.Contains(t, result, `ALTER TABLE manifest_version DROP CONSTRAINT IF EXISTS uq_manifest_version_version`)
+	assert.NotContains(t, result, "DROP INDEX")
+}
+
 func TestAdaptCockroachDDLForPostgres_AddConstraintCheck(t *testing.T) {
 	input := `ALTER TABLE public.my_table ADD CONSTRAINT chk_status CHECK (status IN ('a','b'));`
 	result := adaptCockroachDDLForPostgres(input)

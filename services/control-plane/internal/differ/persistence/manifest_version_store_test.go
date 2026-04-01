@@ -67,7 +67,7 @@ func TestSave_And_GetLatestApplied(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	assert.Equal(t, 1, result.Version)
+	assert.Equal(t, "1.0", result.Version)
 	assert.Equal(t, "test-user", result.AppliedBy)
 	assert.Equal(t, "1.0", result.Manifest.Version)
 	assert.Equal(t, "Test Manifest", result.Manifest.Metadata.Name)
@@ -75,27 +75,55 @@ func TestSave_And_GetLatestApplied(t *testing.T) {
 	assert.False(t, result.AppliedAt.IsZero())
 }
 
-func TestSave_IncrementsVersion(t *testing.T) {
+func TestSave_MultipleVersions(t *testing.T) {
 	store, ctx := setupTestStore(t)
 
 	// Save first version
 	err := store.Save(ctx, testManifest(), "user-a")
 	require.NoError(t, err)
 
-	// Save second version
+	// Save second version with a different version string
 	m2 := testManifest()
+	m2.Version = "2.0"
 	m2.Metadata.Name = "Updated Manifest"
 	err = store.Save(ctx, m2, "user-b")
 	require.NoError(t, err)
 
-	// GetLatestApplied should return version 2
+	// GetLatestApplied should return version 2.0 (most recent by applied_at)
 	result, err := store.GetLatestApplied(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	assert.Equal(t, 2, result.Version)
+	assert.Equal(t, "2.0", result.Version)
 	assert.Equal(t, "user-b", result.AppliedBy)
 	assert.Equal(t, "Updated Manifest", result.Manifest.Metadata.Name)
+}
+
+func TestSave_UsesManifestVersion(t *testing.T) {
+	store, ctx := setupTestStore(t)
+
+	m := testManifest()
+	m.Version = "3.2.1"
+	err := store.Save(ctx, m, "user-c")
+	require.NoError(t, err)
+
+	result, err := store.GetLatestApplied(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Version should be the manifest's version string, not an auto-incremented integer
+	assert.Equal(t, "3.2.1", result.Version)
+}
+
+func TestSave_DuplicateVersionFails(t *testing.T) {
+	store, ctx := setupTestStore(t)
+
+	err := store.Save(ctx, testManifest(), "user-a")
+	require.NoError(t, err)
+
+	// Saving the same version again should fail (unique constraint)
+	err = store.Save(ctx, testManifest(), "user-b")
+	assert.Error(t, err)
 }
 
 func TestMultiTenantIsolation(t *testing.T) {
@@ -125,18 +153,18 @@ func TestMultiTenantIsolation(t *testing.T) {
 	err = store.Save(ctxB, manifestB, "admin-b")
 	require.NoError(t, err)
 
-	// Both tenants should see version 1 (independent counters)
+	// Both tenants should see version "1.0" (independent stores)
 	resultA, err := store.GetLatestApplied(ctxA)
 	require.NoError(t, err)
 	require.NotNil(t, resultA)
-	assert.Equal(t, 1, resultA.Version)
+	assert.Equal(t, "1.0", resultA.Version)
 	assert.Equal(t, "admin-a", resultA.AppliedBy)
 	assert.Equal(t, "Alpha Manifest", resultA.Manifest.Metadata.Name)
 
 	resultB, err := store.GetLatestApplied(ctxB)
 	require.NoError(t, err)
 	require.NotNil(t, resultB)
-	assert.Equal(t, 1, resultB.Version)
+	assert.Equal(t, "1.0", resultB.Version)
 	assert.Equal(t, "admin-b", resultB.AppliedBy)
 	assert.Equal(t, "Beta Manifest", resultB.Manifest.Metadata.Name)
 }

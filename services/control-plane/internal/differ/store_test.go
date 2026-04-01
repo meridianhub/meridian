@@ -13,14 +13,14 @@ func TestManifestVersion_Fields(t *testing.T) {
 	now := time.Now()
 	mv := ManifestVersion{
 		ID:        "v-123",
-		Version:   3,
+		Version:   "1.0",
 		Manifest:  &controlplanev1.Manifest{Version: "1.0"},
 		AppliedAt: now,
 		AppliedBy: "user@example.com",
 	}
 
 	assert.Equal(t, "v-123", mv.ID)
-	assert.Equal(t, 3, mv.Version)
+	assert.Equal(t, "1.0", mv.Version)
 	assert.Equal(t, "1.0", mv.Manifest.GetVersion())
 	assert.Equal(t, now, mv.AppliedAt)
 	assert.Equal(t, "user@example.com", mv.AppliedBy)
@@ -29,7 +29,7 @@ func TestManifestVersion_Fields(t *testing.T) {
 func TestManifestVersion_ZeroValue(t *testing.T) {
 	var mv ManifestVersion
 	assert.Equal(t, "", mv.ID)
-	assert.Equal(t, 0, mv.Version)
+	assert.Equal(t, "", mv.Version)
 	assert.Nil(t, mv.Manifest)
 	assert.True(t, mv.AppliedAt.IsZero())
 	assert.Equal(t, "", mv.AppliedBy)
@@ -54,7 +54,7 @@ func (s *inMemoryManifestVersionStore) Save(_ context.Context, manifest *control
 		Manifest:  manifest,
 		AppliedBy: appliedBy,
 		AppliedAt: time.Now(),
-		Version:   1,
+		Version:   manifest.GetVersion(),
 	}
 	return nil
 }

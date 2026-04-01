@@ -39,13 +39,13 @@ func (s *PostgresManifestVersionStore) GetLatestApplied(ctx context.Context) (*d
 		row := tx.QueryRow(ctx, `
 			SELECT id, version, manifest_json, applied_at, applied_by
 			FROM manifest_version
-			ORDER BY version DESC
+			ORDER BY applied_at DESC
 			LIMIT 1
 		`)
 
 		var (
 			id           string
-			version      int
+			version      string
 			manifestJSON []byte
 			appliedAt    time.Time
 			appliedBy    string
@@ -79,14 +79,7 @@ func (s *PostgresManifestVersionStore) GetLatestApplied(ctx context.Context) (*d
 // Save stores a new manifest version after successful application.
 func (s *PostgresManifestVersionStore) Save(ctx context.Context, manifest *controlplanev1.Manifest, appliedBy string) error {
 	return s.withWriteTransaction(ctx, func(tx pgx.Tx) error {
-		var nextVersion int
-		err := tx.QueryRow(ctx, `
-			SELECT COALESCE(MAX(version), 0) + 1
-			FROM manifest_version
-		`).Scan(&nextVersion)
-		if err != nil {
-			return fmt.Errorf("get next version: %w", err)
-		}
+		version := manifest.GetVersion()
 
 		manifestJSON, err := protojson.Marshal(manifest)
 		if err != nil {
@@ -100,7 +93,7 @@ func (s *PostgresManifestVersionStore) Save(ctx context.Context, manifest *contr
 		_, err = tx.Exec(ctx, `
 			INSERT INTO manifest_version (version, manifest_json, applied_by)
 			VALUES ($1, $2, $3)
-		`, nextVersion, manifestJSON, appliedBy)
+		`, version, manifestJSON, appliedBy)
 		if err != nil {
 			return fmt.Errorf("insert manifest version: %w", err)
 		}

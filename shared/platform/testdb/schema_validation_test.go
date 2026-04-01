@@ -201,7 +201,8 @@ func applyMigrations(ctx context.Context, t *testing.T, db *sql.DB) {
 		content, err := os.ReadFile(mig.fullPath)
 		require.NoError(t, err, "Failed to read migration %s", mig.fullPath)
 
-		_, err = db.ExecContext(ctx, string(content))
+		sql := adaptCockroachDDLForPostgres(string(content))
+		_, err = db.ExecContext(ctx, sql)
 		require.NoError(t, err, "Failed to apply migration %s: SQL error", mig.fullPath)
 
 		t.Logf("Applied migration: [%s] %s", mig.schema, mig.filename)
