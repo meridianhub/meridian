@@ -177,51 +177,18 @@ func (c *ReferenceDataClient) DeleteInstrument(ctx *saga.StarlarkContext, params
 // Uses proactive idempotency: checks if already ACTIVE before creating a draft.
 func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 	code, _ := params["code"].(string)
-
 	callCtx := prepareCallContext(ctx)
 
 	// Proactive check: if already ACTIVE, return success immediately.
 	existing, lookupErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{
 		Code: code,
 	})
-	if lookupErr == nil {
-		def := existing.GetDefinition()
-		if def.GetStatus() == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
-			return map[string]any{
-				"id":      def.GetId(),
-				"code":    def.GetCode(),
-				"version": def.GetVersion(),
-				"status":  def.GetStatus().String(),
-			}, nil
-		}
+	if lookupErr == nil && existing.GetDefinition().GetStatus() == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
+		return accountTypeResult(existing.GetDefinition()), nil
 	}
 
 	// Proceed with create + activate flow.
-	draftReq := &referencedatav1.CreateDraftRequest{}
-	draftReq.Code = code
-	draftReq.DisplayName, _ = params["display_name"].(string)
-	draftReq.Description, _ = params["description"].(string)
-	draftReq.InstrumentCode, _ = params["instrument_code"].(string)
-	draftReq.DefaultSagaPrefix, _ = params["default_saga_prefix"].(string)
-	draftReq.ValidationCel, _ = params["validation_cel"].(string)
-	draftReq.EligibilityCel, _ = params["eligibility_cel"].(string)
-
-	if bcStr, ok := params["behavior_class"].(string); ok {
-		draftReq.BehaviorClass = parseBehaviorClass(bcStr)
-	}
-	if nbStr, ok := params["normal_balance"].(string); ok {
-		draftReq.NormalBalance = parseNormalBalance(nbStr)
-	}
-
-	// Resolved conversion method (UUID + version from ValuationMethodService)
-	if id, ok := params["default_conversion_method_id"].(string); ok {
-		draftReq.DefaultConversionMethodId = id
-	}
-	if v, ok := toInt32(params["default_conversion_method_version"]); ok {
-		draftReq.DefaultConversionMethodVersion = v
-	}
-
-	draftResp, err := c.accountTypes.CreateDraft(callCtx, draftReq)
+	draftResp, err := c.accountTypes.CreateDraft(callCtx, buildCreateDraftRequest(params))
 	if err != nil {
 		// Reactive fallback: if AlreadyExists (race condition), look up the active definition.
 		if status.Code(err) == codes.AlreadyExists {
@@ -230,23 +197,50 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 		return nil, fmt.Errorf("create account type draft: %w", err)
 	}
 
-	def := draftResp.GetDefinition()
-
 	// Activate the draft
 	activateResp, err := c.accountTypes.ActivateAccountType(callCtx, &referencedatav1.ActivateAccountTypeRequest{
-		Id: def.GetId(),
+		Id: draftResp.GetDefinition().GetId(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("activate account type: %w", err)
 	}
+	return accountTypeResult(activateResp.GetDefinition()), nil
+}
 
-	activeDef := activateResp.GetDefinition()
+// buildCreateDraftRequest converts Starlark params to a CreateDraftRequest.
+func buildCreateDraftRequest(params map[string]any) *referencedatav1.CreateDraftRequest {
+	req := &referencedatav1.CreateDraftRequest{}
+	req.Code, _ = params["code"].(string)
+	req.DisplayName, _ = params["display_name"].(string)
+	req.Description, _ = params["description"].(string)
+	req.InstrumentCode, _ = params["instrument_code"].(string)
+	req.DefaultSagaPrefix, _ = params["default_saga_prefix"].(string)
+	req.ValidationCel, _ = params["validation_cel"].(string)
+	req.EligibilityCel, _ = params["eligibility_cel"].(string)
+
+	if bcStr, ok := params["behavior_class"].(string); ok {
+		req.BehaviorClass = parseBehaviorClass(bcStr)
+	}
+	if nbStr, ok := params["normal_balance"].(string); ok {
+		req.NormalBalance = parseNormalBalance(nbStr)
+	}
+	if id, ok := params["default_conversion_method_id"].(string); ok {
+		req.DefaultConversionMethodId = id
+	}
+	if v, ok := toInt32(params["default_conversion_method_version"]); ok {
+		req.DefaultConversionMethodVersion = v
+	}
+	return req
+}
+
+// accountTypeResult converts an AccountTypeDefinition to a saga result map.
+func accountTypeResult(def *referencedatav1.AccountTypeDefinition) map[string]any {
 	return map[string]any{
-		"id":      activeDef.GetId(),
-		"code":    activeDef.GetCode(),
-		"version": activeDef.GetVersion(),
-		"status":  activeDef.GetStatus().String(),
-	}, nil
+		"id":      def.GetId(),
+		"code":    def.GetCode(),
+		"version": def.GetVersion(),
+		"status":  def.GetStatus().String(),
+	}
 }
 
 // DeleteAccountType implements ReferenceDataService.
@@ -277,13 +271,7 @@ func (c *ReferenceDataClient) handleAccountTypeAlreadyExists(ctx context.Context
 	if err != nil {
 		return nil, fmt.Errorf("create account type draft: account type already exists but lookup failed: %w", err)
 	}
-	def := resp.GetDefinition()
-	return map[string]any{
-		"id":      def.GetId(),
-		"code":    def.GetCode(),
-		"version": def.GetVersion(),
-		"status":  def.GetStatus().String(),
-	}, nil
+	return accountTypeResult(resp.GetDefinition()), nil
 }
 
 // RegisterValuationRule implements ReferenceDataService.
