@@ -157,6 +157,11 @@ func (r *PostgresRegistry) ListActive(ctx context.Context) ([]*Definition, error
 			if err != nil {
 				return err
 			}
+			methods, err := r.loadValuationMethods(ctx, tx, def.ID)
+			if err != nil {
+				return err
+			}
+			def.ValuationMethods = methods
 			result = append(result, def)
 		}
 
@@ -219,6 +224,11 @@ func (r *PostgresRegistry) ListAll(ctx context.Context, statusFilter []Status) (
 			if err != nil {
 				return err
 			}
+			methods, err := r.loadValuationMethods(ctx, tx, def.ID)
+			if err != nil {
+				return err
+			}
+			def.ValuationMethods = methods
 			result = append(result, def)
 		}
 
