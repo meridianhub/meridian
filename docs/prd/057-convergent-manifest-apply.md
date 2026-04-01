@@ -233,9 +233,12 @@ Each service is queried for its managed resource types:
 detect draft/deprecated types.
 
 **Valuation Rules**: No standalone list endpoint. These are
-control-plane-internal, only created via manifest. The stored
-manifest version IS the source of truth for these. Accept this
-as an exception - consistent with PRD-045.
+control-plane-internal, only created via manifest. Phase 2
+should add a `ListValuationRules` query against the
+control-plane database to read live state, keeping the diff
+consistent across all resource types. Until then, valuation
+rules use stored manifest history as a fallback - this is a
+known limitation, not a target state.
 
 ### Diff Logic
 
@@ -251,9 +254,10 @@ The diff produces one action per resource. The full set:
   depend on resource type: for resources that support in-place
   mutation (OG connections/routes via upsert), apply directly.
   For lifecycle-managed resources (instruments, account types),
-  UPDATE is deferred to Phase 2 implementation - the initial
-  approach treats field changes as a validation warning until
-  we define deprecate-and-recreate semantics.
+  UPDATE means deprecate the existing version and create a new
+  one in the target state (deprecate-and-recreate). The apply
+  succeeds only when desired state is fully converged - field
+  drift is not left unresolved.
 - **DEPRECATE** - Resource in live state but not in manifest,
   tenant-owned. Move to terminal state.
 
