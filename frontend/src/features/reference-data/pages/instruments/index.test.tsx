@@ -32,7 +32,12 @@ vi.mock('@/api/context', () => ({
   })),
 }))
 
+vi.mock('@/lib/analytics', () => ({
+  track: vi.fn(),
+}))
+
 import { InstrumentsPage } from './index'
+import { track } from '@/lib/analytics'
 
 function makeQueryClient() {
   return new QueryClient({
@@ -391,6 +396,56 @@ describe('InstrumentsPage', () => {
       })
 
       expect(screen.queryByText('Platform')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('analytics', () => {
+    it('fires platform_badge_visible when system instruments are present', async () => {
+      mockListInstruments.mockResolvedValue({
+        instruments: mockInstruments, // includes isSystem: true (GBP)
+        nextPageToken: '',
+      })
+
+      render(
+        <Wrapper>
+          <InstrumentsPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(vi.mocked(track)).toHaveBeenCalledWith('economy.platform_badge_visible', {
+          page: 'instruments',
+          platform_count: 1,
+          tenant_count: 2,
+        })
+      })
+    })
+
+    it('fires platform_resource_clicked when system instrument row is clicked', async () => {
+      mockListInstruments.mockResolvedValue({
+        instruments: mockInstruments,
+        nextPageToken: '',
+      })
+
+      const user = userEvent.setup()
+
+      render(
+        <Wrapper>
+          <InstrumentsPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('GBP')).toBeInTheDocument()
+      })
+
+      await user.click(screen.getByText('GBP'))
+
+      expect(vi.mocked(track)).toHaveBeenCalledWith('economy.platform_resource_clicked', {
+        resource_type: 'instrument',
+        resource_code: 'GBP',
+        page: 'instruments',
+      })
     })
   })
 })

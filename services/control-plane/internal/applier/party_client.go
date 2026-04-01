@@ -37,6 +37,7 @@ func NewPartyClient(conn *grpc.ClientConn) *PartyClient {
 // RegisterOrganization implements PartyService.
 // Converts Starlark params to a RegisterPartyRequest with PARTY_TYPE_ORGANIZATION
 // and calls the gRPC service.
+// Uses proactive idempotency: checks if organization already exists before creating.
 func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 	req := &partyv1.RegisterPartyRequest{
 		PartyType: partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
@@ -53,10 +54,19 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 	req.ExternalReferenceType = externalRefType
 
 	callCtx := prepareCallContext(ctx)
+
+	// Proactive check: if organization with this external reference already exists, return success.
+	if req.ExternalReference != "" {
+		existing, lookupErr := c.findPartyByExternalRef(callCtx, req.ExternalReference, req.ExternalReferenceType)
+		if lookupErr == nil && existing != nil {
+			return partyResult(existing), nil
+		}
+	}
+
+	// Proceed with registration.
 	resp, err := c.client.RegisterParty(callCtx, req)
 	if err != nil {
-		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios
-		// where the underlying party was already created by a previous apply.
+		// Reactive fallback: treat AlreadyExists as success for manifest re-apply scenarios.
 		if status.Code(err) == codes.AlreadyExists {
 			return c.handleAlreadyExists(callCtx, req)
 		}
@@ -64,11 +74,16 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 	}
 
 	party := resp.GetParty()
+	return partyResult(party), nil
+}
+
+// partyResult converts a Party to a saga result map.
+func partyResult(p *partyv1.Party) map[string]any {
 	return map[string]any{
-		"party_id":   party.GetPartyId(),
-		"legal_name": party.GetLegalName(),
-		"status":     party.GetStatus().String(),
-	}, nil
+		"party_id":   p.GetPartyId(),
+		"legal_name": p.GetLegalName(),
+		"status":     p.GetStatus().String(),
+	}
 }
 
 // handleAlreadyExists resolves the existing party on AlreadyExists so that
@@ -77,11 +92,7 @@ func (c *PartyClient) RegisterOrganization(ctx *saga.StarlarkContext, params map
 func (c *PartyClient) handleAlreadyExists(ctx context.Context, req *partyv1.RegisterPartyRequest) (any, error) {
 	existing, _ := c.findPartyByExternalRef(ctx, req.GetExternalReference(), req.GetExternalReferenceType())
 	if existing != nil {
-		return map[string]any{
-			"party_id":   existing.GetPartyId(),
-			"legal_name": existing.GetLegalName(),
-			"status":     existing.GetStatus().String(),
-		}, nil
+		return partyResult(existing), nil
 	}
 	return map[string]any{
 		"legal_name": req.GetLegalName(),

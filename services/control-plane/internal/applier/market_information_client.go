@@ -17,6 +17,9 @@ import (
 // ErrUnknownDataCategory is returned when an unrecognized data category string is provided.
 var ErrUnknownDataCategory = errors.New("unknown data category")
 
+// errDataSourceNotFound is returned when a data source lookup finds no matching source.
+var errDataSourceNotFound = errors.New("data source not found")
+
 // MarketInformationClient wraps the market-information gRPC client to implement
 // MarketInformationService for use as a saga handler dependency.
 //
@@ -35,6 +38,7 @@ func NewMarketInformationClient(conn *grpc.ClientConn) *MarketInformationClient 
 
 // RegisterDataSource implements MarketInformationService.
 // Converts Starlark params to a RegisterDataSourceRequest and calls the gRPC service.
+// Uses proactive idempotency: checks if data source already exists before creating.
 func (c *MarketInformationClient) RegisterDataSource(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 	req := &marketinformationv1.RegisterDataSourceRequest{}
 	req.Code, _ = params["code"].(string)
@@ -45,10 +49,30 @@ func (c *MarketInformationClient) RegisterDataSource(ctx *saga.StarlarkContext, 
 	}
 
 	callCtx := prepareCallContext(ctx)
+
+	// Proactive check: if a data source with this code already exists, return success immediately.
+	existing, lookupErr := c.findDataSourceByCode(callCtx, req.Code)
+	if lookupErr == nil && existing != nil {
+		return map[string]any{
+			"source_id": existing.GetId(),
+			"code":      existing.GetCode(),
+			"status":    "REGISTERED",
+		}, nil
+	}
+
+	// Proceed with registration.
 	resp, err := c.client.RegisterDataSource(callCtx, req)
 	if err != nil {
-		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios.
+		// Reactive fallback: treat AlreadyExists as success for manifest re-apply scenarios.
 		if status.Code(err) == codes.AlreadyExists {
+			fallback, fallbackErr := c.findDataSourceByCode(callCtx, req.Code)
+			if fallbackErr == nil && fallback != nil {
+				return map[string]any{
+					"source_id": fallback.GetId(),
+					"code":      fallback.GetCode(),
+					"status":    "REGISTERED",
+				}, nil
+			}
 			return map[string]any{
 				"code":   req.Code,
 				"status": "REGISTERED",
@@ -65,9 +89,34 @@ func (c *MarketInformationClient) RegisterDataSource(ctx *saga.StarlarkContext, 
 	}, nil
 }
 
+// findDataSourceByCode pages through ListDataSources to locate a data source by code.
+// Returns errDataSourceNotFound if no matching source is found.
+func (c *MarketInformationClient) findDataSourceByCode(ctx context.Context, code string) (*marketinformationv1.DataSource, error) {
+	pageToken := ""
+	for {
+		resp, err := c.client.ListDataSources(ctx, &marketinformationv1.ListDataSourcesRequest{
+			PageSize:  100,
+			PageToken: pageToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list data sources for lookup: %w", err)
+		}
+		for _, src := range resp.GetSources() {
+			if src.GetCode() == code {
+				return src, nil
+			}
+		}
+		pageToken = resp.GetNextPageToken()
+		if pageToken == "" {
+			return nil, errDataSourceNotFound
+		}
+	}
+}
+
 // RegisterDataSet implements MarketInformationService.
 // Converts Starlark params to a RegisterDataSetRequest and calls the gRPC service.
 // The created data set is in DRAFT status and must be activated separately.
+// Uses proactive idempotency: checks if data set already exists before creating.
 func (c *MarketInformationClient) RegisterDataSet(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 	req := &marketinformationv1.RegisterDataSetRequest{}
 	req.Code, _ = params["code"].(string)
@@ -94,10 +143,17 @@ func (c *MarketInformationClient) RegisterDataSet(ctx *saga.StarlarkContext, par
 	}
 
 	callCtx := prepareCallContext(ctx)
+
+	// Proactive check: if data set already exists (DRAFT or ACTIVE), return success immediately.
+	existing, lookupErr := c.retrieveDataSet(callCtx, req.Code)
+	if lookupErr == nil && existing != nil {
+		return dataSetResult(existing), nil
+	}
+
+	// Proceed with registration.
 	resp, err := c.client.RegisterDataSet(callCtx, req)
 	if err != nil {
-		// Idempotency: treat AlreadyExists as success for manifest re-apply scenarios.
-		// Attempt to retrieve the existing data set to return its details.
+		// Reactive fallback: treat AlreadyExists as success for manifest re-apply scenarios.
 		if status.Code(err) == codes.AlreadyExists {
 			return c.handleDataSetAlreadyExists(callCtx, req.Code)
 		}
@@ -105,16 +161,12 @@ func (c *MarketInformationClient) RegisterDataSet(ctx *saga.StarlarkContext, par
 	}
 
 	ds := resp.GetDataset()
-	return map[string]any{
-		"dataset_id": ds.GetId(),
-		"code":       ds.GetCode(),
-		"version":    ds.GetVersion(),
-		"status":     ds.GetStatus().String(),
-	}, nil
+	return dataSetResult(ds), nil
 }
 
 // ActivateDataSet implements MarketInformationService.
 // Converts Starlark params to an ActivateDataSetRequest and calls the gRPC service.
+// Uses proactive idempotency: checks if already ACTIVE before attempting activation.
 func (c *MarketInformationClient) ActivateDataSet(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 	req := &marketinformationv1.ActivateDataSetRequest{}
 	req.Code, _ = params["code"].(string)
@@ -123,31 +175,38 @@ func (c *MarketInformationClient) ActivateDataSet(ctx *saga.StarlarkContext, par
 	}
 
 	callCtx := prepareCallContext(ctx)
+
+	// Proactive check: if already ACTIVE, return success immediately.
+	existing, lookupErr := c.retrieveDataSet(callCtx, req.Code)
+	if lookupErr == nil && existing.GetStatus() == marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE {
+		return dataSetResult(existing), nil
+	}
+
+	// Proceed with activation.
 	resp, err := c.client.ActivateDataSet(callCtx, req)
 	if err != nil {
-		// Idempotency: on FailedPrecondition, check if the data set is already ACTIVE.
-		// Only treat as success if the dataset has reached the desired state.
+		// Reactive fallback: on FailedPrecondition, check if the data set is already ACTIVE.
 		if status.Code(err) == codes.FailedPrecondition {
-			existing, lookupErr := c.retrieveDataSet(callCtx, req.Code)
-			if lookupErr == nil && existing.GetStatus() == marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE {
-				return map[string]any{
-					"dataset_id": existing.GetId(),
-					"code":       existing.GetCode(),
-					"version":    existing.GetVersion(),
-					"status":     existing.GetStatus().String(),
-				}, nil
+			retryLookup, retryErr := c.retrieveDataSet(callCtx, req.Code)
+			if retryErr == nil && retryLookup.GetStatus() == marketinformationv1.DataSetStatus_DATA_SET_STATUS_ACTIVE {
+				return dataSetResult(retryLookup), nil
 			}
 		}
 		return nil, fmt.Errorf("activate data set: %w", err)
 	}
 
 	ds := resp.GetDataset()
+	return dataSetResult(ds), nil
+}
+
+// dataSetResult converts a DataSetDefinition to a saga result map.
+func dataSetResult(ds *marketinformationv1.DataSetDefinition) map[string]any {
 	return map[string]any{
 		"dataset_id": ds.GetId(),
 		"code":       ds.GetCode(),
 		"version":    ds.GetVersion(),
 		"status":     ds.GetStatus().String(),
-	}, nil
+	}
 }
 
 // handleDataSetAlreadyExists retrieves an existing data set by code so that
@@ -157,12 +216,7 @@ func (c *MarketInformationClient) handleDataSetAlreadyExists(ctx context.Context
 	if err != nil {
 		return nil, fmt.Errorf("register data set: dataset already exists but lookup failed: %w", err)
 	}
-	return map[string]any{
-		"dataset_id": ds.GetId(),
-		"code":       ds.GetCode(),
-		"version":    ds.GetVersion(),
-		"status":     ds.GetStatus().String(),
-	}, nil
+	return dataSetResult(ds), nil
 }
 
 // retrieveDataSet looks up a data set by code. Returns the proto definition or an error.
