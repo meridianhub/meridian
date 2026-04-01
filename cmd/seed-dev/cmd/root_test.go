@@ -49,7 +49,7 @@ func TestGetEnvOrDefault_ReturnsEnvValue(t *testing.T) {
 }
 
 func TestApplyManifest_InvalidFile(t *testing.T) {
-	err := applyManifest(t.Context(), nil, "dev_tenant", "/nonexistent/path/manifest.json")
+	err := applyManifest(t.Context(), nil, "dev_tenant", "/nonexistent/path/manifest.json", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read manifest file")
 }
@@ -58,7 +58,7 @@ func TestApplyManifest_InvalidJSON(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "bad.json")
 	require.NoError(t, os.WriteFile(tmp, []byte("not valid json {{"), 0o600))
 
-	err := applyManifest(t.Context(), nil, "dev_tenant", tmp)
+	err := applyManifest(t.Context(), nil, "dev_tenant", tmp, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse manifest JSON")
 }

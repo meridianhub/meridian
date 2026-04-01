@@ -119,7 +119,11 @@ func (h *ApplyManifestHandler) ApplyManifest(
 
 	// Step 1: Validate the manifest
 	logger.Info("step 1: validating manifest")
-	validationResult := h.validate(ctx, req.GetManifest(), skipImmutability)
+	var validateOpts []validator.ValidateOption
+	if req.GetForce() {
+		validateOpts = append(validateOpts, validator.WithForceDestructiveChanges())
+	}
+	validationResult := h.validate(ctx, req.GetManifest(), skipImmutability, validateOpts...)
 	response.StepResults = append(response.StepResults, validationResult.stepResult)
 
 	if !validationResult.valid {
@@ -322,6 +326,7 @@ func (h *ApplyManifestHandler) validate(
 	ctx context.Context,
 	mf *controlplanev1.Manifest,
 	skipImmutability bool,
+	opts ...validator.ValidateOption,
 ) validationOutput {
 	// Get the previous manifest for immutability checks (best-effort).
 	// When skipImmutability is true we model a new-tenant create, so there
@@ -334,7 +339,7 @@ func (h *ApplyManifestHandler) validate(
 		}
 	}
 
-	result := h.validator.Validate(mf, previousManifest)
+	result := h.validator.Validate(mf, previousManifest, opts...)
 
 	step := &controlplanev1.StepResult{
 		StepName: "validate",
