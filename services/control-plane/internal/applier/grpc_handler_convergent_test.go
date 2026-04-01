@@ -400,6 +400,32 @@ func TestNewApplyManifestHandler_NilLiveStateProvider_IsValid(t *testing.T) {
 	assert.Nil(t, handler.liveState)
 }
 
+// --- Task 12: buildInput Tests ---
+
+func TestBuildInput_WithDiffPlan_FiltersResources(t *testing.T) {
+	mf := newTestManifest()
+	plan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourceInstrument, ResourceCode: "GBP", Action: differ.ActionCreate},
+			{ResourceType: differ.ResourceAccountType, ResourceCode: "CURRENT", Action: differ.ActionNoChange},
+		},
+	}
+
+	input := buildInput(mf, plan)
+	// Only GBP instrument should be included (CREATE), account type excluded (NO_CHANGE).
+	require.Len(t, input.Instruments, 1)
+	assert.Equal(t, "GBP", input.Instruments[0].Code)
+	assert.Empty(t, input.AccountTypes)
+}
+
+func TestBuildInput_NilDiffPlan_IncludesAllResources(t *testing.T) {
+	mf := newTestManifest()
+
+	input := buildInput(mf, nil)
+	require.Len(t, input.Instruments, 1)
+	require.Len(t, input.AccountTypes, 1)
+}
+
 // --- Task 12: buildDiffOutput Tests ---
 
 func TestBuildDiffOutput(t *testing.T) {

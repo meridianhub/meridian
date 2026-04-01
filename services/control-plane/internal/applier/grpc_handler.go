@@ -541,17 +541,8 @@ func (h *ApplyManifestHandler) execute(
 		}
 	}
 
-	// Build executor input filtered by the diff plan when available,
-	// so only actionable resources (CREATE/UPDATE/DEPRECATE) are sent to the executor.
-	var input *ApplyManifestInput
-	if diffPlan != nil {
-		input = buildExecutorInputFromPlan(req.GetManifest(), diffPlan)
-	} else {
-		input = buildExecutorInput(req.GetManifest())
-	}
+	input := buildInput(req.GetManifest(), diffPlan)
 	input.TenantID = execPlan.TenantID
-
-	// Derive phase status from execution plan phases
 	phaseStatus := buildInitialPhaseStatus(execPlan)
 
 	result, err := h.executor.Apply(ctx, input)
