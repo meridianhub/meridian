@@ -274,9 +274,15 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 //     This handles both the legacy "ADD CONSTRAINT IF NOT EXISTS" form (CockroachDB
 //     extension) and the standard "ADD CONSTRAINT" form used after the PG16 fix.
 func adaptCockroachDDLForPostgres(sql string) string {
+	// CockroachDB requires DROP INDEX CASCADE to remove unique constraints;
+	// Postgres requires ALTER TABLE DROP CONSTRAINT. Rewrite known cases.
 	result := strings.ReplaceAll(sql,
 		`DROP INDEX IF EXISTS "public"."uq_platform_saga_definition_name" CASCADE`,
 		`ALTER TABLE "public"."platform_saga_definition" DROP CONSTRAINT IF EXISTS "uq_platform_saga_definition_name"`,
+	)
+	result = strings.ReplaceAll(result,
+		`DROP INDEX IF EXISTS uq_manifest_version_version CASCADE`,
+		`ALTER TABLE manifest_version DROP CONSTRAINT IF EXISTS uq_manifest_version_version`,
 	)
 	// Wrap ADD CONSTRAINT ... CHECK statements targeting public-schema tables in a
 	// DO block that ignores duplicate_object errors. This handles both:

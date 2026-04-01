@@ -6,7 +6,8 @@
 -- atlas:txn false
 
 -- Drop the unique constraint before altering the column type.
--- CockroachDB requires DROP INDEX CASCADE for unique constraints (not ALTER TABLE DROP CONSTRAINT).
+-- CockroachDB requires DROP INDEX CASCADE for unique constraints.
+-- The test adapter (adaptCockroachDDLForPostgres) rewrites this for Postgres.
 DROP INDEX IF EXISTS uq_manifest_version_version CASCADE;
 
 -- Change the column type from INTEGER to VARCHAR(50) to match the GORM model.

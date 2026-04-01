@@ -80,9 +80,6 @@ func (s *PostgresManifestVersionStore) GetLatestApplied(ctx context.Context) (*d
 func (s *PostgresManifestVersionStore) Save(ctx context.Context, manifest *controlplanev1.Manifest, appliedBy string) error {
 	return s.withWriteTransaction(ctx, func(tx pgx.Tx) error {
 		version := manifest.GetVersion()
-		if version == "" {
-			version = "1.0"
-		}
 
 		manifestJSON, err := protojson.Marshal(manifest)
 		if err != nil {
