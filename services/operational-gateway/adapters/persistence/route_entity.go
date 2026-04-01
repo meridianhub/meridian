@@ -19,6 +19,8 @@ type RouteEntity struct {
 	InboundMapping       string     `gorm:"column:inbound_mapping;type:varchar(255);not null;default:''"`
 	HTTPMethod           string     `gorm:"column:http_method;type:varchar(10);not null;default:''"`
 	PathTemplate         string     `gorm:"column:path_template;type:varchar(1024);not null;default:''"`
+	Status               string     `gorm:"column:status;type:varchar(20);not null;default:'ACTIVE'"`
+	DeprecatedAt         *time.Time `gorm:"column:deprecated_at"`
 	CreatedAt            time.Time  `gorm:"column:created_at;not null;default:now()"`
 	UpdatedAt            time.Time  `gorm:"column:updated_at;not null;default:now()"`
 }
@@ -47,6 +49,8 @@ func routeToEntity(r *domain.Route) (*RouteEntity, error) {
 		InboundMapping:  r.InboundMapping,
 		HTTPMethod:      r.HTTPMethod,
 		PathTemplate:    r.PathTemplate,
+		Status:          string(r.Status),
+		DeprecatedAt:    r.DeprecatedAt,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
@@ -72,6 +76,8 @@ func routeFromEntity(e *RouteEntity) *domain.Route {
 		InboundMapping:  e.InboundMapping,
 		HTTPMethod:      e.HTTPMethod,
 		PathTemplate:    e.PathTemplate,
+		Status:          domain.RouteStatus(e.Status),
+		DeprecatedAt:    e.DeprecatedAt,
 		CreatedAt:       e.CreatedAt,
 		UpdatedAt:       e.UpdatedAt,
 	}

@@ -202,6 +202,7 @@ func connectionToProto(c *domain.ProviderConnection) *opgatewayv1.ProviderConnec
 		Protocol:     domainToProtoProtocol(c.Protocol),
 		BaseUrl:      c.BaseURL,
 		HealthStatus: domainToProtoHealthStatus(c.HealthStatus),
+		Status:       domainToProtoConnectionStatus(c.Status),
 		RetryPolicy: &opgatewayv1.RetryPolicy{
 			MaxAttempts:           int32(c.RetryPolicy.MaxAttempts),              // #nosec G115 — bounded domain value
 			InitialBackoffSeconds: int32(c.RetryPolicy.InitialBackoff.Seconds()), // #nosec G115
@@ -221,6 +222,9 @@ func connectionToProto(c *domain.ProviderConnection) *opgatewayv1.ProviderConnec
 
 	if c.LastHealthCheckAt != nil {
 		p.LastHealthCheckAt = timestamppb.New(*c.LastHealthCheckAt)
+	}
+	if c.DeprecatedAt != nil {
+		p.DeprecatedAt = timestamppb.New(*c.DeprecatedAt)
 	}
 
 	mapAuthConfigToProto(p, c.AuthConfig)
@@ -401,4 +405,30 @@ func domainToProtoHealthStatus(h domain.HealthStatus) opgatewayv1.HealthStatus {
 		return opgatewayv1.HealthStatus_HEALTH_STATUS_UNHEALTHY
 	}
 	return opgatewayv1.HealthStatus_HEALTH_STATUS_UNSPECIFIED
+}
+
+// ========== Connection/Route Status mappers ==========
+
+// domainToProtoConnectionStatus converts a domain ConnectionStatus to proto ConnectionStatus.
+func domainToProtoConnectionStatus(s domain.ConnectionStatus) opgatewayv1.ConnectionStatus {
+	switch s {
+	case domain.ConnectionStatusActive:
+		return opgatewayv1.ConnectionStatus_CONNECTION_STATUS_ACTIVE
+	case domain.ConnectionStatusDeprecated:
+		return opgatewayv1.ConnectionStatus_CONNECTION_STATUS_DEPRECATED
+	default:
+		return opgatewayv1.ConnectionStatus_CONNECTION_STATUS_UNSPECIFIED
+	}
+}
+
+// domainToProtoRouteStatus converts a domain RouteStatus to proto RouteStatus.
+func domainToProtoRouteStatus(s domain.RouteStatus) opgatewayv1.RouteStatus {
+	switch s {
+	case domain.RouteStatusActive:
+		return opgatewayv1.RouteStatus_ROUTE_STATUS_ACTIVE
+	case domain.RouteStatusDeprecated:
+		return opgatewayv1.RouteStatus_ROUTE_STATUS_DEPRECATED
+	default:
+		return opgatewayv1.RouteStatus_ROUTE_STATUS_UNSPECIFIED
+	}
 }

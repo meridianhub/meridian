@@ -99,6 +99,8 @@ func createSchema(db *gorm.DB) error {
             circuit_opened_at TIMESTAMPTZ NULL,
             failure_count INT NOT NULL DEFAULT 0,
             success_count INT NOT NULL DEFAULT 0,
+            status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            deprecated_at TIMESTAMPTZ NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (tenant_id, connection_id)
@@ -152,6 +154,8 @@ func createSchema(db *gorm.DB) error {
             inbound_mapping VARCHAR(255) NOT NULL DEFAULT '',
             http_method VARCHAR(10) NOT NULL DEFAULT '',
             path_template VARCHAR(1024) NOT NULL DEFAULT '',
+            status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+            deprecated_at TIMESTAMPTZ NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (tenant_id, instruction_type),

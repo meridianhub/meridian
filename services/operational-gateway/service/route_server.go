@@ -11,6 +11,7 @@ import (
 	"github.com/meridianhub/meridian/services/operational-gateway/ports"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // InstructionRouteService implements InstructionRouteServiceServer.
@@ -159,9 +160,49 @@ func (s *InstructionRouteService) ListRoutes(
 	}, nil
 }
 
+// DeprecateRoute transitions an instruction route from ACTIVE to DEPRECATED.
+func (s *InstructionRouteService) DeprecateRoute(
+	ctx context.Context,
+	req *opgatewayv1.DeprecateRouteRequest,
+) (*opgatewayv1.DeprecateRouteResponse, error) {
+	if req.InstructionType == "" {
+		return nil, status.Error(codes.InvalidArgument, "instruction_type is required")
+	}
+
+	tid, err := requireTenant(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	route, err := s.routeRepo.FindByInstructionType(ctx, tenantIDToUUID(tid), req.InstructionType)
+	if err != nil {
+		if errors.Is(err, ports.ErrRouteNotFound) {
+			return nil, status.Errorf(codes.NotFound, "route not found: %s", req.InstructionType)
+		}
+		s.logger.Error("failed to retrieve route for deprecation", "error", err)
+		return nil, status.Error(codes.Internal, "failed to retrieve route")
+	}
+
+	if err := route.Deprecate(); err != nil {
+		if errors.Is(err, domain.ErrRouteNotActive) {
+			return nil, status.Errorf(codes.FailedPrecondition, "route is not in ACTIVE status: %s", req.InstructionType)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to deprecate route: %v", err)
+	}
+
+	if err := s.routeRepo.Upsert(ctx, route); err != nil {
+		s.logger.Error("failed to persist deprecated route", "error", err)
+		return nil, status.Error(codes.Internal, "failed to persist deprecated route")
+	}
+
+	return &opgatewayv1.DeprecateRouteResponse{
+		Route: routeToProto(route),
+	}, nil
+}
+
 // routeToProto converts a domain Route to its proto representation.
 func routeToProto(r *domain.Route) *opgatewayv1.InstructionRoute {
-	return &opgatewayv1.InstructionRoute{
+	p := &opgatewayv1.InstructionRoute{
 		InstructionType:      r.InstructionType,
 		ConnectionId:         r.ConnectionID,
 		FallbackConnectionId: r.FallbackConnectionID,
@@ -169,5 +210,12 @@ func routeToProto(r *domain.Route) *opgatewayv1.InstructionRoute {
 		InboundMapping:       r.InboundMapping,
 		HttpMethod:           r.HTTPMethod,
 		PathTemplate:         r.PathTemplate,
+		Status:               domainToProtoRouteStatus(r.Status),
+		CreatedAt:            timestamppb.New(r.CreatedAt),
+		UpdatedAt:            timestamppb.New(r.UpdatedAt),
 	}
+	if r.DeprecatedAt != nil {
+		p.DeprecatedAt = timestamppb.New(*r.DeprecatedAt)
+	}
+	return p
 }
