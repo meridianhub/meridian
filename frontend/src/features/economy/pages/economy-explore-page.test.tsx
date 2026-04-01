@@ -393,6 +393,8 @@ describe('EconomyExplorePage', () => {
   })
 
   it('fires empty_state_shown when no manifest exists', async () => {
+    vi.mocked(track).mockClear()
+
     vi.mocked(useApiClients).mockReturnValue({
       manifestHistory: {
         getCurrentManifest: vi.fn().mockResolvedValue({ version: null }),

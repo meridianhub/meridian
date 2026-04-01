@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
@@ -36,10 +36,12 @@ export function StarlarkConfigPage() {
     queryFn: () => queryFn({ pageSize: 25 }),
   })
 
+  const hasFiredBadgeRef = useRef(false)
   useEffect(() => {
-    if (!data?.items) return
+    if (!data?.items || hasFiredBadgeRef.current) return
     const platformCount = data.items.filter((s) => s.isSystem).length
     if (platformCount === 0) return
+    hasFiredBadgeRef.current = true
     track('economy.platform_badge_visible', {
       page: 'sagas',
       platform_count: platformCount,

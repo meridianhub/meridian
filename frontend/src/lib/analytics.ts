@@ -36,7 +36,7 @@ export type AnalyticsEvents = {
 
 export function track<E extends keyof AnalyticsEvents>(
   event: E,
-  properties?: AnalyticsEvents[E],
+  properties: AnalyticsEvents[E],
 ): void {
   if (import.meta.env.DEV) {
     console.log('[Analytics]', event, properties)

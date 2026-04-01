@@ -73,14 +73,16 @@ export function AccountTypesPage() {
   }
 
   const { data: analyticsData } = useQuery({
-    queryKey: [...referenceKeys.accountTypes(), {}],
+    queryKey: referenceKeys.accountTypes(),
     queryFn: () => queryFn({ pageSize: 25 }),
   })
 
+  const hasFiredBadgeRef = React.useRef(false)
   React.useEffect(() => {
-    if (!analyticsData?.items) return
+    if (!analyticsData?.items || hasFiredBadgeRef.current) return
     const platformCount = analyticsData.items.filter((d) => d.isSystem).length
     if (platformCount === 0) return
+    hasFiredBadgeRef.current = true
     track('economy.platform_badge_visible', {
       page: 'account-types',
       platform_count: platformCount,
