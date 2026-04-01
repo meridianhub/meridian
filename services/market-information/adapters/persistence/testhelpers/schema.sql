@@ -113,6 +113,7 @@ CREATE INDEX idx_observation_causation
 
 CREATE INDEX idx_data_source_trust_level ON data_source (trust_level DESC);
 CREATE INDEX idx_data_source_deleted_at ON data_source (deleted_at);
+CREATE INDEX idx_data_source_status ON data_source (status);
 
 -- Cursor pagination indexes (from 20260123000003_add_cursor_pagination_indexes.sql)
 CREATE INDEX idx_data_source_cursor

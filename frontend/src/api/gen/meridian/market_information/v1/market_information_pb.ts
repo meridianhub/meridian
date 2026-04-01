@@ -2019,7 +2019,8 @@ export const MarketInformationService: GenService<{
    * DeprecateDataSource transitions a data source from ACTIVE to DEPRECATED.
    * Sets is_active to false for backward compatibility.
    * Returns NOT_FOUND if data source doesn't exist.
-   * Returns FAILED_PRECONDITION if data source is not in ACTIVE status.
+   * Idempotent: succeeds if the data source is already DEPRECATED.
+   * Returns FAILED_PRECONDITION only if the stored state is invalid.
    *
    * @generated from rpc meridian.market_information.v1.MarketInformationService.DeprecateDataSource
    */

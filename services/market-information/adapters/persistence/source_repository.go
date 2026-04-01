@@ -35,11 +35,11 @@ func (r *SourceRepository) Save(ctx context.Context, source domain.DataSource) e
 		// Try to insert, on conflict update
 		query := `
 			INSERT INTO data_source (
-				id, code, name, description, trust_level, status,
+				id, code, name, description, trust_level, status, deprecated_at,
 				created_at, created_by, updated_at, updated_by, version
 			) VALUES (
-				$1, $2, $3, $4, $5, $6,
-				$7, $8, $9, $10, 1
+				$1, $2, $3, $4, $5, $6, $7,
+				$8, $9, $10, $11, 1
 			)
 			ON CONFLICT (code) DO UPDATE SET
 				name = EXCLUDED.name,
@@ -60,6 +60,7 @@ func (r *SourceRepository) Save(ctx context.Context, source domain.DataSource) e
 			entity.Description,
 			entity.TrustLevel,
 			entity.Status,
+			entity.DeprecatedAt,
 			entity.CreatedAt,
 			userID,
 			entity.UpdatedAt,

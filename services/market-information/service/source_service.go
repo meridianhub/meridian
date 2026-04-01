@@ -85,8 +85,13 @@ func (s *Server) UpdateDataSource(ctx context.Context, req *pb.UpdateDataSourceR
 		WithCode(existing.Code()).
 		WithSourceType(existing.SourceType()).
 		WithIsActive(existing.IsActive()).
+		WithStatus(existing.Status()).
 		WithCreatedAt(existing.CreatedAt()).
 		WithUpdatedAt(time.Now())
+
+	if existing.DeprecatedAt() != nil {
+		builder.WithDeprecatedAt(existing.DeprecatedAt())
+	}
 
 	// Update name if provided, otherwise keep existing
 	if req.Name != "" {
@@ -140,7 +145,7 @@ func (s *Server) DeactivateDataSource(ctx context.Context, req *pb.DeactivateDat
 		"id", existing.ID().String())
 
 	// Return the source with IsActive=false to indicate deactivation
-	deactivated := domain.NewDataSourceBuilder().
+	deactivatedBuilder := domain.NewDataSourceBuilder().
 		WithID(existing.ID()).
 		WithCode(existing.Code()).
 		WithName(existing.Name()).
@@ -148,9 +153,15 @@ func (s *Server) DeactivateDataSource(ctx context.Context, req *pb.DeactivateDat
 		WithSourceType(existing.SourceType()).
 		WithTrustLevel(existing.TrustLevel()).
 		WithIsActive(false).
+		WithStatus(existing.Status()).
 		WithCreatedAt(existing.CreatedAt()).
-		WithUpdatedAt(time.Now()).
-		Build()
+		WithUpdatedAt(time.Now())
+
+	if existing.DeprecatedAt() != nil {
+		deactivatedBuilder.WithDeprecatedAt(existing.DeprecatedAt())
+	}
+
+	deactivated := deactivatedBuilder.Build()
 
 	return &pb.DeactivateDataSourceResponse{
 		Source: domainSourceToProto(deactivated),

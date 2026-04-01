@@ -457,7 +457,8 @@ service MarketInformationService {
   // DeprecateDataSource transitions a data source from ACTIVE to DEPRECATED.
   // Sets is_active to false for backward compatibility.
   // Returns NOT_FOUND if data source doesn't exist.
-  // Returns FAILED_PRECONDITION if data source is not in ACTIVE status.
+  // Idempotent: succeeds if the data source is already DEPRECATED.
+  // Returns FAILED_PRECONDITION only if the stored state is invalid.
   rpc DeprecateDataSource(DeprecateDataSourceRequest) returns (DeprecateDataSourceResponse) {
     option (google.api.http) = {
       post: "/v1/market-information/sources/{code}/deprecate"

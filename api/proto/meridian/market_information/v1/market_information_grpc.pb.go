@@ -77,7 +77,8 @@ type MarketInformationServiceClient interface {
 	// DeprecateDataSource transitions a data source from ACTIVE to DEPRECATED.
 	// Sets is_active to false for backward compatibility.
 	// Returns NOT_FOUND if data source doesn't exist.
-	// Returns FAILED_PRECONDITION if data source is not in ACTIVE status.
+	// Idempotent: succeeds if the data source is already DEPRECATED.
+	// Returns FAILED_PRECONDITION only if the stored state is invalid.
 	DeprecateDataSource(ctx context.Context, in *DeprecateDataSourceRequest, opts ...grpc.CallOption) (*DeprecateDataSourceResponse, error)
 	// ListDataSources returns data sources matching the filter criteria.
 	ListDataSources(ctx context.Context, in *ListDataSourcesRequest, opts ...grpc.CallOption) (*ListDataSourcesResponse, error)
@@ -295,7 +296,8 @@ type MarketInformationServiceServer interface {
 	// DeprecateDataSource transitions a data source from ACTIVE to DEPRECATED.
 	// Sets is_active to false for backward compatibility.
 	// Returns NOT_FOUND if data source doesn't exist.
-	// Returns FAILED_PRECONDITION if data source is not in ACTIVE status.
+	// Idempotent: succeeds if the data source is already DEPRECATED.
+	// Returns FAILED_PRECONDITION only if the stored state is invalid.
 	DeprecateDataSource(context.Context, *DeprecateDataSourceRequest) (*DeprecateDataSourceResponse, error)
 	// ListDataSources returns data sources matching the filter criteria.
 	ListDataSources(context.Context, *ListDataSourcesRequest) (*ListDataSourcesResponse, error)

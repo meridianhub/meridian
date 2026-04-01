@@ -101,6 +101,7 @@ func createSchema(db *gorm.DB) error {
             success_count INT NOT NULL DEFAULT 0,
             status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
             deprecated_at TIMESTAMPTZ NULL,
+            CONSTRAINT chk_provider_connection_status CHECK (status IN ('ACTIVE', 'DEPRECATED')),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (tenant_id, connection_id)
@@ -156,6 +157,7 @@ func createSchema(db *gorm.DB) error {
             path_template VARCHAR(1024) NOT NULL DEFAULT '',
             status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
             deprecated_at TIMESTAMPTZ NULL,
+            CONSTRAINT chk_instruction_route_status CHECK (status IN ('ACTIVE', 'DEPRECATED')),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (tenant_id, instruction_type),
