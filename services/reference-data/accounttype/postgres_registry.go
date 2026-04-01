@@ -1,3 +1,5 @@
+// meridian:large-file - postgres_registry contains the full Postgres implementation of Registry;
+// splitting would fragment the transaction helper patterns and scanning logic.
 package accounttype
 
 import (
