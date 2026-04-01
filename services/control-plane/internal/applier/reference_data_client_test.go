@@ -699,6 +699,66 @@ func TestReferenceDataClient_RegisterAccountType_LookupError_ProceedsToCreate(t 
 	assert.Contains(t, m["status"], "ACTIVE")
 }
 
+func TestReferenceDataClient_RegisterAccountType_ReactiveFallback_AlreadyExists(t *testing.T) {
+	// Proactive check returns NotFound, CreateDraft returns AlreadyExists (race condition).
+	// Reactive fallback calls GetActiveDefinition again and finds the account type.
+	callCount := 0
+	atSrv := &fakeAccountTypeServer{
+		getActiveDefinitionFn: func(_ context.Context, req *referencedatav1.GetActiveDefinitionRequest) (*referencedatav1.GetActiveDefinitionResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, status.Error(codes.NotFound, "no active definition found")
+			}
+			return &referencedatav1.GetActiveDefinitionResponse{
+				Definition: &referencedatav1.AccountTypeDefinition{
+					Id:      "at-uuid-race",
+					Code:    req.Code,
+					Version: 1,
+					Status:  referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE,
+				},
+			}, nil
+		},
+		createDraftFn: func(_ context.Context, _ *referencedatav1.CreateDraftRequest) (*referencedatav1.CreateDraftResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "account type already exists")
+		},
+	}
+	conn := newRefDataTestServerWithAccountType(t, atSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	result, err := client.RegisterAccountType(testStarlarkCtx(), map[string]any{
+		"code":            "RACE_TYPE",
+		"display_name":    "Race Condition Type",
+		"instrument_code": "GBP",
+	})
+	require.NoError(t, err, "reactive AlreadyExists fallback should handle race condition")
+
+	m := result.(map[string]any)
+	assert.Equal(t, "at-uuid-race", m["id"])
+	assert.Equal(t, "RACE_TYPE", m["code"])
+	assert.Contains(t, m["status"], "ACTIVE")
+}
+
+func TestReferenceDataClient_RegisterAccountType_AlreadyExists_LookupFails(t *testing.T) {
+	// Both proactive and reactive GetActiveDefinition calls return NotFound.
+	// CreateDraft returns AlreadyExists. The reactive fallback lookup also fails.
+	atSrv := &fakeAccountTypeServer{
+		getActiveDefinitionFn: func(_ context.Context, _ *referencedatav1.GetActiveDefinitionRequest) (*referencedatav1.GetActiveDefinitionResponse, error) {
+			return nil, status.Error(codes.NotFound, "no active definition found")
+		},
+		createDraftFn: func(_ context.Context, _ *referencedatav1.CreateDraftRequest) (*referencedatav1.CreateDraftResponse, error) {
+			return nil, status.Error(codes.AlreadyExists, "account type already exists")
+		},
+	}
+	conn := newRefDataTestServerWithAccountType(t, atSrv)
+	client := NewReferenceDataClient(conn, conn)
+
+	_, err := client.RegisterAccountType(testStarlarkCtx(), map[string]any{
+		"code": "ORPHAN_TYPE",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lookup failed")
+}
+
 // ─── Task 3: Proactive RegisterSagaDefinition idempotency ─────────────────
 
 func TestReferenceDataClient_RegisterSagaDefinition_ProactiveCheck_AlreadyActive(t *testing.T) {

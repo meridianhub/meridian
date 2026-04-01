@@ -223,6 +223,10 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 
 	draftResp, err := c.accountTypes.CreateDraft(callCtx, draftReq)
 	if err != nil {
+		// Reactive fallback: if AlreadyExists (race condition), look up the active definition.
+		if status.Code(err) == codes.AlreadyExists {
+			return c.handleAccountTypeAlreadyExists(callCtx, code)
+		}
 		return nil, fmt.Errorf("create account type draft: %w", err)
 	}
 
@@ -261,6 +265,24 @@ func (c *ReferenceDataClient) DeleteAccountType(ctx *saga.StarlarkContext, param
 	return map[string]any{
 		"code":   def.GetCode(),
 		"status": def.GetStatus().String(),
+	}, nil
+}
+
+// handleAccountTypeAlreadyExists resolves the existing active account type by code
+// so that downstream saga steps receive the id. Returns an error if the lookup fails.
+func (c *ReferenceDataClient) handleAccountTypeAlreadyExists(ctx context.Context, code string) (any, error) {
+	resp, err := c.accountTypes.GetActiveDefinition(ctx, &referencedatav1.GetActiveDefinitionRequest{
+		Code: code,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create account type draft: account type already exists but lookup failed: %w", err)
+	}
+	def := resp.GetDefinition()
+	return map[string]any{
+		"id":      def.GetId(),
+		"code":    def.GetCode(),
+		"version": def.GetVersion(),
+		"status":  def.GetStatus().String(),
 	}, nil
 }
 
