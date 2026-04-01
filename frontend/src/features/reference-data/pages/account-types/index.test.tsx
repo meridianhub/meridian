@@ -229,4 +229,45 @@ describe('AccountTypesPage', () => {
       expect(mockListActive).toHaveBeenCalled()
     })
   })
+
+  describe('Platform badge', () => {
+    it('renders Platform badge for isSystem account types', async () => {
+      mockListActive.mockResolvedValue({
+        definitions: mockDefinitions,
+        nextPageToken: '',
+      })
+
+      render(
+        <Wrapper>
+          <AccountTypesPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('CUSTOMER_CURRENT')).toBeInTheDocument()
+      })
+
+      const badges = screen.getAllByText('Platform')
+      expect(badges).toHaveLength(1)
+    })
+
+    it('does not render Platform badge for non-system account types', async () => {
+      mockListActive.mockResolvedValue({
+        definitions: [mockDefinitions[1]], // CLEARING with isSystem: false
+        nextPageToken: '',
+      })
+
+      render(
+        <Wrapper>
+          <AccountTypesPage />
+        </Wrapper>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('CLEARING')).toBeInTheDocument()
+      })
+
+      expect(screen.queryByText('Platform')).not.toBeInTheDocument()
+    })
+  })
 })
