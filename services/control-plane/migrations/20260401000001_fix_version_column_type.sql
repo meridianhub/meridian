@@ -6,7 +6,8 @@
 -- atlas:txn false
 
 -- Drop the unique constraint before altering the column type.
-ALTER TABLE manifest_version DROP CONSTRAINT IF EXISTS uq_manifest_version_version;
+-- CockroachDB requires DROP INDEX CASCADE for unique constraints (not ALTER TABLE DROP CONSTRAINT).
+DROP INDEX IF EXISTS uq_manifest_version_version CASCADE;
 
 -- Change the column type from INTEGER to VARCHAR(50) to match the GORM model.
 ALTER TABLE manifest_version ALTER COLUMN version SET DATA TYPE VARCHAR(50);
