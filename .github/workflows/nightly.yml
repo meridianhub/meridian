@@ -90,7 +90,7 @@ jobs:
   slow-integration-tests:
     name: Slow Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     # Note: No postgres service container needed - tests use testcontainers
     # which manage their own ephemeral containers with proper isolation.
 
