@@ -20,11 +20,13 @@ import (
 
 // mockLiveStateProvider returns a fixed LiveState for testing.
 type mockLiveStateProvider struct {
-	state *differ.LiveState
-	err   error
+	state     *differ.LiveState
+	err       error
+	callCount int
 }
 
 func (m *mockLiveStateProvider) QueryLiveState(_ context.Context, _ string) (*differ.LiveState, error) {
+	m.callCount++
 	return m.state, m.err
 }
 
@@ -42,7 +44,6 @@ func newTestHandlerWithLiveState(t *testing.T, liveState differ.LiveStateProvide
 		Validator: v,
 		Differ:    d,
 		Planner:   p,
-		LiveState: liveState,
 	})
 	require.NoError(t, err)
 	return handler
@@ -106,7 +107,7 @@ func TestApplyManifest_LiveStateDiff_DryRun_ExistingResources_NoChange(t *testin
 
 func TestApplyManifest_LiveStateDiff_SkipImmutability_FallsBackToStoredDiff(t *testing.T) {
 	// With skipImmutability (new-tenant mode), live-state diff is NOT used
-	// even if a provider is configured.
+	// even if a provider is configured. Verify by checking call count.
 	liveState := &mockLiveStateProvider{
 		state: &differ.LiveState{},
 	}
@@ -121,6 +122,7 @@ func TestApplyManifest_LiveStateDiff_SkipImmutability_FallsBackToStoredDiff(t *t
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN, resp.Status)
+	assert.Equal(t, 0, liveState.callCount, "QueryLiveState should not be called when skipImmutability is set")
 }
 
 func TestApplyManifest_LiveStateDiff_Error_ReturnsFailure(t *testing.T) {
@@ -149,13 +151,29 @@ func TestApplyManifest_LiveStateDiff_Error_ReturnsFailure(t *testing.T) {
 }
 
 func TestApplyManifest_LiveStateDiff_SystemResourcesExcluded(t *testing.T) {
-	// Live state has system resources that should be excluded from diff.
+	// Live state has a system-managed instrument that is NOT in the manifest.
+	// Without SystemCodes filtering, it would appear as a DEPRECATE action.
+	// With filtering, it should be excluded from the diff entirely.
 	mf := newTestManifest()
+
+	// Include both the manifest instruments AND a system-managed one in live state.
+	allInstruments := append(
+		mf.GetInstruments(),
+		&controlplanev1.InstrumentDefinition{
+			Code: "SYSTEM_INTERNAL",
+			Name: "System Internal Instrument",
+			Type: controlplanev1.InstrumentType_INSTRUMENT_TYPE_FIAT,
+			Dimensions: &controlplanev1.InstrumentDimensions{
+				Unit:      "SYS",
+				Precision: 2,
+			},
+		},
+	)
+
 	liveState := &mockLiveStateProvider{
 		state: &differ.LiveState{
-			Instruments:  mf.GetInstruments(),
+			Instruments:  allInstruments,
 			AccountTypes: mf.GetAccountTypes(),
-			// System-managed instrument not in manifest should NOT appear as DEPRECATE.
 			SystemCodes: map[differ.ResourceType]map[string]bool{
 				differ.ResourceInstrument: {"SYSTEM_INTERNAL": true},
 			},
@@ -172,6 +190,9 @@ func TestApplyManifest_LiveStateDiff_SystemResourcesExcluded(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN, resp.Status)
+	// The diff should succeed without SYSTEM_INTERNAL appearing as DEPRECATE.
+	diffStep := resp.StepResults[1]
+	assert.Equal(t, controlplanev1.StepResultStatus_STEP_RESULT_STATUS_SUCCESS, diffStep.Status)
 }
 
 func TestApplyManifest_NoLiveState_FallsBackToStoredManifestDiff(t *testing.T) {
@@ -212,61 +233,7 @@ func TestApplyManifest_LiveStateDiff_NoExecutor_FailsGracefully(t *testing.T) {
 	assert.Equal(t, controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_FAILED, resp.Status)
 }
 
-// --- Task 12: Execute with DiffPlan Tests ---
-
-func TestExecute_WithDiffPlan_UsesFilteredInput(t *testing.T) {
-	// Verifies that when diffPlan is provided, buildExecutorInputFromPlan is used.
-	handler := newTestHandler(t) // no executor
-
-	diffPlan := &differ.DiffPlan{
-		Actions: []differ.PlannedAction{
-			{
-				ResourceType: differ.ResourceInstrument,
-				ResourceCode: "GBP",
-				Action:       differ.ActionCreate,
-			},
-			{
-				ResourceType: differ.ResourceAccountType,
-				ResourceCode: "SAVINGS",
-				Action:       differ.ActionNoChange, // Should be excluded from input
-			},
-		},
-	}
-	plan := &planner.ExecutionPlan{
-		Calls: []planner.PlannedCall{
-			{Phase: planner.PhaseInstruments, ResourceID: "GBP"},
-		},
-	}
-
-	result := handler.execute(context.Background(), &controlplanev1.ApplyManifestRequest{
-		Manifest:  newTestManifest(),
-		AppliedBy: "test",
-	}, plan, diffPlan)
-
-	// Handler has no executor, so it fails at executor nil check - but proves
-	// the code path through buildExecutorInputFromPlan was reached.
-	assert.Error(t, result.err)
-	assert.ErrorIs(t, result.err, ErrExecutorNotConfigured)
-}
-
-func TestExecute_NilDiffPlan_UsesBuildExecutorInput(t *testing.T) {
-	// Verifies that when diffPlan is nil, buildExecutorInput is used (legacy path).
-	handler := newTestHandler(t) // no executor
-
-	plan := &planner.ExecutionPlan{
-		Calls: []planner.PlannedCall{
-			{Phase: planner.PhaseInstruments, ResourceID: "GBP"},
-		},
-	}
-
-	result := handler.execute(context.Background(), &controlplanev1.ApplyManifestRequest{
-		Manifest:  newTestManifest(),
-		AppliedBy: "test",
-	}, plan, nil)
-
-	assert.Error(t, result.err)
-	assert.ErrorIs(t, result.err, ErrExecutorNotConfigured)
-}
+// --- Task 12: buildInput / Execute Input Selection Tests ---
 
 // --- Task 11: Partial Success Handling Verification Tests ---
 
@@ -372,32 +339,15 @@ func TestUpdatePhaseStatus_PartialFailure_CorrectPhaseClassification(t *testing.
 
 // --- Task 12: Handler Config Tests ---
 
-func TestNewApplyManifestHandler_LiveStateProviderStored(t *testing.T) {
-	v, err := validator.New()
-	require.NoError(t, err)
-
+func TestDiffer_HasLiveState_WithProvider(t *testing.T) {
 	liveState := &mockLiveStateProvider{state: &differ.LiveState{}}
-	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
-		Validator: v,
-		Differ:    differ.New(nil, nil, liveState),
-		Planner:   planner.NewManifestPlanner(),
-		LiveState: liveState,
-	})
-	require.NoError(t, err)
-	assert.NotNil(t, handler.liveState)
+	d := differ.New(nil, nil, liveState)
+	assert.True(t, d.HasLiveState())
 }
 
-func TestNewApplyManifestHandler_NilLiveStateProvider_IsValid(t *testing.T) {
-	v, err := validator.New()
-	require.NoError(t, err)
-
-	handler, err := NewApplyManifestHandler(ApplyManifestHandlerConfig{
-		Validator: v,
-		Differ:    differ.New(nil, nil, nil),
-		Planner:   planner.NewManifestPlanner(),
-	})
-	require.NoError(t, err)
-	assert.Nil(t, handler.liveState)
+func TestDiffer_HasLiveState_WithoutProvider(t *testing.T) {
+	d := differ.New(nil, nil, nil)
+	assert.False(t, d.HasLiveState())
 }
 
 // --- Task 12: buildInput Tests ---

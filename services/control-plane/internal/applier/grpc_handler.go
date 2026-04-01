@@ -42,7 +42,6 @@ type ApplyManifestHandler struct {
 	executor       *ManifestExecutor
 	historyService *manifest.HistoryService
 	versionStore   differ.ManifestVersionStore
-	liveState      differ.LiveStateProvider
 	postApplyHooks []PostApplyHook
 	logger         *slog.Logger
 }
@@ -60,7 +59,6 @@ type ApplyManifestHandlerConfig struct {
 	Executor       *ManifestExecutor
 	HistoryService *manifest.HistoryService
 	VersionStore   differ.ManifestVersionStore
-	LiveState      differ.LiveStateProvider
 	Logger         *slog.Logger
 
 	// PostApplyHooks are called after a manifest is successfully applied.
@@ -90,7 +88,6 @@ func NewApplyManifestHandler(cfg ApplyManifestHandlerConfig) (*ApplyManifestHand
 		executor:       cfg.Executor,
 		historyService: cfg.HistoryService,
 		versionStore:   cfg.VersionStore,
-		liveState:      cfg.LiveState,
 		postApplyHooks: cfg.PostApplyHooks,
 		logger:         cfg.Logger.With("component", "apply_manifest_handler"),
 	}, nil
@@ -394,9 +391,9 @@ func (h *ApplyManifestHandler) diff(
 	mf *controlplanev1.Manifest,
 	skipImmutability bool,
 ) diffOutput {
-	// Use live-state diff when a provider is available and we're not skipping immutability
-	// (skipImmutability means new-tenant mode where everything is CREATE).
-	if h.liveState != nil && !skipImmutability {
+	// Use live-state diff when the differ has a provider configured and we're not
+	// skipping immutability (skipImmutability means new-tenant mode where everything is CREATE).
+	if h.differ.HasLiveState() && !skipImmutability {
 		return h.diffAgainstLiveState(ctx, mf)
 	}
 
