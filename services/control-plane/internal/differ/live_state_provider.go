@@ -2,12 +2,23 @@ package differ
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/metadata"
+)
+
+// Sentinel errors for nil client parameters.
+var (
+	ErrNilReferenceDataClient      = errors.New("referenceData client is required")
+	ErrNilSagaRegistryClient       = errors.New("sagaRegistry client is required")
+	ErrNilMarketInformationClient  = errors.New("marketInformation client is required")
+	ErrNilPartyClient              = errors.New("party client is required")
+	ErrNilInternalAccountClient    = errors.New("internalAccount client is required")
+	ErrNilOperationalGatewayClient = errors.New("operationalGateway client is required")
 )
 
 // Service-specific client interfaces, decoupled from generated gRPC stubs.
@@ -69,22 +80,22 @@ func NewGRPCLiveStateProvider(
 	operationalGateway OperationalGatewayClient,
 ) (*GRPCLiveStateProvider, error) {
 	if referenceData == nil {
-		return nil, fmt.Errorf("referenceData client is required")
+		return nil, ErrNilReferenceDataClient
 	}
 	if sagaRegistry == nil {
-		return nil, fmt.Errorf("sagaRegistry client is required")
+		return nil, ErrNilSagaRegistryClient
 	}
 	if marketInformation == nil {
-		return nil, fmt.Errorf("marketInformation client is required")
+		return nil, ErrNilMarketInformationClient
 	}
 	if party == nil {
-		return nil, fmt.Errorf("party client is required")
+		return nil, ErrNilPartyClient
 	}
 	if internalAccount == nil {
-		return nil, fmt.Errorf("internalAccount client is required")
+		return nil, ErrNilInternalAccountClient
 	}
 	if operationalGateway == nil {
-		return nil, fmt.Errorf("operationalGateway client is required")
+		return nil, ErrNilOperationalGatewayClient
 	}
 	return &GRPCLiveStateProvider{
 		referenceData:      referenceData,

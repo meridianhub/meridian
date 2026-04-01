@@ -158,29 +158,28 @@ func TestNewGRPCLiveStateProvider_AllClientsRequired(t *testing.T) {
 	refData, saga, market, party, intAcct, opGw := newTestMocks()
 
 	tests := []struct {
-		name           string
-		refData        ReferenceDataClient
-		saga           SagaRegistryClient
-		market         MarketInformationClient
-		party          PartyClient
-		intAcct        InternalAccountClient
-		opGw           OperationalGatewayClient
-		expectContains string
+		name      string
+		refData   ReferenceDataClient
+		saga      SagaRegistryClient
+		market    MarketInformationClient
+		party     PartyClient
+		intAcct   InternalAccountClient
+		opGw      OperationalGatewayClient
+		expectErr error
 	}{
-		{"nil referenceData", nil, saga, market, party, intAcct, opGw, "referenceData"},
-		{"nil sagaRegistry", refData, nil, market, party, intAcct, opGw, "sagaRegistry"},
-		{"nil marketInformation", refData, saga, nil, party, intAcct, opGw, "marketInformation"},
-		{"nil party", refData, saga, market, nil, intAcct, opGw, "party"},
-		{"nil internalAccount", refData, saga, market, party, nil, opGw, "internalAccount"},
-		{"nil operationalGateway", refData, saga, market, party, intAcct, nil, "operationalGateway"},
+		{"nil referenceData", nil, saga, market, party, intAcct, opGw, ErrNilReferenceDataClient},
+		{"nil sagaRegistry", refData, nil, market, party, intAcct, opGw, ErrNilSagaRegistryClient},
+		{"nil marketInformation", refData, saga, nil, party, intAcct, opGw, ErrNilMarketInformationClient},
+		{"nil party", refData, saga, market, nil, intAcct, opGw, ErrNilPartyClient},
+		{"nil internalAccount", refData, saga, market, party, nil, opGw, ErrNilInternalAccountClient},
+		{"nil operationalGateway", refData, saga, market, party, intAcct, nil, ErrNilOperationalGatewayClient},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			provider, err := NewGRPCLiveStateProvider(tt.refData, tt.saga, tt.market, tt.party, tt.intAcct, tt.opGw)
 			assert.Nil(t, provider)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.expectContains)
+			require.ErrorIs(t, err, tt.expectErr)
 		})
 	}
 }
