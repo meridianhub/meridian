@@ -230,8 +230,8 @@ const RATCHET_ALLOWLIST = new Set([
   'features/economy/components/manifest-diff.tsx:3:@/features/manifests/lib/manifest-diff',
   'features/economy/components/manifest-diff.tsx:4:@/features/manifests/lib/manifest-graph-model',
   'features/economy/lib/resource-schema-registry.ts:9:@/features/manifests/lib/manifest-graph-model',
-  'features/economy/pages/economy-overview-page.tsx:6:@/features/manifests/components/manifest-graph',
-  'features/economy/pages/economy-overview-page.tsx:7:@/features/manifests/pages/manifest-history-table',
+  'features/economy/pages/economy-overview-page.tsx:7:@/features/manifests/components/manifest-graph',
+  'features/economy/pages/economy-overview-page.tsx:8:@/features/manifests/pages/manifest-history-table',
 
   // cross-feature: payments -> sagas, accounts
   'features/payments/pages/payment-detail-query.ts:1:@/features/sagas/components/saga-timeline',
@@ -256,7 +256,7 @@ const RATCHET_ALLOWLIST = new Set([
   'features/reference-data/components/execution-subgraph.tsx:31:@/features/manifests/lib/manifest-graph-model',
   'features/reference-data/lib/filter-subgraph.ts:5:@/features/manifests/lib/manifest-graph-model',
   'features/reference-data/pages/instruments/index.tsx:7:@/features/sagas/components/cel-editor',
-  'features/reference-data/pages/account-types/index.tsx:6:@/features/sagas/components/cel-editor',
+  'features/reference-data/pages/account-types/index.tsx:7:@/features/sagas/components/cel-editor',
   'features/reference-data/pages/account-types/create-account-type-dialog.tsx:13:@/features/sagas/components/cel-editor',
 ])
 

@@ -1,8 +1,10 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ConnectError, Code } from '@connectrpc/connect'
 import { Link } from 'react-router-dom'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
+import { track } from '@/lib/analytics'
 import type { SagaDefinition } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import type { MappingDefinition } from '@/api/gen/meridian/mapping/v1/mapping_pb'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -29,6 +31,10 @@ function LoadingSkeleton() {
 }
 
 function EmptyState() {
+  useEffect(() => {
+    track('economy.empty_state_shown', { page: 'explore', hasManifest: false })
+  }, [])
+
   return (
     <div data-testid="explorer-empty" className="p-6 flex flex-col items-center gap-4 py-16 text-muted-foreground">
       <span className="text-lg font-medium">No custom economy configured</span>
