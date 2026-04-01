@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -601,6 +602,9 @@ func runPostgresPreMigrationFixups(ctx context.Context, superuserDSN string, dri
 // Migrations are written for CockroachDB (production). When running against
 // PostgreSQL (demo, local dev), this function translates known incompatibilities:
 //   - DROP INDEX CASCADE for unique constraints -> ALTER TABLE DROP CONSTRAINT
+//   - ADD CONSTRAINT [IF NOT EXISTS] CHECK on public-schema tables -> idempotent DO block
+//
+// This mirrors shared/platform/testdb/pgx.go:adaptCockroachDDLForPostgres.
 func adaptCockroachDDLForPostgres(sql string) string {
 	// CockroachDB uses DROP INDEX CASCADE for unique constraints;
 	// PostgreSQL requires ALTER TABLE DROP CONSTRAINT.
@@ -612,5 +616,16 @@ func adaptCockroachDDLForPostgres(sql string) string {
 		`DROP INDEX IF EXISTS uq_manifest_version_version CASCADE`,
 		`ALTER TABLE manifest_version DROP CONSTRAINT IF EXISTS uq_manifest_version_version`,
 	)
+
+	// Wrap ADD CONSTRAINT ... CHECK statements targeting public-schema tables in a
+	// DO block that ignores duplicate_object errors. In multi-tenant tests, multiple
+	// schemas apply the same migration against the shared public schema.
+	re := regexp.MustCompile(`(?s)(ALTER TABLE\s+public\.\S+\s+)ADD CONSTRAINT(?:\s+IF NOT EXISTS)?\s+(\S+\s+CHECK\s*\([^;]+?\));`)
+	sql = re.ReplaceAllStringFunc(sql, func(match string) string {
+		inner := strings.Replace(match, "ADD CONSTRAINT IF NOT EXISTS", "ADD CONSTRAINT", 1)
+		inner = strings.TrimSuffix(strings.TrimSpace(inner), ";")
+		return "DO $compat$ BEGIN " + inner + "; EXCEPTION WHEN duplicate_object THEN NULL; END $compat$;"
+	})
+
 	return sql
 }

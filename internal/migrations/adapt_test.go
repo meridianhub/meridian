@@ -25,6 +25,22 @@ func TestAdaptCockroachDDLForPostgres_SagaDefinitionUniqueConstraint(t *testing.
 	assert.NotContains(t, result, "DROP INDEX")
 }
 
+func TestAdaptCockroachDDLForPostgres_AddConstraintCheck(t *testing.T) {
+	input := `ALTER TABLE public.my_table ADD CONSTRAINT chk_status CHECK (status IN ('a','b'));`
+	result := adaptCockroachDDLForPostgres(input)
+	assert.Contains(t, result, "DO $compat$ BEGIN")
+	assert.Contains(t, result, "EXCEPTION WHEN duplicate_object THEN NULL")
+	assert.Contains(t, result, "ADD CONSTRAINT chk_status CHECK")
+}
+
+func TestAdaptCockroachDDLForPostgres_AddConstraintIfNotExists(t *testing.T) {
+	input := `ALTER TABLE public.my_table ADD CONSTRAINT IF NOT EXISTS chk_val CHECK (val > 0);`
+	result := adaptCockroachDDLForPostgres(input)
+	assert.Contains(t, result, "DO $compat$ BEGIN")
+	assert.NotContains(t, result, "IF NOT EXISTS")
+	assert.Contains(t, result, "ADD CONSTRAINT chk_val CHECK")
+}
+
 func TestAdaptCockroachDDLForPostgres_MultiStatementMigration(t *testing.T) {
 	input := `UPDATE manifest_version SET version_new = version::TEXT WHERE version_new IS NULL;
 ALTER TABLE manifest_version ALTER COLUMN version_new SET NOT NULL;
