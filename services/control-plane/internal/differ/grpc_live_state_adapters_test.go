@@ -172,7 +172,7 @@ func TestMapMarketDataSet_NoOptionalFields(t *testing.T) {
 
 func TestMapOrganization(t *testing.T) {
 	p := &partyv1.Party{
-		PartyId:               "ACME_CORP",
+		PartyId:               "a1b2c3d4-uuid",
 		PartyType:             partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
 		LegalName:             "ACME Corporation Ltd",
 		DisplayName:           "ACME Corp",
@@ -180,19 +180,35 @@ func TestMapOrganization(t *testing.T) {
 		ExternalReferenceType: partyv1.ExternalReferenceType_EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE,
 		Attributes: []*quantityv1.AttributeEntry{
 			{Key: "region", Value: "UK"},
+			{Key: "_manifest_code", Value: "ACME_CORP"},
 		},
 	}
 
 	got := mapOrganization(p)
 
+	// Code should come from _manifest_code attribute, not party_id (UUID)
 	assert.Equal(t, "ACME_CORP", got.GetCode())
 	assert.Equal(t, "ACME Corporation Ltd", got.GetName())
-	assert.Equal(t, "PARTY_TYPE_ORGANIZATION", got.GetPartyType())
+	assert.Equal(t, "ORGANIZATION", got.GetPartyType())
 	assert.Equal(t, "ACME Corporation Ltd", got.GetLegalName())
 	assert.Equal(t, "ACME Corp", got.GetDisplayName())
 	assert.Equal(t, "12345678", got.GetExternalReference())
 	assert.Equal(t, "EXTERNAL_REFERENCE_TYPE_COMPANIES_HOUSE", got.GetExternalReferenceType())
-	assert.Equal(t, map[string]string{"region": "UK"}, got.GetAttributes())
+	assert.Equal(t, map[string]string{"region": "UK", "_manifest_code": "ACME_CORP"}, got.GetAttributes())
+}
+
+func TestMapOrganization_FallsBackToExternalReference(t *testing.T) {
+	p := &partyv1.Party{
+		PartyId:           "a1b2c3d4-uuid",
+		PartyType:         partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
+		LegalName:         "Old Corp",
+		ExternalReference: "OLD_CORP",
+	}
+
+	got := mapOrganization(p)
+
+	// No _manifest_code attribute, so falls back to external_reference
+	assert.Equal(t, "OLD_CORP", got.GetCode())
 }
 
 func TestMapOrganization_MinimalFields(t *testing.T) {

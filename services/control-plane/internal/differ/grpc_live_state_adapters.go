@@ -461,10 +461,31 @@ func mapMarketDataSet(ds *marketinformationv1.DataSetDefinition) *controlplanev1
 }
 
 func mapOrganization(p *partyv1.Party) *controlplanev1.OrganizationDefinition {
+	// Derive the manifest code from attributes or external_reference.
+	// The Party service has no dedicated "code" field - party_id is a UUID.
+	// The manifest applier stores the org code as external_reference (fallback)
+	// or the _manifest_code attribute.
+	code := ""
+	for _, a := range p.GetAttributes() {
+		if a.GetKey() == "_manifest_code" {
+			code = a.GetValue()
+			break
+		}
+	}
+	if code == "" {
+		code = p.GetExternalReference()
+	}
+	if code == "" {
+		code = p.GetPartyId()
+	}
+
+	// Strip proto enum prefix: "PARTY_TYPE_ORGANIZATION" -> "ORGANIZATION"
+	partyType := strings.TrimPrefix(p.GetPartyType().String(), "PARTY_TYPE_")
+
 	def := &controlplanev1.OrganizationDefinition{
-		Code:      p.GetPartyId(),
+		Code:      code,
 		Name:      p.GetLegalName(),
-		PartyType: p.GetPartyType().String(),
+		PartyType: partyType,
 	}
 	if v := p.GetLegalName(); v != "" {
 		def.LegalName = &v
