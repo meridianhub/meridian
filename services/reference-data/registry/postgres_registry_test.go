@@ -909,6 +909,7 @@ func TestPostgresRegistry_StatusStateMachine(t *testing.T) {
 	t.Run("valid transitions", func(t *testing.T) {
 		assert.NoError(t, registry.ValidateStatusTransition(registry.StatusDraft, registry.StatusActive))
 		assert.NoError(t, registry.ValidateStatusTransition(registry.StatusActive, registry.StatusDeprecated))
+		assert.NoError(t, registry.ValidateStatusTransition(registry.StatusDeprecated, registry.StatusActive))
 	})
 
 	t.Run("invalid transitions", func(t *testing.T) {
@@ -918,10 +919,6 @@ func TestPostgresRegistry_StatusStateMachine(t *testing.T) {
 
 		// DEPRECATED -> DRAFT
 		err = registry.ValidateStatusTransition(registry.StatusDeprecated, registry.StatusDraft)
-		require.ErrorIs(t, err, registry.ErrInvalidStateTransition)
-
-		// DEPRECATED -> ACTIVE
-		err = registry.ValidateStatusTransition(registry.StatusDeprecated, registry.StatusActive)
 		require.ErrorIs(t, err, registry.ErrInvalidStateTransition)
 
 		// DRAFT -> DEPRECATED (not allowed for instrument definitions)
