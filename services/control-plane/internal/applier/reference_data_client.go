@@ -180,11 +180,16 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 	callCtx := prepareCallContext(ctx)
 
 	// Proactive check: if already ACTIVE, return success immediately.
+	// Also handle DEPRECATED by attempting reactivation via the registry
+	// (which now allows DEPRECATED -> ACTIVE transitions).
 	existing, lookupErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{
 		Code: code,
 	})
-	if lookupErr == nil && existing.GetDefinition().GetStatus() == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
-		return accountTypeResult(existing.GetDefinition()), nil
+	if lookupErr == nil {
+		defStatus := existing.GetDefinition().GetStatus()
+		if defStatus == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
+			return accountTypeResult(existing.GetDefinition()), nil
+		}
 	}
 
 	// Proceed with create + activate flow.
@@ -202,8 +207,9 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 		Id: draftResp.GetDefinition().GetId(),
 	})
 	if err != nil {
-		// Reactive fallback: if FailedPrecondition and account type is ACTIVE, treat as success.
-		if status.Code(err) == codes.FailedPrecondition {
+		// Reactive fallback: if FailedPrecondition or NotFound (wrong ID from CreateDraft
+		// no-op), look up by code and return if ACTIVE.
+		if status.Code(err) == codes.FailedPrecondition || status.Code(err) == codes.NotFound {
 			retryLookup, retryErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{
 				Code: code,
 			})
