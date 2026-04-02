@@ -88,6 +88,7 @@ var (
 	ErrUnknownAliasSource           = errors.New("param_alias references unknown field")
 	ErrAliasCollision               = errors.New("param_alias target already exists as a field")
 	ErrDuplicateLeafName            = errors.New("duplicate leaf field name from exposed paths")
+	ErrCompositeWithProtoRef        = errors.New("composite handler must not set proto_ref")
 )
 
 // Schema represents a collection of handler definitions for a service.
@@ -161,6 +162,11 @@ type HandlerDef struct {
 
 	// Version is the handler version number. Defaults to 1 if unset.
 	Version int `yaml:"version,omitempty"`
+
+	// Composite marks this handler as a composite handler - one that orchestrates
+	// multiple underlying operations and has no single proto request/response shape.
+	// Composite handlers use params: {} intentionally and skip proto_ref validation.
+	Composite bool `yaml:"composite,omitempty"`
 
 	// IsDeprecated marks this handler as deprecated. Scripts calling it will receive a warning.
 	Deprecated bool `yaml:"deprecated,omitempty"`
@@ -247,6 +253,11 @@ func (h *HandlerDef) Validate(handlerName string) error {
 	// Normalize version: unset (0) defaults to 1
 	if h.Version == 0 {
 		h.Version = 1
+	}
+
+	// Composite handlers must not declare proto_ref.
+	if h.Composite && h.ProtoRef != nil {
+		return fmt.Errorf("handler %s: %w", handlerName, ErrCompositeWithProtoRef)
 	}
 
 	// Proto-referenced handlers: validate the reference format.

@@ -226,7 +226,7 @@ func TestHandlersYAML_ExternalHandlers(t *testing.T) {
 	}
 }
 
-func TestHandlersYAML_LegacyPostEntries(t *testing.T) {
+func TestHandlersYAML_CompositePostEntries(t *testing.T) {
 	yamlPath := filepath.Join(testdataDir(), "handlers.yaml")
 	data, err := os.ReadFile(yamlPath)
 	require.NoError(t, err)
@@ -234,11 +234,60 @@ func TestHandlersYAML_LegacyPostEntries(t *testing.T) {
 	schema, err := Parse(data)
 	require.NoError(t, err)
 
-	// post_entries is a legacy handler (no proto_ref)
 	handler := schema.Handlers["financial_accounting.post_entries"]
 	require.NotNil(t, handler)
-	assert.Nil(t, handler.ProtoRef, "post_entries should not have proto_ref")
+
+	// post_entries is a composite handler: no proto_ref, marked composite
+	assert.True(t, handler.Composite, "post_entries should be marked as composite")
+	assert.True(t, handler.IsComposite(), "IsComposite() should return true")
+	assert.Nil(t, handler.ProtoRef, "composite handler should not have proto_ref")
 	assert.Equal(t, "financial_accounting.reverse_entries", handler.Compensate)
+
+	// Proto resolution should succeed - composite handlers are skipped
+	err = schema.ResolveProtoTypes(protoregistry.GlobalFiles)
+	require.NoError(t, err, "proto resolution should skip composite handlers without error")
+
+	// Params should remain empty (intentionally) after resolution
+	assert.Empty(t, handler.Params, "composite handler params should remain empty after proto resolution")
+}
+
+func TestHandlersYAML_CompositeHandlerValidation(t *testing.T) {
+	t.Run("valid composite handler", func(t *testing.T) {
+		yamlData := []byte(`
+service: test
+version: "1.0"
+handlers:
+  test.composite_op:
+    description: "A composite handler"
+    compensation_strategy: none
+    composite: true
+    params: {}
+`)
+		schema, err := Parse(yamlData)
+		require.NoError(t, err, "composite handler with empty params should be valid")
+
+		handler := schema.Handlers["test.composite_op"]
+		require.NotNil(t, handler)
+		assert.True(t, handler.IsComposite())
+		assert.False(t, handler.HasProtoRef())
+	})
+
+	t.Run("composite with proto_ref is rejected", func(t *testing.T) {
+		yamlData := []byte(`
+service: test
+version: "1.0"
+handlers:
+  test.bad_composite:
+    description: "Invalid: composite with proto_ref"
+    compensation_strategy: none
+    composite: true
+    proto_ref:
+      proto_rpc: "some.Service/Method"
+`)
+		_, err := Parse(yamlData)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrCompositeWithProtoRef)
+	})
 }
 
 func TestHandlersYAML_SizeReduction(t *testing.T) {

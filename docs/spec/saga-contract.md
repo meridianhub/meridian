@@ -175,6 +175,36 @@ Every handler invocation returns a `map[string]any` to the saga script. The keys
 
 **This is a formal contract.** Saga scripts depend on specific return keys (e.g., `lien_id`, `log_id`, `booking_log_id`). Removing or renaming a return field is a breaking change to all sagas that consume it.
 
+### 2.7 Composite Handlers
+
+Some handlers orchestrate multiple underlying operations rather than mapping to a single proto RPC. These **composite handlers** process variable-length inputs (e.g., arrays of entries), call other handlers iteratively, and aggregate results. They have no single request/response proto message.
+
+Composite handlers are marked explicitly in the schema:
+
+```yaml
+financial_accounting.post_entries:
+  description: "Post double-entry accounting entries to the ledger"
+  compensate: financial_accounting.reverse_entries
+  composite: true
+  params: {}
+```
+
+**Key properties:**
+
+- `composite: true` signals that empty `params: {}` is intentional, not a gap
+- No `proto_ref` - the handler's parameter shape is defined by its implementation, not a proto message
+- Proto type resolution skips composite handlers without error
+- Compensation still applies - composite handlers declare `compensate` or `compensation_strategy` like any other handler
+- The runtime provides composite handlers as DSL builtins (e.g., `posting()`) rather than auto-generated service module methods
+
+**When to use `composite: true`:**
+
+A handler should be marked composite when it iterates over a collection of sub-operations and no single proto message represents its input. The canonical example is `post_entries`, which processes a variable-length array of ledger entries, calling `CaptureLedgerPosting` for each one and aggregating the results.
+
+**When NOT to use `composite: true`:**
+
+If a handler maps to a single proto RPC - even if it triggers downstream operations internally - use `proto_ref`. The composite marker is for handlers whose parameter shape genuinely cannot be represented by one proto message.
+
 ## 3. Trigger Grammar
 
 Sagas bind to execution triggers. The trigger determines *when* a saga runs.
