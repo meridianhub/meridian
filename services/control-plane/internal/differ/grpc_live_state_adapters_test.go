@@ -308,13 +308,13 @@ func TestMapProviderConnection_NoRetryOrRateLimit(t *testing.T) {
 
 func TestMapInstructionRoute(t *testing.T) {
 	r := &opgatewayv1.InstructionRoute{
-		InstructionType:    "payment.initiate",
-		ConnectionId:       "stripe-main",
+		InstructionType:      "payment.initiate",
+		ConnectionId:         "stripe-main",
 		FallbackConnectionId: "stripe-backup",
-		OutboundMapping:    "payment_outbound",
-		InboundMapping:     "payment_inbound",
-		HttpMethod:         "POST",
-		PathTemplate:       "/v1/charges",
+		OutboundMapping:      "payment_outbound",
+		InboundMapping:       "payment_inbound",
+		HttpMethod:           "POST",
+		PathTemplate:         "/v1/charges",
 	}
 
 	got := mapInstructionRoute(r)
@@ -347,8 +347,8 @@ func TestMapProtocol(t *testing.T) {
 
 func TestMapAuthConfig_AllTypes(t *testing.T) {
 	tests := []struct {
-		name string
-		conn *opgatewayv1.ProviderConnection
+		name  string
+		conn  *opgatewayv1.ProviderConnection
 		check func(t *testing.T, auth *controlplanev1.AuthConfigManifest)
 	}{
 		{
@@ -413,10 +413,3 @@ func TestMapAuthConfig_AllTypes(t *testing.T) {
 	}
 }
 
-func TestNewLiveStateClients_NilConn(t *testing.T) {
-	// Passing a nil conn to the constructors will create clients with nil stubs.
-	// This test verifies the wiring function itself doesn't panic when given
-	// a valid (non-nil) connection shape. We can't test actual gRPC calls without
-	// a server, but we verify the constructor wiring completes.
-	// The nil-client validation is tested by the existing GRPCLiveStateProvider tests.
-}

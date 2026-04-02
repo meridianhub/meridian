@@ -36,6 +36,7 @@ func NewGRPCReferenceDataClient(conn *grpc.ClientConn) *GRPCReferenceDataClient 
 	}
 }
 
+// ListInstruments implements ReferenceDataClient.
 func (c *GRPCReferenceDataClient) ListInstruments(ctx context.Context) ([]*controlplanev1.InstrumentDefinition, error) {
 	var result []*controlplanev1.InstrumentDefinition
 	pageToken := ""
@@ -57,6 +58,7 @@ func (c *GRPCReferenceDataClient) ListInstruments(ctx context.Context) ([]*contr
 	}
 }
 
+// ListAccountTypes implements ReferenceDataClient.
 func (c *GRPCReferenceDataClient) ListAccountTypes(ctx context.Context) ([]*controlplanev1.AccountTypeDefinition, error) {
 	var result []*controlplanev1.AccountTypeDefinition
 	pageToken := ""
@@ -95,6 +97,7 @@ func NewGRPCSagaRegistryClient(conn *grpc.ClientConn) *GRPCSagaRegistryClient {
 	}
 }
 
+// ListSagas implements SagaRegistryClient.
 func (c *GRPCSagaRegistryClient) ListSagas(ctx context.Context) ([]*controlplanev1.SagaDefinition, error) {
 	var result []*controlplanev1.SagaDefinition
 	pageToken := ""
@@ -133,6 +136,7 @@ func NewGRPCMarketInformationClient(conn *grpc.ClientConn) *GRPCMarketInformatio
 	}
 }
 
+// ListMarketDataSources implements MarketInformationClient.
 func (c *GRPCMarketInformationClient) ListMarketDataSources(ctx context.Context) ([]*controlplanev1.MarketDataSourceDefinition, error) {
 	var result []*controlplanev1.MarketDataSourceDefinition
 	pageToken := ""
@@ -154,6 +158,7 @@ func (c *GRPCMarketInformationClient) ListMarketDataSources(ctx context.Context)
 	}
 }
 
+// ListMarketDataSets implements MarketInformationClient.
 func (c *GRPCMarketInformationClient) ListMarketDataSets(ctx context.Context) ([]*controlplanev1.MarketDataSetDefinition, error) {
 	var result []*controlplanev1.MarketDataSetDefinition
 	pageToken := ""
@@ -192,6 +197,7 @@ func NewGRPCPartyClient(conn *grpc.ClientConn) *GRPCPartyClient {
 	}
 }
 
+// ListOrganizations implements PartyClient.
 func (c *GRPCPartyClient) ListOrganizations(ctx context.Context) ([]*controlplanev1.OrganizationDefinition, error) {
 	var result []*controlplanev1.OrganizationDefinition
 	pageToken := ""
@@ -231,6 +237,7 @@ func NewGRPCInternalAccountClient(conn *grpc.ClientConn) *GRPCInternalAccountCli
 	}
 }
 
+// ListInternalAccounts implements InternalAccountClient.
 func (c *GRPCInternalAccountClient) ListInternalAccounts(ctx context.Context) ([]*controlplanev1.InternalAccountDefinition, error) {
 	var result []*controlplanev1.InternalAccountDefinition
 	pageToken := ""
@@ -274,6 +281,7 @@ func NewGRPCOperationalGatewayClient(conn *grpc.ClientConn) *GRPCOperationalGate
 	}
 }
 
+// ListProviderConnections implements OperationalGatewayClient.
 func (c *GRPCOperationalGatewayClient) ListProviderConnections(ctx context.Context) ([]*controlplanev1.ProviderConnectionConfig, error) {
 	var result []*controlplanev1.ProviderConnectionConfig
 	pageToken := ""
@@ -298,6 +306,7 @@ func (c *GRPCOperationalGatewayClient) ListProviderConnections(ctx context.Conte
 	}
 }
 
+// ListInstructionRoutes implements OperationalGatewayClient.
 func (c *GRPCOperationalGatewayClient) ListInstructionRoutes(ctx context.Context) ([]*controlplanev1.InstructionRouteConfig, error) {
 	resp, err := c.routeClient.ListRoutes(ctx, &opgatewayv1.ListRoutesRequest{})
 	if err != nil {
@@ -335,9 +344,14 @@ func mapDimensionToInstrumentType(d referencedatav1.Dimension) controlplanev1.In
 		referencedatav1.Dimension_DIMENSION_VOLUME,
 		referencedatav1.Dimension_DIMENSION_CARBON:
 		return controlplanev1.InstrumentType_INSTRUMENT_TYPE_COMMODITY
-	default:
+	case referencedatav1.Dimension_DIMENSION_UNSPECIFIED,
+		referencedatav1.Dimension_DIMENSION_TIME,
+		referencedatav1.Dimension_DIMENSION_COMPUTE,
+		referencedatav1.Dimension_DIMENSION_DATA,
+		referencedatav1.Dimension_DIMENSION_COUNT:
 		return controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED
 	}
+	return controlplanev1.InstrumentType_INSTRUMENT_TYPE_UNSPECIFIED
 }
 
 func mapAccountType(at *referencedatav1.AccountTypeDefinition) *controlplanev1.AccountTypeDefinition {
@@ -469,9 +483,10 @@ func mapProtocol(p opgatewayv1.Protocol) controlplanev1.ProviderProtocol {
 		return controlplanev1.ProviderProtocol_PROVIDER_PROTOCOL_MQTT
 	case opgatewayv1.Protocol_PROTOCOL_AMQP:
 		return controlplanev1.ProviderProtocol_PROVIDER_PROTOCOL_AMQP
-	default:
+	case opgatewayv1.Protocol_PROTOCOL_UNSPECIFIED:
 		return controlplanev1.ProviderProtocol_PROVIDER_PROTOCOL_UNSPECIFIED
 	}
+	return controlplanev1.ProviderProtocol_PROVIDER_PROTOCOL_UNSPECIFIED
 }
 
 func mapAuthConfig(conn *opgatewayv1.ProviderConnection) *controlplanev1.AuthConfigManifest {
@@ -537,13 +552,13 @@ func mapAuthConfig(conn *opgatewayv1.ProviderConnection) *controlplanev1.AuthCon
 
 func mapInstructionRoute(r *opgatewayv1.InstructionRoute) *controlplanev1.InstructionRouteConfig {
 	return &controlplanev1.InstructionRouteConfig{
-		InstructionType:    r.GetInstructionType(),
-		ConnectionId:       r.GetConnectionId(),
+		InstructionType:      r.GetInstructionType(),
+		ConnectionId:         r.GetConnectionId(),
 		FallbackConnectionId: r.GetFallbackConnectionId(),
-		OutboundMappingId:  r.GetOutboundMapping(),
-		InboundMappingId:   r.GetInboundMapping(),
-		HttpMethod:         r.GetHttpMethod(),
-		PathTemplate:       r.GetPathTemplate(),
+		OutboundMappingId:    r.GetOutboundMapping(),
+		InboundMappingId:     r.GetInboundMapping(),
+		HttpMethod:           r.GetHttpMethod(),
+		PathTemplate:         r.GetPathTemplate(),
 	}
 }
 
