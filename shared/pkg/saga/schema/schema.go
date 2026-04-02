@@ -88,6 +88,7 @@ var (
 	ErrUnknownAliasSource           = errors.New("param_alias references unknown field")
 	ErrAliasCollision               = errors.New("param_alias target already exists as a field")
 	ErrDuplicateLeafName            = errors.New("duplicate leaf field name from exposed paths")
+	ErrCompositeWithProtoRef        = errors.New("composite handler must not set proto_ref")
 )
 
 // Schema represents a collection of handler definitions for a service.
@@ -256,7 +257,7 @@ func (h *HandlerDef) Validate(handlerName string) error {
 
 	// Composite handlers must not declare proto_ref.
 	if h.Composite && h.ProtoRef != nil {
-		return fmt.Errorf("handler %s: composite handler must not set proto_ref", handlerName)
+		return fmt.Errorf("handler %s: %w", handlerName, ErrCompositeWithProtoRef)
 	}
 
 	// Proto-referenced handlers: validate the reference format.

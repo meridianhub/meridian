@@ -286,7 +286,7 @@ handlers:
 `)
 		_, err := Parse(yamlData)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "composite handler must not set proto_ref")
+		assert.ErrorIs(t, err, ErrCompositeWithProtoRef)
 	})
 }
 
