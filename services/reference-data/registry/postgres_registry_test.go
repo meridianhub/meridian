@@ -944,12 +944,12 @@ func TestPostgresRegistry_StatusStateMachine(t *testing.T) {
 		assert.True(t, registry.StatusDraft.CanTransitionTo(registry.StatusActive))
 		assert.True(t, registry.StatusActive.CanTransitionTo(registry.StatusDeprecated))
 		assert.False(t, registry.StatusActive.CanTransitionTo(registry.StatusDraft))
-		assert.False(t, registry.StatusDeprecated.CanTransitionTo(registry.StatusActive))
+		assert.True(t, registry.StatusDeprecated.CanTransitionTo(registry.StatusActive))
 		assert.False(t, registry.StatusDraft.CanTransitionTo(registry.StatusDraft))
 	})
 }
 
-func TestPostgresRegistry_DeprecatedIsTerminal(t *testing.T) {
+func TestPostgresRegistry_DeprecatedCanReactivate(t *testing.T) {
 	reg, pool := setupTestRegistry(t)
 	ctx := setupTenantContext(t, pool, "test-tenant-terminal")
 
@@ -964,14 +964,15 @@ func TestPostgresRegistry_DeprecatedIsTerminal(t *testing.T) {
 	require.NoError(t, reg.ActivateInstrument(ctx, "TERMINAL1", 1))
 	require.NoError(t, reg.DeprecateInstrument(ctx, "TERMINAL1", 1, nil))
 
-	t.Run("cannot activate deprecated instrument", func(t *testing.T) {
+	t.Run("can reactivate deprecated instrument", func(t *testing.T) {
 		err := reg.ActivateInstrument(ctx, "TERMINAL1", 1)
-		require.ErrorIs(t, err, registry.ErrNotDraft)
+		require.NoError(t, err)
 	})
 
 	t.Run("cannot deprecate already deprecated instrument", func(t *testing.T) {
+		// Re-deprecate after reactivation should work
 		err := reg.DeprecateInstrument(ctx, "TERMINAL1", 1, nil)
-		require.ErrorIs(t, err, registry.ErrNotActive)
+		require.NoError(t, err)
 	})
 
 	t.Run("cannot update deprecated instrument", func(t *testing.T) {
