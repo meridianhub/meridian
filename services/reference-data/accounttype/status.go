@@ -30,7 +30,7 @@ var validStatusTransitions = map[Status]map[Status]bool{
 		StatusDeprecated: true,
 	},
 	StatusDeprecated: {
-		// Terminal state - no valid transitions
+		StatusActive: true, // Convergent apply: re-declare in manifest to reactivate
 	},
 }
 

@@ -152,9 +152,9 @@ func TestStatusCanTransitionTo_ActiveToDraftForbidden(t *testing.T) {
 	assert.False(t, accounttype.StatusActive.CanTransitionTo(accounttype.StatusDraft))
 }
 
-func TestStatusCanTransitionTo_DeprecatedIsTerminal(t *testing.T) {
+func TestStatusCanTransitionTo_DeprecatedAllowsReactivation(t *testing.T) {
 	assert.False(t, accounttype.StatusDeprecated.CanTransitionTo(accounttype.StatusDraft))
-	assert.False(t, accounttype.StatusDeprecated.CanTransitionTo(accounttype.StatusActive))
+	assert.True(t, accounttype.StatusDeprecated.CanTransitionTo(accounttype.StatusActive))
 }
 
 func TestStatusCanTransitionTo_SameStatusForbidden(t *testing.T) {

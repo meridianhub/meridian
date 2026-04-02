@@ -30,7 +30,7 @@ func TestInstrumentStatus_CanTransitionTo(t *testing.T) {
 		{"ACTIVE to DRAFT", registry.StatusActive, registry.StatusDraft, false},
 		{"ACTIVE to ACTIVE", registry.StatusActive, registry.StatusActive, false},
 		{"DEPRECATED to DRAFT", registry.StatusDeprecated, registry.StatusDraft, false},
-		{"DEPRECATED to ACTIVE", registry.StatusDeprecated, registry.StatusActive, false},
+		{"DEPRECATED to ACTIVE", registry.StatusDeprecated, registry.StatusActive, true},
 		{"DEPRECATED to DEPRECATED", registry.StatusDeprecated, registry.StatusDeprecated, false},
 		{"unknown to ACTIVE", registry.Status("UNKNOWN"), registry.StatusActive, false},
 	}
@@ -65,9 +65,9 @@ func TestValidateStatusTransition(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot transition")
 	})
 
-	t.Run("DEPRECATED is terminal", func(t *testing.T) {
+	t.Run("DEPRECATED to ACTIVE is valid (reactivation)", func(t *testing.T) {
 		err := registry.ValidateStatusTransition(registry.StatusDeprecated, registry.StatusActive)
-		require.ErrorIs(t, err, registry.ErrInvalidStateTransition)
+		require.NoError(t, err)
 	})
 }
 

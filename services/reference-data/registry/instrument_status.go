@@ -10,7 +10,7 @@ import (
 //
 //	DRAFT -> ACTIVE (activation)
 //	ACTIVE -> DEPRECATED (deprecation)
-//	DEPRECATED is terminal - no transitions allowed
+//	DEPRECATED -> ACTIVE (reactivation via convergent manifest apply)
 var validInstrumentStatusTransitions = map[Status]map[Status]bool{
 	StatusDraft: {
 		StatusActive: true,
@@ -19,7 +19,7 @@ var validInstrumentStatusTransitions = map[Status]map[Status]bool{
 		StatusDeprecated: true,
 	},
 	StatusDeprecated: {
-		// Terminal state - no valid transitions
+		StatusActive: true, // Convergent apply: re-declare in manifest to reactivate
 	},
 }
 
