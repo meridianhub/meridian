@@ -180,11 +180,16 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 	callCtx := prepareCallContext(ctx)
 
 	// Proactive check: if already ACTIVE, return success immediately.
+	// Also handle DEPRECATED by attempting reactivation via the registry
+	// (which now allows DEPRECATED -> ACTIVE transitions).
 	existing, lookupErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{
 		Code: code,
 	})
-	if lookupErr == nil && existing.GetDefinition().GetStatus() == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
-		return accountTypeResult(existing.GetDefinition()), nil
+	if lookupErr == nil {
+		defStatus := existing.GetDefinition().GetStatus()
+		if defStatus == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
+			return accountTypeResult(existing.GetDefinition()), nil
+		}
 	}
 
 	// Proceed with create + activate flow.
@@ -197,13 +202,25 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 		return nil, fmt.Errorf("create account type draft: %w", err)
 	}
 
+	// If CreateDraft was a no-op (ON CONFLICT DO NOTHING), the returned ID is wrong
+	// (a new UUID that was never inserted). Look up by code to get the real definition.
+	defID := draftResp.GetDefinition().GetId()
+	if defID == "" {
+		// Fallback: look up by code to get the real ID
+		lookup, lookupErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{Code: code})
+		if lookupErr == nil {
+			return accountTypeResult(lookup.GetDefinition()), nil
+		}
+	}
+
 	// Activate the draft (or reactivate if DEPRECATED)
 	activateResp, err := c.accountTypes.ActivateAccountType(callCtx, &referencedatav1.ActivateAccountTypeRequest{
-		Id: draftResp.GetDefinition().GetId(),
+		Id: defID,
 	})
 	if err != nil {
-		// Reactive fallback: if FailedPrecondition and account type is ACTIVE, treat as success.
-		if status.Code(err) == codes.FailedPrecondition {
+		// Reactive fallback: if FailedPrecondition, the definition may already be ACTIVE
+		// (race) or our ID was wrong (CreateDraft no-op). Try lookup by code.
+		if status.Code(err) == codes.FailedPrecondition || status.Code(err) == codes.NotFound {
 			retryLookup, retryErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{
 				Code: code,
 			})
