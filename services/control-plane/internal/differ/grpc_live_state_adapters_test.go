@@ -12,6 +12,8 @@ import (
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestMapInstrument(t *testing.T) {
@@ -421,6 +423,45 @@ func TestMapAuthConfig_AllTypes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := mapAuthConfig(tt.conn)
 			tt.check(t, got)
+		})
+	}
+}
+
+func TestIsEmptyState(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "Unimplemented",
+			err:      status.Error(codes.Unimplemented, "unknown service"),
+			expected: true,
+		},
+		{
+			name:     "schema not provisioned",
+			err:      status.Error(codes.Internal, "failed to list accounts: tenant schema not provisioned: schema does not exist in database: org_volterra_energy"),
+			expected: true,
+		},
+		{
+			name:     "schema does not exist",
+			err:      status.Error(codes.Internal, "schema does not exist"),
+			expected: true,
+		},
+		{
+			name:     "other internal error",
+			err:      status.Error(codes.Internal, "connection refused"),
+			expected: false,
+		},
+		{
+			name:     "not found",
+			err:      status.Error(codes.NotFound, "resource not found"),
+			expected: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isEmptyState(tt.err))
 		})
 	}
 }
