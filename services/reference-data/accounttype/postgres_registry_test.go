@@ -244,14 +244,14 @@ func TestPostgresAccountTypeRegistry_ActivateAccountType(t *testing.T) {
 		assert.Contains(t, err.Error(), "instrument")
 	})
 
-	t.Run("rejects activation of DEPRECATED definition", func(t *testing.T) {
+	t.Run("reactivates DEPRECATED definition", func(t *testing.T) {
 		def := newTestDefinition("ACTIVATE_DEP", "GBP")
 		require.NoError(t, reg.CreateDraft(ctx, def))
 		require.NoError(t, reg.ActivateAccountType(ctx, "ACTIVATE_DEP", 1))
 		require.NoError(t, reg.DeprecateAccountType(ctx, "ACTIVATE_DEP", 1, nil))
 
 		err := reg.ActivateAccountType(ctx, "ACTIVATE_DEP", 1)
-		require.ErrorIs(t, err, accounttype.ErrNotDraft)
+		require.NoError(t, err)
 	})
 }
 

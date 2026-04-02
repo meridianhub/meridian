@@ -406,7 +406,7 @@ func TestPostgresRegistry_LifecycleTransitions(t *testing.T) {
 		assert.NotNil(t, result.DeprecatedAt)
 	})
 
-	t.Run("ACTIVE to ACTIVE fails", func(t *testing.T) {
+	t.Run("ACTIVE to ACTIVE is idempotent", func(t *testing.T) {
 		def := &saga.Definition{
 			Name:    "lifecycle3",
 			Version: 1,
@@ -416,7 +416,7 @@ func TestPostgresRegistry_LifecycleTransitions(t *testing.T) {
 		require.NoError(t, reg.ActivateSaga(ctx, def.ID))
 
 		err := reg.ActivateSaga(ctx, def.ID)
-		require.ErrorIs(t, err, saga.ErrNotDraft)
+		require.NoError(t, err) // idempotent
 	})
 
 	t.Run("DRAFT to DEPRECATED fails", func(t *testing.T) {
