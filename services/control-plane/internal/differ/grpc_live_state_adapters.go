@@ -3,6 +3,7 @@ package differ
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
@@ -17,13 +18,22 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// isUnimplemented returns true if the error indicates the gRPC service is not
-// registered on the target server. This happens when the unified binary does
-// not include a particular service (e.g., operational-gateway runs as a
-// separate process). Returning true allows callers to treat the resource type
-// as having no live state rather than failing the entire diff.
-func isUnimplemented(err error) bool {
-	return status.Code(err) == codes.Unimplemented
+// isEmptyState returns true if the error indicates the service has no data for
+// this tenant rather than a real failure. This covers two cases:
+//   - codes.Unimplemented: the gRPC service is not registered on the target
+//     server (e.g., operational-gateway runs as a separate process)
+//   - "schema not provisioned" / "schema does not exist": the tenant's schema
+//     has not been created in this service's database yet (first manifest apply)
+//
+// Returning true allows callers to treat the resource type as having no live
+// state rather than failing the entire diff.
+func isEmptyState(err error) bool {
+	if status.Code(err) == codes.Unimplemented {
+		return true
+	}
+	msg := status.Convert(err).Message()
+	return strings.Contains(msg, "schema not provisioned") ||
+		strings.Contains(msg, "schema does not exist")
 }
 
 // defaultPageSize is the page size used when paginating through list RPCs.
@@ -57,7 +67,7 @@ func (c *GRPCReferenceDataClient) ListInstruments(ctx context.Context) ([]*contr
 			PageToken: pageToken,
 		})
 		if err != nil {
-			if isUnimplemented(err) {
+			if isEmptyState(err) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("list instruments: %w", err)
@@ -82,7 +92,7 @@ func (c *GRPCReferenceDataClient) ListAccountTypes(ctx context.Context) ([]*cont
 			PageToken: pageToken,
 		})
 		if err != nil {
-			if isUnimplemented(err) {
+			if isEmptyState(err) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("list account types: %w", err)
@@ -124,7 +134,7 @@ func (c *GRPCSagaRegistryClient) ListSagas(ctx context.Context) ([]*controlplane
 			PageToken: pageToken,
 		})
 		if err != nil {
-			if isUnimplemented(err) {
+			if isEmptyState(err) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("list sagas: %w", err)
@@ -166,7 +176,7 @@ func (c *GRPCMarketInformationClient) ListMarketDataSources(ctx context.Context)
 			PageToken: pageToken,
 		})
 		if err != nil {
-			if isUnimplemented(err) {
+			if isEmptyState(err) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("list data sources: %w", err)
@@ -191,7 +201,7 @@ func (c *GRPCMarketInformationClient) ListMarketDataSets(ctx context.Context) ([
 			PageToken: pageToken,
 		})
 		if err != nil {
-			if isUnimplemented(err) {
+			if isEmptyState(err) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("list data sets: %w", err)
@@ -234,7 +244,7 @@ func (c *GRPCPartyClient) ListOrganizations(ctx context.Context) ([]*controlplan
 			PartyType: partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
 		})
 		if err != nil {
-			if isUnimplemented(err) {
+			if isEmptyState(err) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("list organizations: %w", err)
@@ -281,7 +291,7 @@ func (c *GRPCInternalAccountClient) ListInternalAccounts(ctx context.Context) ([
 			},
 		})
 		if err != nil {
-			if isUnimplemented(err) {
+			if isEmptyState(err) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("list internal accounts: %w", err)
@@ -328,7 +338,7 @@ func (c *GRPCOperationalGatewayClient) ListProviderConnections(ctx context.Conte
 			},
 		})
 		if err != nil {
-			if isUnimplemented(err) {
+			if isEmptyState(err) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("list provider connections: %w", err)
@@ -348,7 +358,7 @@ func (c *GRPCOperationalGatewayClient) ListProviderConnections(ctx context.Conte
 func (c *GRPCOperationalGatewayClient) ListInstructionRoutes(ctx context.Context) ([]*controlplanev1.InstructionRouteConfig, error) {
 	resp, err := c.routeClient.ListRoutes(ctx, &opgatewayv1.ListRoutesRequest{})
 	if err != nil {
-		if isUnimplemented(err) {
+		if isEmptyState(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("list instruction routes: %w", err)
