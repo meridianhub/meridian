@@ -202,24 +202,13 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 		return nil, fmt.Errorf("create account type draft: %w", err)
 	}
 
-	// If CreateDraft was a no-op (ON CONFLICT DO NOTHING), the returned ID is wrong
-	// (a new UUID that was never inserted). Look up by code to get the real definition.
-	defID := draftResp.GetDefinition().GetId()
-	if defID == "" {
-		// Fallback: look up by code to get the real ID
-		lookup, lookupErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{Code: code})
-		if lookupErr == nil {
-			return accountTypeResult(lookup.GetDefinition()), nil
-		}
-	}
-
 	// Activate the draft (or reactivate if DEPRECATED)
 	activateResp, err := c.accountTypes.ActivateAccountType(callCtx, &referencedatav1.ActivateAccountTypeRequest{
-		Id: defID,
+		Id: draftResp.GetDefinition().GetId(),
 	})
 	if err != nil {
-		// Reactive fallback: if FailedPrecondition, the definition may already be ACTIVE
-		// (race) or our ID was wrong (CreateDraft no-op). Try lookup by code.
+		// Reactive fallback: if FailedPrecondition or NotFound (wrong ID from CreateDraft
+		// no-op), look up by code and return if ACTIVE.
 		if status.Code(err) == codes.FailedPrecondition || status.Code(err) == codes.NotFound {
 			retryLookup, retryErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{
 				Code: code,
