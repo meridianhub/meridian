@@ -254,6 +254,11 @@ func (h *HandlerDef) Validate(handlerName string) error {
 		h.Version = 1
 	}
 
+	// Composite handlers must not declare proto_ref.
+	if h.Composite && h.ProtoRef != nil {
+		return fmt.Errorf("handler %s: composite handler must not set proto_ref", handlerName)
+	}
+
 	// Proto-referenced handlers: validate the reference format.
 	// Params/Returns are resolved later via ResolveProtoTypes, so skip field validation.
 	if h.ProtoRef != nil {

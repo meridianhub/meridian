@@ -252,8 +252,8 @@ func TestHandlersYAML_CompositePostEntries(t *testing.T) {
 }
 
 func TestHandlersYAML_CompositeHandlerValidation(t *testing.T) {
-	// Verify that a composite handler with empty params and no proto_ref is valid
-	yamlData := []byte(`
+	t.Run("valid composite handler", func(t *testing.T) {
+		yamlData := []byte(`
 service: test
 version: "1.0"
 handlers:
@@ -263,13 +263,31 @@ handlers:
     composite: true
     params: {}
 `)
-	schema, err := Parse(yamlData)
-	require.NoError(t, err, "composite handler with empty params should be valid")
+		schema, err := Parse(yamlData)
+		require.NoError(t, err, "composite handler with empty params should be valid")
 
-	handler := schema.Handlers["test.composite_op"]
-	require.NotNil(t, handler)
-	assert.True(t, handler.IsComposite())
-	assert.False(t, handler.HasProtoRef())
+		handler := schema.Handlers["test.composite_op"]
+		require.NotNil(t, handler)
+		assert.True(t, handler.IsComposite())
+		assert.False(t, handler.HasProtoRef())
+	})
+
+	t.Run("composite with proto_ref is rejected", func(t *testing.T) {
+		yamlData := []byte(`
+service: test
+version: "1.0"
+handlers:
+  test.bad_composite:
+    description: "Invalid: composite with proto_ref"
+    compensation_strategy: none
+    composite: true
+    proto_ref:
+      proto_rpc: "some.Service/Method"
+`)
+		_, err := Parse(yamlData)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "composite handler must not set proto_ref")
+	})
 }
 
 func TestHandlersYAML_SizeReduction(t *testing.T) {
