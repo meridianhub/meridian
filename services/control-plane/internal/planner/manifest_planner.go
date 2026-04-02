@@ -145,69 +145,78 @@ type methodKey struct {
 // grpcMethodMap maps (resource type, action) pairs to gRPC methods.
 var grpcMethodMap = map[methodKey]GRPCMethod{
 	// Instruments
-	{differ.ResourceInstrument, differ.ActionCreate}: MethodRegisterInstrument,
-	{differ.ResourceInstrument, differ.ActionUpdate}: MethodUpdateInstrument,
-	{differ.ResourceInstrument, differ.ActionDelete}: MethodDeprecateInstrument,
+	{differ.ResourceInstrument, differ.ActionCreate}:    MethodRegisterInstrument,
+	{differ.ResourceInstrument, differ.ActionUpdate}:    MethodUpdateInstrument,
+	{differ.ResourceInstrument, differ.ActionDelete}:    MethodDeprecateInstrument,
+	{differ.ResourceInstrument, differ.ActionDeprecate}: MethodDeprecateInstrument,
 
 	// Account Types: mapped to Reference Data AccountTypeRegistryService.
 	// CREATE → CreateDraft (the handler calls Activate internally for idempotent flow).
 	// UPDATE → UpdateDefinition.
-	// DELETE → DeprecateAccountType.
-	{differ.ResourceAccountType, differ.ActionCreate}: MethodCreateAccountTypeDraft,
-	{differ.ResourceAccountType, differ.ActionUpdate}: MethodUpdateAccountTypeDefinition,
-	{differ.ResourceAccountType, differ.ActionDelete}: MethodDeprecateAccountType,
+	// DELETE/DEPRECATE → DeprecateAccountType.
+	{differ.ResourceAccountType, differ.ActionCreate}:    MethodCreateAccountTypeDraft,
+	{differ.ResourceAccountType, differ.ActionUpdate}:    MethodUpdateAccountTypeDefinition,
+	{differ.ResourceAccountType, differ.ActionDelete}:    MethodDeprecateAccountType,
+	{differ.ResourceAccountType, differ.ActionDeprecate}: MethodDeprecateAccountType,
 
 	// Valuation Rules: mapped to Reference Data Service instrument operations
 	// (valuation rules are registered alongside instrument definitions).
-	{differ.ResourceValuationRule, differ.ActionCreate}: MethodRegisterInstrument,
-	{differ.ResourceValuationRule, differ.ActionUpdate}: MethodUpdateInstrument,
-	{differ.ResourceValuationRule, differ.ActionDelete}: MethodDeprecateInstrument,
+	{differ.ResourceValuationRule, differ.ActionCreate}:    MethodRegisterInstrument,
+	{differ.ResourceValuationRule, differ.ActionUpdate}:    MethodUpdateInstrument,
+	{differ.ResourceValuationRule, differ.ActionDelete}:    MethodDeprecateInstrument,
+	{differ.ResourceValuationRule, differ.ActionDeprecate}: MethodDeprecateInstrument,
 
 	// Sagas
-	{differ.ResourceSaga, differ.ActionCreate}: MethodCreateSagaDraft,
-	{differ.ResourceSaga, differ.ActionUpdate}: MethodUpdateSagaDefinition,
-	{differ.ResourceSaga, differ.ActionDelete}: MethodDeprecateSaga,
+	{differ.ResourceSaga, differ.ActionCreate}:    MethodCreateSagaDraft,
+	{differ.ResourceSaga, differ.ActionUpdate}:    MethodUpdateSagaDefinition,
+	{differ.ResourceSaga, differ.ActionDelete}:    MethodDeprecateSaga,
+	{differ.ResourceSaga, differ.ActionDeprecate}: MethodDeprecateSaga,
 
 	// Party Types
 	{differ.ResourcePartyType, differ.ActionCreate}: MethodRegisterPartyType,
 	{differ.ResourcePartyType, differ.ActionUpdate}: MethodUpdatePartyType,
-	// DELETE for party types is not supported (party types are managed through schema updates)
-	// No delete method registered intentionally.
+	// DELETE/DEPRECATE for party types is not supported (party types are managed through schema updates)
+	// No delete/deprecate method registered intentionally.
 
 	// Mappings
-	{differ.ResourceMapping, differ.ActionCreate}: MethodCreateMapping,
-	{differ.ResourceMapping, differ.ActionUpdate}: MethodUpdateMapping,
-	{differ.ResourceMapping, differ.ActionDelete}: MethodDeprecateMapping,
+	{differ.ResourceMapping, differ.ActionCreate}:    MethodCreateMapping,
+	{differ.ResourceMapping, differ.ActionUpdate}:    MethodUpdateMapping,
+	{differ.ResourceMapping, differ.ActionDelete}:    MethodDeprecateMapping,
+	{differ.ResourceMapping, differ.ActionDeprecate}: MethodDeprecateMapping,
 
 	// Provider Connections (Operational Gateway)
 	{differ.ResourceProviderConnection, differ.ActionCreate}: MethodUpsertProviderConnection,
 	{differ.ResourceProviderConnection, differ.ActionUpdate}: MethodUpsertProviderConnection,
-	// No delete method: proto does not define DeleteConnection RPC.
+	// No delete/deprecate method: proto does not define DeleteConnection RPC.
 
 	// Instruction Routes (Operational Gateway)
 	{differ.ResourceInstructionRoute, differ.ActionCreate}: MethodUpsertInstructionRoute,
 	{differ.ResourceInstructionRoute, differ.ActionUpdate}: MethodUpsertInstructionRoute,
-	// No delete method: proto does not define DeleteRoute RPC.
+	// No delete/deprecate method: proto does not define DeleteRoute RPC.
 
 	// Market Data Sources
-	{differ.ResourceMarketDataSource, differ.ActionCreate}: MethodRegisterDataSource,
-	{differ.ResourceMarketDataSource, differ.ActionUpdate}: MethodUpdateDataSource,
-	{differ.ResourceMarketDataSource, differ.ActionDelete}: MethodDeactivateDataSource,
+	{differ.ResourceMarketDataSource, differ.ActionCreate}:    MethodRegisterDataSource,
+	{differ.ResourceMarketDataSource, differ.ActionUpdate}:    MethodUpdateDataSource,
+	{differ.ResourceMarketDataSource, differ.ActionDelete}:    MethodDeactivateDataSource,
+	{differ.ResourceMarketDataSource, differ.ActionDeprecate}: MethodDeactivateDataSource,
 
 	// Market Data Sets
-	{differ.ResourceMarketDataSet, differ.ActionCreate}: MethodRegisterDataSet,
-	{differ.ResourceMarketDataSet, differ.ActionUpdate}: MethodUpdateDataSet,
-	{differ.ResourceMarketDataSet, differ.ActionDelete}: MethodDeprecateDataSet,
+	{differ.ResourceMarketDataSet, differ.ActionCreate}:    MethodRegisterDataSet,
+	{differ.ResourceMarketDataSet, differ.ActionUpdate}:    MethodUpdateDataSet,
+	{differ.ResourceMarketDataSet, differ.ActionDelete}:    MethodDeprecateDataSet,
+	{differ.ResourceMarketDataSet, differ.ActionDeprecate}: MethodDeprecateDataSet,
 
 	// Organizations
-	{differ.ResourceOrganization, differ.ActionCreate}: MethodRegisterOrganization,
-	{differ.ResourceOrganization, differ.ActionUpdate}: MethodRegisterOrganization,
-	{differ.ResourceOrganization, differ.ActionDelete}: MethodControlOrganization,
+	{differ.ResourceOrganization, differ.ActionCreate}:    MethodRegisterOrganization,
+	{differ.ResourceOrganization, differ.ActionUpdate}:    MethodRegisterOrganization,
+	{differ.ResourceOrganization, differ.ActionDelete}:    MethodControlOrganization,
+	{differ.ResourceOrganization, differ.ActionDeprecate}: MethodControlOrganization,
 
 	// Internal Accounts
-	{differ.ResourceInternalAccount, differ.ActionCreate}: MethodInitiateAccount,
-	{differ.ResourceInternalAccount, differ.ActionUpdate}: MethodUpdateInternalAccount,
-	{differ.ResourceInternalAccount, differ.ActionDelete}: MethodControlInternalAccount,
+	{differ.ResourceInternalAccount, differ.ActionCreate}:    MethodInitiateAccount,
+	{differ.ResourceInternalAccount, differ.ActionUpdate}:    MethodUpdateInternalAccount,
+	{differ.ResourceInternalAccount, differ.ActionDelete}:    MethodControlInternalAccount,
+	{differ.ResourceInternalAccount, differ.ActionDeprecate}: MethodControlInternalAccount,
 }
 
 // GenerateIdempotencyKey produces a deterministic SHA-256 based idempotency key.
