@@ -436,6 +436,7 @@ func wireControlPlane(ctx context.Context, server *grpc.Server, pool *pgxpool.Po
 		Pool:        pool,
 		Logger:      logger,
 		HandlerDeps: deps,
+		GRPCConn:    loopback.rawConn,
 	}); err != nil {
 		return err
 	}

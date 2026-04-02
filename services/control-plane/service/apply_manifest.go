@@ -29,6 +29,11 @@ type ApplyManifestServiceConfig struct {
 	// When nil, the handler validates, diffs, and plans manifests but does
 	// not execute them (suitable for lightweight deployments).
 	HandlerDeps *applier.HandlerDependencies
+
+	// GRPCConn is a gRPC connection to downstream services used to build
+	// the live-state provider for convergent manifest diffs. When nil, the
+	// differ falls back to stored-manifest comparison only.
+	GRPCConn *grpc.ClientConn
 }
 
 // ErrPoolRequired is returned when Pool is nil during service registration.
@@ -51,7 +56,16 @@ func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceC
 	}
 
 	versionStore := persistence.NewPostgresManifestVersionStore(cfg.Pool)
-	d := differ.New(nil, nil, nil) // NoOp safety checker, drift detector, and live state provider
+
+	var liveState differ.LiveStateProvider
+	if cfg.GRPCConn != nil {
+		var lsErr error
+		liveState, lsErr = differ.NewLiveStateClients(cfg.GRPCConn)
+		if lsErr != nil {
+			return fmt.Errorf("live state provider: %w", lsErr)
+		}
+	}
+	d := differ.New(nil, nil, liveState)
 	p := planner.NewManifestPlanner()
 
 	var executor *applier.ManifestExecutor
