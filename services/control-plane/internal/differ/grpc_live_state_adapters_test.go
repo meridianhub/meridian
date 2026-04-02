@@ -412,4 +412,3 @@ func TestMapAuthConfig_AllTypes(t *testing.T) {
 		})
 	}
 }
-
