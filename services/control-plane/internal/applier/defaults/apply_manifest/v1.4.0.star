@@ -1,11 +1,9 @@
 # Saga: apply_manifest
 # Version: 1.4.0
 # Previous: 1.3.0
-# Changed: Action-aware execution. Each resource checks its "action" field
-#          (set by the live-state diff planner) and routes to the correct
-#          handler: CREATE runs register+activate, UPDATE runs update,
-#          DEPRECATE runs deprecate. Resources without an action field
-#          default to CREATE for backward compatibility.
+# Changed: Identical logic to v1.3.0. Replaces broken v1.4.0 from #2097 that
+#          called nonexistent update_instrument/update_account_type handlers.
+#          All resource types use the idempotent register+activate flow.
 # Author: Platform Team
 # Date: 2026-04-02
 #
@@ -13,15 +11,31 @@
 # It executes phased gRPC calls to provision tenant resources from a manifest definition.
 #
 # Phases (executed sequentially, parallel within each phase):
-#   Phase 10: Instruments (CREATE: register+activate, UPDATE: update)
-#   Phase 20: Account types (CREATE: draft+activate, UPDATE: update)
-#   Phase 30: Market data sources (CREATE: register, UPDATE: update)
-#   Phase 35: Market data sets (CREATE: register+activate, UPDATE: update)
-#   Phase 40: Valuation rules (CREATE: register, UPDATE: update)
-#   Phase 55: Organizations (CREATE: register, UPDATE: register [idempotent])
-#   Phase 60: Internal accounts (CREATE: initiate, UPDATE: update)
-#   Phase 70: Saga definitions (CREATE: register, UPDATE: update)
-#   Phase 90: Operational gateway (upsert for both CREATE and UPDATE)
+#   Phase 10: Register and activate instruments with Reference Data service
+#   Phase 20: Register account types (CreateDraft + Activate)
+#   Phase 30: Register market data sources
+#   Phase 35: Register and activate market data sets
+#   Phase 40: Register valuation rules
+#   Phase 55: Register organizations with Party service
+#   Phase 60: Initiate internal accounts (explicit or auto-derived from account types)
+#   Phase 70: Register saga definitions
+#   Phase 90: Configure Operational Gateway (provider connections + instruction routes)
+#
+# Compensation Order (LIFO - Last In, First Out):
+#   Failures trigger compensation of completed steps in reverse order.
+#
+# Input data (provided via input_data dictionary):
+#   - manifest_version: string - The manifest version being applied
+#   - instruments: list - List of instrument definitions to register
+#   - account_types: list - List of account type definitions to register
+#   - market_data_sources: list - List of market data source definitions to register
+#   - market_data_sets: list - List of market data set definitions to register
+#   - valuation_rules: list - List of valuation rule definitions to register
+#   - organizations: list - List of organization definitions to register
+#   - internal_accounts: list - List of internal account definitions to initiate
+#   - saga_definitions: list - List of saga definitions to register
+#   - provider_connections: list - List of provider connection configs to upsert
+#   - instruction_routes: list - List of instruction route configs to upsert
 
 apply_manifest_saga = saga(name="apply_manifest")
 
@@ -49,170 +63,111 @@ def execute_apply_manifest():
     registered_connections = []
     registered_routes = []
 
-    # Phase 10: Instruments
+    # Phase 10: Register and activate instruments (no dependencies)
     for instrument in instruments:
-        action = instrument.get("action", "CREATE")
-        if action == "UPDATE":
-            step(name="update_instrument_" + instrument["code"])
-            reference_data.update_instrument(
-                instrument_code=instrument["code"],
-                display_name=instrument.get("display_name", instrument["code"]),
-                dimension=instrument.get("dimension", "CURRENCY"),
-                decimal_places=instrument.get("decimal_places", 2),
-                description=instrument.get("description", ""),
-            )
-        else:
-            step(name="register_instrument_" + instrument["code"])
-            result = reference_data.register_instrument(
-                instrument_code=instrument["code"],
-                display_name=instrument.get("display_name", instrument["code"]),
-                dimension=instrument.get("dimension", "CURRENCY"),
-                decimal_places=instrument.get("decimal_places", 2),
-                description=instrument.get("description", ""),
-            )
+        step(name="register_instrument_" + instrument["code"])
+        result = reference_data.register_instrument(
+            instrument_code=instrument["code"],
+            display_name=instrument.get("display_name", instrument["code"]),
+            dimension=instrument.get("dimension", "CURRENCY"),
+            decimal_places=instrument.get("decimal_places", 2),
+            description=instrument.get("description", ""),
+        )
 
-            step(name="activate_instrument_" + instrument["code"])
-            reference_data.activate_instrument(
-                instrument_code=instrument["code"],
-            )
+        # Activate the instrument (DRAFT → ACTIVE)
+        step(name="activate_instrument_" + instrument["code"])
+        reference_data.activate_instrument(
+            instrument_code=instrument["code"],
+        )
 
         registered_instruments.append({
             "instrument_code": instrument["code"],
             "status": "ACTIVE",
         })
 
-    # Phase 20: Account types
+    # Phase 20: Register account types (depends on instruments from Phase 10)
     for account_type in account_types:
-        action = account_type.get("action", "CREATE")
-        if action == "UPDATE":
-            step(name="update_account_type_" + account_type["code"])
-            reference_data.update_account_type(
-                code=account_type["code"],
-                display_name=account_type.get("display_name", account_type["code"]),
-                behavior_class=account_type.get("behavior_class", "CLEARING"),
-                normal_balance=account_type.get("normal_balance", "DEBIT"),
-                instrument_code=account_type.get("instrument_code", ""),
-                description=account_type.get("description", ""),
-                default_saga_prefix=account_type.get("default_saga_prefix", ""),
-                default_conversion_method=account_type.get("default_conversion_method", ""),
-                validation_cel=account_type.get("validation_cel", ""),
-                eligibility_cel=account_type.get("eligibility_cel", ""),
-                attribute_schema=account_type.get("attribute_schema", ""),
-                valuation_methods=account_type.get("valuation_methods", []),
-            )
-        else:
-            step(name="register_account_type_" + account_type["code"])
-            reference_data.register_account_type(
-                code=account_type["code"],
-                display_name=account_type.get("display_name", account_type["code"]),
-                behavior_class=account_type.get("behavior_class", "CLEARING"),
-                normal_balance=account_type.get("normal_balance", "DEBIT"),
-                instrument_code=account_type.get("instrument_code", ""),
-                description=account_type.get("description", ""),
-                default_saga_prefix=account_type.get("default_saga_prefix", ""),
-                default_conversion_method=account_type.get("default_conversion_method", ""),
-                validation_cel=account_type.get("validation_cel", ""),
-                eligibility_cel=account_type.get("eligibility_cel", ""),
-                attribute_schema=account_type.get("attribute_schema", ""),
-                valuation_methods=account_type.get("valuation_methods", []),
-            )
+        step(name="register_account_type_" + account_type["code"])
+        reference_data.register_account_type(
+            code=account_type["code"],
+            display_name=account_type.get("display_name", account_type["code"]),
+            behavior_class=account_type.get("behavior_class", "CLEARING"),
+            normal_balance=account_type.get("normal_balance", "DEBIT"),
+            instrument_code=account_type.get("instrument_code", ""),
+            description=account_type.get("description", ""),
+            default_saga_prefix=account_type.get("default_saga_prefix", ""),
+            default_conversion_method=account_type.get("default_conversion_method", ""),
+            validation_cel=account_type.get("validation_cel", ""),
+            eligibility_cel=account_type.get("eligibility_cel", ""),
+            attribute_schema=account_type.get("attribute_schema", ""),
+            valuation_methods=account_type.get("valuation_methods", []),
+        )
 
         registered_account_types.append({
             "account_type_code": account_type["code"],
             "status": "REGISTERED",
         })
 
-    # Phase 30: Market data sources
+    # Phase 30: Register market data sources (no dependency on instruments/account types)
     for source in market_data_sources:
-        action = source.get("action", "CREATE")
-        if action == "UPDATE":
-            step(name="update_data_source_" + source["code"])
-            market_information.update_data_source(
-                code=source["code"],
-                name=source.get("name", source["code"]),
-                description=source.get("description", ""),
-                trust_level=source.get("trust_level", 0),
-            )
-        else:
-            step(name="register_data_source_" + source["code"])
-            market_information.register_data_source(
-                code=source["code"],
-                name=source.get("name", source["code"]),
-                description=source.get("description", ""),
-                trust_level=source.get("trust_level", 0),
-            )
+        step(name="register_data_source_" + source["code"])
+        market_information.register_data_source(
+            code=source["code"],
+            name=source.get("name", source["code"]),
+            description=source.get("description", ""),
+            trust_level=source.get("trust_level", 0),
+        )
         registered_market_data_sources.append({
             "code": source["code"],
             "status": "REGISTERED",
         })
 
-    # Phase 35: Market data sets
+    # Phase 35: Register and activate market data sets (depends on data sources from Phase 30)
     for dataset in market_data_sets:
-        action = dataset.get("action", "CREATE")
-        if action == "UPDATE":
-            step(name="update_data_set_" + dataset["code"])
-            market_information.update_data_set(
-                code=dataset["code"],
-                category=dataset.get("category", ""),
-                unit=dataset.get("unit", ""),
-                source_code=dataset.get("source_code", ""),
-                display_name=dataset.get("display_name", dataset["code"]),
-                description=dataset.get("description", ""),
-                validation_expression=dataset.get("validation_expression", "") or "true",
-                resolution_key_expression=dataset.get("resolution_key_expression", "") or "observed_at",
-            )
-        else:
-            step(name="register_data_set_" + dataset["code"])
-            ds_result = market_information.register_data_set(
-                code=dataset["code"],
-                category=dataset.get("category", ""),
-                unit=dataset.get("unit", ""),
-                source_code=dataset.get("source_code", ""),
-                display_name=dataset.get("display_name", dataset["code"]),
-                description=dataset.get("description", ""),
-                validation_expression=dataset.get("validation_expression", "") or "true",
-                resolution_key_expression=dataset.get("resolution_key_expression", "") or "observed_at",
-            )
+        step(name="register_data_set_" + dataset["code"])
+        ds_result = market_information.register_data_set(
+            code=dataset["code"],
+            category=dataset.get("category", ""),
+            unit=dataset.get("unit", ""),
+            source_code=dataset.get("source_code", ""),
+            display_name=dataset.get("display_name", dataset["code"]),
+            description=dataset.get("description", ""),
+            validation_expression=dataset.get("validation_expression", "") or "true",
+            resolution_key_expression=dataset.get("resolution_key_expression", "") or "observed_at",
+        )
 
-            step(name="activate_data_set_" + dataset["code"])
-            market_information.activate_data_set(
-                code=dataset["code"],
-                version=getattr(ds_result, "version", 1),
-            )
+        step(name="activate_data_set_" + dataset["code"])
+        market_information.activate_data_set(
+            code=dataset["code"],
+            version=getattr(ds_result, "version", 1),
+        )
 
         registered_market_data_sets.append({
             "code": dataset["code"],
             "status": "ACTIVE",
         })
 
-    # Phase 40: Valuation rules
+    # Phase 40: Register valuation rules (depends on instruments from Phase 10)
     for rule in valuation_rules:
-        action = rule.get("action", "CREATE")
-        if action == "UPDATE":
-            step(name="update_valuation_rule_" + rule["from_instrument"] + "_" + rule["to_instrument"])
-            reference_data.update_instrument(
-                from_instrument=rule["from_instrument"],
-                to_instrument=rule["to_instrument"],
-                rule_type=rule.get("rule_type", "FIXED_RATE"),
-                expression=rule.get("expression", ""),
-                description=rule.get("description", ""),
-            )
-        else:
-            step(name="register_valuation_rule_" + rule["from_instrument"] + "_" + rule["to_instrument"])
-            reference_data.register_valuation_rule(
-                from_instrument=rule["from_instrument"],
-                to_instrument=rule["to_instrument"],
-                rule_type=rule.get("rule_type", "FIXED_RATE"),
-                expression=rule.get("expression", ""),
-                description=rule.get("description", ""),
-            )
+        step(name="register_valuation_rule_" + rule["from_instrument"] + "_" + rule["to_instrument"])
+        reference_data.register_valuation_rule(
+            from_instrument=rule["from_instrument"],
+            to_instrument=rule["to_instrument"],
+            rule_type=rule.get("rule_type", "FIXED_RATE"),
+            expression=rule.get("expression", ""),
+            description=rule.get("description", ""),
+        )
         registered_valuation_rules.append({
             "from_instrument": rule["from_instrument"],
             "to_instrument": rule["to_instrument"],
             "status": "REGISTERED",
         })
 
-    # Phase 55: Organizations
+    # Phase 55: Register organizations with Party service
+    # Fields are passed through directly from the manifest proto via buildSagaInput.
+    # Fallback resolution (legal_name from name, external_reference from code) is
+    # handled upstream in extractPartyAndAccounts, so the Starlark script receives
+    # pre-resolved values.
     for org in organizations:
         step(name="register_organization_" + org["code"])
         party.register_organization(
@@ -228,7 +183,8 @@ def execute_apply_manifest():
             "status": "REGISTERED",
         })
 
-    # Phase 60: Internal accounts
+    # Phase 60: Initiate internal accounts
+    # Backward compatibility: if no explicit internal_accounts, auto-derive from account types
     effective_internal_accounts = internal_accounts
     if len(effective_internal_accounts) == 0:
         for account_type in account_types:
@@ -240,64 +196,40 @@ def execute_apply_manifest():
             })
 
     for ia in effective_internal_accounts:
-        action = ia.get("action", "CREATE")
-        if action == "UPDATE":
-            step(name="update_account_" + ia["code"])
-            internal_account.update(
-                account_code=ia["code"],
-                name=ia.get("name", ia["code"]),
-                account_type=ia.get("account_type", "CLEARING"),
-                instrument_code=ia.get("instrument_code", ""),
-                description=ia.get("description", ""),
-                owner_organization=ia.get("owner_organization", ""),
-            )
-            registered_internal_accounts.append({
-                "account_code": ia["code"],
-                "status": "UPDATED",
-            })
-        else:
-            step(name="initiate_account_" + ia["code"])
-            account_result = internal_account.initiate(
-                account_code=ia["code"],
-                name=ia.get("name", ia["code"]),
-                account_type=ia.get("account_type", "CLEARING"),
-                instrument_code=ia.get("instrument_code", ""),
-                description=ia.get("description", ""),
-                owner_organization=ia.get("owner_organization", ""),
-            )
-            registered_internal_accounts.append({
-                "account_code": ia["code"],
-                "account_id": account_result.account_id,
-                "status": "ACTIVE",
-            })
+        step(name="initiate_account_" + ia["code"])
+        account_result = internal_account.initiate(
+            account_code=ia["code"],
+            name=ia.get("name", ia["code"]),
+            account_type=ia.get("account_type", "CLEARING"),
+            instrument_code=ia.get("instrument_code", ""),
+            description=ia.get("description", ""),
+            owner_organization=ia.get("owner_organization", ""),
+        )
+        registered_internal_accounts.append({
+            "account_code": ia["code"],
+            "account_id": account_result.account_id,
+            "status": "ACTIVE",
+        })
 
-    # Phase 70: Saga definitions
+    # Phase 70: Register saga definitions
     for saga_def in saga_definitions:
-        action = saga_def.get("action", "CREATE")
-        if action == "UPDATE":
-            step(name="update_saga_definition_" + saga_def["name"])
-            reference_data.update_saga_definition(
-                saga_name=saga_def["name"],
-                display_name=saga_def.get("display_name", saga_def["name"]),
-                description=saga_def.get("description", ""),
-                script=saga_def.get("script", ""),
-                version=saga_def.get("version", "1.0.0"),
-            )
-        else:
-            step(name="register_saga_definition_" + saga_def["name"])
-            reference_data.register_saga_definition(
-                saga_name=saga_def["name"],
-                display_name=saga_def.get("display_name", saga_def["name"]),
-                description=saga_def.get("description", ""),
-                script=saga_def.get("script", ""),
-                version=saga_def.get("version", "1.0.0"),
-            )
+        step(name="register_saga_definition_" + saga_def["name"])
+        reference_data.register_saga_definition(
+            saga_name=saga_def["name"],
+            display_name=saga_def.get("display_name", saga_def["name"]),
+            description=saga_def.get("description", ""),
+            script=saga_def.get("script", ""),
+            version=saga_def.get("version", "1.0.0"),
+        )
         registered_saga_definitions.append({
             "saga_name": saga_def["name"],
             "status": "REGISTERED",
         })
 
-    # Phase 90: Operational gateway (upsert handles both CREATE and UPDATE)
+    # Phase 90: Configure Operational Gateway
+    # Provider connections must be upserted before instruction routes because
+    # routes reference connections by connection_id.
+
     for conn in provider_connections:
         step(name="upsert_provider_connection_" + conn["connection_id"])
         result = operational_gateway.upsert_connection(
