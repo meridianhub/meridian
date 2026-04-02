@@ -197,11 +197,20 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 		return nil, fmt.Errorf("create account type draft: %w", err)
 	}
 
-	// Activate the draft
+	// Activate the draft (or reactivate if DEPRECATED)
 	activateResp, err := c.accountTypes.ActivateAccountType(callCtx, &referencedatav1.ActivateAccountTypeRequest{
 		Id: draftResp.GetDefinition().GetId(),
 	})
 	if err != nil {
+		// Reactive fallback: if FailedPrecondition and account type is ACTIVE, treat as success.
+		if status.Code(err) == codes.FailedPrecondition {
+			retryLookup, retryErr := c.accountTypes.GetAccountType(callCtx, &referencedatav1.GetAccountTypeRequest{
+				Code: code,
+			})
+			if retryErr == nil && retryLookup.GetDefinition().GetStatus() == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
+				return accountTypeResult(retryLookup.GetDefinition()), nil
+			}
+		}
 		return nil, fmt.Errorf("activate account type: %w", err)
 	}
 	return accountTypeResult(activateResp.GetDefinition()), nil

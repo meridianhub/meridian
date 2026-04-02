@@ -186,7 +186,10 @@ func (r *PostgresRegistry) ActivateSaga(ctx context.Context, id uuid.UUID) error
 		return ErrSystemSagaReadOnly
 	}
 
-	if saga.Status != StatusDraft {
+	if saga.Status == StatusActive {
+		return nil // idempotent
+	}
+	if saga.Status != StatusDraft && saga.Status != StatusDeprecated {
 		return ErrNotDraft
 	}
 

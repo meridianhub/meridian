@@ -352,7 +352,7 @@ func (r *PostgresRegistry) ActivateAccountType(ctx context.Context, code string,
 		if def.Status == StatusActive {
 			return nil // idempotent
 		}
-		if def.Status != StatusDraft {
+		if !def.Status.CanTransitionTo(StatusActive) {
 			return ErrNotDraft
 		}
 
