@@ -56,7 +56,7 @@ func TestHandlersYAML_ProtoResolution(t *testing.T) {
 
 	// Verify proto-referenced handlers have populated params
 	protoRefHandlers := 0
-	legacyHandlers := 0
+	inlineHandlers := 0
 
 	for name, handler := range schema.Handlers {
 		if handler.HasProtoRef() {
@@ -67,12 +67,12 @@ func TestHandlersYAML_ProtoResolution(t *testing.T) {
 			assert.NotNil(t, handler.Returns,
 				"handler %s: returns should be resolved from proto", name)
 		} else {
-			legacyHandlers++
+			inlineHandlers++
 		}
 	}
 
-	t.Logf("Proto-referenced: %d, Legacy: %d, Total: %d",
-		protoRefHandlers, legacyHandlers, protoRefHandlers+legacyHandlers)
+	t.Logf("Proto-referenced: %d, Inline: %d, Total: %d",
+		protoRefHandlers, inlineHandlers, protoRefHandlers+inlineHandlers)
 
 	assert.GreaterOrEqual(t, protoRefHandlers, 36,
 		"at least 36 handlers should use proto-referenced format")

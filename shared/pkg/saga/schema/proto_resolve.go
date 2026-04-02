@@ -10,7 +10,7 @@ import (
 
 // ResolveProtoTypes resolves proto-referenced handlers in the schema by looking up
 // proto service/method descriptors and populating Params/Returns from proto reflection.
-// Handlers without ProtoRef are left unchanged (legacy inline format).
+// Handlers without ProtoRef are left unchanged (composite handlers or inline-param handlers).
 // Uses the global proto registry by default; pass a custom resolver for testing.
 func (s *Schema) ResolveProtoTypes(files *protoregistry.Files) error {
 	if files == nil {
@@ -20,7 +20,7 @@ func (s *Schema) ResolveProtoTypes(files *protoregistry.Files) error {
 		if handler.ProtoRef == nil {
 			// Composite handlers intentionally have no proto_ref - they orchestrate
 			// multiple sub-operations and define their own parameter handling.
-			// Non-composite handlers without proto_ref use legacy inline format.
+			// Non-composite handlers without proto_ref define params inline.
 			continue
 		}
 		if err := resolveHandlerProto(handlerName, handler, files); err != nil {

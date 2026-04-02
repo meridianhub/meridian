@@ -127,13 +127,13 @@ func TestResolveProtoTypes_MethodNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrProtoMethodNotFound)
 }
 
-func TestResolveProtoTypes_LegacyHandlersUntouched(t *testing.T) {
+func TestResolveProtoTypes_InlineHandlersUntouched(t *testing.T) {
 	s := &Schema{
 		Service: "test",
 		Version: "1.0",
 		Handlers: map[string]*HandlerDef{
-			"test.legacy_handler": {
-				Description:          "Legacy handler with inline params",
+			"test.inline_handler": {
+				Description:          "Handler with inline params",
 				CompensationStrategy: CompensationStrategyNone,
 				Params: map[string]*FieldDef{
 					"id": {Type: TypeString, Required: true},
@@ -148,20 +148,20 @@ func TestResolveProtoTypes_LegacyHandlersUntouched(t *testing.T) {
 	err := s.ResolveProtoTypes(protoregistry.GlobalFiles)
 	require.NoError(t, err)
 
-	handler := s.Handlers["test.legacy_handler"]
+	handler := s.Handlers["test.inline_handler"]
 	assert.Len(t, handler.Params, 1)
 	assert.Equal(t, TypeString, handler.Params["id"].Type)
 	assert.Len(t, handler.Returns, 1)
 }
 
 func TestResolveProtoTypes_MixedFormat(t *testing.T) {
-	// Schema with both legacy and proto-referenced handlers
+	// Schema with both inline-param and proto-referenced handlers
 	s := &Schema{
 		Service: "test",
 		Version: "1.0",
 		Handlers: map[string]*HandlerDef{
-			"test.legacy": {
-				Description:          "Legacy inline handler",
+			"test.inline": {
+				Description:          "Inline-param handler",
 				CompensationStrategy: CompensationStrategyNone,
 				Params: map[string]*FieldDef{
 					"name": {Type: TypeString, Required: true},
@@ -181,10 +181,10 @@ func TestResolveProtoTypes_MixedFormat(t *testing.T) {
 	err := s.ResolveProtoTypes(protoregistry.GlobalFiles)
 	require.NoError(t, err)
 
-	// Legacy handler unchanged
-	legacy := s.Handlers["test.legacy"]
-	assert.Len(t, legacy.Params, 1)
-	assert.Equal(t, TypeString, legacy.Params["name"].Type)
+	// Inline-param handler unchanged
+	inline := s.Handlers["test.inline"]
+	assert.Len(t, inline.Params, 1)
+	assert.Equal(t, TypeString, inline.Params["name"].Type)
 
 	// Proto-referenced handler resolved
 	protoRef := s.Handlers["position_keeping.proto_ref"]
