@@ -240,6 +240,9 @@ func (c *GRPCPartyClient) ListOrganizations(ctx context.Context) ([]*controlplan
 			return nil, fmt.Errorf("list organizations: %w", err)
 		}
 		for _, p := range resp.GetParties() {
+			if p.GetPartyType() != partyv1.PartyType_PARTY_TYPE_ORGANIZATION {
+				continue
+			}
 			result = append(result, mapOrganization(p))
 		}
 		pageToken = resp.GetNextPageToken()
@@ -394,10 +397,12 @@ func mapDimensionToInstrumentType(d referencedatav1.Dimension) controlplanev1.In
 
 func mapAccountType(at *referencedatav1.AccountTypeDefinition) *controlplanev1.AccountTypeDefinition {
 	def := &controlplanev1.AccountTypeDefinition{
-		Code:               at.GetCode(),
-		Name:               at.GetDisplayName(),
-		NormalBalance:      controlplanev1.NormalBalance(at.GetNormalBalance()),
-		AllowedInstruments: []string{at.GetInstrumentCode()},
+		Code:          at.GetCode(),
+		Name:          at.GetDisplayName(),
+		NormalBalance: controlplanev1.NormalBalance(at.GetNormalBalance()),
+	}
+	if ic := at.GetInstrumentCode(); ic != "" {
+		def.AllowedInstruments = []string{ic}
 	}
 	if at.GetValidationCel() != "" || at.GetBucketingCel() != "" {
 		def.Policies = &controlplanev1.AccountTypePolicies{

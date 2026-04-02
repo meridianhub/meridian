@@ -81,6 +81,18 @@ func TestMapAccountType_NoPolicies(t *testing.T) {
 	assert.Nil(t, got.GetPolicies())
 }
 
+func TestMapAccountType_NoInstrumentCode(t *testing.T) {
+	at := &referencedatav1.AccountTypeDefinition{
+		Code:          "UNRESTRICTED",
+		DisplayName:   "Unrestricted Account",
+		NormalBalance: referencedatav1.NormalBalance_NORMAL_BALANCE_DEBIT,
+	}
+
+	got := mapAccountType(at)
+
+	assert.Empty(t, got.GetAllowedInstruments(), "empty instrument code should not produce AllowedInstruments entry")
+}
+
 func TestMapSaga(t *testing.T) {
 	s := &sagav1.SagaDefinition{
 		Name:                    "process_payment",

@@ -597,7 +597,20 @@ func TestPlan_PartyType_Delete_NotSupported(t *testing.T) {
 
 	_, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
 	assert.Error(t, err, "DELETE for party types should fail")
-	assert.ErrorIs(t, err, ErrDeleteNotSupportedForPartyType)
+	assert.ErrorIs(t, err, ErrMutationNotSupportedForPartyType)
+}
+
+func TestPlan_PartyType_Deprecate_NotSupported(t *testing.T) {
+	p := NewManifestPlanner()
+	diffPlan := &differ.DiffPlan{
+		Actions: []differ.PlannedAction{
+			{ResourceType: differ.ResourcePartyType, ResourceCode: "tenant-1:PERSON", Action: differ.ActionDeprecate},
+		},
+	}
+
+	_, err := p.Plan(diffPlan, "tenant-1", "1.0", false)
+	assert.Error(t, err, "DEPRECATE for party types should fail")
+	assert.ErrorIs(t, err, ErrMutationNotSupportedForPartyType)
 }
 
 // --- Market Data Source planner tests ---

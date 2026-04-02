@@ -15,9 +15,9 @@ var ErrNilDiffPlan = errors.New("diff plan cannot be nil")
 // ErrNoMethodMapping is returned when no gRPC method mapping exists for a resource type/action combination.
 var ErrNoMethodMapping = errors.New("no gRPC method mapping")
 
-// ErrDeleteNotSupportedForPartyType is returned when a DELETE action is attempted on a party type.
+// ErrMutationNotSupportedForPartyType is returned when a DELETE or DEPRECATE action is attempted on a party type.
 // Party types are managed through schema updates; deletion via manifest apply is not supported.
-var ErrDeleteNotSupportedForPartyType = errors.New("delete not supported for party types: update the schema instead")
+var ErrMutationNotSupportedForPartyType = errors.New("delete/deprecate not supported for party types: update the schema instead")
 
 // ManifestPlanner transforms a DiffPlan into a dependency-ordered
 // ExecutionPlan of gRPC calls. It assigns each action to a phase
@@ -126,8 +126,8 @@ func phaseForResource(rt differ.ResourceType) Phase {
 
 // grpcMethodFor returns the gRPC method for a resource type and action.
 func grpcMethodFor(rt differ.ResourceType, action differ.ActionType) (GRPCMethod, error) {
-	if rt == differ.ResourcePartyType && action == differ.ActionDelete {
-		return "", ErrDeleteNotSupportedForPartyType
+	if rt == differ.ResourcePartyType && (action == differ.ActionDelete || action == differ.ActionDeprecate) {
+		return "", ErrMutationNotSupportedForPartyType
 	}
 	key := methodKey{rt, action}
 	method, ok := grpcMethodMap[key]
