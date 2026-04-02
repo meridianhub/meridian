@@ -204,7 +204,7 @@ func (c *ReferenceDataClient) RegisterAccountType(ctx *saga.StarlarkContext, par
 	if err != nil {
 		// Reactive fallback: if FailedPrecondition and account type is ACTIVE, treat as success.
 		if status.Code(err) == codes.FailedPrecondition {
-			retryLookup, retryErr := c.accountTypes.GetAccountType(callCtx, &referencedatav1.GetAccountTypeRequest{
+			retryLookup, retryErr := c.accountTypes.GetActiveDefinition(callCtx, &referencedatav1.GetActiveDefinitionRequest{
 				Code: code,
 			})
 			if retryErr == nil && retryLookup.GetDefinition().GetStatus() == referencedatav1.AccountTypeStatus_ACCOUNT_TYPE_STATUS_ACTIVE {
