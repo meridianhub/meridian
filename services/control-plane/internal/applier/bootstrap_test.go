@@ -15,7 +15,7 @@ func TestLoadEmbeddedApplyManifest(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, script)
-	assert.Equal(t, "1.4.0", version)
+	assert.Equal(t, "1.5.0", version)
 	assert.Contains(t, script, "apply_manifest")
 	assert.Contains(t, script, "execute_apply_manifest")
 	assert.Contains(t, script, "reference_data.register_instrument")
@@ -195,7 +195,7 @@ func TestLoadEmbeddedApplyManifest_ReturnsLatestVersion(t *testing.T) {
 	// loadEmbeddedApplyManifest should return v1.3.0 as the latest
 	script, version, err := loadEmbeddedApplyManifest()
 	require.NoError(t, err)
-	assert.Equal(t, "1.4.0", version)
+	assert.Equal(t, "1.5.0", version)
 	assert.NotEmpty(t, script)
 	// Verify TrimSpace was applied: no leading whitespace
 	assert.NotEqual(t, ' ', rune(script[0]))
