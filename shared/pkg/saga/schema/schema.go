@@ -162,6 +162,11 @@ type HandlerDef struct {
 	// Version is the handler version number. Defaults to 1 if unset.
 	Version int `yaml:"version,omitempty"`
 
+	// Composite marks this handler as a composite handler - one that orchestrates
+	// multiple underlying operations and has no single proto request/response shape.
+	// Composite handlers use params: {} intentionally and skip proto_ref validation.
+	Composite bool `yaml:"composite,omitempty"`
+
 	// IsDeprecated marks this handler as deprecated. Scripts calling it will receive a warning.
 	Deprecated bool `yaml:"deprecated,omitempty"`
 

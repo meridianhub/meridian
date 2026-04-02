@@ -18,6 +18,9 @@ func (s *Schema) ResolveProtoTypes(files *protoregistry.Files) error {
 	}
 	for handlerName, handler := range s.Handlers {
 		if handler.ProtoRef == nil {
+			// Composite handlers intentionally have no proto_ref - they orchestrate
+			// multiple sub-operations and define their own parameter handling.
+			// Non-composite handlers without proto_ref use legacy inline format.
 			continue
 		}
 		if err := resolveHandlerProto(handlerName, handler, files); err != nil {
@@ -165,4 +168,10 @@ func leafFieldName(path string) string {
 // HasProtoRef returns true if the handler uses proto-referenced format.
 func (h *HandlerDef) HasProtoRef() bool {
 	return h.ProtoRef != nil
+}
+
+// IsComposite returns true if the handler is a composite handler that
+// orchestrates multiple sub-operations and intentionally has no proto_ref.
+func (h *HandlerDef) IsComposite() bool {
+	return h.Composite
 }

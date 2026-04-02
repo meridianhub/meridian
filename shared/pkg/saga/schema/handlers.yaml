@@ -118,11 +118,10 @@ handlers:
     proto_ref:
       proto_rpc: "meridian.financial_accounting.v1.FinancialAccountingService/InitiateFinancialBookingLog"
 
-  # post_entries is a composite handler (iterates over entries calling CaptureLedgerPosting).
-  # No single proto type; uses legacy inline format.
   financial_accounting.post_entries:
     description: "Post double-entry accounting entries to the ledger"
     compensate: financial_accounting.reverse_entries
+    composite: true
     params: {}
 
   financial_accounting.reverse_entries:
