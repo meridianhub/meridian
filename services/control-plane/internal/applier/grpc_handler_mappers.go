@@ -268,6 +268,14 @@ func extractPartyAndAccountsFromPlan(mf *controlplanev1.Manifest, input *ApplyMa
 		if extRef == "" {
 			extRef = org.GetCode()
 		}
+		// Inject _manifest_code into attributes so the live-state adapter can
+		// map the party back to its manifest code (party_id is a UUID).
+		attrs := make(map[string]string)
+		for k, v := range org.GetAttributes() {
+			attrs[k] = v
+		}
+		attrs["_manifest_code"] = org.GetCode()
+
 		input.Organizations = append(input.Organizations, OrganizationInput{
 			Code:                  org.GetCode(),
 			Name:                  org.GetName(),
@@ -276,7 +284,7 @@ func extractPartyAndAccountsFromPlan(mf *controlplanev1.Manifest, input *ApplyMa
 			ExternalReference:     extRef,
 			ExternalReferenceType: org.GetExternalReferenceType(),
 			PartyType:             org.GetPartyType(),
-			Attributes:            org.GetAttributes(),
+			Attributes:            attrs,
 			Action:                string(action),
 		})
 	}
@@ -408,6 +416,12 @@ func extractPartyAndAccounts(mf *controlplanev1.Manifest, input *ApplyManifestIn
 			extRef = org.GetCode()
 		}
 
+		attrs := make(map[string]string)
+		for k, v := range org.GetAttributes() {
+			attrs[k] = v
+		}
+		attrs["_manifest_code"] = org.GetCode()
+
 		input.Organizations = append(input.Organizations, OrganizationInput{
 			Code:                  org.GetCode(),
 			Name:                  org.GetName(),
@@ -416,7 +430,7 @@ func extractPartyAndAccounts(mf *controlplanev1.Manifest, input *ApplyManifestIn
 			ExternalReference:     extRef,
 			ExternalReferenceType: org.GetExternalReferenceType(),
 			PartyType:             org.GetPartyType(),
-			Attributes:            org.GetAttributes(),
+			Attributes:            attrs,
 		})
 	}
 	for _, ia := range mf.GetInternalAccounts() {
