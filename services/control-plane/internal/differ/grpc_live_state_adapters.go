@@ -13,7 +13,18 @@ import (
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+// isUnimplemented returns true if the error indicates the gRPC service is not
+// registered on the target server. This happens when the unified binary does
+// not include a particular service (e.g., operational-gateway runs as a
+// separate process). Returning true allows callers to treat the resource type
+// as having no live state rather than failing the entire diff.
+func isUnimplemented(err error) bool {
+	return status.Code(err) == codes.Unimplemented
+}
 
 // defaultPageSize is the page size used when paginating through list RPCs.
 const defaultPageSize = 500
@@ -46,6 +57,9 @@ func (c *GRPCReferenceDataClient) ListInstruments(ctx context.Context) ([]*contr
 			PageToken: pageToken,
 		})
 		if err != nil {
+			if isUnimplemented(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list instruments: %w", err)
 		}
 		for _, inst := range resp.GetInstruments() {
@@ -68,6 +82,9 @@ func (c *GRPCReferenceDataClient) ListAccountTypes(ctx context.Context) ([]*cont
 			PageToken: pageToken,
 		})
 		if err != nil {
+			if isUnimplemented(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list account types: %w", err)
 		}
 		for _, at := range resp.GetDefinitions() {
@@ -107,6 +124,9 @@ func (c *GRPCSagaRegistryClient) ListSagas(ctx context.Context) ([]*controlplane
 			PageToken: pageToken,
 		})
 		if err != nil {
+			if isUnimplemented(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list sagas: %w", err)
 		}
 		for _, s := range resp.GetSagas() {
@@ -146,6 +166,9 @@ func (c *GRPCMarketInformationClient) ListMarketDataSources(ctx context.Context)
 			PageToken: pageToken,
 		})
 		if err != nil {
+			if isUnimplemented(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list data sources: %w", err)
 		}
 		for _, src := range resp.GetSources() {
@@ -168,6 +191,9 @@ func (c *GRPCMarketInformationClient) ListMarketDataSets(ctx context.Context) ([
 			PageToken: pageToken,
 		})
 		if err != nil {
+			if isUnimplemented(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list data sets: %w", err)
 		}
 		for _, ds := range resp.GetDatasets() {
@@ -208,6 +234,9 @@ func (c *GRPCPartyClient) ListOrganizations(ctx context.Context) ([]*controlplan
 			PartyType: partyv1.PartyType_PARTY_TYPE_ORGANIZATION,
 		})
 		if err != nil {
+			if isUnimplemented(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list organizations: %w", err)
 		}
 		for _, p := range resp.GetParties() {
@@ -249,6 +278,9 @@ func (c *GRPCInternalAccountClient) ListInternalAccounts(ctx context.Context) ([
 			},
 		})
 		if err != nil {
+			if isUnimplemented(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list internal accounts: %w", err)
 		}
 		for _, f := range resp.GetFacilities() {
@@ -293,6 +325,9 @@ func (c *GRPCOperationalGatewayClient) ListProviderConnections(ctx context.Conte
 			},
 		})
 		if err != nil {
+			if isUnimplemented(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("list provider connections: %w", err)
 		}
 		for _, conn := range resp.GetConnections() {
@@ -310,6 +345,9 @@ func (c *GRPCOperationalGatewayClient) ListProviderConnections(ctx context.Conte
 func (c *GRPCOperationalGatewayClient) ListInstructionRoutes(ctx context.Context) ([]*controlplanev1.InstructionRouteConfig, error) {
 	resp, err := c.routeClient.ListRoutes(ctx, &opgatewayv1.ListRoutesRequest{})
 	if err != nil {
+		if isUnimplemented(err) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("list instruction routes: %w", err)
 	}
 	result := make([]*controlplanev1.InstructionRouteConfig, 0, len(resp.GetRoutes()))
