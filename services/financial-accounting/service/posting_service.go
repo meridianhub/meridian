@@ -10,15 +10,17 @@ import (
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 	"github.com/meridianhub/meridian/services/financial-accounting/observability"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/shopspring/decimal"
 )
 
 // PostingService handles ledger posting operations
 type PostingService struct {
-	repo              *persistence.LedgerRepository
-	bankCashAccountID string
-	accountResolver   *AccountResolver
-	logger            *slog.Logger
+	repo               *persistence.LedgerRepository
+	bankCashAccountID  string
+	accountResolver    *AccountResolver
+	instrumentResolver refdata.InstrumentResolver
+	logger             *slog.Logger
 }
 
 // PostingServiceConfig holds configuration for creating a PostingService.
@@ -33,6 +35,11 @@ type PostingServiceConfig struct {
 	// AccountResolver is optional. When provided, enables dynamic clearing account
 	// lookup by instrument. Falls back to BankCashAccountID on lookup failure.
 	AccountResolver *AccountResolver
+
+	// InstrumentResolver is optional. When provided, resolves instrument metadata
+	// (dimension, precision) from Reference Data instead of relying on ParseCurrency.
+	// When nil, falls back to legacy currency-based resolution.
+	InstrumentResolver refdata.InstrumentResolver
 
 	// Logger is optional. If nil, a default logger is used.
 	Logger *slog.Logger
@@ -67,25 +74,23 @@ func NewPostingServiceWithConfig(cfg PostingServiceConfig) *PostingService {
 		"static_account_id", cfg.BankCashAccountID)
 
 	return &PostingService{
-		repo:              cfg.Repo,
-		bankCashAccountID: cfg.BankCashAccountID,
-		accountResolver:   cfg.AccountResolver,
-		logger:            logger,
+		repo:               cfg.Repo,
+		bankCashAccountID:  cfg.BankCashAccountID,
+		accountResolver:    cfg.AccountResolver,
+		instrumentResolver: cfg.InstrumentResolver,
+		logger:             logger,
 	}
 }
 
-// decimalFromCents converts cents (int64) to decimal amount
-func decimalFromCents(cents int64) decimal.Decimal {
-	return decimal.NewFromInt(cents).Div(decimal.NewFromInt(100))
-}
-
-// DepositEvent represents a deposit event from CurrentAccount service
+// DepositEvent represents a deposit event from CurrentAccount service.
+// Amount is a decimal string (e.g., "100.00") for full precision with any asset type.
+// InstrumentCode identifies the instrument (e.g., "GBP", "KWH", "TONNE_CO2E").
 type DepositEvent struct {
-	AccountID     string
-	AmountCents   int64
-	Currency      string
-	CorrelationID string
-	ValueDate     time.Time
+	AccountID      string
+	Amount         string // Decimal as string for precision
+	InstrumentCode string // e.g., "GBP", "KWH"
+	CorrelationID  string
+	ValueDate      time.Time
 }
 
 // ProcessDeposit creates double-entry postings for a deposit
@@ -100,27 +105,27 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 	debitPosting, creditPosting, err := s.buildDepositPostings(ctx, bookingLogID, event)
 	if err != nil {
 		timer.ObserveError(observability.ErrorCategoryValidation)
-		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
+		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
 		return err
 	}
 
 	// Post both entries
 	if err := debitPosting.Post("Deposit processed"); err != nil {
 		timer.ObserveError(observability.ErrorCategoryInternal)
-		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
+		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
 		return fmt.Errorf("failed to post debit: %w", err)
 	}
 
 	if err := creditPosting.Post("Deposit processed"); err != nil {
 		timer.ObserveError(observability.ErrorCategoryInternal)
-		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
+		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
 		return fmt.Errorf("failed to post credit: %w", err)
 	}
 
 	// Save both postings atomically in a transaction
 	if err := s.repo.SavePostingsInTransaction(ctx, []*domain.LedgerPosting{debitPosting, creditPosting}); err != nil {
 		timer.ObserveError(observability.ErrorCategoryDatabase)
-		observability.RecordDepositProcessed(event.Currency, observability.StatusError)
+		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
 		return fmt.Errorf("failed to save postings: %w", err)
 	}
 
@@ -132,21 +137,21 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 }
 
 // buildDepositPostings creates the debit and credit postings for a deposit event.
+// Uses InstrumentResolver when available for proper instrument metadata; falls back
+// to legacy ParseCurrency for known ISO 4217 currency codes.
 func (s *PostingService) buildDepositPostings(
 	ctx context.Context,
 	bookingLogID uuid.UUID,
 	event DepositEvent,
 ) (*domain.LedgerPosting, *domain.LedgerPosting, error) {
-	amount := decimalFromCents(event.AmountCents)
-
-	currency, err := domain.ParseCurrency(event.Currency)
+	amount, err := decimal.NewFromString(event.Amount)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid currency: %w", err)
+		return nil, nil, fmt.Errorf("invalid amount %q: %w", event.Amount, err)
 	}
 
-	instrument, err := domain.CurrencyToInstrument(currency)
+	instrument, err := s.resolveInstrument(ctx, event.InstrumentCode)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create instrument: %w", err)
+		return nil, nil, fmt.Errorf("failed to resolve instrument %q: %w", event.InstrumentCode, err)
 	}
 
 	money := domain.NewMoney(amount, instrument)
@@ -180,13 +185,39 @@ func (s *PostingService) buildDepositPostings(
 	return debitPosting, creditPosting, nil
 }
 
+// resolveInstrument resolves an instrument code to a domain Instrument.
+// Tries InstrumentResolver first, then falls back to legacy ParseCurrency.
+func (s *PostingService) resolveInstrument(ctx context.Context, code string) (domain.Instrument, error) {
+	if s.instrumentResolver != nil {
+		props, err := s.instrumentResolver.Resolve(ctx, code)
+		if err == nil {
+			return domain.NewInstrument(props.Code, 1, props.Dimension, props.Precision)
+		}
+		s.logger.Debug("instrument resolver failed, trying legacy currency lookup",
+			"instrument_code", code,
+			"error", err)
+	}
+
+	// Legacy fallback for known ISO 4217 currencies
+	currency, err := domain.ParseCurrency(code)
+	if err != nil {
+		return domain.Instrument{}, fmt.Errorf("unknown instrument: %w", err)
+	}
+	return domain.CurrencyToInstrument(currency)
+}
+
 // recordDepositSuccessMetrics records all metrics for a successful deposit processing.
 func recordDepositSuccessMetrics(event DepositEvent) {
-	observability.RecordDepositProcessed(event.Currency, observability.StatusSuccess)
-	observability.RecordPosting(observability.DirectionDebit, event.Currency)
-	observability.RecordPosting(observability.DirectionCredit, event.Currency)
-	observability.RecordPostingAmount(observability.DirectionDebit, event.Currency, event.AmountCents)
-	observability.RecordPostingAmount(observability.DirectionCredit, event.Currency, event.AmountCents)
+	observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusSuccess)
+	observability.RecordPosting(observability.DirectionDebit, event.InstrumentCode)
+	observability.RecordPosting(observability.DirectionCredit, event.InstrumentCode)
+
+	// Convert amount string to float64 for metrics (precision loss acceptable for counters)
+	if amountDec, err := decimal.NewFromString(event.Amount); err == nil {
+		amountFloat, _ := amountDec.Float64()
+		observability.RecordPostingAmountFloat(observability.DirectionDebit, event.InstrumentCode, amountFloat)
+		observability.RecordPostingAmountFloat(observability.DirectionCredit, event.InstrumentCode, amountFloat)
+	}
 }
 
 // GetPostingsByBookingLog retrieves all postings for a booking log

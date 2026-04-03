@@ -81,30 +81,6 @@ func TestExtractUserFromContext_NoContextReturnsSystem(t *testing.T) {
 	assert.Equal(t, "system", result)
 }
 
-// --- decimalFromCents ---
-
-func TestDecimalFromCents(t *testing.T) {
-	tests := []struct {
-		name     string
-		cents    int64
-		expected string
-	}{
-		{"zero", 0, "0"},
-		{"100 cents is 1.00", 100, "1"},
-		{"150 cents is 1.50", 150, "1.5"},
-		{"1 cent is 0.01", 1, "0.01"},
-		{"negative cents", -500, "-5"},
-		{"large amount", 1234567, "12345.67"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := decimalFromCents(tt.cents)
-			assert.Equal(t, tt.expected, result.String())
-		})
-	}
-}
-
 // --- toProtoFinancialBookingLog ---
 
 func TestToProtoFinancialBookingLog_Nil(t *testing.T) {
@@ -561,16 +537,16 @@ func TestToProtoFinancialBookingLog_CancelledStatus(t *testing.T) {
 
 func TestDepositEvent_StructConstruction(t *testing.T) {
 	event := DepositEvent{
-		AccountID:     "ACC-001",
-		AmountCents:   15000,
-		Currency:      "GBP",
-		CorrelationID: "corr-123",
-		ValueDate:     time.Now().UTC(),
+		AccountID:      "ACC-001",
+		Amount:         "150.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "corr-123",
+		ValueDate:      time.Now().UTC(),
 	}
 
 	assert.Equal(t, "ACC-001", event.AccountID)
-	assert.Equal(t, int64(15000), event.AmountCents)
-	assert.Equal(t, "GBP", event.Currency)
+	assert.Equal(t, "150.00", event.Amount)
+	assert.Equal(t, "GBP", event.InstrumentCode)
 	assert.Equal(t, "corr-123", event.CorrelationID)
 	assert.False(t, event.ValueDate.IsZero())
 }
@@ -892,31 +868,31 @@ func TestExecuteUpdateLedgerPosting_UnspecifiedStatus(t *testing.T) {
 
 // --- ProcessDeposit error branches ---
 
-func TestProcessDeposit_InvalidCurrency(t *testing.T) {
+func TestProcessDeposit_InvalidInstrument(t *testing.T) {
 	svc := NewPostingService(nil, "BANK-CASH-001")
 
 	event := DepositEvent{
-		AccountID:     "ACC-INVALID-CURRENCY",
-		AmountCents:   10000,
-		Currency:      "INVALID_CURRENCY",
-		CorrelationID: "deposit-invalid-curr",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-INVALID-INSTRUMENT",
+		Amount:         "100.00",
+		InstrumentCode: "INVALID_INSTRUMENT",
+		CorrelationID:  "deposit-invalid-inst",
+		ValueDate:      time.Now(),
 	}
 
 	err := svc.ProcessDeposit(context.Background(), event)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid currency")
+	assert.Contains(t, err.Error(), "failed to resolve instrument")
 }
 
 func TestProcessDeposit_NegativeAmount(t *testing.T) {
 	svc := NewPostingService(nil, "BANK-CASH-001")
 
 	event := DepositEvent{
-		AccountID:     "ACC-NEG-AMOUNT",
-		AmountCents:   -500,
-		Currency:      "GBP",
-		CorrelationID: "deposit-neg-amount",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-NEG-AMOUNT",
+		Amount:         "-5.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-neg-amount",
+		ValueDate:      time.Now(),
 	}
 
 	err := svc.ProcessDeposit(context.Background(), event)
@@ -928,16 +904,32 @@ func TestProcessDeposit_EmptyAccountID(t *testing.T) {
 	svc := NewPostingService(nil, "BANK-CASH-001")
 
 	event := DepositEvent{
-		AccountID:     "",
-		AmountCents:   10000,
-		Currency:      "GBP",
-		CorrelationID: "deposit-empty-acct",
-		ValueDate:     time.Now(),
+		AccountID:      "",
+		Amount:         "100.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-empty-acct",
+		ValueDate:      time.Now(),
 	}
 
 	err := svc.ProcessDeposit(context.Background(), event)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create debit posting")
+}
+
+func TestProcessDeposit_InvalidAmountString(t *testing.T) {
+	svc := NewPostingService(nil, "BANK-CASH-001")
+
+	event := DepositEvent{
+		AccountID:      "ACC-BAD-AMOUNT",
+		Amount:         "not-a-number",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-bad-amount",
+		ValueDate:      time.Now(),
+	}
+
+	err := svc.ProcessDeposit(context.Background(), event)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid amount")
 }
 
 // --- fromProtoInstrumentAmount nil input ---

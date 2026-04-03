@@ -237,6 +237,12 @@ func RecordPostingAmount(direction, currency string, amountCents int64) {
 	postingAmountTotal.WithLabelValues(direction, currency).Add(float64(amountCents))
 }
 
+// RecordPostingAmountFloat records the amount of a posting as a float for tracking total volume.
+// Used for asset-agnostic amounts where the unit may not be cents.
+func RecordPostingAmountFloat(direction, instrumentCode string, amount float64) {
+	postingAmountTotal.WithLabelValues(direction, instrumentCode).Add(amount)
+}
+
 // RecordBookingLog records a booking log creation with status.
 func RecordBookingLog(status string) {
 	bookingLogsTotal.WithLabelValues(status).Inc()

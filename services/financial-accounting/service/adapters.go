@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -12,6 +13,7 @@ import (
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 )
 
 var (
@@ -21,7 +23,58 @@ var (
 
 	// ErrNilInstrumentAmount is returned when proto InstrumentAmount is nil
 	ErrNilInstrumentAmount = errors.New("instrument amount cannot be nil")
+
+	// ErrEmptyInstrumentCode is returned when the instrument code is empty
+	ErrEmptyInstrumentCode = errors.New("instrument code cannot be empty")
 )
+
+// InstrumentAmountConverter converts between proto InstrumentAmount and domain Money
+// using an InstrumentResolver for proper instrument metadata lookup.
+type InstrumentAmountConverter struct {
+	resolver refdata.InstrumentResolver
+}
+
+// NewInstrumentAmountConverter creates a converter with the given resolver.
+// If resolver is nil, conversions fall back to legacy currency-based resolution.
+func NewInstrumentAmountConverter(resolver refdata.InstrumentResolver) *InstrumentAmountConverter {
+	return &InstrumentAmountConverter{resolver: resolver}
+}
+
+// FromProto converts protobuf InstrumentAmount to domain Money using the InstrumentResolver.
+// Falls back to legacy ParseCurrency logic when the resolver is nil or returns an error.
+func (c *InstrumentAmountConverter) FromProto(ctx context.Context, ia *quantityv1.InstrumentAmount) (domain.Money, error) {
+	if ia == nil {
+		return domain.Money{}, ErrNilInstrumentAmount
+	}
+	if ia.InstrumentCode == "" {
+		return domain.Money{}, ErrEmptyInstrumentCode
+	}
+
+	amount, err := decimal.NewFromString(ia.Amount)
+	if err != nil {
+		return domain.Money{}, fmt.Errorf("invalid amount: %w", err)
+	}
+
+	// Try resolver first for proper instrument metadata
+	if c.resolver != nil {
+		props, resolveErr := c.resolver.Resolve(ctx, ia.InstrumentCode)
+		if resolveErr == nil {
+			inst, instErr := domain.NewInstrument(props.Code, uint32(ia.Version), props.Dimension, props.Precision)
+			if instErr == nil {
+				return domain.NewMoney(amount, inst), nil
+			}
+		}
+	}
+
+	// Fall back to legacy resolution
+	return fromProtoInstrumentAmount(ia)
+}
+
+// ToProtoInstrumentAmount converts domain Money to protobuf InstrumentAmount.
+// Preserves full decimal precision via string representation.
+func ToProtoInstrumentAmount(m domain.Money) *quantityv1.InstrumentAmount {
+	return toProtoInstrumentAmount(m)
+}
 
 // parseUUID parses and validates a UUID string.
 //
