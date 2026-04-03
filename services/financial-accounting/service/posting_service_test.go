@@ -12,6 +12,7 @@ import (
 	internalaccountv1 "github.com/meridianhub/meridian/api/proto/meridian/internal_account/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/meridianhub/meridian/shared/platform/audit"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/shopspring/decimal"
@@ -40,11 +41,11 @@ func TestProcessDeposit(t *testing.T) {
 	service := NewPostingService(repo, "BANK-CASH-001")
 
 	event := DepositEvent{
-		AccountID:     "ACC-123",
-		AmountCents:   10000, // £100.00
-		Currency:      "GBP",
-		CorrelationID: "deposit-001",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-123",
+		Amount:         "100.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-001",
+		ValueDate:      time.Now(),
 	}
 	err := service.ProcessDeposit(ctx, event)
 	if err != nil {
@@ -98,11 +99,11 @@ func TestValidateDoubleEntry(t *testing.T) {
 
 	// Process a deposit (creates balanced entries)
 	event := DepositEvent{
-		AccountID:     "ACC-456",
-		AmountCents:   50000,
-		Currency:      "GBP",
-		CorrelationID: "deposit-002",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-456",
+		Amount:         "500.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-002",
+		ValueDate:      time.Now(),
 	}
 
 	err := service.ProcessDeposit(ctx, event)
@@ -132,11 +133,11 @@ func TestProcessDeposit_InvalidAmount(t *testing.T) {
 	service := NewPostingService(repo, "BANK-CASH-001")
 
 	event := DepositEvent{
-		AccountID:     "ACC-789",
-		AmountCents:   0, // Invalid
-		Currency:      "GBP",
-		CorrelationID: "deposit-003",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-789",
+		Amount:         "0", // Invalid - zero amount
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-003",
+		ValueDate:      time.Now(),
 	}
 	err := service.ProcessDeposit(ctx, event)
 	if err == nil {
@@ -152,11 +153,11 @@ func TestGetPostingsByBookingLog(t *testing.T) {
 
 	// Create some postings
 	event := DepositEvent{
-		AccountID:     "ACC-999",
-		AmountCents:   25000,
-		Currency:      "GBP",
-		CorrelationID: "deposit-004",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-999",
+		Amount:         "250.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-004",
+		ValueDate:      time.Now(),
 	}
 
 	err := service.ProcessDeposit(ctx, event)
@@ -267,11 +268,11 @@ func TestProcessDeposit_WithDynamicClearingAccount(t *testing.T) {
 	})
 
 	event := DepositEvent{
-		AccountID:     "ACC-DYNAMIC-123",
-		AmountCents:   10000,
-		Currency:      "GBP",
-		CorrelationID: "deposit-dynamic-001",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-DYNAMIC-123",
+		Amount:         "100.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-dynamic-001",
+		ValueDate:      time.Now(),
 	}
 
 	err = service.ProcessDeposit(ctx, event)
@@ -308,11 +309,11 @@ func TestProcessDeposit_FallbackOnResolverError(t *testing.T) {
 	})
 
 	event := DepositEvent{
-		AccountID:     "ACC-FALLBACK-123",
-		AmountCents:   10000,
-		Currency:      "GBP",
-		CorrelationID: "deposit-fallback-001",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-FALLBACK-123",
+		Amount:         "100.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-fallback-001",
+		ValueDate:      time.Now(),
 	}
 
 	err = service.ProcessDeposit(ctx, event)
@@ -339,11 +340,11 @@ func TestProcessDeposit_WithoutResolver_UsesStaticAccount(t *testing.T) {
 	})
 
 	event := DepositEvent{
-		AccountID:     "ACC-STATIC-123",
-		AmountCents:   10000,
-		Currency:      "GBP",
-		CorrelationID: "deposit-static-001",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-STATIC-123",
+		Amount:         "100.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-static-001",
+		ValueDate:      time.Now(),
 	}
 
 	err := service.ProcessDeposit(ctx, event)
@@ -380,11 +381,11 @@ func TestProcessDeposit_FallbackOnNoClearingAccountFound(t *testing.T) {
 	})
 
 	event := DepositEvent{
-		AccountID:     "ACC-EMPTY-123",
-		AmountCents:   10000,
-		Currency:      "GBP",
-		CorrelationID: "deposit-empty-001",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-EMPTY-123",
+		Amount:         "100.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-empty-001",
+		ValueDate:      time.Now(),
 	}
 
 	err = service.ProcessDeposit(ctx, event)
@@ -425,22 +426,22 @@ func TestProcessDeposit_MultiAsset_DynamicLookup(t *testing.T) {
 
 	// Process GBP deposit
 	gbpEvent := DepositEvent{
-		AccountID:     "ACC-GBP-123",
-		AmountCents:   10000,
-		Currency:      "GBP",
-		CorrelationID: "deposit-gbp-001",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-GBP-123",
+		Amount:         "100.00",
+		InstrumentCode: "GBP",
+		CorrelationID:  "deposit-gbp-001",
+		ValueDate:      time.Now(),
 	}
 	err = service.ProcessDeposit(ctx, gbpEvent)
 	require.NoError(t, err)
 
 	// Process USD deposit
 	usdEvent := DepositEvent{
-		AccountID:     "ACC-USD-123",
-		AmountCents:   20000,
-		Currency:      "USD",
-		CorrelationID: "deposit-usd-001",
-		ValueDate:     time.Now(),
+		AccountID:      "ACC-USD-123",
+		Amount:         "200.00",
+		InstrumentCode: "USD",
+		CorrelationID:  "deposit-usd-001",
+		ValueDate:      time.Now(),
 	}
 	err = service.ProcessDeposit(ctx, usdEvent)
 	require.NoError(t, err)
@@ -459,8 +460,207 @@ func TestProcessDeposit_MultiAsset_DynamicLookup(t *testing.T) {
 }
 
 // =============================================================================
+// Tests for asset-agnostic deposits with InstrumentResolver
+// =============================================================================
+
+func TestProcessDeposit_KWH_WithResolver(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	resolver := &postingServiceMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"KWH": {Code: "KWH", Dimension: "ENERGY", Precision: 3, RoundingMode: "HALF_UP"},
+		},
+	}
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:               repo,
+		BankCashAccountID:  "ENERGY-CLEARING-001",
+		InstrumentResolver: resolver,
+		Logger:             postingTestLogger(),
+	})
+
+	event := DepositEvent{
+		AccountID:      "ACC-ENERGY-001",
+		Amount:         "123.456",
+		InstrumentCode: "KWH",
+		CorrelationID:  "deposit-kwh-001",
+		ValueDate:      time.Now(),
+	}
+
+	err := service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	// Verify debit posting exists
+	var debitEntity persistence.LedgerPostingEntity
+	err = db.Where("account_id = ? AND posting_direction = ?", "ACC-ENERGY-001", "DEBIT").First(&debitEntity).Error
+	require.NoError(t, err)
+	require.Equal(t, "KWH", debitEntity.Currency)
+
+	// Verify credit posting exists
+	var creditEntity persistence.LedgerPostingEntity
+	err = db.Where("account_id = ? AND posting_direction = ?", "ENERGY-CLEARING-001", "CREDIT").First(&creditEntity).Error
+	require.NoError(t, err)
+}
+
+func TestProcessDeposit_UnknownInstrument_WithResolver(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	// Resolver that doesn't know "UNKNOWN"
+	resolver := &postingServiceMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{},
+	}
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:               repo,
+		BankCashAccountID:  "FALLBACK",
+		InstrumentResolver: resolver,
+		Logger:             postingTestLogger(),
+	})
+
+	event := DepositEvent{
+		AccountID:      "ACC-UNKNOWN",
+		Amount:         "100.00",
+		InstrumentCode: "UNKNOWN_ASSET",
+		CorrelationID:  "deposit-unknown-001",
+		ValueDate:      time.Now(),
+	}
+
+	err := service.ProcessDeposit(ctx, event)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to resolve instrument")
+}
+
+func TestProcessDeposit_Precision_Preserved(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	resolver := &postingServiceMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"KWH": {Code: "KWH", Dimension: "ENERGY", Precision: 3, RoundingMode: "HALF_UP"},
+		},
+	}
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:               repo,
+		BankCashAccountID:  "CLEARING",
+		InstrumentResolver: resolver,
+		Logger:             postingTestLogger(),
+	})
+
+	event := DepositEvent{
+		AccountID:      "ACC-PRECISION",
+		Amount:         "123.456",
+		InstrumentCode: "KWH",
+		CorrelationID:  "deposit-precision-001",
+		ValueDate:      time.Now(),
+	}
+
+	err := service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	// Retrieve and verify amount preserved through the pipeline
+	var entity persistence.LedgerPostingEntity
+	err = db.Where("account_id = ? AND posting_direction = ?", "ACC-PRECISION", "DEBIT").First(&entity).Error
+	require.NoError(t, err)
+
+	// 123.456 with precision 3 = 123456 minor units
+	require.Equal(t, int64(123456), entity.AmountMinorUnits)
+}
+
+func TestProcessDeposit_MinorUnit_Conversion(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	resolver := &postingServiceMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"KWH": {Code: "KWH", Dimension: "ENERGY", Precision: 3, RoundingMode: "HALF_UP"},
+		},
+	}
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:               repo,
+		BankCashAccountID:  "CLEARING",
+		InstrumentResolver: resolver,
+		Logger:             postingTestLogger(),
+	})
+
+	// 123456 minor units with precision 3 = 123.456 KWH
+	event := DepositEvent{
+		AccountID:       "ACC-MINOR-UNIT",
+		AmountMinorUnit: 123456,
+		InstrumentCode:  "KWH",
+		CorrelationID:   "deposit-minor-001",
+		ValueDate:       time.Now(),
+	}
+
+	err := service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	var entity persistence.LedgerPostingEntity
+	err = db.Where("account_id = ? AND posting_direction = ?", "ACC-MINOR-UNIT", "DEBIT").First(&entity).Error
+	require.NoError(t, err)
+	// 123.456 with precision 3 = 123456 minor units in storage
+	require.Equal(t, int64(123456), entity.AmountMinorUnits)
+}
+
+func TestProcessDeposit_MinorUnit_JPY_ZeroPrecision(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	resolver := &postingServiceMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"JPY": {Code: "JPY", Dimension: "CURRENCY", Precision: 0, RoundingMode: "HALF_EVEN"},
+		},
+	}
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:               repo,
+		BankCashAccountID:  "CLEARING-JPY",
+		InstrumentResolver: resolver,
+		Logger:             postingTestLogger(),
+	})
+
+	// 500 minor units with precision 0 = 500 JPY (no division)
+	event := DepositEvent{
+		AccountID:       "ACC-JPY",
+		AmountMinorUnit: 500,
+		InstrumentCode:  "JPY",
+		CorrelationID:   "deposit-jpy-001",
+		ValueDate:       time.Now(),
+	}
+
+	err := service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	var entity persistence.LedgerPostingEntity
+	err = db.Where("account_id = ? AND posting_direction = ?", "ACC-JPY", "DEBIT").First(&entity).Error
+	require.NoError(t, err)
+	// 500 JPY with precision 0 = 500 minor units
+	require.Equal(t, int64(500), entity.AmountMinorUnits)
+}
+
+// =============================================================================
 // Test helpers
 // =============================================================================
+
+// postingServiceMockInstrumentResolver implements refdata.InstrumentResolver for PostingService tests.
+type postingServiceMockInstrumentResolver struct {
+	instruments map[string]refdata.InstrumentProperties
+}
+
+func (m *postingServiceMockInstrumentResolver) Resolve(_ context.Context, code string) (refdata.InstrumentProperties, error) {
+	if props, ok := m.instruments[code]; ok {
+		return props, nil
+	}
+	return refdata.InstrumentProperties{}, refdata.ErrUnknownInstrument
+}
 
 // Sentinel error for testing fallback behavior
 var errMockServiceUnavailable = errors.New("mock: service unavailable")

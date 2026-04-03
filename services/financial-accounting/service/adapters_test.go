@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
+	"github.com/meridianhub/meridian/shared/pkg/refdata"
 )
 
 func TestFromProtoPostingDirection(t *testing.T) {
@@ -258,4 +260,169 @@ func TestParseUUID_Invalid(t *testing.T) {
 	_, err := parseUUID("not-a-uuid")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid UUID format")
+}
+
+// =============================================================================
+// InstrumentAmountConverter tests
+// =============================================================================
+
+// adapterMockInstrumentResolver implements refdata.InstrumentResolver for testing.
+type adapterMockInstrumentResolver struct {
+	instruments map[string]refdata.InstrumentProperties
+	err         error
+}
+
+func (m *adapterMockInstrumentResolver) Resolve(_ context.Context, code string) (refdata.InstrumentProperties, error) {
+	if m.err != nil {
+		return refdata.InstrumentProperties{}, m.err
+	}
+	if props, ok := m.instruments[code]; ok {
+		return props, nil
+	}
+	return refdata.InstrumentProperties{}, refdata.ErrUnknownInstrument
+}
+
+func TestInstrumentAmountConverter_FromProto_WithResolver(t *testing.T) {
+	resolver := &adapterMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"GBP":        {Code: "GBP", Dimension: "CURRENCY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"KWH":        {Code: "KWH", Dimension: "ENERGY", Precision: 3, RoundingMode: "HALF_UP"},
+			"TONNE_CO2E": {Code: "TONNE_CO2E", Dimension: "CARBON", Precision: 6, RoundingMode: "HALF_EVEN"},
+			"GPU_HOUR":   {Code: "GPU_HOUR", Dimension: "COMPUTE", Precision: 4, RoundingMode: "HALF_EVEN"},
+		},
+	}
+	converter := NewInstrumentAmountConverter(resolver)
+	ctx := context.Background()
+
+	tests := []struct {
+		name           string
+		instrumentCode string
+		amount         string
+		wantCode       string
+		wantDimension  string
+		wantPrecision  int
+	}{
+		{"GBP currency", "GBP", "100.50", "GBP", "CURRENCY", 2},
+		{"KWH energy", "KWH", "123.456", "KWH", "ENERGY", 3},
+		{"TONNE_CO2E carbon", "TONNE_CO2E", "0.001234", "TONNE_CO2E", "CARBON", 6},
+		{"GPU_HOUR compute", "GPU_HOUR", "24.5000", "GPU_HOUR", "COMPUTE", 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ia := &quantityv1.InstrumentAmount{
+				Amount:         tt.amount,
+				InstrumentCode: tt.instrumentCode,
+				Version:        1,
+			}
+
+			result, err := converter.FromProto(ctx, ia)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCode, result.Instrument.Code)
+			assert.Equal(t, tt.wantDimension, result.Instrument.Dimension)
+			assert.Equal(t, tt.wantPrecision, result.Instrument.Precision)
+		})
+	}
+}
+
+func TestInstrumentAmountConverter_FromProto_NilInput(t *testing.T) {
+	converter := NewInstrumentAmountConverter(nil)
+	_, err := converter.FromProto(context.Background(), nil)
+	require.ErrorIs(t, err, ErrNilInstrumentAmount)
+}
+
+func TestInstrumentAmountConverter_FromProto_EmptyInstrumentCode(t *testing.T) {
+	converter := NewInstrumentAmountConverter(nil)
+	ia := &quantityv1.InstrumentAmount{Amount: "100", InstrumentCode: ""}
+	_, err := converter.FromProto(context.Background(), ia)
+	require.ErrorIs(t, err, ErrEmptyInstrumentCode)
+}
+
+func TestInstrumentAmountConverter_FromProto_InvalidAmount(t *testing.T) {
+	converter := NewInstrumentAmountConverter(nil)
+	ia := &quantityv1.InstrumentAmount{Amount: "not-a-number", InstrumentCode: "GBP"}
+	_, err := converter.FromProto(context.Background(), ia)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid amount")
+}
+
+func TestInstrumentAmountConverter_FromProto_FallbackToLegacy(t *testing.T) {
+	// Resolver returns error - should fall back to ParseCurrency for GBP
+	resolver := &adapterMockInstrumentResolver{err: refdata.ErrUnknownInstrument}
+	converter := NewInstrumentAmountConverter(resolver)
+
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "100.00",
+		InstrumentCode: "GBP",
+		Version:        1,
+	}
+
+	result, err := converter.FromProto(context.Background(), ia)
+	require.NoError(t, err)
+	assert.Equal(t, "GBP", result.Instrument.Code)
+	assert.Equal(t, "100", result.Amount.String())
+}
+
+func TestInstrumentAmountConverter_FromProto_NilResolver(t *testing.T) {
+	// No resolver - should use legacy fromProtoInstrumentAmount
+	converter := NewInstrumentAmountConverter(nil)
+
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "50.25",
+		InstrumentCode: "USD",
+		Version:        1,
+	}
+
+	result, err := converter.FromProto(context.Background(), ia)
+	require.NoError(t, err)
+	assert.Equal(t, "USD", result.Instrument.Code)
+	assert.Equal(t, "50.25", result.Amount.String())
+}
+
+func TestInstrumentAmountConverter_Roundtrip(t *testing.T) {
+	resolver := &adapterMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"KWH": {Code: "KWH", Dimension: "ENERGY", Precision: 3, RoundingMode: "HALF_UP"},
+		},
+	}
+	converter := NewInstrumentAmountConverter(resolver)
+
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "123.456",
+		InstrumentCode: "KWH",
+		Version:        1,
+	}
+
+	money, err := converter.FromProto(context.Background(), ia)
+	require.NoError(t, err)
+
+	roundtripped := ToProtoInstrumentAmount(money)
+	assert.Equal(t, "123.456", roundtripped.Amount)
+	assert.Equal(t, "KWH", roundtripped.InstrumentCode)
+}
+
+func TestInstrumentAmountConverter_FromProto_RejectsUnknownNonCurrency(t *testing.T) {
+	// Resolver is configured but doesn't know "UNKNOWN_ASSET". Since it's not
+	// a known ISO 4217 currency, it should error rather than infer precision.
+	resolver := &adapterMockInstrumentResolver{err: refdata.ErrUnknownInstrument}
+	converter := NewInstrumentAmountConverter(resolver)
+
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "100.00",
+		InstrumentCode: "UNKNOWN_ASSET",
+		Version:        1,
+	}
+
+	_, err := converter.FromProto(context.Background(), ia)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to resolve instrument")
+}
+
+func TestToProtoInstrumentAmount_Exported(t *testing.T) {
+	inst := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	m := domain.NewMoney(decimal.NewFromInt(42), inst)
+
+	result := ToProtoInstrumentAmount(m)
+	assert.Equal(t, "GBP", result.InstrumentCode)
+	assert.Equal(t, "42", result.Amount)
 }

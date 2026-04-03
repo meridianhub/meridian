@@ -9,6 +9,7 @@ import (
 
 	"buf.build/go/protovalidate"
 	"github.com/google/uuid"
+
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
@@ -217,12 +218,16 @@ func (dc *DepositConsumer) processAndStoreResult(ctx context.Context, event *eve
 		return fmt.Errorf("%w: %v", ErrInvalidCurrency, event.InstrumentCode)
 	}
 
+	// Pass the raw minor-unit value as a string. The PostingService will
+	// resolve instrument precision and convert from minor to major units.
+	// This avoids hardcoding a /100 divisor that would be wrong for
+	// non-2dp instruments (e.g., JPY=0dp, KWH=3dp).
 	depositEvent := service.DepositEvent{
-		AccountID:     event.AccountId,
-		AmountCents:   event.AmountCents,
-		Currency:      currencyCode,
-		CorrelationID: event.CorrelationId,
-		ValueDate:     event.ValueDate.AsTime(),
+		AccountID:       event.AccountId,
+		AmountMinorUnit: event.AmountCents,
+		InstrumentCode:  currencyCode,
+		CorrelationID:   event.CorrelationId,
+		ValueDate:       event.ValueDate.AsTime(),
 	}
 
 	if err := dc.postingService.ProcessDeposit(ctx, depositEvent); err != nil {

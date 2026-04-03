@@ -84,6 +84,14 @@ var (
 		[]string{"direction", "currency"},
 	)
 
+	postingAmountMajorTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "financial_accounting_posting_amount_major_total",
+			Help: "Total amount posted in major instrument units by instrument and direction",
+		},
+		[]string{"direction", "instrument"},
+	)
+
 	// Booking log metrics
 	bookingLogsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
@@ -235,6 +243,13 @@ func RecordPosting(direction, currency string) {
 // RecordPostingAmount records the amount of a posting in cents for tracking total volume.
 func RecordPostingAmount(direction, currency string, amountCents int64) {
 	postingAmountTotal.WithLabelValues(direction, currency).Add(float64(amountCents))
+}
+
+// RecordPostingAmountFloat records the amount of a posting in major units for tracking total volume.
+// This uses a separate counter from RecordPostingAmount (which tracks minor units/cents)
+// to avoid mixing units in the same metric series.
+func RecordPostingAmountFloat(direction, instrumentCode string, amount float64) {
+	postingAmountMajorTotal.WithLabelValues(direction, instrumentCode).Add(amount)
 }
 
 // RecordBookingLog records a booking log creation with status.

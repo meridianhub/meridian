@@ -60,12 +60,14 @@ func setupBenchContainer(b *testing.B) *benchTestContainer {
 
 // createBenchDepositEvent creates a realistic deposit event for benchmarking.
 func createBenchDepositEvent(i int) DepositEvent {
+	// Vary amounts: base 100.00 + cents variation
+	amount := decimal.NewFromInt(int64(10000 + (i % 100000))).Div(decimal.NewFromInt(100))
 	return DepositEvent{
-		AccountID:     fmt.Sprintf("ACC-BENCH-%08d", i),
-		AmountCents:   int64(10000 + (i % 100000)), // Vary amounts
-		Currency:      "GBP",
-		CorrelationID: fmt.Sprintf("deposit-bench-%s", uuid.New().String()[:8]),
-		ValueDate:     time.Now().UTC(),
+		AccountID:      fmt.Sprintf("ACC-BENCH-%08d", i),
+		Amount:         amount.String(),
+		InstrumentCode: "GBP",
+		CorrelationID:  fmt.Sprintf("deposit-bench-%s", uuid.New().String()[:8]),
+		ValueDate:      time.Now().UTC(),
 	}
 }
 
@@ -123,24 +125,24 @@ func BenchmarkProcessDeposit_VariedAmounts(b *testing.B) {
 	tc := setupBenchContainer(b)
 	ctx := context.Background()
 
-	amounts := []int64{
-		100,         // £1.00
-		10000,       // £100.00
-		100000,      // £1,000.00
-		10000000,    // £100,000.00
-		10000000000, // £100,000,000.00
+	amounts := []string{
+		"1.00",         // £1.00
+		"100.00",       // £100.00
+		"1000.00",      // £1,000.00
+		"100000.00",    // £100,000.00
+		"100000000.00", // £100,000,000.00
 	}
 
 	for _, amount := range amounts {
-		b.Run(fmt.Sprintf("Amount_%d", amount), func(b *testing.B) {
+		b.Run(fmt.Sprintf("Amount_%s", amount), func(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				event := DepositEvent{
-					AccountID:     fmt.Sprintf("ACC-VAR-%08d", i),
-					AmountCents:   amount,
-					Currency:      "GBP",
-					CorrelationID: fmt.Sprintf("deposit-var-%s", uuid.New().String()[:8]),
-					ValueDate:     time.Now().UTC(),
+					AccountID:      fmt.Sprintf("ACC-VAR-%08d", i),
+					Amount:         amount,
+					InstrumentCode: "GBP",
+					CorrelationID:  fmt.Sprintf("deposit-var-%s", uuid.New().String()[:8]),
+					ValueDate:      time.Now().UTC(),
 				}
 				err := tc.service.ProcessDeposit(ctx, event)
 				if err != nil {
