@@ -269,17 +269,15 @@ func TestRegistryHandler_ActivateSaga(t *testing.T) {
 		assert.NotNil(t, resp.Saga.ActivatedAt)
 	})
 
-	t.Run("rejects activation of already active saga", func(t *testing.T) {
+	t.Run("activation of already active saga is idempotent", func(t *testing.T) {
 		req := &sagav1.ActivateSagaRequest{
 			Id: sagaID,
 		}
 
-		_, err := handler.ActivateSaga(ctx, req)
-		require.Error(t, err)
+		resp, err := handler.ActivateSaga(ctx, req)
+		require.NoError(t, err)
 
-		st, ok := status.FromError(err)
-		require.True(t, ok)
-		assert.Equal(t, codes.FailedPrecondition, st.Code())
+		assert.Equal(t, sagav1.SagaStatus_SAGA_STATUS_ACTIVE, resp.Saga.Status)
 	})
 }
 
