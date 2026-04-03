@@ -4,8 +4,8 @@ package meridian.events.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
-import "google/type/money.proto";
 import "meridian/common/v1/types.proto";
+import "meridian/quantity/v1/quantity.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/events/v1;eventsv1";
 
@@ -125,29 +125,23 @@ message FinancialBookingLogPostedEvent {
   // posting_count is the number of ledger postings in this booking log
   int32 posting_count = 2 [(buf.validate.field).int32 = {gte: 0}];
 
-  // total_debits is the sum of all debit postings (must be positive or zero)
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money total_debits = 3 [
+  // total_debits is the sum of all debit postings (must be non-negative)
+  meridian.quantity.v1.InstrumentAmount total_debits = 3 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "non_negative_total_debits"
       message: "total debits must be greater than or equal to zero"
-      expression: "this.units >= 0 && this.nanos >= 0"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$')"
     }
   ];
 
-  // total_credits is the sum of all credit postings (must be positive or zero)
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money total_credits = 4 [
+  // total_credits is the sum of all credit postings (must be non-negative)
+  meridian.quantity.v1.InstrumentAmount total_credits = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "non_negative_total_credits"
       message: "total credits must be greater than or equal to zero"
-      expression: "this.units >= 0 && this.nanos >= 0"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$')"
     }
   ];
 
@@ -241,16 +235,13 @@ message LedgerPostingCapturedEvent {
     not_in: [0]
   }];
 
-  // posting_amount is the monetary amount being posted (must be positive)
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money posting_amount = 4 [
+  // posting_amount is the amount being posted (must be positive)
+  meridian.quantity.v1.InstrumentAmount posting_amount = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "positive_posting_amount"
       message: "posting amount must be greater than zero"
-      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$') && !this.amount.matches('^0+(\\\\.0+)?$')"
     }
   ];
 
@@ -305,28 +296,22 @@ message LedgerPostingAmendedEvent {
   }];
 
   // previous_amount was the amount before amendment (must be positive)
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money previous_amount = 3 [
+  meridian.quantity.v1.InstrumentAmount previous_amount = 3 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "positive_previous_amount"
       message: "previous amount must be greater than zero"
-      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$') && !this.amount.matches('^0+(\\\\.0+)?$')"
     }
   ];
 
   // new_amount is the amount after amendment (must be positive)
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money new_amount = 4 [
+  meridian.quantity.v1.InstrumentAmount new_amount = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "positive_new_amount"
       message: "new amount must be greater than zero"
-      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$') && !this.amount.matches('^0+(\\\\.0+)?$')"
     }
   ];
 
@@ -520,35 +505,29 @@ message BalanceValidationFailedEvent {
   }];
 
   // total_debits is the sum of all debit postings (must be non-negative)
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money total_debits = 2 [
+  meridian.quantity.v1.InstrumentAmount total_debits = 2 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "non_negative_total_debits_validation"
       message: "total debits must be greater than or equal to zero"
-      expression: "this.units >= 0 && this.nanos >= 0"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$')"
     }
   ];
 
   // total_credits is the sum of all credit postings (must be non-negative)
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money total_credits = 3 [
+  meridian.quantity.v1.InstrumentAmount total_credits = 3 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "non_negative_total_credits_validation"
       message: "total credits must be greater than or equal to zero"
-      expression: "this.units >= 0 && this.nanos >= 0"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$')"
     }
   ];
 
   // variance is the difference between debits and credits (can be negative)
   // Positive variance = debits > credits
   // Negative variance = credits > debits
-  google.type.Money variance = 4 [(buf.validate.field).required = true];
+  meridian.quantity.v1.InstrumentAmount variance = 4 [(buf.validate.field).required = true];
 
   // reason explains the validation failure
   string reason = 5 [(buf.validate.field).string = {
