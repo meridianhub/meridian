@@ -91,9 +91,13 @@ function FourSideHandles() {
   return (
     <>
       <Handle id="top" type="source" position={Position.Top} className={HANDLE_CLASS} />
+      <Handle id="top-target" type="target" position={Position.Top} className={HANDLE_CLASS} />
       <Handle id="bottom" type="source" position={Position.Bottom} className={HANDLE_CLASS} />
+      <Handle id="bottom-target" type="target" position={Position.Bottom} className={HANDLE_CLASS} />
       <Handle id="left" type="source" position={Position.Left} className={HANDLE_CLASS} />
+      <Handle id="left-target" type="target" position={Position.Left} className={HANDLE_CLASS} />
       <Handle id="right" type="source" position={Position.Right} className={HANDLE_CLASS} />
+      <Handle id="right-target" type="target" position={Position.Right} className={HANDLE_CLASS} />
     </>
   )
 }
@@ -560,12 +564,12 @@ function pickHandles(
   const dy = tgt.y - src.y
   if (Math.abs(dx) > Math.abs(dy)) {
     return dx > 0
-      ? { sourceHandle: 'right', targetHandle: 'left' }
-      : { sourceHandle: 'left', targetHandle: 'right' }
+      ? { sourceHandle: 'right', targetHandle: 'left-target' }
+      : { sourceHandle: 'left', targetHandle: 'right-target' }
   }
   return dy > 0
-    ? { sourceHandle: 'bottom', targetHandle: 'top' }
-    : { sourceHandle: 'top', targetHandle: 'bottom' }
+    ? { sourceHandle: 'bottom', targetHandle: 'top-target' }
+    : { sourceHandle: 'top', targetHandle: 'bottom-target' }
 }
 
 function buildReactFlowEdges(manifestEdges: ManifestEdge[]): Edge[] {
