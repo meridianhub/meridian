@@ -77,17 +77,22 @@ assumes ISO 4217 via its `currency_code` field. The booking log itself already u
 Payment rails only carry ISO 4217 currencies. The fiat restriction here is a
 correct business constraint, not a missed refactor.
 
-## Proto-Level Dependency
+## Proto Surface Area
 
-13 production files import `google.type.Money`. The primary proto definition
-that needs updating:
+4 proto files import `google.type.Money`, containing ~19 Money fields total:
 
-```protobuf
-// financial_accounting.proto - LedgerPosting
-google.type.Money posting_amount = 4;  // <-- fiat-only by design
-```
+| Proto File | Money Fields | Count |
+|------------|-------------|-------|
+| `financial_accounting/v1/financial_accounting.proto` | `LedgerPosting.posting_amount`, `CaptureLedgerPostingRequest.posting_amount`, `ListLedgerPostingsRequest.currency` (filter) | 3 |
+| `events/v1/financial_accounting_events.proto` | `FinancialBookingLogPostedEvent.total_debits/total_credits`, `LedgerPostingCapturedEvent.posting_amount`, `LedgerPostingAmendedEvent.previous_amount/new_amount`, `BalanceValidationFailedEvent.total_debits/total_credits/variance` | 7 |
+| `events/v1/current_account_events.proto` | `AccountClosedEvent.closing_balance`, `TransactionInitiatedEvent.transaction_amount`, `TransactionCompletedEvent.new_balance/new_available_balance`, `OverdraftConfiguredEvent.overdraft_limit/previous_limit`, `OverdraftLimitExceededEvent.attempted_amount/current_balance/overdraft_limit/shortage` | 9 |
+| `common/v1/types.proto` | `MoneyAmount.amount` (wrapper type) | 1 |
 
-The replacement already exists:
+**Note:** `ListLedgerPostingsRequest.currency` (field 7) has validation
+`max_len: 3, pattern: "^[A-Z]{0,3}$"` which cannot match instrument codes like
+"TONNE_CO2E" or "GPU_HOUR". This filter must be renamed and revalidated.
+
+The replacement type already exists and is proven:
 
 ```protobuf
 // quantity/v1/quantity.proto - InstrumentAmount
@@ -99,34 +104,75 @@ message InstrumentAmount {
 }
 ```
 
+5 proto files already use `InstrumentAmount` (position_keeping, internal_account,
+current_account service proto, position_keeping_events). The migration pattern is
+established.
+
+## Wire-Format Compatibility
+
+Changing a field's message type at the same field number is a **wire-incompatible**
+change. `google.type.Money` field 2 = `units` (int64, varint) while
+`InstrumentAmount` field 2 = `instrument_code` (string, length-delimited). An old
+client would misparse the bytes.
+
+**Decision: Clean swap.** Acceptable because:
+- No external API consumers exist yet
+- No SLAs or production deployments
+- The outbox can be drained before deployment (see Deployment section)
+- Doing this after GA would require maintaining parallel fields for years
+
+**CEL validation rewrite required.** Current proto-level CEL rules reference
+Money's `units`/`nanos` structure:
+```
+this.units > 0 || (this.units == 0 && this.nanos > 0)
+```
+These must be rewritten for InstrumentAmount, e.g.:
+```
+double(this.amount) > 0.0
+```
+
 ## Solution
 
-Replace `google.type.Money` with `InstrumentAmount` in the posting proto, and
+Replace `google.type.Money` with `InstrumentAmount` in all affected protos, and
 replace `ParseCurrency()` with `InstrumentResolver.Resolve()` in all Go
 conversion paths.
 
-### Phase 1: financial-accounting (highest impact, demo blocker)
+### Phase 1: Proto migration (foundation for all other phases)
 
-1. **Proto:** Replace `LedgerPosting.posting_amount` from `google.type.Money` to
-   `meridian.quantity.v1.InstrumentAmount`. Update the CapturePosting request
-   message similarly.
+1. **financial_accounting.proto:** Replace `LedgerPosting.posting_amount` (field 4)
+   and `CaptureLedgerPostingRequest.posting_amount` (field 3) from
+   `google.type.Money` to `meridian.quantity.v1.InstrumentAmount`.
 
-2. **Go adapters:** Replace `fromProtoMoney()` to use `InstrumentResolver.Resolve()`
+2. **CEL validation:** Rewrite positive-amount CEL rules for InstrumentAmount.
+   Without this, deploying the proto change creates a window with zero
+   positive-amount enforcement.
+
+3. **ListLedgerPostingsRequest:** Rename `currency` (field 7) to `instrument_code`,
+   expand validation to `max_len: 32, pattern: "^[A-Z][A-Z0-9_]*$"`.
+
+4. **financial_accounting_events.proto:** Migrate all 7 Money fields to
+   InstrumentAmount.
+
+5. **Run `buf generate api/proto`** to regenerate Go files.
+
+### Phase 2: financial-accounting Go layer (demo blocker)
+
+1. **Go adapters:** Replace `fromProtoMoney()` to use `InstrumentResolver.Resolve()`
    instead of `ParseCurrency()`. The resolver returns dimension, precision, and
    rounding mode for any registered instrument.
 
-3. **Posting service:** Replace `buildDepositPostings()` to use the resolver
+2. **Posting service:** Replace `buildDepositPostings()` to use the resolver
    for currency validation.
 
-4. **Wire resolver:** Inject `InstrumentResolver` into the service layer
+3. **Wire resolver:** Inject `InstrumentResolver` into the service layer
    (it is already available in the dependency graph via refdata package).
 
-5. **Seed script:** Remove the KWH skip workaround in `cmd/seed-dev/cmd/fixtures.go`.
+4. **Seed script:** Remove the KWH skip workaround in `cmd/seed-dev/cmd/fixtures.go`.
 
-6. **Events proto:** Update `FinancialBookingLogPostedEvent` fields
-   (`total_debits`, `total_credits`) from `google.type.Money` to `InstrumentAmount`.
+5. **Frontend/gateway:** Verify posting amount rendering handles InstrumentAmount
+   format (string amount + instrument_code vs units/nanos + currency_code).
 
-### Phase 2: position-keeping
+### Phase 3: position-keeping
 
 1. **balance_mapper.go:** Replace `ToDomainMoney()` and
    `ToDomainMoneyFromInstrumentAmount()` to use `InstrumentResolver` instead
@@ -134,7 +180,7 @@ conversion paths.
 
 2. Wire `InstrumentResolver` into the adapter layer.
 
-### Phase 3: current-account
+### Phase 4: current-account
 
 1. **domain/quantity.go:** Remove the explicit `CURRENCY` dimension check in
    `NewMoneyFromInstrument()`. Allow any dimension registered in reference data.
@@ -142,7 +188,15 @@ conversion paths.
 2. Verify all callers handle non-monetary dimensions correctly (account creation,
    balance queries).
 
-### Phase 4: Cleanup
+3. **current_account_events.proto:** Scope each of the 9 Money fields:
+   - Migrate to InstrumentAmount: `closing_balance`, `transaction_amount`,
+     `new_balance`, `new_available_balance` (these carry the account's instrument)
+   - Domain decision needed: `overdraft_limit`, `previous_limit`,
+     `attempted_amount`, `current_balance`, `shortage` - overdraft may be an
+     inherently monetary concept. If so, these can remain as Money or be migrated
+     with a CURRENCY dimension constraint at the application layer.
+
+### Phase 5: Cleanup
 
 1. Mark `ParseCurrency()` and `CurrencyToInstrument()` as deprecated with
    clear migration guidance pointing to `InstrumentResolver`.
@@ -150,7 +204,25 @@ conversion paths.
 2. Remove unused `Currency` constants from service domain packages once no
    production code references them (test fixtures may retain them).
 
-3. Update `google.type.Money` usage in any remaining event protos.
+3. Assess whether `MoneyAmount` wrapper in `common/v1/types.proto` is still
+   needed after the migration.
+
+## Deployment
+
+**Pre-deployment checklist:**
+
+1. **Drain the outbox.** Before deploying proto changes, ensure all pending events
+   in the outbox table are published. Unprocessed events serialized with the old
+   proto schema (google.type.Money wire format) would be silently corrupt after
+   deployment. This is operationally trivial in pre-production.
+
+2. **Deploy all proto changes atomically.** Do not deploy Phase 1 proto changes
+   without the corresponding Phase 2 Go adapter changes in the same release.
+   A half-deployed state where the proto expects InstrumentAmount but the Go code
+   still calls `ParseCurrency()` would fail on every request.
+
+3. **Verify Kafka consumers.** Confirm no downstream consumers depend on the
+   `google.type.Money` wire format for financial accounting events.
 
 ## Non-Goals
 
@@ -160,53 +232,68 @@ conversion paths.
 - **Adding new instrument types to reference data** - instruments are tenant
   configuration, not platform changes
 - **Changing the InstrumentAmount proto** - it is already production-ready
+- **InstrumentAmount.version migration story** - version=1 is correct for this
+  migration; version evolution is a separate concern
 
 ## Testing Strategy
 
 ### Unit Tests
-- `fromProtoMoney()` (or its replacement) accepts "GBP", "KWH", "TONNE_CO2E",
-  "GPU_HOUR" and rejects empty/invalid codes
+- Adapter conversion accepts "GBP", "KWH", "TONNE_CO2E", "GPU_HOUR" and rejects
+  empty/invalid codes
 - Posting capture roundtrip for non-fiat instruments
 - Balance mapper converts non-fiat amounts correctly
+- CEL validation rules reject zero/negative InstrumentAmount values
 
 ### Integration Tests
 - End-to-end: create booking log with KWH instrument, capture postings, verify
   they appear in the booking log detail response
 - Seed script deposits KWH successfully (no skip workaround)
 - Demo environment shows KWH transactions on the ledger detail page
+- Non-fiat postings round-trip correctly: create, store, query, display
 
 ### Regression Tests
 - All existing GBP/USD posting tests continue to pass unchanged
 - Payment-order tests remain currency-only
+- ListLedgerPostings filtering works for both "GBP" and "KWH" instrument codes
 
 ## Complexity Assessment
 
 | Phase | Estimate | Parallelizable |
 |-------|----------|----------------|
-| Phase 1: financial-accounting | 3 points | No (proto change is foundation) |
-| Phase 2: position-keeping | 2 points | Yes (after Phase 1 proto) |
-| Phase 3: current-account | 2 points | Yes (after Phase 1 proto) |
-| Phase 4: Cleanup | 1 point | Yes |
-| **Total** | **8 points** | Phases 2-4 parallelize after Phase 1 |
+| Phase 1: Proto migration | 3 points | No (foundation) |
+| Phase 2: financial-accounting Go | 3 points | No (depends on Phase 1) |
+| Phase 3: position-keeping | 2 points | Yes (after Phase 1) |
+| Phase 4: current-account + events | 3 points | Yes (after Phase 1) |
+| Phase 5: Cleanup | 2 points | Yes |
+| **Total** | **13 points** | Phases 3-5 parallelize after Phase 2 |
 
-Critical path: Phase 1 (proto + financial-accounting) then Phases 2-4 in parallel.
+Critical path: Phase 1 (proto) -> Phase 2 (financial-accounting Go) -> deploy.
+Phases 3-5 can follow in parallel.
 
 ## Success Criteria
 
 1. KWH ledger detail page shows postings on the demo environment
 2. Seed script creates KWH deposits without skipping
 3. `ParseCurrency()` has zero callers in production code paths
-4. All existing fiat tests pass without modification
-5. payment-order remains currency-only (no regression)
+4. Non-fiat postings round-trip correctly (create, store, query, display)
+5. All existing fiat tests pass without modification
+6. payment-order remains currency-only (no regression)
+7. Proto-level CEL validation enforces positive amounts for InstrumentAmount
+
+## Resolved Questions
+
+1. **Proto backward compatibility:** Clean swap acceptable. No external consumers,
+   pre-production system, outbox drain eliminates wire-format corruption risk.
+
+2. **Event consumers:** Events are proto-serialized in the outbox
+   (`shared/platform/events/outbox_pgx.go:359`). Drain outbox before deploying.
+   No external Kafka consumers depend on the Money wire format.
 
 ## Open Questions
 
-1. **Proto backward compatibility:** Changing `LedgerPosting.posting_amount` from
-   `google.type.Money` to `InstrumentAmount` is a breaking proto change. Should we
-   add a new field and deprecate the old one, or is a clean swap acceptable given
-   no external consumers? (Recommendation: clean swap - no external consumers exist
-   yet, and maintaining two fields adds permanent complexity.)
-
-2. **Event consumers:** Do any downstream consumers of
-   `FinancialBookingLogPostedEvent` depend on the `google.type.Money` format for
-   `total_debits`/`total_credits`? Need to audit Kafka consumers.
+1. **current_account_events overdraft fields:** Are overdraft-related fields
+   (`overdraft_limit`, `previous_limit`, `shortage`) inherently monetary concepts
+   that should stay as Money, or should they migrate to InstrumentAmount for
+   consistency? This is a domain decision - overdraft limits on a KWH account
+   may not make business sense today, but restricting them at the proto level
+   creates a future constraint.
