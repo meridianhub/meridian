@@ -79,7 +79,9 @@ func (c Currency) DecimalPlaces() int32 {
 
 // ParseCurrency converts a string to a Currency type with validation.
 //
-// Deprecated: Use shared/pkg/refdata.InstrumentResolver.Resolve() instead.
+// Deprecated: Use InstrumentResolver.Resolve() for all new code.
+// This function only supports ISO 4217 currencies. For multi-asset support,
+// resolve instrument properties from Reference Data via InstrumentResolver.
 func ParseCurrency(s string) (Currency, error) {
 	c := Currency(s)
 	if !c.IsValid() {
