@@ -1,6 +1,8 @@
 # Meridian
 
 [![Build & Test](https://github.com/meridianhub/meridian/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/build.yml?query=branch%3Adevelop)
+[![Deploy Develop](https://github.com/meridianhub/meridian/actions/workflows/deploy-develop.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/deploy-develop.yml)
+[![Deploy Demo](https://github.com/meridianhub/meridian/actions/workflows/deploy-demo.yml/badge.svg?branch=demo)](https://github.com/meridianhub/meridian/actions/workflows/deploy-demo.yml)
 [![Nightly](https://github.com/meridianhub/meridian/actions/workflows/nightly.yml/badge.svg)](https://github.com/meridianhub/meridian/actions/workflows/nightly.yml)
 [![Code Quality](https://github.com/meridianhub/meridian/actions/workflows/quality.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/quality.yml?query=branch%3Adevelop)
 [![Security Scanning](https://github.com/meridianhub/meridian/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/security.yml?query=branch%3Adevelop)
