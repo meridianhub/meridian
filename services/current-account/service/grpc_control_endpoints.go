@@ -344,10 +344,14 @@ func (s *Service) publishAccountClosedEvent(
 	accountID, reason, actorID, correlationID string,
 	actionTimestamp, now time.Time,
 ) error {
+	version := int32(account.Balance().Instrument().Version)
+	if version == 0 {
+		version = 1
+	}
 	closingBalance := &quantityv1.InstrumentAmount{
 		Amount:         account.Balance().Amount().String(),
 		InstrumentCode: account.Balance().InstrumentCode(),
-		Version:        int32(account.Balance().Instrument().Version),
+		Version:        version,
 	}
 	event := &eventsv1.AccountClosedEvent{
 		EventId:        uuid.New().String(),
