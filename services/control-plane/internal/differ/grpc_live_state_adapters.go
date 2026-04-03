@@ -93,7 +93,7 @@ func (c *GRPCReferenceDataClient) ListNonActiveInstrumentCodes(ctx context.Conte
 		})
 		if err != nil {
 			if isEmptyState(err) {
-				return nil, nil
+				return result, nil
 			}
 			return nil, fmt.Errorf("list non-active instruments: %w", err)
 		}
