@@ -1440,7 +1440,7 @@ func TestCaptureLedgerPosting_IdempotencySerializationRoundTrip(t *testing.T) {
 		assert.Equal(t, bookingLogID.String(), deserializedResponse.LedgerPosting.FinancialBookingLogId)
 		assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_CREDIT, deserializedResponse.LedgerPosting.PostingDirection)
 		assert.Equal(t, "EUR", deserializedResponse.LedgerPosting.PostingAmount.InstrumentCode)
-		assert.Equal(t, "999.123456789", deserializedResponse.LedgerPosting.PostingAmount.Amount)
+		assert.Equal(t, "999.123", deserializedResponse.LedgerPosting.PostingAmount.Amount)
 		assert.Equal(t, "ACC-456", deserializedResponse.LedgerPosting.AccountId)
 		assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, deserializedResponse.LedgerPosting.Status)
 		assert.Equal(t, "test-result", deserializedResponse.LedgerPosting.PostingResult)

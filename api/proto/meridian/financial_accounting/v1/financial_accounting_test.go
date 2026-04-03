@@ -69,8 +69,8 @@ func TestLedgerPostingCreation(t *testing.T) {
 	if posting.PostingAmount.InstrumentCode != "GBP" {
 		t.Errorf("Expected GBP currency, got %s", posting.PostingAmount.InstrumentCode)
 	}
-	if posting.PostingAmount.Amount != "100" {
-		t.Errorf("Expected 100 amount, got %s", posting.PostingAmount.Amount)
+	if posting.PostingAmount.Amount != "100.00000005" {
+		t.Errorf("Expected 100.00000005 amount, got %s", posting.PostingAmount.Amount)
 	}
 }
 

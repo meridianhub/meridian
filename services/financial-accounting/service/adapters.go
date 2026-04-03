@@ -42,6 +42,10 @@ func parseUUID(s string) (uuid.UUID, error) {
 //
 // The conversion parses the string amount and creates an Instrument from the instrument code.
 // This supports any asset type (currencies, energy, commodities, etc.).
+//
+// For known ISO 4217 currencies (GBP, USD, EUR, etc.), the instrument is created via
+// CurrencyToInstrument which sets the correct dimension and precision. For unknown
+// instrument codes, precision is inferred from the amount string's decimal places.
 func fromProtoInstrumentAmount(ia *quantityv1.InstrumentAmount) (domain.Money, error) {
 	if ia == nil {
 		return domain.Money{}, ErrNilInstrumentAmount
@@ -52,12 +56,36 @@ func fromProtoInstrumentAmount(ia *quantityv1.InstrumentAmount) (domain.Money, e
 		return domain.Money{}, fmt.Errorf("invalid amount: %w", err)
 	}
 
+	// Try known currency codes first for backward compatibility.
+	// This preserves the correct dimension ("CURRENCY") and precision (e.g., 2 for GBP).
+	if currency, currErr := domain.ParseCurrency(ia.InstrumentCode); currErr == nil {
+		instrument, instErr := domain.CurrencyToInstrument(currency)
+		if instErr == nil {
+			return domain.NewMoney(amount, instrument), nil
+		}
+	}
+
+	// For non-currency instrument codes, infer precision from the amount string.
+	precision := inferPrecisionFromAmount(ia.Amount)
+
 	instrument := domain.Instrument{
-		Code:    ia.InstrumentCode,
-		Version: uint32(ia.Version),
+		Code:      ia.InstrumentCode,
+		Version:   uint32(ia.Version),
+		Precision: precision,
 	}
 
 	return domain.NewMoney(amount, instrument), nil
+}
+
+// inferPrecisionFromAmount derives the number of decimal places from an amount string.
+// For example: "100.50" returns 2, "1.234567" returns 6, "100" returns 0.
+func inferPrecisionFromAmount(amount string) int {
+	for i := len(amount) - 1; i >= 0; i-- {
+		if amount[i] == '.' {
+			return len(amount) - 1 - i
+		}
+	}
+	return 0
 }
 
 // toProtoInstrumentAmount converts domain Money to protobuf InstrumentAmount.
