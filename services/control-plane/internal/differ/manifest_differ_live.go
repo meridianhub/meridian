@@ -72,12 +72,16 @@ func (d *ManifestDiffer) diffInstrumentsAgainstLive(live *LiveState, manifest *c
 			})
 			continue
 		}
-		if !proto.Equal(existing, desired) {
+		if !proto.Equal(existing, desired) || live.NonActiveInstruments[code] {
+			desc := describeInstrumentChanges(code, existing, desired)
+			if live.NonActiveInstruments[code] {
+				desc = fmt.Sprintf("Reactivate instrument %s (currently non-ACTIVE)", code)
+			}
 			plan.Actions = append(plan.Actions, PlannedAction{
 				ResourceType: ResourceInstrument,
 				ResourceCode: code,
 				Action:       ActionUpdate,
-				Description:  describeInstrumentChanges(code, existing, desired),
+				Description:  desc,
 			})
 		} else {
 			plan.Actions = append(plan.Actions, PlannedAction{

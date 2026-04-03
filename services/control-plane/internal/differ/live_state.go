@@ -19,6 +19,12 @@ type LiveState struct {
 	ProviderConnections []*controlplanev1.ProviderConnectionConfig
 	InstructionRoutes   []*controlplanev1.InstructionRouteConfig
 
+	// NonActiveInstruments tracks instrument codes that exist but are not ACTIVE
+	// (e.g., DEPRECATED). The diff uses this to force UPDATE instead of NO_CHANGE
+	// so the saga re-activates them. The proto comparison doesn't include status,
+	// so without this, DEPRECATED instruments appear as NO_CHANGE.
+	NonActiveInstruments map[string]bool
+
 	// SystemCodes tracks resources that are system-managed (is_system=true).
 	// Outer key is ResourceType, inner key is the resource code/name.
 	// Resources in this set are excluded from diff planning by filterTenantOwned.

@@ -82,6 +82,33 @@ func (c *GRPCReferenceDataClient) ListInstruments(ctx context.Context) ([]*contr
 	}
 }
 
+// ListNonActiveInstrumentCodes implements ReferenceDataClient.
+func (c *GRPCReferenceDataClient) ListNonActiveInstrumentCodes(ctx context.Context) (map[string]bool, error) {
+	result := make(map[string]bool)
+	pageToken := ""
+	for {
+		resp, err := c.instruments.ListInstruments(ctx, &referencedatav1.ListInstrumentsRequest{
+			PageSize:  defaultPageSize,
+			PageToken: pageToken,
+		})
+		if err != nil {
+			if isEmptyState(err) {
+				return result, nil
+			}
+			return nil, fmt.Errorf("list non-active instruments: %w", err)
+		}
+		for _, inst := range resp.GetInstruments() {
+			if inst.GetStatus() != referencedatav1.InstrumentStatus_INSTRUMENT_STATUS_ACTIVE {
+				result[inst.GetCode()] = true
+			}
+		}
+		pageToken = resp.GetNextPageToken()
+		if pageToken == "" {
+			return result, nil
+		}
+	}
+}
+
 // ListAccountTypes implements ReferenceDataClient.
 func (c *GRPCReferenceDataClient) ListAccountTypes(ctx context.Context) ([]*controlplanev1.AccountTypeDefinition, error) {
 	var result []*controlplanev1.AccountTypeDefinition

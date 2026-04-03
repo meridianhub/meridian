@@ -28,6 +28,10 @@ var (
 type ReferenceDataClient interface {
 	ListInstruments(ctx context.Context) ([]*controlplanev1.InstrumentDefinition, error)
 	ListAccountTypes(ctx context.Context) ([]*controlplanev1.AccountTypeDefinition, error)
+	// ListNonActiveInstrumentCodes returns codes of instruments that exist but are not ACTIVE.
+	// Used by the diff to force UPDATE for instruments that the proto comparison marks as NO_CHANGE
+	// (e.g., DEPRECATED instruments with matching fields).
+	ListNonActiveInstrumentCodes(ctx context.Context) (map[string]bool, error)
 }
 
 // SagaRegistryClient queries the saga-registry service for saga definitions.
@@ -139,6 +143,14 @@ func (p *GRPCLiveStateProvider) scheduleReferenceDataQueries(ctx context.Context
 			return fmt.Errorf("query instruments: %w", err)
 		}
 		state.Instruments = instruments
+		return nil
+	})
+	g.Go(func() error {
+		nonActive, err := p.referenceData.ListNonActiveInstrumentCodes(ctx)
+		if err != nil {
+			return fmt.Errorf("query non-active instruments: %w", err)
+		}
+		state.NonActiveInstruments = nonActive
 		return nil
 	})
 	g.Go(func() error {
