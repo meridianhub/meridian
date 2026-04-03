@@ -21,6 +21,8 @@ export interface ELKLayoutOptions {
   direction?: string
   nodeNodeSpacing?: string
   layerSpacing?: string
+  /** Additional ELK layout options passed through verbatim. */
+  extra?: Record<string, string>
 }
 
 export interface LayoutNode {
@@ -53,14 +55,24 @@ export async function layoutWithELK<T extends Record<string, unknown>>(
     targets: [e.target],
   }))
 
+  const algorithm = options?.algorithm ?? 'layered'
+  const layoutOptions: Record<string, string> = {
+    'elk.algorithm': algorithm,
+    'elk.spacing.nodeNode': options?.nodeNodeSpacing ?? '60',
+  }
+
+  if (algorithm === 'layered') {
+    layoutOptions['elk.direction'] = options?.direction ?? 'DOWN'
+    layoutOptions['elk.layered.spacing.nodeNodeBetweenLayers'] = options?.layerSpacing ?? '100'
+  }
+
+  if (options?.extra) {
+    Object.assign(layoutOptions, options.extra)
+  }
+
   const layout = await elk.layout({
     id: 'root',
-    layoutOptions: {
-      'elk.algorithm': options?.algorithm ?? 'layered',
-      'elk.direction': options?.direction ?? 'DOWN',
-      'elk.spacing.nodeNode': options?.nodeNodeSpacing ?? '60',
-      'elk.layered.spacing.nodeNodeBetweenLayers': options?.layerSpacing ?? '100',
-    },
+    layoutOptions,
     children: elkNodes,
     edges: elkEdges,
   })
