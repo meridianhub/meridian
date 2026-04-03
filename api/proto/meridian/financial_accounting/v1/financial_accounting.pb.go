@@ -7,10 +7,6 @@
 package financialaccountingv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	v1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -19,6 +15,9 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -2087,41 +2086,39 @@ func file_meridian_financial_accounting_v1_financial_accounting_proto_rawDescGZI
 	return file_meridian_financial_accounting_v1_financial_accounting_proto_rawDescData
 }
 
-var (
-	file_meridian_financial_accounting_v1_financial_accounting_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-	file_meridian_financial_accounting_v1_financial_accounting_proto_msgTypes  = make([]protoimpl.MessageInfo, 20)
-	file_meridian_financial_accounting_v1_financial_accounting_proto_goTypes   = []any{
-		(ControlAction)(0),                          // 0: meridian.financial_accounting.v1.ControlAction
-		(*FinancialBookingLog)(nil),                 // 1: meridian.financial_accounting.v1.FinancialBookingLog
-		(*LedgerPosting)(nil),                       // 2: meridian.financial_accounting.v1.LedgerPosting
-		(*InitiateFinancialBookingLogRequest)(nil),  // 3: meridian.financial_accounting.v1.InitiateFinancialBookingLogRequest
-		(*InitiateFinancialBookingLogResponse)(nil), // 4: meridian.financial_accounting.v1.InitiateFinancialBookingLogResponse
-		(*UpdateFinancialBookingLogRequest)(nil),    // 5: meridian.financial_accounting.v1.UpdateFinancialBookingLogRequest
-		(*UpdateFinancialBookingLogResponse)(nil),   // 6: meridian.financial_accounting.v1.UpdateFinancialBookingLogResponse
-		(*RetrieveFinancialBookingLogRequest)(nil),  // 7: meridian.financial_accounting.v1.RetrieveFinancialBookingLogRequest
-		(*RetrieveFinancialBookingLogResponse)(nil), // 8: meridian.financial_accounting.v1.RetrieveFinancialBookingLogResponse
-		(*CaptureLedgerPostingRequest)(nil),         // 9: meridian.financial_accounting.v1.CaptureLedgerPostingRequest
-		(*CaptureLedgerPostingResponse)(nil),        // 10: meridian.financial_accounting.v1.CaptureLedgerPostingResponse
-		(*UpdateLedgerPostingRequest)(nil),          // 11: meridian.financial_accounting.v1.UpdateLedgerPostingRequest
-		(*UpdateLedgerPostingResponse)(nil),         // 12: meridian.financial_accounting.v1.UpdateLedgerPostingResponse
-		(*RetrieveLedgerPostingRequest)(nil),        // 13: meridian.financial_accounting.v1.RetrieveLedgerPostingRequest
-		(*RetrieveLedgerPostingResponse)(nil),       // 14: meridian.financial_accounting.v1.RetrieveLedgerPostingResponse
-		(*ListFinancialBookingLogsRequest)(nil),     // 15: meridian.financial_accounting.v1.ListFinancialBookingLogsRequest
-		(*ListFinancialBookingLogsResponse)(nil),    // 16: meridian.financial_accounting.v1.ListFinancialBookingLogsResponse
-		(*ListLedgerPostingsRequest)(nil),           // 17: meridian.financial_accounting.v1.ListLedgerPostingsRequest
-		(*ListLedgerPostingsResponse)(nil),          // 18: meridian.financial_accounting.v1.ListLedgerPostingsResponse
-		(*ControlFinancialBookingLogRequest)(nil),   // 19: meridian.financial_accounting.v1.ControlFinancialBookingLogRequest
-		(*ControlFinancialBookingLogResponse)(nil),  // 20: meridian.financial_accounting.v1.ControlFinancialBookingLogResponse
-		(v1.TransactionStatus)(0),                   // 21: meridian.common.v1.TransactionStatus
-		(*timestamppb.Timestamp)(nil),               // 22: google.protobuf.Timestamp
-		(v1.PostingDirection)(0),                    // 23: meridian.common.v1.PostingDirection
-		(*v11.InstrumentAmount)(nil),                // 24: meridian.quantity.v1.InstrumentAmount
-		(v1.AccountServiceDomain)(0),                // 25: meridian.common.v1.AccountServiceDomain
-		(*v1.IdempotencyKey)(nil),                   // 26: meridian.common.v1.IdempotencyKey
-		(*v1.Pagination)(nil),                       // 27: meridian.common.v1.Pagination
-		(*v1.PaginationResponse)(nil),               // 28: meridian.common.v1.PaginationResponse
-	}
-)
+var file_meridian_financial_accounting_v1_financial_accounting_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_meridian_financial_accounting_v1_financial_accounting_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_meridian_financial_accounting_v1_financial_accounting_proto_goTypes = []any{
+	(ControlAction)(0),                          // 0: meridian.financial_accounting.v1.ControlAction
+	(*FinancialBookingLog)(nil),                 // 1: meridian.financial_accounting.v1.FinancialBookingLog
+	(*LedgerPosting)(nil),                       // 2: meridian.financial_accounting.v1.LedgerPosting
+	(*InitiateFinancialBookingLogRequest)(nil),  // 3: meridian.financial_accounting.v1.InitiateFinancialBookingLogRequest
+	(*InitiateFinancialBookingLogResponse)(nil), // 4: meridian.financial_accounting.v1.InitiateFinancialBookingLogResponse
+	(*UpdateFinancialBookingLogRequest)(nil),    // 5: meridian.financial_accounting.v1.UpdateFinancialBookingLogRequest
+	(*UpdateFinancialBookingLogResponse)(nil),   // 6: meridian.financial_accounting.v1.UpdateFinancialBookingLogResponse
+	(*RetrieveFinancialBookingLogRequest)(nil),  // 7: meridian.financial_accounting.v1.RetrieveFinancialBookingLogRequest
+	(*RetrieveFinancialBookingLogResponse)(nil), // 8: meridian.financial_accounting.v1.RetrieveFinancialBookingLogResponse
+	(*CaptureLedgerPostingRequest)(nil),         // 9: meridian.financial_accounting.v1.CaptureLedgerPostingRequest
+	(*CaptureLedgerPostingResponse)(nil),        // 10: meridian.financial_accounting.v1.CaptureLedgerPostingResponse
+	(*UpdateLedgerPostingRequest)(nil),          // 11: meridian.financial_accounting.v1.UpdateLedgerPostingRequest
+	(*UpdateLedgerPostingResponse)(nil),         // 12: meridian.financial_accounting.v1.UpdateLedgerPostingResponse
+	(*RetrieveLedgerPostingRequest)(nil),        // 13: meridian.financial_accounting.v1.RetrieveLedgerPostingRequest
+	(*RetrieveLedgerPostingResponse)(nil),       // 14: meridian.financial_accounting.v1.RetrieveLedgerPostingResponse
+	(*ListFinancialBookingLogsRequest)(nil),     // 15: meridian.financial_accounting.v1.ListFinancialBookingLogsRequest
+	(*ListFinancialBookingLogsResponse)(nil),    // 16: meridian.financial_accounting.v1.ListFinancialBookingLogsResponse
+	(*ListLedgerPostingsRequest)(nil),           // 17: meridian.financial_accounting.v1.ListLedgerPostingsRequest
+	(*ListLedgerPostingsResponse)(nil),          // 18: meridian.financial_accounting.v1.ListLedgerPostingsResponse
+	(*ControlFinancialBookingLogRequest)(nil),   // 19: meridian.financial_accounting.v1.ControlFinancialBookingLogRequest
+	(*ControlFinancialBookingLogResponse)(nil),  // 20: meridian.financial_accounting.v1.ControlFinancialBookingLogResponse
+	(v1.TransactionStatus)(0),                   // 21: meridian.common.v1.TransactionStatus
+	(*timestamppb.Timestamp)(nil),               // 22: google.protobuf.Timestamp
+	(v1.PostingDirection)(0),                    // 23: meridian.common.v1.PostingDirection
+	(*v11.InstrumentAmount)(nil),                // 24: meridian.quantity.v1.InstrumentAmount
+	(v1.AccountServiceDomain)(0),                // 25: meridian.common.v1.AccountServiceDomain
+	(*v1.IdempotencyKey)(nil),                   // 26: meridian.common.v1.IdempotencyKey
+	(*v1.Pagination)(nil),                       // 27: meridian.common.v1.Pagination
+	(*v1.PaginationResponse)(nil),               // 28: meridian.common.v1.PaginationResponse
+}
 var file_meridian_financial_accounting_v1_financial_accounting_proto_depIdxs = []int32{
 	21, // 0: meridian.financial_accounting.v1.FinancialBookingLog.status:type_name -> meridian.common.v1.TransactionStatus
 	22, // 1: meridian.financial_accounting.v1.FinancialBookingLog.created_at:type_name -> google.protobuf.Timestamp
