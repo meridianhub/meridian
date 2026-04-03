@@ -334,8 +334,6 @@ consistent fiat-only rejection. Phases 4-5 can deploy independently.
    (`shared/platform/events/outbox_pgx.go:359`). Drain outbox before deploying.
    No external Kafka consumers depend on the Money wire format.
 
-## Resolved Questions (continued)
-
 3. **current_account_events overdraft fields:** All 10 fields migrate to
    InstrumentAmount. The type system should support any asset; business rules
    constrain which assets allow overdrafts at the application layer, not at the
