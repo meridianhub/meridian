@@ -71,7 +71,7 @@ jobs:
             echo "::error::Non-allowlisted vulnerabilities detected: $NON_ALLOWLISTED"
             exit 1
           fi
-          echo "::warning::Suppressed allowlisted Dex false positive(s) — see ADR-0036"
+          echo "::warning::Suppressed allowlisted false positive(s) (Dex, Docker/Moby) — see ADR-0036"
         fi
 
   gosec:
