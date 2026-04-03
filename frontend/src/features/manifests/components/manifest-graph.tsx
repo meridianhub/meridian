@@ -84,6 +84,20 @@ interface ManifestNodeData {
   [key: string]: unknown
 }
 
+const HANDLE_CLASS = '!bg-transparent !border-0 !w-0 !h-0'
+
+/** Invisible handles on all four sides so edges can attach to the nearest side. */
+function FourSideHandles() {
+  return (
+    <>
+      <Handle id="top" type="source" position={Position.Top} className={HANDLE_CLASS} />
+      <Handle id="bottom" type="source" position={Position.Bottom} className={HANDLE_CLASS} />
+      <Handle id="left" type="source" position={Position.Left} className={HANDLE_CLASS} />
+      <Handle id="right" type="source" position={Position.Right} className={HANDLE_CLASS} />
+    </>
+  )
+}
+
 const InstrumentNode = memo(function InstrumentNode({ data }: { data: ManifestNodeData }) {
   const node = data.manifestNode
   const code = node.data.code as string
@@ -99,7 +113,7 @@ const InstrumentNode = memo(function InstrumentNode({ data }: { data: ManifestNo
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -113,7 +127,6 @@ const InstrumentNode = memo(function InstrumentNode({ data }: { data: ManifestNo
         </TooltipTrigger>
         <TooltipContent side="top">{node.label} ({code})</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -133,7 +146,7 @@ const AccountTypeNode = memo(function AccountTypeNode({ data }: { data: Manifest
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -147,7 +160,6 @@ const AccountTypeNode = memo(function AccountTypeNode({ data }: { data: Manifest
         </TooltipTrigger>
         <TooltipContent side="top">{node.label} ({code})</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -167,7 +179,7 @@ const ValuationRuleNode = memo(function ValuationRuleNode({ data }: { data: Mani
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -179,7 +191,6 @@ const ValuationRuleNode = memo(function ValuationRuleNode({ data }: { data: Mani
         </TooltipTrigger>
         <TooltipContent side="top">Valuation: {from} to {to}</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -199,7 +210,7 @@ const SagaNode = memo(function SagaNode({ data }: { data: ManifestNodeData }) {
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -214,7 +225,6 @@ const SagaNode = memo(function SagaNode({ data }: { data: ManifestNodeData }) {
         </TooltipTrigger>
         <TooltipContent side="top">{node.label} ({trigger})</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -233,7 +243,7 @@ const MarketDataNode = memo(function MarketDataNode({ data }: { data: ManifestNo
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -246,7 +256,6 @@ const MarketDataNode = memo(function MarketDataNode({ data }: { data: ManifestNo
         </TooltipTrigger>
         <TooltipContent side="top">{node.label} ({code})</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -265,7 +274,7 @@ const OrganizationNode = memo(function OrganizationNode({ data }: { data: Manife
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -278,7 +287,6 @@ const OrganizationNode = memo(function OrganizationNode({ data }: { data: Manife
         </TooltipTrigger>
         <TooltipContent side="top">{node.label} ({code})</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -298,7 +306,7 @@ const InternalAccountNode = memo(function InternalAccountNode({ data }: { data: 
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -312,7 +320,6 @@ const InternalAccountNode = memo(function InternalAccountNode({ data }: { data: 
         </TooltipTrigger>
         <TooltipContent side="top">{node.label} ({code})</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -330,7 +337,7 @@ const MappingNode = memo(function MappingNode({ data }: { data: ManifestNodeData
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -342,7 +349,6 @@ const MappingNode = memo(function MappingNode({ data }: { data: ManifestNodeData
         </TooltipTrigger>
         <TooltipContent side="top">Mapping: {node.label}</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -361,7 +367,7 @@ const PaymentRailNode = memo(function PaymentRailNode({ data }: { data: Manifest
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -374,7 +380,6 @@ const PaymentRailNode = memo(function PaymentRailNode({ data }: { data: Manifest
         </TooltipTrigger>
         <TooltipContent side="top">Payment Rail: {provider}</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -392,7 +397,7 @@ const OperationalGatewayNode = memo(function OperationalGatewayNode({ data }: { 
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -404,7 +409,6 @@ const OperationalGatewayNode = memo(function OperationalGatewayNode({ data }: { 
         </TooltipTrigger>
         <TooltipContent side="top">{node.label}</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -423,7 +427,7 @@ const ProviderConnectionNode = memo(function ProviderConnectionNode({ data }: { 
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -436,7 +440,6 @@ const ProviderConnectionNode = memo(function ProviderConnectionNode({ data }: { 
         </TooltipTrigger>
         <TooltipContent side="top">{node.label} ({connectionId})</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -455,7 +458,7 @@ const InstructionRouteNode = memo(function InstructionRouteNode({ data }: { data
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -468,7 +471,6 @@ const InstructionRouteNode = memo(function InstructionRouteNode({ data }: { data
         </TooltipTrigger>
         <TooltipContent side="top">{node.label} via {connectionId}</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -487,7 +489,7 @@ const EventChannelNode = memo(function EventChannelNode({ data }: { data: Manife
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -499,7 +501,6 @@ const EventChannelNode = memo(function EventChannelNode({ data }: { data: Manife
         </TooltipTrigger>
         <TooltipContent side="top">Event Channel: {channel}</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -517,7 +518,7 @@ const PartyTypeNode = memo(function PartyTypeNode({ data }: { data: ManifestNode
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!bg-transparent !border-0 !w-0 !h-0" />
+      <FourSideHandles />
       <Tooltip>
         <TooltipTrigger asChild>
           <div
@@ -529,7 +530,6 @@ const PartyTypeNode = memo(function PartyTypeNode({ data }: { data: ManifestNode
         </TooltipTrigger>
         <TooltipContent side="top">Party Type: {node.label}</TooltipContent>
       </Tooltip>
-      <Handle type="source" position={Position.Bottom} className="!bg-transparent !border-0 !w-0 !h-0" />
     </>
   )
 })
@@ -549,6 +549,23 @@ const nodeTypes = {
   instruction_route: InstructionRouteNode,
   party_type: PartyTypeNode,
   event_channel: EventChannelNode,
+}
+
+/** Pick the closest side handle pair based on relative node positions. */
+function pickHandles(
+  src: { x: number; y: number },
+  tgt: { x: number; y: number },
+): { sourceHandle: string; targetHandle: string } {
+  const dx = tgt.x - src.x
+  const dy = tgt.y - src.y
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return dx > 0
+      ? { sourceHandle: 'right', targetHandle: 'left' }
+      : { sourceHandle: 'left', targetHandle: 'right' }
+  }
+  return dy > 0
+    ? { sourceHandle: 'bottom', targetHandle: 'top' }
+    : { sourceHandle: 'top', targetHandle: 'bottom' }
 }
 
 function buildReactFlowEdges(manifestEdges: ManifestEdge[]): Edge[] {
@@ -624,6 +641,18 @@ async function layoutManifestGraph(
       },
     },
   )
+
+  // Assign optimal handle pairs based on laid-out node positions
+  const posById = new Map(rfNodes.map((n) => [n.id, n.position]))
+  for (const edge of rfEdges) {
+    const srcPos = posById.get(edge.source)
+    const tgtPos = posById.get(edge.target)
+    if (srcPos && tgtPos) {
+      const handles = pickHandles(srcPos, tgtPos)
+      edge.sourceHandle = handles.sourceHandle
+      edge.targetHandle = handles.targetHandle
+    }
+  }
 
   return { nodes: rfNodes, edges: rfEdges }
 }
@@ -948,6 +977,7 @@ export function ManifestGraph({ manifest, className, _fullscreen }: ManifestGrap
         {(Object.keys(NODE_THEMES) as ManifestNodeType[]).map((type) => {
           const theme = NODE_THEMES[type]
           const count = nodeCountByType[type]
+          if (count === 0) return null
           return (
             <label key={type} className="flex items-center gap-2 cursor-pointer">
               <input
