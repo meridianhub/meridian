@@ -172,7 +172,12 @@ conversion paths.
    non-fiat too.
 
 3. **Posting service:** Replace `buildDepositPostings()` to use the resolver
-   for instrument validation.
+   for instrument validation. **Critical:** `decimalFromCents()` at
+   `posting_service.go:78` hardcodes division by 100, and `DepositEvent.AmountCents`
+   is cent-based. After removing ParseCurrency, KWH amounts would silently get
+   divided by 100 - data corruption. Either change `DepositEvent` to carry a
+   decimal string + instrument code, or use `InstrumentResolver` to look up
+   precision and apply the correct divisor.
 
 4. **Seed script:** Remove the KWH skip workaround in `cmd/seed-dev/cmd/fixtures.go`.
 
@@ -284,7 +289,7 @@ conversion paths.
 | Phase | Estimate | Parallelizable |
 |-------|----------|----------------|
 | Phase 1: Proto migration | 3 points | No (foundation) |
-| Phase 2: financial-accounting Go | 3 points | No (depends on Phase 1) |
+| Phase 2: financial-accounting Go | 3 points | Atomic with Phase 1 (proto change breaks compilation) |
 | Phase 3: position-keeping | 2 points | Yes (after Phase 1) |
 | Phase 4: current-account + events | 3 points | Yes (after Phase 1) |
 | Phase 5: Cleanup | 2 points | Yes |
