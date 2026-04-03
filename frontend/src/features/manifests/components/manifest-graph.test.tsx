@@ -229,21 +229,17 @@ describe('ManifestGraph', () => {
   })
 
   describe('filter sidebar', () => {
-    it('renders type filter checkboxes', async () => {
+    it('renders type filter checkboxes for types with data', async () => {
       renderGraph(energyManifest)
+      // Only types with nodes in the manifest are shown
       expect(await screen.findByLabelText('Show Instruments')).toBeInTheDocument()
       expect(screen.getByLabelText('Show Account Types')).toBeInTheDocument()
       expect(screen.getByLabelText('Show Valuation Rules')).toBeInTheDocument()
       expect(screen.getByLabelText('Show Sagas')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Payment Rails')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Party Types')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Mappings')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Operational Gateway')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Provider Connections')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Instruction Routes')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Market Data')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Organizations')).toBeInTheDocument()
-      expect(screen.getByLabelText('Show Internal Accounts')).toBeInTheDocument()
+      expect(screen.getByLabelText('Show Event Channels')).toBeInTheDocument()
+      // Types with 0 nodes are hidden
+      expect(screen.queryByLabelText('Show Payment Rails')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Show Mappings')).not.toBeInTheDocument()
     })
 
     it('shows node counts per type', async () => {
