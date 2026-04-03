@@ -6,11 +6,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
-	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 )
 
@@ -19,8 +19,8 @@ var (
 	// This error is wrapped in InvalidArgument gRPC status codes.
 	ErrEmptyUUID = errors.New("UUID cannot be empty")
 
-	// ErrNilMoney is returned when proto money is nil
-	ErrNilMoney = errors.New("money cannot be nil")
+	// ErrNilInstrumentAmount is returned when proto InstrumentAmount is nil
+	ErrNilInstrumentAmount = errors.New("instrument amount cannot be nil")
 )
 
 // parseUUID parses and validates a UUID string.
@@ -38,64 +38,35 @@ func parseUUID(s string) (uuid.UUID, error) {
 	return id, nil
 }
 
-// fromProtoMoney converts protobuf Money to domain Money.
+// fromProtoInstrumentAmount converts protobuf InstrumentAmount to domain Money.
 //
-// The conversion creates an Instrument from the proto currency code and constructs
-// a Qty[Monetary] type. The proto google.type.Money uses currency codes (ISO 4217)
-// which are mapped to instruments with dimension "CURRENCY".
-func fromProtoMoney(protoMoney *money.Money) (domain.Money, error) {
-	if protoMoney == nil {
-		return domain.Money{}, ErrNilMoney
+// The conversion parses the string amount and creates an Instrument from the instrument code.
+// This supports any asset type (currencies, energy, commodities, etc.).
+func fromProtoInstrumentAmount(ia *quantityv1.InstrumentAmount) (domain.Money, error) {
+	if ia == nil {
+		return domain.Money{}, ErrNilInstrumentAmount
 	}
 
-	// Convert units and nanos to decimal
-	// For example: units: 123, nanos: 456789000 -> 123.456789
-	amount := decimal.NewFromInt(protoMoney.Units)
-	if protoMoney.Nanos != 0 {
-		nanosPart := decimal.NewFromInt(int64(protoMoney.Nanos)).Div(decimal.NewFromInt(1000000000))
-		amount = amount.Add(nanosPart)
-	}
-
-	// Parse and validate currency code
-	currency, err := domain.ParseCurrency(protoMoney.CurrencyCode)
+	amount, err := decimal.NewFromString(ia.Amount)
 	if err != nil {
-		return domain.Money{}, fmt.Errorf("invalid currency: %w", err)
+		return domain.Money{}, fmt.Errorf("invalid amount: %w", err)
 	}
 
-	// Convert Currency to Instrument for Qty[Monetary] construction
-	instrument, err := domain.CurrencyToInstrument(currency)
-	if err != nil {
-		return domain.Money{}, fmt.Errorf("failed to create instrument: %w", err)
+	instrument := domain.Instrument{
+		Code:    ia.InstrumentCode,
+		Version: uint32(ia.Version),
 	}
 
 	return domain.NewMoney(amount, instrument), nil
 }
 
-// toProtoMoney converts domain Money to protobuf google.type.Money.
-// Preserves full decimal precision up to 9 decimal places (nanosecond precision).
-//
-// The conversion extracts the instrument code (which is the currency code for monetary
-// instruments) and the decimal amount to construct the proto message.
-func toProtoMoney(m domain.Money) *money.Money {
-	// Convert decimal amount to units and nanos
-	// For example: 123.456789 USD -> units: 123, nanos: 456789000
-	amount := m.Amount
-	units := amount.IntPart()
-	fraction := amount.Sub(amount.Truncate(0))
-	nanos := fraction.Mul(decimal.NewFromInt(1_000_000_000)).IntPart()
-
-	// Clamp nanos to int32 range to prevent overflow
-	// This handles edge cases with extreme precision
-	if nanos > 999_999_999 {
-		nanos = 999_999_999
-	} else if nanos < -999_999_999 {
-		nanos = -999_999_999
-	}
-
-	return &money.Money{
-		CurrencyCode: m.Instrument.Code, // Use instrument code (e.g., "USD", "GBP")
-		Units:        units,
-		Nanos:        int32(nanos), // #nosec G115 -- Safely clamped to int32 range above
+// toProtoInstrumentAmount converts domain Money to protobuf InstrumentAmount.
+// Preserves full decimal precision via string representation.
+func toProtoInstrumentAmount(m domain.Money) *quantityv1.InstrumentAmount {
+	return &quantityv1.InstrumentAmount{
+		Amount:         m.Amount.String(),
+		InstrumentCode: m.Instrument.Code,
+		Version:        int32(m.Instrument.Version),
 	}
 }
 
@@ -173,7 +144,7 @@ func toProtoLedgerPosting(posting *domain.LedgerPosting) *financialaccountingv1.
 		Id:                    posting.ID.String(),
 		FinancialBookingLogId: posting.FinancialBookingLogID.String(),
 		PostingDirection:      toProtoPostingDirection(posting.Direction),
-		PostingAmount:         toProtoMoney(posting.Amount),
+		PostingAmount:         toProtoInstrumentAmount(posting.Amount),
 		AccountId:             posting.AccountID,
 		AccountServiceDomain:  toProtoAccountServiceDomain(posting.AccountServiceDomain),
 		ValueDate:             timestamppb.New(posting.ValueDate),

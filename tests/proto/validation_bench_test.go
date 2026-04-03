@@ -6,7 +6,7 @@ import (
 	"buf.build/go/protovalidate"
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
-	"google.golang.org/genproto/googleapis/type/money"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -51,10 +51,10 @@ func BenchmarkComplexMessageValidation(b *testing.B) {
 	msg := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: "FBL-123",
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        500000000,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100.5",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "ACC-123",
 		ValueDate: timestamppb.Now(),

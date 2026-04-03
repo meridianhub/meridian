@@ -14,10 +14,10 @@ import (
 	"github.com/lib/pq"
 
 	"github.com/google/uuid"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -437,10 +437,10 @@ func TestCaptureLedgerPosting_Integration_Success(t *testing.T) {
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        500000000, // 100.50 GBP
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100.5",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "ACC-123",
 		ValueDate: timestamppb.Now(),
@@ -482,10 +482,10 @@ func TestCaptureLedgerPosting_Integration_CreditDirection(t *testing.T) {
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        50,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "50",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "ACC-456",
 		ValueDate: timestamppb.Now(),
@@ -510,10 +510,10 @@ func TestCaptureLedgerPosting_Integration_WithIdempotencyKey(t *testing.T) {
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "ACC-123",
 		ValueDate: timestamppb.Now(),
@@ -550,10 +550,10 @@ func TestCaptureLedgerPosting_Integration_InvalidBookingLogID(t *testing.T) {
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: "not-a-uuid",
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "ACC-123",
 		ValueDate: timestamppb.Now(),
@@ -579,10 +579,10 @@ func TestCaptureLedgerPosting_Integration_ZeroAmount(t *testing.T) {
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        0,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "0",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "ACC-123",
 		ValueDate: timestamppb.Now(),
@@ -608,10 +608,10 @@ func TestCaptureLedgerPosting_Integration_MissingAccountID(t *testing.T) {
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "", // Missing
 		ValueDate: timestamppb.Now(),
@@ -1192,10 +1192,10 @@ func TestEndToEnd_CreateAndRetrievePosting(t *testing.T) {
 	createResp, err := ts.grpcClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        250,
-			Nanos:        750000000,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "250.75",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "ACC-E2E-TEST",
 		ValueDate: timestamppb.Now(),
@@ -1227,10 +1227,10 @@ func TestEndToEnd_PostingLifecycle(t *testing.T) {
 	createResp, err := ts.grpcClient.CaptureLedgerPosting(ctx, &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        500,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "500",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId: "ACC-LIFECYCLE",
 		ValueDate: timestamppb.Now(),

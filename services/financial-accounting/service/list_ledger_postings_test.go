@@ -424,7 +424,7 @@ func TestListLedgerPostings_MultipleFilters(t *testing.T) {
 		FinancialBookingLogId: bookingLogID.String(),
 		AccountId:             "ACC-001",
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		Currency:              "USD",
+		InstrumentCode:        "USD",
 		Status:                commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 	}
 
@@ -439,7 +439,7 @@ func TestListLedgerPostings_MultipleFilters(t *testing.T) {
 		posting := resp.LedgerPostings[0]
 		assert.Equal(t, "ACC-001", posting.AccountId)
 		assert.Equal(t, commonv1.PostingDirection_POSTING_DIRECTION_DEBIT, posting.PostingDirection)
-		assert.Equal(t, "USD", posting.PostingAmount.CurrencyCode)
+		assert.Equal(t, "USD", posting.PostingAmount.InstrumentCode)
 		assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, posting.Status)
 	}
 }
@@ -565,8 +565,8 @@ func TestListLedgerPostings_InstrumentResolverValidation(t *testing.T) {
 			}
 
 			resp, err := svc.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
-				Pagination: &commonv1.Pagination{PageSize: 50},
-				Currency:   tt.currency,
+				Pagination:     &commonv1.Pagination{PageSize: 50},
+				InstrumentCode: tt.currency,
 			})
 
 			if tt.wantErr {
@@ -609,8 +609,8 @@ func TestListLedgerPostings_ResolverUnavailable(t *testing.T) {
 	}
 
 	resp, err := svc.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
-		Pagination: &commonv1.Pagination{PageSize: 50},
-		Currency:   "GBP",
+		Pagination:     &commonv1.Pagination{PageSize: 50},
+		InstrumentCode: "GBP",
 	})
 
 	assert.Error(t, err)
@@ -643,8 +643,8 @@ func TestListLedgerPostings_NoResolverSkipsValidation(t *testing.T) {
 	// Previously "GPU_HOUR" would have been rejected by isValidCurrencyCode.
 	// With nil resolver, it passes through to the database filter.
 	resp, err := svc.ListLedgerPostings(ctx, &financialaccountingv1.ListLedgerPostingsRequest{
-		Pagination: &commonv1.Pagination{PageSize: 50},
-		Currency:   "GPU_HOUR",
+		Pagination:     &commonv1.Pagination{PageSize: 50},
+		InstrumentCode: "GPU_HOUR",
 	})
 
 	assert.NoError(t, err)

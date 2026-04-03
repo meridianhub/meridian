@@ -5,8 +5,8 @@ package meridian.financial_accounting.v1;
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
-import "google/type/money.proto";
 import "meridian/common/v1/types.proto";
+import "meridian/quantity/v1/quantity.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1;financialaccountingv1";
@@ -135,13 +135,14 @@ message LedgerPosting {
     not_in: [0]
   }];
 
-  // posting_amount is the monetary amount being posted (must be positive for accounting entries).
-  google.type.Money posting_amount = 4 [
+  // posting_amount is the amount being posted (must be positive for accounting entries).
+  // Uses InstrumentAmount for universal asset support (currencies, energy, commodities, etc.).
+  meridian.quantity.v1.InstrumentAmount posting_amount = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "positive_posting_amount"
       message: "posting amount must be greater than zero"
-      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+      expression: "this.amount.matches('^[1-9][0-9]*(\\\\.[0-9]+)?$') || this.amount.matches('^0\\\\.[0-9]*[1-9][0-9]*$')"
     }
   ];
 
@@ -283,12 +284,13 @@ message CaptureLedgerPostingRequest {
   }];
 
   // posting_amount is the amount to post (must be positive).
-  google.type.Money posting_amount = 3 [
+  // Uses InstrumentAmount for universal asset support (currencies, energy, commodities, etc.).
+  meridian.quantity.v1.InstrumentAmount posting_amount = 3 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "positive_posting_amount_request"
       message: "posting amount must be greater than zero"
-      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+      expression: "this.amount.matches('^[1-9][0-9]*(\\\\.[0-9]+)?$') || this.amount.matches('^0\\\\.[0-9]*[1-9][0-9]*$')"
     }
   ];
 
@@ -399,7 +401,7 @@ message ListFinancialBookingLogsResponse {
 // - AccountCode: Filter by account identifier
 // - PostingDirection: Filter by DEBIT or CREDIT
 // - Date range: Filter by value date (from/to)
-// - Currency: Filter by currency code
+// - InstrumentCode: Filter by instrument code
 //
 // Pagination: If pagination is not provided, the service will apply
 // default limits (typically 50 items) to prevent unbounded queries.
@@ -430,10 +432,10 @@ message ListLedgerPostingsRequest {
   // value_date_to filters postings on or before this date.
   google.protobuf.Timestamp value_date_to = 6;
 
-  // currency filters by currency code (from posting_amount).
-  string currency = 7 [(buf.validate.field).string = {
-    max_len: 3
-    pattern: "^[A-Z]{0,3}$"
+  // instrument_code filters by instrument code (from posting_amount).
+  string instrument_code = 7 [(buf.validate.field).string = {
+    max_len: 32
+    pattern: "^$|^[A-Z][A-Z0-9_]*$"
   }];
 
   // status filters by transaction status.

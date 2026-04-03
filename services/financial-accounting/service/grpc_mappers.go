@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -346,6 +347,28 @@ func (s *FinancialAccountingService) publishControlEventsInTx(
 	}
 
 	return nil
+}
+
+// toProtoMoney converts domain Money to protobuf google.type.Money.
+// Used for event publishing where the events proto still uses google.type.Money.
+// This will be removed when events are migrated to InstrumentAmount.
+func toProtoMoney(m domain.Money) *money.Money {
+	amount := m.Amount
+	units := amount.IntPart()
+	fraction := amount.Sub(amount.Truncate(0))
+	nanos := fraction.Mul(decimal.NewFromInt(1_000_000_000)).IntPart()
+
+	if nanos > 999_999_999 {
+		nanos = 999_999_999
+	} else if nanos < -999_999_999 {
+		nanos = -999_999_999
+	}
+
+	return &money.Money{
+		CurrencyCode: m.Instrument.Code,
+		Units:        units,
+		Nanos:        int32(nanos), // #nosec G115 -- Safely clamped to int32 range above
+	}
 }
 
 // applyPostingStatusTransition applies a status transition to a ledger posting using domain methods.

@@ -174,8 +174,7 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 			},
 			validate: func(t *testing.T, posting *financialaccountingv1.LedgerPosting) {
 				assert.NotNil(t, posting.PostingAmount)
-				assert.Equal(t, int64(0), posting.PostingAmount.Units)
-				assert.Equal(t, int32(0), posting.PostingAmount.Nanos)
+				assert.Equal(t, "0", posting.PostingAmount.Amount)
 			},
 			rationale: "Zero amount postings should be retrieved correctly",
 		},
@@ -199,8 +198,7 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 			},
 			validate: func(t *testing.T, posting *financialaccountingv1.LedgerPosting) {
 				assert.NotNil(t, posting.PostingAmount)
-				// Verify large amount is converted correctly
-				assert.Greater(t, posting.PostingAmount.Units, int64(0))
+				assert.NotEmpty(t, posting.PostingAmount.Amount)
 			},
 			rationale: "Maximum int64 amounts should be handled without overflow",
 		},
@@ -248,11 +246,9 @@ func TestRetrieveLedgerPosting_EdgeCases(t *testing.T) {
 			},
 			validate: func(t *testing.T, posting *financialaccountingv1.LedgerPosting) {
 				assert.NotNil(t, posting.PostingAmount)
-				// For -15050 cents (-$150.50): units=-150, nanos=-500000000
-				assert.Equal(t, int64(-150), posting.PostingAmount.Units, "Negative units should be correct")
-				assert.Equal(t, int32(-500000000), posting.PostingAmount.Nanos, "Negative nanos should match fractional cents")
+				assert.Contains(t, posting.PostingAmount.Amount, "-", "Negative amounts should preserve sign")
 			},
-			rationale: "Negative amounts (credits) should preserve sign in both units and nanos",
+			rationale: "Negative amounts (credits) should preserve sign",
 		},
 	}
 

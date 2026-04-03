@@ -12,12 +12,12 @@ import (
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/payment_order/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/payment-order/adapters/persistence"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
 	poobservability "github.com/meridianhub/meridian/services/payment-order/observability"
 	"github.com/meridianhub/meridian/shared/pkg/idempotency"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -418,12 +418,15 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 		"payment_order_id", po.ID.String(),
 		"reason", reason)
 
-	// Convert amount from cents to google.type.Money format
+	// Convert amount to InstrumentAmount format
 	amountCents := domain.ToMinorUnits(po.Amount)
-	postingAmount := &money.Money{
-		CurrencyCode: currencyCode,
-		Units:        amountCents / 100,
-		Nanos:        int32((amountCents % 100) * 10000000),
+	majorUnits := amountCents / 100
+	minorUnits := amountCents % 100
+	amountStr := fmt.Sprintf("%d.%02d", majorUnits, minorUnits)
+	postingAmount := &quantityv1.InstrumentAmount{
+		Amount:         amountStr,
+		InstrumentCode: currencyCode,
+		Version:        1,
 	}
 	valueDate := timestamppb.Now()
 
@@ -493,7 +496,7 @@ func (s *Service) captureReversalPostings(
 	ctx context.Context,
 	po *domain.PaymentOrder,
 	reversalBookingLogID string,
-	postingAmount *money.Money,
+	postingAmount *quantityv1.InstrumentAmount,
 	valueDate *timestamppb.Timestamp,
 	contraAccountID string,
 	amountCents int64,

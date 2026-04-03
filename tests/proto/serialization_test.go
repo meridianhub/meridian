@@ -7,6 +7,7 @@ import (
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -69,10 +70,10 @@ func TestProtoSerialization(t *testing.T) {
 			Id:                    "123e4567-e89b-12d3-a456-426614174000",
 			FinancialBookingLogId: "223e4567-e89b-12d3-a456-426614174001",
 			PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-			PostingAmount: &money.Money{
-				CurrencyCode: "USD",
-				Units:        250,
-				Nanos:        750000000,
+			PostingAmount: &quantityv1.InstrumentAmount{
+				Amount:         "250.75",
+				InstrumentCode: "USD",
+				Version:        1,
 			},
 			AccountId: "ACC-98765",
 			ValueDate: now,
