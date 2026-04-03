@@ -30,9 +30,12 @@ function serializeManifest(manifest: Manifest): string {
   try {
     return JSON.stringify(toJson(ManifestSchema, manifest), null, 2)
   } catch {
-    // Fallback for plain objects (e.g. in tests)
-    return JSON.stringify(manifest, (_key, value) =>
-      typeof value === 'bigint' ? value.toString() : value, 2)
+    // Fallback for plain objects (e.g. in tests) - strip protobuf $typeName fields
+    return JSON.stringify(manifest, (key, value) => {
+      if (key === '$typeName') return undefined
+      if (typeof value === 'bigint') return value.toString()
+      return value
+    }, 2)
   }
 }
 
