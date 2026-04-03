@@ -27,6 +27,10 @@ func (m *mockReferenceDataClient) ListAccountTypes(_ context.Context) ([]*contro
 	return m.accountTypes, m.acctErr
 }
 
+func (m *mockReferenceDataClient) ListNonActiveInstrumentCodes(_ context.Context) (map[string]bool, error) {
+	return nil, nil
+}
+
 type mockSagaRegistryClient struct {
 	sagas []*controlplanev1.SagaDefinition
 	err   error
@@ -385,6 +389,10 @@ func (c *contextAwareRefDataClient) ListAccountTypes(ctx context.Context) ([]*co
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	return nil, nil
+}
+
+func (c *contextAwareRefDataClient) ListNonActiveInstrumentCodes(_ context.Context) (map[string]bool, error) {
 	return nil, nil
 }
 
