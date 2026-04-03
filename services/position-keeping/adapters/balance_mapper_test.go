@@ -324,6 +324,7 @@ func TestToDomainMoney(t *testing.T) {
 		expectedCur    domain.Currency
 		expectError    bool
 		errorIs        error
+		nilResolver    bool
 	}{
 		{
 			name: "GBP with cents",
@@ -404,6 +405,13 @@ func TestToDomainMoney(t *testing.T) {
 			expectError:    false,
 		},
 		{
+			name:        "nil resolver returns error",
+			proto:       &commonv1.MoneyAmount{Amount: &money.Money{CurrencyCode: "GBP"}},
+			expectError: true,
+			errorIs:     adapters.ErrNilInstrumentResolver,
+			nilResolver: true,
+		},
+		{
 			name:        "nil MoneyAmount returns error",
 			proto:       nil,
 			expectError: true,
@@ -445,7 +453,11 @@ func TestToDomainMoney(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := adapters.ToDomainMoney(ctx, resolver, tt.proto)
+			r := refdata.InstrumentResolver(resolver)
+			if tt.nilResolver {
+				r = nil
+			}
+			result, err := adapters.ToDomainMoney(ctx, r, tt.proto)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -717,7 +729,19 @@ func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
 		errContains  string
 		expectAmount string
 		expectCode   string
+		nilResolver  bool
 	}{
+		{
+			name: "nil resolver returns error",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "100",
+				InstrumentCode: "GBP",
+				Version:        1,
+			},
+			expectError: true,
+			errContains: "resolver",
+			nilResolver: true,
+		},
 		{
 			name: "valid GBP amount",
 			proto: &quantityv1.InstrumentAmount{
@@ -823,7 +847,11 @@ func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := adapters.ToDomainMoneyFromInstrumentAmount(ctx, resolver, tt.proto)
+			r := refdata.InstrumentResolver(resolver)
+			if tt.nilResolver {
+				r = nil
+			}
+			result, err := adapters.ToDomainMoneyFromInstrumentAmount(ctx, r, tt.proto)
 
 			if tt.expectError {
 				require.Error(t, err)

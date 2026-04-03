@@ -30,6 +30,9 @@ var ErrNilGoogleMoney = errors.New("MoneyAmount.Amount (google.type.Money) is ni
 // ErrInvalidCurrency is returned when the currency code is empty or invalid.
 var ErrInvalidCurrency = errors.New("invalid or empty currency code")
 
+// ErrNilInstrumentResolver is returned when a nil InstrumentResolver is provided.
+var ErrNilInstrumentResolver = errors.New("instrument resolver is required")
+
 // ErrUnknownProtoBalanceType is returned when the proto BalanceType value is not recognized.
 var ErrUnknownProtoBalanceType = errors.New("unknown proto BalanceType value")
 
@@ -118,6 +121,9 @@ func ToProtoMoneyAmount(domainMoney domain.Money) *commonv1.MoneyAmount {
 // Returns an error if the MoneyAmount or its inner google.type.Money is nil,
 // or if the instrument code cannot be resolved.
 func ToDomainMoney(ctx context.Context, resolver refdata.InstrumentResolver, protoMoney *commonv1.MoneyAmount) (domain.Money, error) {
+	if resolver == nil {
+		return domain.Money{}, ErrNilInstrumentResolver
+	}
 	if protoMoney == nil {
 		return domain.Money{}, ErrNilMoneyAmount
 	}
@@ -194,6 +200,9 @@ func ToProtoInstrumentAmountFromAsset(domainAsset domain.Asset) *quantityv1.Inst
 // registered instrument code (currencies, energy units, compute hours, carbon credits, etc.).
 // Returns an error if the amount is invalid or the instrument code cannot be resolved.
 func ToDomainMoneyFromInstrumentAmount(ctx context.Context, resolver refdata.InstrumentResolver, protoAmount *quantityv1.InstrumentAmount) (domain.Money, error) {
+	if resolver == nil {
+		return domain.Money{}, ErrNilInstrumentResolver
+	}
 	if protoAmount == nil {
 		return domain.Money{}, ErrNilInstrumentAmount
 	}
