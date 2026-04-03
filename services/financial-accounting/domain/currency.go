@@ -39,6 +39,10 @@ func ParseCurrency(s string) (Currency, error) {
 //   - Precision: derived from the currency's decimal places (e.g., 2 for GBP, 0 for JPY)
 //
 // Returns an error if the currency is invalid.
+//
+// Deprecated: Use InstrumentResolver.Resolve() for all new code.
+// This function only supports ISO 4217 currencies. For multi-asset support,
+// resolve instrument properties from Reference Data via InstrumentResolver.
 func CurrencyToInstrument(c Currency) (Instrument, error) {
 	if !c.IsValid() {
 		return Instrument{}, ErrInvalidDimension
