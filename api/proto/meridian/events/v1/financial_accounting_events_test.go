@@ -6,7 +6,7 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
-	money "google.golang.org/genproto/googleapis/type/money"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -56,10 +56,10 @@ func TestLedgerPostingCapturedEvent_Serialization(t *testing.T) {
 		PostingId:        "posting-123",
 		BookingLogId:     "booking-log-456",
 		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        50000000,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100.05",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId:     "account-789",
 		ValueDate:     timestamppb.New(time.Now()),
@@ -89,8 +89,8 @@ func TestLedgerPostingCapturedEvent_Serialization(t *testing.T) {
 	if decoded.PostingDirection != event.PostingDirection {
 		t.Errorf("PostingDirection mismatch: got %v, want %v", decoded.PostingDirection, event.PostingDirection)
 	}
-	if decoded.PostingAmount.Units != event.PostingAmount.Units {
-		t.Errorf("PostingAmount.Units mismatch: got %v, want %v", decoded.PostingAmount.Units, event.PostingAmount.Units)
+	if decoded.PostingAmount.Amount != event.PostingAmount.Amount {
+		t.Errorf("PostingAmount.Amount mismatch: got %v, want %v", decoded.PostingAmount.Amount, event.PostingAmount.Amount)
 	}
 	if decoded.AccountId != event.AccountId {
 		t.Errorf("AccountId mismatch: got %v, want %v", decoded.AccountId, event.AccountId)
@@ -101,15 +101,15 @@ func TestFinancialBookingLogPostedEvent_Serialization(t *testing.T) {
 	event := &eventsv1.FinancialBookingLogPostedEvent{
 		BookingLogId: "booking-log-123",
 		PostingCount: 4,
-		TotalDebits: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        500,
-			Nanos:        0,
+		TotalDebits: &quantityv1.InstrumentAmount{
+			Amount:         "500.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
-		TotalCredits: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        500,
-			Nanos:        0,
+		TotalCredits: &quantityv1.InstrumentAmount{
+			Amount:         "500.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		Reason:        "Monthly closing",
 		PostedBy:      "user-123",
@@ -138,8 +138,8 @@ func TestFinancialBookingLogPostedEvent_Serialization(t *testing.T) {
 	if decoded.PostingCount != event.PostingCount {
 		t.Errorf("PostingCount mismatch: got %v, want %v", decoded.PostingCount, event.PostingCount)
 	}
-	if decoded.TotalDebits.Units != event.TotalDebits.Units {
-		t.Errorf("TotalDebits.Units mismatch: got %v, want %v", decoded.TotalDebits.Units, event.TotalDebits.Units)
+	if decoded.TotalDebits.Amount != event.TotalDebits.Amount {
+		t.Errorf("TotalDebits.Amount mismatch: got %v, want %v", decoded.TotalDebits.Amount, event.TotalDebits.Amount)
 	}
 	if decoded.PostedBy != event.PostedBy {
 		t.Errorf("PostedBy mismatch: got %v, want %v", decoded.PostedBy, event.PostedBy)
@@ -149,20 +149,20 @@ func TestFinancialBookingLogPostedEvent_Serialization(t *testing.T) {
 func TestBalanceValidationFailedEvent_Serialization(t *testing.T) {
 	event := &eventsv1.BalanceValidationFailedEvent{
 		BookingLogId: "booking-log-123",
-		TotalDebits: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        500,
-			Nanos:        0,
+		TotalDebits: &quantityv1.InstrumentAmount{
+			Amount:         "500.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
-		TotalCredits: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        490,
-			Nanos:        0,
+		TotalCredits: &quantityv1.InstrumentAmount{
+			Amount:         "490.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
-		Variance: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        10,
-			Nanos:        0,
+		Variance: &quantityv1.InstrumentAmount{
+			Amount:         "10.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		Reason:        "Debits and credits do not balance",
 		CorrelationId: "correlation-abc",
@@ -187,8 +187,8 @@ func TestBalanceValidationFailedEvent_Serialization(t *testing.T) {
 	if decoded.BookingLogId != event.BookingLogId {
 		t.Errorf("BookingLogId mismatch: got %v, want %v", decoded.BookingLogId, event.BookingLogId)
 	}
-	if decoded.Variance.Units != event.Variance.Units {
-		t.Errorf("Variance.Units mismatch: got %v, want %v", decoded.Variance.Units, event.Variance.Units)
+	if decoded.Variance.Amount != event.Variance.Amount {
+		t.Errorf("Variance.Amount mismatch: got %v, want %v", decoded.Variance.Amount, event.Variance.Amount)
 	}
 	if decoded.Reason != event.Reason {
 		t.Errorf("Reason mismatch: got %v, want %v", decoded.Reason, event.Reason)
@@ -236,15 +236,15 @@ func TestLedgerPostingAmendedEvent_Serialization(t *testing.T) {
 	event := &eventsv1.LedgerPostingAmendedEvent{
 		PostingId:    "posting-123",
 		BookingLogId: "booking-log-456",
-		PreviousAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        0,
+		PreviousAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
-		NewAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        150,
-			Nanos:        0,
+		NewAmount: &quantityv1.InstrumentAmount{
+			Amount:         "150.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		Reason:        "Correction after reconciliation",
 		AmendedBy:     "user-789",
@@ -267,8 +267,8 @@ func TestLedgerPostingAmendedEvent_Serialization(t *testing.T) {
 	if decoded.PostingId != event.PostingId {
 		t.Errorf("PostingId mismatch: got %v, want %v", decoded.PostingId, event.PostingId)
 	}
-	if decoded.NewAmount.Units != event.NewAmount.Units {
-		t.Errorf("NewAmount.Units mismatch: got %v, want %v", decoded.NewAmount.Units, event.NewAmount.Units)
+	if decoded.NewAmount.Amount != event.NewAmount.Amount {
+		t.Errorf("NewAmount.Amount mismatch: got %v, want %v", decoded.NewAmount.Amount, event.NewAmount.Amount)
 	}
 }
 
@@ -457,16 +457,16 @@ func TestFinancialBookingLogInitiatedEvent_NegativeVersion(t *testing.T) {
 	}
 }
 
-func TestLedgerPostingCapturedEvent_ZeroMoney(t *testing.T) {
+func TestLedgerPostingCapturedEvent_ZeroAmount(t *testing.T) {
 	// Test zero amount (boundary case - technically invalid but should serialize)
 	event := &eventsv1.LedgerPostingCapturedEvent{
 		PostingId:        "posting-123",
 		BookingLogId:     "booking-log-456",
 		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        0,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "0",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId:     "account-789",
 		ValueDate:     timestamppb.New(time.Now()),
@@ -487,21 +487,21 @@ func TestLedgerPostingCapturedEvent_ZeroMoney(t *testing.T) {
 		t.Fatalf("Failed to unmarshal event with zero amount: %v", err)
 	}
 
-	if decoded.PostingAmount.Units != 0 {
-		t.Errorf("Expected 0 units, got %v", decoded.PostingAmount.Units)
+	if decoded.PostingAmount.Amount != "0" {
+		t.Errorf("Expected amount '0', got %v", decoded.PostingAmount.Amount)
 	}
 }
 
-func TestLedgerPostingCapturedEvent_NegativeMoney(t *testing.T) {
+func TestLedgerPostingCapturedEvent_NegativeAmount(t *testing.T) {
 	// Test negative amount (invalid but should serialize)
 	event := &eventsv1.LedgerPostingCapturedEvent{
 		PostingId:        "posting-123",
 		BookingLogId:     "booking-log-456",
 		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        -100,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "-100",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId:     "account-789",
 		ValueDate:     timestamppb.New(time.Now()),
@@ -522,21 +522,21 @@ func TestLedgerPostingCapturedEvent_NegativeMoney(t *testing.T) {
 		t.Fatalf("Failed to unmarshal event with negative amount: %v", err)
 	}
 
-	if decoded.PostingAmount.Units != -100 {
-		t.Errorf("Expected -100 units, got %v", decoded.PostingAmount.Units)
+	if decoded.PostingAmount.Amount != "-100" {
+		t.Errorf("Expected amount '-100', got %v", decoded.PostingAmount.Amount)
 	}
 }
 
-func TestLedgerPostingCapturedEvent_MaxInt64Amount(t *testing.T) {
-	// Test maximum int64 value (boundary case)
+func TestLedgerPostingCapturedEvent_LargeAmount(t *testing.T) {
+	// Test large decimal amount (boundary case)
 	event := &eventsv1.LedgerPostingCapturedEvent{
 		PostingId:        "posting-123",
 		BookingLogId:     "booking-log-456",
 		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        9223372036854775807, // max int64
-			Nanos:        999999999,           // max nanos
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "9999999999999999.999999",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId:     "account-789",
 		ValueDate:     timestamppb.New(time.Now()),
@@ -549,16 +549,16 @@ func TestLedgerPostingCapturedEvent_MaxInt64Amount(t *testing.T) {
 
 	data, err := proto.Marshal(event)
 	if err != nil {
-		t.Fatalf("Failed to marshal event with max int64: %v", err)
+		t.Fatalf("Failed to marshal event with large amount: %v", err)
 	}
 
 	decoded := &eventsv1.LedgerPostingCapturedEvent{}
 	if err := proto.Unmarshal(data, decoded); err != nil {
-		t.Fatalf("Failed to unmarshal event with max int64: %v", err)
+		t.Fatalf("Failed to unmarshal event with large amount: %v", err)
 	}
 
-	if decoded.PostingAmount.Units != 9223372036854775807 {
-		t.Errorf("Expected max int64, got %v", decoded.PostingAmount.Units)
+	if decoded.PostingAmount.Amount != "9999999999999999.999999" {
+		t.Errorf("Expected large amount, got %v", decoded.PostingAmount.Amount)
 	}
 }
 
@@ -568,10 +568,10 @@ func TestLedgerPostingCapturedEvent_InvalidAccountIdPattern(t *testing.T) {
 		PostingId:        "posting-123",
 		BookingLogId:     "booking-log-456",
 		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId:     "account@#$%",
 		ValueDate:     timestamppb.New(time.Now()),
@@ -661,15 +661,15 @@ func TestBalanceValidationFailedEvent_NegativePostingCount(t *testing.T) {
 	event := &eventsv1.FinancialBookingLogPostedEvent{
 		BookingLogId: "booking-log-123",
 		PostingCount: -1,
-		TotalDebits: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        500,
-			Nanos:        0,
+		TotalDebits: &quantityv1.InstrumentAmount{
+			Amount:         "500.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
-		TotalCredits: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        500,
-			Nanos:        0,
+		TotalCredits: &quantityv1.InstrumentAmount{
+			Amount:         "500.00",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		Reason:        "Test negative count",
 		PostedBy:      "user-123",
@@ -694,31 +694,25 @@ func TestBalanceValidationFailedEvent_NegativePostingCount(t *testing.T) {
 	}
 }
 
-// Money Validation Documentation Tests
+// InstrumentAmount Validation Documentation Tests
 //
-// NOTE: buf.validate does not currently support CEL validation on google.type.Money fields.
-// The CEL constraints in the proto file serve as documentation of validation requirements,
-// but enforcement must happen at the service/application layer.
-//
-// See: https://github.com/bufbuild/protovalidate/issues
-//
-// The tests below document the expected validation behavior per the proto schema.
+// The CEL constraints in the proto file enforce validation on the string-based
+// amount field using regex patterns. These tests document the expected behavior.
 
-func TestLedgerPostingCapturedEvent_MoneyValidationDocumentation(t *testing.T) {
+func TestLedgerPostingCapturedEvent_AmountValidationDocumentation(t *testing.T) {
 	// Documents expected validation behavior for posting_amount field
-	// Per proto schema: posting_amount must be positive (units > 0 or nanos > 0)
+	// Per proto schema: posting_amount must be positive (regex validated)
 	tests := []struct {
 		name        string
-		units       int64
-		nanos       int32
+		amount      string
 		expectValid bool
 		description string
 	}{
-		{"Valid positive amount", 100, 50, true, "Both units and nanos positive"},
-		{"Valid zero units positive nanos", 0, 1, true, "Zero units but positive nanos"},
-		{"Invalid zero amount", 0, 0, false, "Zero amount not allowed for postings"},
-		{"Invalid negative units", -100, 0, false, "Negative units not allowed"},
-		{"Invalid negative nanos", 0, -50, false, "Negative nanos not allowed"},
+		{"Valid positive integer", "100", true, "Positive integer amount"},
+		{"Valid positive decimal", "100.50", true, "Positive decimal amount"},
+		{"Valid small decimal", "0.01", true, "Small positive decimal"},
+		{"Invalid zero amount", "0", false, "Zero amount not allowed for postings"},
+		{"Invalid negative amount", "-100", false, "Negative amount not allowed"},
 	}
 
 	for _, tt := range tests {
@@ -727,10 +721,10 @@ func TestLedgerPostingCapturedEvent_MoneyValidationDocumentation(t *testing.T) {
 				PostingId:        "posting-123",
 				BookingLogId:     "booking-log-456",
 				PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        tt.units,
-					Nanos:        tt.nanos,
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         tt.amount,
+					InstrumentCode: "GBP",
+					Version:        1,
 				},
 				AccountId:     "valid-account-id",
 				ValueDate:     timestamppb.New(time.Now()),
@@ -754,11 +748,8 @@ func TestLedgerPostingCapturedEvent_MoneyValidationDocumentation(t *testing.T) {
 
 			// Document expected validation behavior
 			if !tt.expectValid {
-				t.Logf("Service layer should reject: %s - %s", tt.name, tt.description)
+				t.Logf("CEL validation should reject: %s - %s", tt.name, tt.description)
 			}
 		})
 	}
 }
-
-// NOTE: Due to buf.validate limitations with google.type.Money, the CEL constraints
-// serve as documentation. Service layer must enforce these validation rules.

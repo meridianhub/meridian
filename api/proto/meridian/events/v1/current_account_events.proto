@@ -4,8 +4,8 @@ package meridian.events.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
-import "google/type/money.proto";
 import "meridian/common/v1/types.proto";
+import "meridian/quantity/v1/quantity.proto";
 
 option go_package = "github.com/meridianhub/meridian/api/proto/meridian/events/v1;eventsv1";
 
@@ -89,7 +89,7 @@ message AccountCreatedEvent {
 }
 
 // AccountStatusChangedEvent represents a status transition for an account
-// (e.g., ACTIVE → FROZEN, FROZEN → ACTIVE, ACTIVE → CLOSED).
+// (e.g., ACTIVE -> FROZEN, FROZEN -> ACTIVE, ACTIVE -> CLOSED).
 // Published when account status changes due to administrative action.
 message AccountStatusChangedEvent {
   // event_id uniquely identifies this event instance
@@ -277,11 +277,8 @@ message AccountClosedEvent {
     pattern: "^[a-zA-Z0-9_-]+$"
   }];
 
-  // closing_balance is the final balance at closure
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money closing_balance = 3 [(buf.validate.field).required = true];
+  // closing_balance is the final balance at closure (no sign constraint - can be negative)
+  meridian.quantity.v1.InstrumentAmount closing_balance = 3 [(buf.validate.field).required = true];
 
   // closure_reason explains why the account was closed
   string closure_reason = 4 [(buf.validate.field).string = {
@@ -353,16 +350,13 @@ message TransactionInitiatedEvent {
     in: ["DEPOSIT", "WITHDRAWAL", "TRANSFER", "FEE", "INTEREST", "ADJUSTMENT"]
   }];
 
-  // transaction_amount is the amount being transacted
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money transaction_amount = 5 [
+  // transaction_amount is the amount being transacted (must be positive)
+  meridian.quantity.v1.InstrumentAmount transaction_amount = 5 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "positive_transaction_amount"
       message: "transaction amount must be greater than zero"
-      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+      expression: "this.amount.matches('^[1-9][0-9]*(\\\\.[0-9]+)?$') || this.amount.matches('^0\\\\.[0-9]*[1-9][0-9]*$')"
     }
   ];
 
@@ -451,17 +445,11 @@ message TransactionCompletedEvent {
     uuid: true
   }];
 
-  // new_balance is the account balance after this transaction
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money new_balance = 6 [(buf.validate.field).required = true];
+  // new_balance is the account balance after this transaction (no sign constraint - can be negative for overdraft)
+  meridian.quantity.v1.InstrumentAmount new_balance = 6 [(buf.validate.field).required = true];
 
-  // new_available_balance is the available balance after this transaction
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money new_available_balance = 7 [(buf.validate.field).required = true];
+  // new_available_balance is the available balance after this transaction (no sign constraint - can be negative for overdraft)
+  meridian.quantity.v1.InstrumentAmount new_available_balance = 7 [(buf.validate.field).required = true];
 
   // completion_reason provides context for completion
   string completion_reason = 8 [(buf.validate.field).string = {
@@ -632,14 +620,24 @@ message OverdraftConfiguredEvent {
   // overdraft_enabled indicates if overdraft is active
   bool overdraft_enabled = 3;
 
-  // overdraft_limit is the maximum overdraft amount allowed
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money overdraft_limit = 4 [(buf.validate.field).required = true];
+  // overdraft_limit is the maximum overdraft amount allowed (must be non-negative)
+  meridian.quantity.v1.InstrumentAmount overdraft_limit = 4 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "non_negative_overdraft_limit"
+      message: "overdraft limit must be greater than or equal to zero"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$')"
+    }
+  ];
 
-  // previous_limit is the overdraft limit before this change (optional)
-  google.type.Money previous_limit = 5;
+  // previous_limit is the overdraft limit before this change (optional, non-negative)
+  meridian.quantity.v1.InstrumentAmount previous_limit = 5 [
+    (buf.validate.field).cel = {
+      id: "non_negative_previous_limit"
+      message: "previous limit must be greater than or equal to zero"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$')"
+    }
+  ];
 
   // interest_rate is the annual interest rate for overdraft (basis points)
   int32 interest_rate_basis_points = 6 [(buf.validate.field).int32 = {
@@ -701,35 +699,36 @@ message OverdraftLimitExceededEvent {
     uuid: true
   }];
 
-  // attempted_amount is the amount that was attempted
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money attempted_amount = 4 [
+  // attempted_amount is the amount that was attempted (must be positive)
+  meridian.quantity.v1.InstrumentAmount attempted_amount = 4 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "positive_attempted_amount"
       message: "attempted amount must be greater than zero"
-      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+      expression: "this.amount.matches('^[1-9][0-9]*(\\\\.[0-9]+)?$') || this.amount.matches('^0\\\\.[0-9]*[1-9][0-9]*$')"
     }
   ];
 
-  // current_balance is the balance at time of rejection
-  google.type.Money current_balance = 5 [(buf.validate.field).required = true];
+  // current_balance is the balance at time of rejection (no sign constraint - can be negative)
+  meridian.quantity.v1.InstrumentAmount current_balance = 5 [(buf.validate.field).required = true];
 
-  // overdraft_limit is the configured overdraft limit
-  google.type.Money overdraft_limit = 6 [(buf.validate.field).required = true];
+  // overdraft_limit is the configured overdraft limit (must be non-negative)
+  meridian.quantity.v1.InstrumentAmount overdraft_limit = 6 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "non_negative_overdraft_limit"
+      message: "overdraft limit must be greater than or equal to zero"
+      expression: "this.amount.matches('^[0-9]+(\\\\.[0-9]+)?$')"
+    }
+  ];
 
-  // shortage is the amount by which the limit was exceeded
-  // NOTE: buf.validate CEL constraints on google.type.Money don't generate runtime
-  // validation. Service layer must enforce this constraint.
-  // See README "Money Field Validation Limitations"
-  google.type.Money shortage = 7 [
+  // shortage is the amount by which the limit was exceeded (must be positive)
+  meridian.quantity.v1.InstrumentAmount shortage = 7 [
     (buf.validate.field).required = true,
     (buf.validate.field).cel = {
       id: "positive_shortage"
       message: "shortage must be greater than zero"
-      expression: "this.units > 0 || (this.units == 0 && this.nanos > 0)"
+      expression: "this.amount.matches('^[1-9][0-9]*(\\\\.[0-9]+)?$') || this.amount.matches('^0\\\\.[0-9]*[1-9][0-9]*$')"
     }
   ];
 

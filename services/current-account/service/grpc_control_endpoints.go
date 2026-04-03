@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	pb "github.com/meridianhub/meridian/api/proto/meridian/current_account/v1"
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	caobservability "github.com/meridianhub/meridian/services/current-account/observability"
@@ -16,7 +17,6 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/events"
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
-	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -344,20 +344,10 @@ func (s *Service) publishAccountClosedEvent(
 	accountID, reason, actorID, correlationID string,
 	actionTimestamp, now time.Time,
 ) error {
-	balanceCents, _ := account.Balance().ToMinorUnits()
-	precision := account.Balance().Precision()
-	divisor := int64(1)
-	for i := 0; i < precision; i++ {
-		divisor *= 10
-	}
-	var nanosMultiplier int32
-	if divisor > 0 {
-		nanosMultiplier = int32(1_000_000_000 / divisor)
-	}
-	closingBalance := &money.Money{
-		CurrencyCode: account.Balance().InstrumentCode(),
-		Units:        balanceCents / divisor,
-		Nanos:        int32(balanceCents%divisor) * nanosMultiplier,
+	closingBalance := &quantityv1.InstrumentAmount{
+		Amount:         account.Balance().Amount().String(),
+		InstrumentCode: account.Balance().InstrumentCode(),
+		Version:        1,
 	}
 	event := &eventsv1.AccountClosedEvent{
 		EventId:        uuid.New().String(),
