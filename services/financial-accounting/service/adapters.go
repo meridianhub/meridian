@@ -66,6 +66,12 @@ func fromProtoInstrumentAmount(ia *quantityv1.InstrumentAmount) (domain.Money, e
 	}
 
 	// For non-currency instrument codes, infer precision from the amount string.
+	// We use a struct literal here because the proto InstrumentAmount message does
+	// not carry dimension or precision fields - these are reference data concerns.
+	// The Dimension field is intentionally empty; downstream consumers that need
+	// dimension-aware validation should resolve from the instrument registry.
+	// Once InstrumentAmount proto gains dimension/precision fields, this should
+	// migrate to domain.NewInstrument() for full validation.
 	precision := inferPrecisionFromAmount(ia.Amount)
 
 	instrument := domain.Instrument{

@@ -420,7 +420,7 @@ func (s *Service) reverseLedgerPosting(ctx context.Context, po *domain.PaymentOr
 
 	// Convert amount to InstrumentAmount format
 	amountCents := domain.ToMinorUnits(po.Amount)
-	postingAmount := buildPostingAmount(currencyCode, amountCents)
+	postingAmount := buildPostingAmount(currencyCode, amountCents, po.Amount.Instrument.Precision)
 	valueDate := timestamppb.Now()
 
 	// Steps 2-3: Create CREDIT and DEBIT reversal postings

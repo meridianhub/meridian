@@ -74,7 +74,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	}
 
 	amountCents := domain.ToMinorUnits(po.Amount)
-	postingAmount := buildPostingAmount(currencyCode, amountCents)
+	postingAmount := buildPostingAmount(currencyCode, amountCents, po.Amount.Instrument.Precision)
 	valueDate := timestamppb.Now()
 
 	// Determine if we should use the 4-posting flow with internal clearing
@@ -131,12 +131,34 @@ func (o *PaymentOrchestrator) createBookingLog(ctx context.Context, po *domain.P
 	return bookingLogResp.FinancialBookingLog.Id, nil
 }
 
-// buildPostingAmount converts cents to InstrumentAmount format.
-func buildPostingAmount(instrumentCode string, amountCents int64) *quantityv1.InstrumentAmount {
-	majorUnits := amountCents / 100
-	minorUnits := amountCents % 100
+// buildPostingAmount converts minor units to InstrumentAmount format.
+// precision determines the number of decimal places (e.g., 2 for GBP, 0 for JPY, 3 for KWD).
+func buildPostingAmount(instrumentCode string, amountMinorUnits int64, precision int) *quantityv1.InstrumentAmount {
+	if precision <= 0 {
+		return &quantityv1.InstrumentAmount{
+			Amount:         fmt.Sprintf("%d", amountMinorUnits),
+			InstrumentCode: instrumentCode,
+			Version:        1,
+		}
+	}
+
+	divisor := int64(1)
+	for range precision {
+		divisor *= 10
+	}
+
+	sign := ""
+	abs := amountMinorUnits
+	if abs < 0 {
+		sign = "-"
+		abs = -abs
+	}
+
+	majorUnits := abs / divisor
+	minorUnits := abs % divisor
+	format := fmt.Sprintf("%%s%%d.%%0%dd", precision)
 	return &quantityv1.InstrumentAmount{
-		Amount:         fmt.Sprintf("%d.%02d", majorUnits, minorUnits),
+		Amount:         fmt.Sprintf(format, sign, majorUnits, minorUnits),
 		InstrumentCode: instrumentCode,
 		Version:        1,
 	}
