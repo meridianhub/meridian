@@ -94,12 +94,13 @@ func buildExecutorInput(mf *controlplanev1.Manifest) *ApplyManifestInput {
 // Each included resource carries its Action field so handlers can behave differently.
 func buildExecutorInputFromPlan(mf *controlplanev1.Manifest, plan *differ.DiffPlan) *ApplyManifestInput {
 	actionable := buildActionableMap(plan)
+	deleted := buildDeletedSet(plan)
 
 	input := &ApplyManifestInput{
 		ManifestVersion: mf.GetVersion(),
 	}
 
-	extractInstrumentsFromPlan(mf, input, actionable)
+	extractInstrumentsFromPlan(mf, input, actionable, deleted)
 	extractAccountTypesFromPlan(mf, input, actionable)
 	extractValuationRulesFromPlan(mf, input, actionable)
 	extractMarketDataFromPlan(mf, input, actionable)
@@ -123,12 +124,31 @@ func buildActionableMap(plan *differ.DiffPlan) map[string]differ.ActionType {
 	return actionable
 }
 
-// extractInstrumentsFromPlan adds instruments with actionable changes to the input.
-func extractInstrumentsFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
+// buildDeletedSet returns a set of resource keys that have DELETE actions.
+func buildDeletedSet(plan *differ.DiffPlan) map[string]bool {
+	deleted := make(map[string]bool)
+	for _, a := range plan.Actions {
+		if a.Action == differ.ActionDelete {
+			deleted[resourceKey(a.ResourceType, a.ResourceCode)] = true
+		}
+	}
+	return deleted
+}
+
+// extractInstrumentsFromPlan adds ALL manifest instruments to the input unless
+// they are explicitly marked for DELETE. Instruments are always included because:
+// 1. register+activate handlers are fully idempotent
+// 2. Account type pre-checks require instruments to be ACTIVE in the tenant schema
+// 3. The diff may mark instruments as NO_CHANGE even when they need reactivation
+func extractInstrumentsFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType, deleted map[string]bool) {
 	for _, inst := range mf.GetInstruments() {
-		action, ok := actionable[resourceKey(differ.ResourceInstrument, inst.GetCode())]
-		if !ok {
+		key := resourceKey(differ.ResourceInstrument, inst.GetCode())
+		if deleted[key] {
 			continue
+		}
+		action, ok := actionable[key]
+		if !ok {
+			action = differ.ActionCreate
 		}
 		dim := instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit())
 		if dim == "" {
