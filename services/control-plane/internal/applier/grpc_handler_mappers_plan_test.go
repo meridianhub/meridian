@@ -59,7 +59,7 @@ func TestBuildExecutorInputFromPlan_FiltersNoChangeActions(t *testing.T) {
 	// All instruments always included (idempotent, needed for account type pre-checks)
 	assert.Len(t, input.Instruments, 3)
 	assert.Equal(t, "GBP", input.Instruments[0].Code)
-	assert.Equal(t, "NO_CHANGE", input.Instruments[0].Action)
+	assert.Equal(t, "CREATE", input.Instruments[0].Action) // defaults to CREATE when not in actionable map
 	assert.Equal(t, "USD", input.Instruments[1].Code)
 	assert.Equal(t, "CREATE", input.Instruments[1].Action)
 	assert.Equal(t, "KWH", input.Instruments[2].Code)
@@ -191,8 +191,9 @@ func TestBuildExecutorInputFromPlan_MultipleResourceTypes(t *testing.T) {
 
 	input := buildExecutorInputFromPlan(mf, plan)
 
-	// GBP instrument: NO_CHANGE -> excluded
-	assert.Empty(t, input.Instruments)
+	// GBP instrument: always included (idempotent activation)
+	require.Len(t, input.Instruments, 1)
+	assert.Equal(t, "GBP", input.Instruments[0].Code)
 
 	// CURRENT account type: UPDATE -> included
 	require.Len(t, input.AccountTypes, 1)
@@ -241,7 +242,9 @@ func TestBuildExecutorInputFromPlan_EmptyPlan(t *testing.T) {
 	input := buildExecutorInputFromPlan(mf, plan)
 
 	assert.Equal(t, "1.0", input.ManifestVersion)
-	assert.Empty(t, input.Instruments)
+	// Instruments always included even when NO_CHANGE
+	require.Len(t, input.Instruments, 1)
+	assert.Equal(t, "GBP", input.Instruments[0].Code)
 	assert.Empty(t, input.AccountTypes)
 }
 
