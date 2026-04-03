@@ -46,10 +46,14 @@ jobs:
       run: |
         set -euo pipefail
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        # Known Dex false positive — see ADR-0036 for context.
+        # Known false positives - see ADR-0036 for context.
         # GO-2024-2476: Dex TLS config discarding. Not applicable because
         # embedded Dex serves HTTP behind the gateway (Caddy terminates TLS).
-        GOVULN_ALLOWLIST="GO-2024-2476"
+        # GO-2026-4883: Docker/Moby plugin privilege off-by-one. No fix available.
+        # Only reachable via testcontainers in tests, not production code paths.
+        # GO-2026-4887: Docker/Moby AuthZ plugin bypass with oversized request bodies.
+        # No fix available. Only reachable via testcontainers in tests, not production.
+        GOVULN_ALLOWLIST="$(printf '%s\n' GO-2024-2476 GO-2026-4883 GO-2026-4887)"
 
         govulncheck ./... 2>&1 | tee /tmp/govulncheck.out || true
         GOVULN_RC=${PIPESTATUS[0]:-$?}
