@@ -125,11 +125,11 @@ client would misparse the bytes.
 
 **CEL validation rewrite required.** Current proto-level CEL rules reference
 Money's `units`/`nanos` structure:
-```
+```cel
 this.units > 0 || (this.units == 0 && this.nanos > 0)
 ```
 These must be rewritten for InstrumentAmount, e.g.:
-```
+```cel
 double(this.amount) > 0.0
 ```
 
