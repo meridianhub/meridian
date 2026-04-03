@@ -9,7 +9,6 @@ import (
 
 	"buf.build/go/protovalidate"
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/service"
@@ -219,17 +218,16 @@ func (dc *DepositConsumer) processAndStoreResult(ctx context.Context, event *eve
 		return fmt.Errorf("%w: %v", ErrInvalidCurrency, event.InstrumentCode)
 	}
 
-	// Convert cents to decimal string for the asset-agnostic DepositEvent.
-	// The proto still carries AmountCents for backward compatibility;
-	// the PostingService resolves precision from the instrument.
-	amount := decimal.NewFromInt(event.AmountCents).Div(decimal.NewFromInt(100))
-
+	// Pass the raw minor-unit value as a string. The PostingService will
+	// resolve instrument precision and convert from minor to major units.
+	// This avoids hardcoding a /100 divisor that would be wrong for
+	// non-2dp instruments (e.g., JPY=0dp, KWH=3dp).
 	depositEvent := service.DepositEvent{
-		AccountID:      event.AccountId,
-		Amount:         amount.String(),
-		InstrumentCode: currencyCode,
-		CorrelationID:  event.CorrelationId,
-		ValueDate:      event.ValueDate.AsTime(),
+		AccountID:       event.AccountId,
+		AmountMinorUnit: event.AmountCents,
+		InstrumentCode:  currencyCode,
+		CorrelationID:   event.CorrelationId,
+		ValueDate:       event.ValueDate.AsTime(),
 	}
 
 	if err := dc.postingService.ProcessDeposit(ctx, depositEvent); err != nil {

@@ -83,14 +83,21 @@ func NewPostingServiceWithConfig(cfg PostingServiceConfig) *PostingService {
 }
 
 // DepositEvent represents a deposit event from CurrentAccount service.
-// Amount is a decimal string (e.g., "100.00") for full precision with any asset type.
 // InstrumentCode identifies the instrument (e.g., "GBP", "KWH", "TONNE_CO2E").
+//
+// Callers should populate exactly one of Amount or AmountMinorUnit:
+//   - Amount: decimal string in major units (e.g., "100.50" GBP). Used by callers
+//     that already know the decimal amount.
+//   - AmountMinorUnit: integer in the instrument's smallest unit (e.g., 10050 for
+//     GBP cents). Used by the Kafka deposit consumer where the proto carries int64.
+//     The PostingService converts to major units using the instrument's precision.
 type DepositEvent struct {
-	AccountID      string
-	Amount         string // Decimal as string for precision
-	InstrumentCode string // e.g., "GBP", "KWH"
-	CorrelationID  string
-	ValueDate      time.Time
+	AccountID       string
+	Amount          string // Decimal string in major units (mutually exclusive with AmountMinorUnit)
+	AmountMinorUnit int64  // Amount in minor units; converted using instrument precision
+	InstrumentCode  string // e.g., "GBP", "KWH"
+	CorrelationID   string
+	ValueDate       time.Time
 }
 
 // ProcessDeposit creates double-entry postings for a deposit
@@ -129,9 +136,9 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 		return fmt.Errorf("failed to save postings: %w", err)
 	}
 
-	// Record successful metrics
+	// Record successful metrics using the resolved amount from the debit posting
 	timer.ObserveSuccess()
-	recordDepositSuccessMetrics(event)
+	recordDepositSuccessMetrics(event.InstrumentCode, debitPosting.Amount.Amount)
 
 	return nil
 }
@@ -144,14 +151,14 @@ func (s *PostingService) buildDepositPostings(
 	bookingLogID uuid.UUID,
 	event DepositEvent,
 ) (*domain.LedgerPosting, *domain.LedgerPosting, error) {
-	amount, err := decimal.NewFromString(event.Amount)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid amount %q: %w", event.Amount, err)
-	}
-
 	instrument, err := s.resolveInstrument(ctx, event.InstrumentCode)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to resolve instrument %q: %w", event.InstrumentCode, err)
+	}
+
+	amount, err := s.resolveAmount(event, instrument)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	money := domain.NewMoney(amount, instrument)
@@ -185,6 +192,23 @@ func (s *PostingService) buildDepositPostings(
 	return debitPosting, creditPosting, nil
 }
 
+// resolveAmount extracts the decimal amount from a DepositEvent.
+// If Amount (string) is set, it takes precedence. Otherwise AmountMinorUnit
+// is converted to major units using the instrument's precision.
+func (s *PostingService) resolveAmount(event DepositEvent, instrument domain.Instrument) (decimal.Decimal, error) {
+	if event.Amount != "" {
+		amount, err := decimal.NewFromString(event.Amount)
+		if err != nil {
+			return decimal.Zero, fmt.Errorf("invalid amount %q: %w", event.Amount, err)
+		}
+		return amount, nil
+	}
+
+	// Convert minor units to major units: e.g., 10050 cents with precision 2 = 100.50
+	divisor := decimal.NewFromInt(10).Pow(decimal.NewFromInt(int64(instrument.Precision)))
+	return decimal.NewFromInt(event.AmountMinorUnit).Div(divisor), nil
+}
+
 // resolveInstrument resolves an instrument code to a domain Instrument.
 // Tries InstrumentResolver first, then falls back to legacy ParseCurrency.
 func (s *PostingService) resolveInstrument(ctx context.Context, code string) (domain.Instrument, error) {
@@ -207,17 +231,15 @@ func (s *PostingService) resolveInstrument(ctx context.Context, code string) (do
 }
 
 // recordDepositSuccessMetrics records all metrics for a successful deposit processing.
-func recordDepositSuccessMetrics(event DepositEvent) {
-	observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusSuccess)
-	observability.RecordPosting(observability.DirectionDebit, event.InstrumentCode)
-	observability.RecordPosting(observability.DirectionCredit, event.InstrumentCode)
+// The amount is the resolved major-unit decimal from the posting (not raw event data).
+func recordDepositSuccessMetrics(instrumentCode string, amount decimal.Decimal) {
+	observability.RecordDepositProcessed(instrumentCode, observability.StatusSuccess)
+	observability.RecordPosting(observability.DirectionDebit, instrumentCode)
+	observability.RecordPosting(observability.DirectionCredit, instrumentCode)
 
-	// Convert amount string to float64 for metrics (precision loss acceptable for counters)
-	if amountDec, err := decimal.NewFromString(event.Amount); err == nil {
-		amountFloat, _ := amountDec.Float64()
-		observability.RecordPostingAmountFloat(observability.DirectionDebit, event.InstrumentCode, amountFloat)
-		observability.RecordPostingAmountFloat(observability.DirectionCredit, event.InstrumentCode, amountFloat)
-	}
+	amountFloat, _ := amount.Float64()
+	observability.RecordPostingAmountFloat(observability.DirectionDebit, instrumentCode, amountFloat)
+	observability.RecordPostingAmountFloat(observability.DirectionCredit, instrumentCode, amountFloat)
 }
 
 // GetPostingsByBookingLog retrieves all postings for a booking log

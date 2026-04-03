@@ -572,6 +572,80 @@ func TestProcessDeposit_Precision_Preserved(t *testing.T) {
 	require.Equal(t, int64(123456), entity.AmountMinorUnits)
 }
 
+func TestProcessDeposit_MinorUnit_Conversion(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	resolver := &postingServiceMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"KWH": {Code: "KWH", Dimension: "ENERGY", Precision: 3, RoundingMode: "HALF_UP"},
+		},
+	}
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:               repo,
+		BankCashAccountID:  "CLEARING",
+		InstrumentResolver: resolver,
+		Logger:             postingTestLogger(),
+	})
+
+	// 123456 minor units with precision 3 = 123.456 KWH
+	event := DepositEvent{
+		AccountID:       "ACC-MINOR-UNIT",
+		AmountMinorUnit: 123456,
+		InstrumentCode:  "KWH",
+		CorrelationID:   "deposit-minor-001",
+		ValueDate:       time.Now(),
+	}
+
+	err := service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	var entity persistence.LedgerPostingEntity
+	err = db.Where("account_id = ? AND posting_direction = ?", "ACC-MINOR-UNIT", "DEBIT").First(&entity).Error
+	require.NoError(t, err)
+	// 123.456 with precision 3 = 123456 minor units in storage
+	require.Equal(t, int64(123456), entity.AmountMinorUnits)
+}
+
+func TestProcessDeposit_MinorUnit_JPY_ZeroPrecision(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+	repo := persistence.NewLedgerRepository(db)
+
+	resolver := &postingServiceMockInstrumentResolver{
+		instruments: map[string]refdata.InstrumentProperties{
+			"JPY": {Code: "JPY", Dimension: "CURRENCY", Precision: 0, RoundingMode: "HALF_EVEN"},
+		},
+	}
+
+	service := NewPostingServiceWithConfig(PostingServiceConfig{
+		Repo:               repo,
+		BankCashAccountID:  "CLEARING-JPY",
+		InstrumentResolver: resolver,
+		Logger:             postingTestLogger(),
+	})
+
+	// 500 minor units with precision 0 = 500 JPY (no division)
+	event := DepositEvent{
+		AccountID:       "ACC-JPY",
+		AmountMinorUnit: 500,
+		InstrumentCode:  "JPY",
+		CorrelationID:   "deposit-jpy-001",
+		ValueDate:       time.Now(),
+	}
+
+	err := service.ProcessDeposit(ctx, event)
+	require.NoError(t, err)
+
+	var entity persistence.LedgerPostingEntity
+	err = db.Where("account_id = ? AND posting_direction = ?", "ACC-JPY", "DEBIT").First(&entity).Error
+	require.NoError(t, err)
+	// 500 JPY with precision 0 = 500 minor units
+	require.Equal(t, int64(500), entity.AmountMinorUnits)
+}
+
 // =============================================================================
 // Test helpers
 // =============================================================================

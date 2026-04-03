@@ -401,6 +401,23 @@ func TestInstrumentAmountConverter_Roundtrip(t *testing.T) {
 	assert.Equal(t, "KWH", roundtripped.InstrumentCode)
 }
 
+func TestInstrumentAmountConverter_FromProto_RejectsUnknownNonCurrency(t *testing.T) {
+	// Resolver is configured but doesn't know "UNKNOWN_ASSET". Since it's not
+	// a known ISO 4217 currency, it should error rather than infer precision.
+	resolver := &adapterMockInstrumentResolver{err: refdata.ErrUnknownInstrument}
+	converter := NewInstrumentAmountConverter(resolver)
+
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "100.00",
+		InstrumentCode: "UNKNOWN_ASSET",
+		Version:        1,
+	}
+
+	_, err := converter.FromProto(context.Background(), ia)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to resolve instrument")
+}
+
 func TestToProtoInstrumentAmount_Exported(t *testing.T) {
 	inst := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
 	m := domain.NewMoney(decimal.NewFromInt(42), inst)

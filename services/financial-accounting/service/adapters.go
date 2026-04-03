@@ -41,7 +41,9 @@ func NewInstrumentAmountConverter(resolver refdata.InstrumentResolver) *Instrume
 }
 
 // FromProto converts protobuf InstrumentAmount to domain Money using the InstrumentResolver.
-// Falls back to legacy ParseCurrency logic when the resolver is nil or returns an error.
+// When a resolver is configured, it is the primary path. Legacy ParseCurrency fallback
+// only applies when the resolver is nil (not configured) or for known ISO 4217 currencies
+// when the resolver returns ErrUnknownInstrument.
 func (c *InstrumentAmountConverter) FromProto(ctx context.Context, ia *quantityv1.InstrumentAmount) (domain.Money, error) {
 	if ia == nil {
 		return domain.Money{}, ErrNilInstrumentAmount
@@ -63,10 +65,16 @@ func (c *InstrumentAmountConverter) FromProto(ctx context.Context, ia *quantityv
 			if instErr == nil {
 				return domain.NewMoney(amount, inst), nil
 			}
+			return domain.Money{}, fmt.Errorf("invalid instrument metadata for %q: %w", ia.InstrumentCode, instErr)
+		}
+		// Only fall back to legacy for known currencies; non-currency codes must
+		// come from the resolver to avoid silently guessed precision.
+		if _, currErr := domain.ParseCurrency(ia.InstrumentCode); currErr != nil {
+			return domain.Money{}, fmt.Errorf("failed to resolve instrument %q: %w", ia.InstrumentCode, resolveErr)
 		}
 	}
 
-	// Fall back to legacy resolution
+	// Legacy fallback: resolver is nil or code is a known ISO 4217 currency
 	return fromProtoInstrumentAmount(ia)
 }
 
