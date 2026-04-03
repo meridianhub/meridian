@@ -33,13 +33,13 @@ func (s *stubResolver) Resolve(_ context.Context, code string) (refdata.Instrume
 func newTestResolver() *stubResolver {
 	return &stubResolver{
 		instruments: map[string]refdata.InstrumentProperties{
-			"GBP":          {Code: "GBP", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
-			"USD":          {Code: "USD", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
-			"EUR":          {Code: "EUR", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
-			"JPY":          {Code: "JPY", Dimension: "MONETARY", Precision: 0, RoundingMode: "HALF_EVEN"},
-			"CHF":          {Code: "CHF", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
-			"CAD":          {Code: "CAD", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
-			"AUD":          {Code: "AUD", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"GBP":          {Code: "GBP", Dimension: "CURRENCY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"USD":          {Code: "USD", Dimension: "CURRENCY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"EUR":          {Code: "EUR", Dimension: "CURRENCY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"JPY":          {Code: "JPY", Dimension: "CURRENCY", Precision: 0, RoundingMode: "HALF_EVEN"},
+			"CHF":          {Code: "CHF", Dimension: "CURRENCY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"CAD":          {Code: "CAD", Dimension: "CURRENCY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"AUD":          {Code: "AUD", Dimension: "CURRENCY", Precision: 2, RoundingMode: "HALF_EVEN"},
 			"KWH":          {Code: "KWH", Dimension: "ENERGY", Precision: 6, RoundingMode: "HALF_EVEN"},
 			"GPU_HOUR":     {Code: "GPU_HOUR", Dimension: "COMPUTE", Precision: 6, RoundingMode: "HALF_EVEN"},
 			"CARBON_TONNE": {Code: "CARBON_TONNE", Dimension: "CARBON", Precision: 3, RoundingMode: "HALF_EVEN"},
@@ -439,7 +439,7 @@ func TestToDomainMoney(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorIs:     adapters.ErrInvalidCurrency,
+			errorIs:     refdata.ErrUnknownInstrument,
 		},
 	}
 
@@ -807,7 +807,7 @@ func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
 				Version:        1,
 			},
 			expectError: true,
-			errContains: "currency",
+			errContains: "unknown instrument",
 		},
 		{
 			name: "negative version returns error",

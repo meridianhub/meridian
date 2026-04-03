@@ -14,6 +14,7 @@ import (
 	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/position-keeping/domain"
 	"github.com/meridianhub/meridian/shared/pkg/refdata"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
 // ErrUnspecifiedBalanceType is returned when attempting to convert BALANCE_TYPE_UNSPECIFIED
@@ -130,9 +131,10 @@ func ToDomainMoney(ctx context.Context, resolver refdata.InstrumentResolver, pro
 		return domain.Money{}, ErrInvalidCurrency
 	}
 
-	// Resolve from Reference Data instead of hardcoded ParseCurrency
-	if _, err := resolver.Resolve(ctx, googleMoney.CurrencyCode); err != nil {
-		return domain.Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, googleMoney.CurrencyCode)
+	// Resolve from Reference Data to get correct precision and dimension
+	props, err := resolver.Resolve(ctx, googleMoney.CurrencyCode)
+	if err != nil {
+		return domain.Money{}, fmt.Errorf("resolving instrument %q: %w", googleMoney.CurrencyCode, err)
 	}
 
 	// Convert units and nanos back to decimal
@@ -141,11 +143,11 @@ func ToDomainMoney(ctx context.Context, resolver refdata.InstrumentResolver, pro
 	nanosDecimal := decimal.NewFromInt(int64(googleMoney.Nanos)).Div(decimal.NewFromInt(1000000000))
 	amount := unitsDecimal.Add(nanosDecimal)
 
-	m, err := domain.NewMoneyFromInstrumentCode(amount, googleMoney.CurrencyCode)
+	inst, err := quantity.NewInstrument(googleMoney.CurrencyCode, 1, props.Dimension, props.Precision)
 	if err != nil {
-		return domain.Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, googleMoney.CurrencyCode)
+		return domain.Money{}, fmt.Errorf("creating instrument for %q: %w", googleMoney.CurrencyCode, err)
 	}
-	return m, nil
+	return quantity.NewMoney(amount, inst), nil
 }
 
 // ErrNilInstrumentAmount is returned when attempting to convert a nil InstrumentAmount.
@@ -210,16 +212,22 @@ func ToDomainMoneyFromInstrumentAmount(ctx context.Context, resolver refdata.Ins
 		return domain.Money{}, fmt.Errorf("%w: %s", ErrInvalidAmount, protoAmount.Amount)
 	}
 
-	// Resolve from Reference Data instead of hardcoded ParseCurrency
-	if _, err := resolver.Resolve(ctx, protoAmount.InstrumentCode); err != nil {
-		return domain.Money{}, fmt.Errorf("%w: %s", ErrInvalidCurrency, protoAmount.InstrumentCode)
+	// Resolve from Reference Data to get correct precision and dimension
+	props, err := resolver.Resolve(ctx, protoAmount.InstrumentCode)
+	if err != nil {
+		return domain.Money{}, fmt.Errorf("resolving instrument %q: %w", protoAmount.InstrumentCode, err)
 	}
 
-	m, err := domain.NewMoneyFromInstrumentCode(amount, protoAmount.InstrumentCode)
-	if err != nil {
-		return domain.Money{}, fmt.Errorf("%w: %s", ErrInvalidInstrumentCode, protoAmount.InstrumentCode)
+	version := uint32(protoAmount.Version)
+	if version == 0 {
+		version = 1
 	}
-	return m, nil
+
+	inst, err := quantity.NewInstrument(protoAmount.InstrumentCode, version, props.Dimension, props.Precision)
+	if err != nil {
+		return domain.Money{}, fmt.Errorf("creating instrument for %q: %w", protoAmount.InstrumentCode, err)
+	}
+	return quantity.NewMoney(amount, inst), nil
 }
 
 // ToDomainAssetFromInstrumentAmount converts a protobuf InstrumentAmount to its domain Asset representation.
