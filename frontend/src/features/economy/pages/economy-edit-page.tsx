@@ -13,9 +13,11 @@ function manifestToPlainObject(manifest: Manifest): Record<string, unknown> {
     return toJson(ManifestSchema, manifest) as Record<string, unknown>
   } catch {
     // Fallback for plain objects (e.g. in tests) - strip protobuf $typeName
-    return JSON.parse(JSON.stringify(manifest, (key, value) =>
-      key === '$typeName' ? undefined : value,
-    )) as Record<string, unknown>
+    return JSON.parse(JSON.stringify(manifest, (key, value) => {
+      if (key === '$typeName') return undefined
+      if (typeof value === 'bigint') return value.toString()
+      return value
+    })) as Record<string, unknown>
   }
 }
 
