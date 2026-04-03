@@ -81,13 +81,13 @@ current integrations, not a missed refactor.
 
 ## Proto Surface Area
 
-4 proto files import `google.type.Money`, containing ~19 Money fields total:
+4 proto files import `google.type.Money`, containing 22 Money fields total:
 
 | Proto File | Money Fields | Count |
 |------------|-------------|-------|
 | `financial_accounting/v1/financial_accounting.proto` | `LedgerPosting.posting_amount`, `CaptureLedgerPostingRequest.posting_amount`, `ListLedgerPostingsRequest.currency` (filter) | 3 |
-| `events/v1/financial_accounting_events.proto` | `FinancialBookingLogPostedEvent.total_debits/total_credits`, `LedgerPostingCapturedEvent.posting_amount`, `LedgerPostingAmendedEvent.previous_amount/new_amount`, `BalanceValidationFailedEvent.total_debits/total_credits/variance` | 7 |
-| `events/v1/current_account_events.proto` | `AccountClosedEvent.closing_balance`, `TransactionInitiatedEvent.transaction_amount`, `TransactionCompletedEvent.new_balance/new_available_balance`, `OverdraftConfiguredEvent.overdraft_limit/previous_limit`, `OverdraftLimitExceededEvent.attempted_amount/current_balance/overdraft_limit/shortage` | 9 |
+| `events/v1/financial_accounting_events.proto` | `FinancialBookingLogPostedEvent.total_debits/total_credits`, `LedgerPostingCapturedEvent.posting_amount`, `LedgerPostingAmendedEvent.previous_amount/new_amount`, `BalanceValidationFailedEvent.total_debits/total_credits/variance` | 8 |
+| `events/v1/current_account_events.proto` | `AccountClosedEvent.closing_balance`, `TransactionInitiatedEvent.transaction_amount`, `TransactionCompletedEvent.new_balance/new_available_balance`, `OverdraftConfiguredEvent.overdraft_limit/previous_limit`, `OverdraftLimitExceededEvent.attempted_amount/current_balance/overdraft_limit/shortage` | 10 |
 | `common/v1/types.proto` | `MoneyAmount.amount` (wrapper type) | 1 |
 
 **Note:** `ListLedgerPostingsRequest.currency` (field 7) has validation
@@ -118,6 +118,7 @@ change. `google.type.Money` field 2 = `units` (int64, varint) while
 client would misparse the bytes.
 
 **Decision: Clean swap.** Acceptable because:
+
 - No external API consumers exist yet
 - No SLAs or production deployments
 - The outbox can be drained before deployment (see Deployment section)
@@ -125,12 +126,17 @@ client would misparse the bytes.
 
 **CEL validation rewrite required.** Current proto-level CEL rules reference
 Money's `units`/`nanos` structure:
+
 ```cel
 this.units > 0 || (this.units == 0 && this.nanos > 0)
 ```
-These must be rewritten for InstrumentAmount, e.g.:
+
+These must be rewritten for InstrumentAmount. Note: `double(this.amount) > 0.0`
+is the documented Protovalidate pattern but loses precision for very large
+decimals. For arbitrary-precision safety, use regex-based string validation:
+
 ```cel
-double(this.amount) > 0.0
+this.amount.matches("^[1-9][0-9]*(\\.[0-9]+)?$") || this.amount.matches("^0\\.[0-9]*[1-9][0-9]*$")
 ```
 
 ## Solution
@@ -150,9 +156,11 @@ conversion paths.
    positive-amount enforcement.
 
 3. **ListLedgerPostingsRequest:** Rename `currency` (field 7) to `instrument_code`,
-   expand validation to `max_len: 32, pattern: "^[A-Z][A-Z0-9_]*$"`.
+   expand validation to `max_len: 32` and preserve optionality (proto3 scalar
+   default is empty string, so use `pattern: "^$|^[A-Z][A-Z0-9_]*$"` or
+   `ignore_empty` semantics to allow unset/empty as "no filter").
 
-4. **financial_accounting_events.proto:** Migrate all 7 Money fields to
+4. **financial_accounting_events.proto:** Migrate all 8 Money fields to
    InstrumentAmount.
 
 5. **Run `buf generate api/proto`** to regenerate Go files.
@@ -160,11 +168,14 @@ conversion paths.
 ### Phase 2: financial-accounting Go layer (demo blocker)
 
 1. **Go adapters (inbound):** Replace `fromProtoMoney()` to use
-   `InstrumentResolver.Resolve()` instead of `ParseCurrency()`. The resolver
-   returns dimension, precision, and rounding mode for any registered instrument.
-   **Note:** The resolver is already wired into financial-accounting at
-   `server.go:193` (`instrumentResolver` field) with `WithInstrumentResolver()`
-   option at line 212. No new plumbing needed.
+   `InstrumentResolver.Resolve()` instead of `ParseCurrency()`. Since
+   `fromProtoMoney()` is a standalone function (not a method on a service
+   struct), either change its signature to accept a resolver parameter, or
+   convert it to a method on the service/adapter struct. The resolver is already
+   wired into financial-accounting at `server.go:193` (`instrumentResolver`
+   field) with `WithInstrumentResolver()` option at line 212 - no new plumbing
+   needed, just thread the resolver through the call chain. Also add
+   `InstrumentResolver` to `PostingService` struct for `buildDepositPostings()`.
 
 2. **Go adapters (outbound):** Replace `toProtoMoney()` (`adapters.go:79`) to
    output `InstrumentAmount` instead of `google.type.Money`. This reverse path
@@ -207,7 +218,7 @@ conversion paths.
 2. Verify all callers handle non-monetary dimensions correctly (account creation,
    balance queries).
 
-3. **current_account_events.proto:** Migrate all 9 Money fields to InstrumentAmount.
+3. **current_account_events.proto:** Migrate all 10 Money fields to InstrumentAmount.
    The type system should support any asset; business rules constrain which assets
    allow overdrafts at a higher layer (application logic, not proto types).
    - Account position fields: `closing_balance`, `transaction_amount`,
@@ -260,6 +271,7 @@ conversion paths.
 ## Testing Strategy
 
 ### Unit Tests
+
 - Adapter conversion accepts "GBP", "KWH", "TONNE_CO2E", "GPU_HOUR" and rejects
   empty/invalid codes
 - Posting capture roundtrip for non-fiat instruments
@@ -267,6 +279,7 @@ conversion paths.
 - CEL validation rules reject zero/negative InstrumentAmount values
 
 ### Integration Tests
+
 - End-to-end: create booking log with KWH instrument, capture postings, verify
   they appear in the booking log detail response
 - **Precision round-trip:** Create KWH posting with 3dp precision (e.g.,
@@ -280,23 +293,26 @@ conversion paths.
   InstrumentAmount fields from `FinancialBookingLogPostedEvent`
 
 ### Regression Tests
+
 - All existing GBP/USD posting tests continue to pass unchanged
 - Payment-order tests remain currency-only
 - ListLedgerPostings filtering works for both "GBP" and "KWH" instrument codes
 
 ## Complexity Assessment
 
-| Phase | Estimate | Parallelizable |
-|-------|----------|----------------|
-| Phase 1: Proto migration | 3 points | No (foundation) |
-| Phase 2: financial-accounting Go | 3 points | Atomic with Phase 1 (proto change breaks compilation) |
-| Phase 3: position-keeping | 2 points | Yes (after Phase 1) |
-| Phase 4: current-account + events | 3 points | Yes (after Phase 1) |
-| Phase 5: Cleanup | 2 points | Yes |
-| **Total** | **13 points** | Phases 3-5 parallelize after Phase 2 |
+| Phase | Estimate | Dev Parallelizable | Deploy |
+|-------|----------|-------------------|--------|
+| Phase 1: Proto migration | 3 points | No (foundation) | Atomic with Phases 2-3 |
+| Phase 2: financial-accounting Go | 3 points | No (depends on Phase 1) | Atomic with Phases 1, 3 |
+| Phase 3: position-keeping | 2 points | Yes (dev in parallel after Phase 1) | Atomic with Phases 1-2 |
+| Phase 4: current-account + events | 3 points | Yes (dev in parallel after Phase 1) | Can follow separately |
+| Phase 5: Cleanup | 2 points | Yes | Can follow separately |
+| **Total** | **13 points** | | |
 
-Critical path: Phase 1 (proto) -> Phase 2 (financial-accounting Go) -> deploy.
-Phases 3-5 can follow in parallel.
+**Development** can parallelize: Phases 2-3 can be developed concurrently after
+Phase 1 lands. **Deployment** is atomic for Phases 1-3: a half-migrated state
+where FA accepts KWH but PK can't track positions is worse than the current
+consistent fiat-only rejection. Phases 4-5 can deploy independently.
 
 ## Success Criteria
 
@@ -320,7 +336,7 @@ Phases 3-5 can follow in parallel.
 
 ## Resolved Questions (continued)
 
-3. **current_account_events overdraft fields:** All 9 fields migrate to
+3. **current_account_events overdraft fields:** All 10 fields migrate to
    InstrumentAmount. The type system should support any asset; business rules
    constrain which assets allow overdrafts at the application layer, not at the
    proto type level. Restricting at the proto level creates a future constraint
