@@ -16,8 +16,9 @@ instructions: |
   (InstrumentAmount in quantity/v1) and resolver (InstrumentResolver in shared/pkg/refdata)
   already exist - this work wires them through the remaining services.
 
-  Key constraint: payment-order is intentionally currency-only (payment rails carry
-  ISO 4217 only). Do not change payment-order's currency validation.
+  Key constraint: payment-order remains currency-only because its current payment
+  rail integrations only support ISO 4217. Do not change payment-order's currency
+  validation.
 ---
 
 # PRD-059: Asset-Agnostic Posting Layer
@@ -72,10 +73,11 @@ assumes ISO 4217 via its `currency_code` field. The booking log itself already u
 |----------|-------|
 | `domain/quantity.go:94` | `NewMoneyFromInstrument()` explicitly rejects non-CURRENCY dimension |
 
-### 4. payment-order (NOT affected - intentionally currency-only)
+### 4. payment-order (NOT affected - currency-only due to current payment rail constraints)
 
-Payment rails only carry ISO 4217 currencies. The fiat restriction here is a
-correct business constraint, not a missed refactor.
+Current payment rail integrations (Stripe, bank transfers) only carry ISO 4217
+currencies. The fiat restriction here is a correct business constraint for the
+current integrations, not a missed refactor.
 
 ## Proto Surface Area
 
@@ -157,15 +159,20 @@ conversion paths.
 
 ### Phase 2: financial-accounting Go layer (demo blocker)
 
-1. **Go adapters:** Replace `fromProtoMoney()` to use `InstrumentResolver.Resolve()`
-   instead of `ParseCurrency()`. The resolver returns dimension, precision, and
-   rounding mode for any registered instrument.
+1. **Go adapters (inbound):** Replace `fromProtoMoney()` to use
+   `InstrumentResolver.Resolve()` instead of `ParseCurrency()`. The resolver
+   returns dimension, precision, and rounding mode for any registered instrument.
+   **Note:** The resolver is already wired into financial-accounting at
+   `server.go:193` (`instrumentResolver` field) with `WithInstrumentResolver()`
+   option at line 212. No new plumbing needed.
 
-2. **Posting service:** Replace `buildDepositPostings()` to use the resolver
-   for currency validation.
+2. **Go adapters (outbound):** Replace `toProtoMoney()` (`adapters.go:79`) to
+   output `InstrumentAmount` instead of `google.type.Money`. This reverse path
+   must match the proto change - if we accept non-fiat in, we must output
+   non-fiat too.
 
-3. **Wire resolver:** Inject `InstrumentResolver` into the service layer
-   (it is already available in the dependency graph via refdata package).
+3. **Posting service:** Replace `buildDepositPostings()` to use the resolver
+   for instrument validation.
 
 4. **Seed script:** Remove the KWH skip workaround in `cmd/seed-dev/cmd/fixtures.go`.
 
@@ -175,26 +182,33 @@ conversion paths.
 ### Phase 3: position-keeping
 
 1. **balance_mapper.go:** Replace `ToDomainMoney()` and
-   `ToDomainMoneyFromInstrumentAmount()` to use `InstrumentResolver` instead
-   of `ParseCurrency()`.
+   `ToDomainMoneyFromInstrumentAmount()` to follow the same pattern as
+   `ToDomainAssetFromInstrumentAmount()` (`balance_mapper.go:220`), which
+   already uses `InstrumentResolver.Resolve()` correctly. The asset-aware
+   path is proven - the Money functions just need to match it.
 
-2. Wire `InstrumentResolver` into the adapter layer.
+2. **No new plumbing needed.** The resolver is already wired into
+   position-keeping via `app/container.go` (`initializeInstrumentResolver()`)
+   and passed via `service.WithInstrumentResolver()`.
 
 ### Phase 4: current-account
 
-1. **domain/quantity.go:** Remove the explicit `CURRENCY` dimension check in
-   `NewMoneyFromInstrument()`. Allow any dimension registered in reference data.
+1. **Caller migration:** `NewMoneyFromInstrument()` (line 93, CURRENCY-only) is
+   the deprecated path. `NewAmountFromInstrument()` (line 73) already delegates
+   to `sharedamount.NewFromInstrument` which supports ALL dimensions. Phase 4 is
+   migrating callers from the old function to the existing dimension-agnostic one,
+   not removing a safety gate or creating new capability.
 
 2. Verify all callers handle non-monetary dimensions correctly (account creation,
    balance queries).
 
-3. **current_account_events.proto:** Scope each of the 9 Money fields:
-   - Migrate to InstrumentAmount: `closing_balance`, `transaction_amount`,
-     `new_balance`, `new_available_balance` (these carry the account's instrument)
-   - Domain decision needed: `overdraft_limit`, `previous_limit`,
-     `attempted_amount`, `current_balance`, `shortage` - overdraft may be an
-     inherently monetary concept. If so, these can remain as Money or be migrated
-     with a CURRENCY dimension constraint at the application layer.
+3. **current_account_events.proto:** Migrate all 9 Money fields to InstrumentAmount.
+   The type system should support any asset; business rules constrain which assets
+   allow overdrafts at a higher layer (application logic, not proto types).
+   - Account position fields: `closing_balance`, `transaction_amount`,
+     `new_balance`, `new_available_balance`
+   - Overdraft fields: `overdraft_limit`, `previous_limit`,
+     `attempted_amount`, `current_balance`, `shortage`
 
 ### Phase 5: Cleanup
 
@@ -216,10 +230,13 @@ conversion paths.
    proto schema (google.type.Money wire format) would be silently corrupt after
    deployment. This is operationally trivial in pre-production.
 
-2. **Deploy all proto changes atomically.** Do not deploy Phase 1 proto changes
+2. **Deploy Phases 1-3 atomically.** Do not deploy Phase 1 proto changes
    without the corresponding Phase 2 Go adapter changes in the same release.
    A half-deployed state where the proto expects InstrumentAmount but the Go code
-   still calls `ParseCurrency()` would fail on every request.
+   still calls `ParseCurrency()` would fail on every request. A state where FA
+   accepts KWH postings but PK can't track positions and CA can't show balances
+   is worse than the current consistent fiat-only rejection. Treat Phases 1-3
+   as an atomic epic.
 
 3. **Verify Kafka consumers.** Confirm no downstream consumers depend on the
    `google.type.Money` wire format for financial accounting events.
@@ -247,9 +264,15 @@ conversion paths.
 ### Integration Tests
 - End-to-end: create booking log with KWH instrument, capture postings, verify
   they appear in the booking log detail response
+- **Precision round-trip:** Create KWH posting with 3dp precision (e.g.,
+  "123.456"), verify the amount survives the full lifecycle without truncation
+  to 2dp. The InstrumentResolver's precision must be respected through the
+  entire posting pipeline.
 - Seed script deposits KWH successfully (no skip workaround)
 - Demo environment shows KWH transactions on the ledger detail page
 - Non-fiat postings round-trip correctly: create, store, query, display
+- Event deserialization: verify downstream consumers can deserialize non-fiat
+  InstrumentAmount fields from `FinancialBookingLogPostedEvent`
 
 ### Regression Tests
 - All existing GBP/USD posting tests continue to pass unchanged
@@ -276,9 +299,10 @@ Phases 3-5 can follow in parallel.
 2. Seed script creates KWH deposits without skipping
 3. `ParseCurrency()` has zero callers in production code paths
 4. Non-fiat postings round-trip correctly (create, store, query, display)
-5. All existing fiat tests pass without modification
-6. payment-order remains currency-only (no regression)
-7. Proto-level CEL validation enforces positive amounts for InstrumentAmount
+5. Non-fiat precision is preserved (KWH 3dp not truncated to 2dp)
+6. All existing fiat tests pass without modification
+7. payment-order remains currency-only (no regression)
+8. Proto-level CEL validation enforces positive amounts for InstrumentAmount
 
 ## Resolved Questions
 
@@ -289,11 +313,26 @@ Phases 3-5 can follow in parallel.
    (`shared/platform/events/outbox_pgx.go:359`). Drain outbox before deploying.
    No external Kafka consumers depend on the Money wire format.
 
-## Open Questions
+## Resolved Questions (continued)
 
-1. **current_account_events overdraft fields:** Are overdraft-related fields
-   (`overdraft_limit`, `previous_limit`, `shortage`) inherently monetary concepts
-   that should stay as Money, or should they migrate to InstrumentAmount for
-   consistency? This is a domain decision - overdraft limits on a KWH account
-   may not make business sense today, but restricting them at the proto level
-   creates a future constraint.
+3. **current_account_events overdraft fields:** All 9 fields migrate to
+   InstrumentAmount. The type system should support any asset; business rules
+   constrain which assets allow overdrafts at the application layer, not at the
+   proto type level. Restricting at the proto level creates a future constraint
+   (e.g., energy pre-purchase agreements are effectively KWH overdrafts).
+
+## De-Risk Findings
+
+The following reduce implementation risk compared to the original estimate:
+
+1. **InstrumentResolver already wired into FA** (`server.go:193`) and PK
+   (`app/container.go`). No new dependency injection needed - just use the
+   existing resolver in the adapter functions.
+
+2. **PK already has the asset-aware pattern.** `ToDomainAssetFromInstrumentAmount()`
+   at `balance_mapper.go:220` uses `InstrumentResolver.Resolve()` correctly.
+   The Money functions just need to follow the same pattern.
+
+3. **CA already has the dimension-agnostic path.** `NewAmountFromInstrument()`
+   (line 73) supports all dimensions. Phase 4 is caller migration, not
+   capability creation.
