@@ -33,6 +33,13 @@ func (s *stubResolver) Resolve(_ context.Context, code string) (refdata.Instrume
 func newTestResolver() *stubResolver {
 	return &stubResolver{
 		instruments: map[string]refdata.InstrumentProperties{
+			"GBP":          {Code: "GBP", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"USD":          {Code: "USD", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"EUR":          {Code: "EUR", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"JPY":          {Code: "JPY", Dimension: "MONETARY", Precision: 0, RoundingMode: "HALF_EVEN"},
+			"CHF":          {Code: "CHF", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"CAD":          {Code: "CAD", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
+			"AUD":          {Code: "AUD", Dimension: "MONETARY", Precision: 2, RoundingMode: "HALF_EVEN"},
 			"KWH":          {Code: "KWH", Dimension: "ENERGY", Precision: 6, RoundingMode: "HALF_EVEN"},
 			"GPU_HOUR":     {Code: "GPU_HOUR", Dimension: "COMPUTE", Precision: 6, RoundingMode: "HALF_EVEN"},
 			"CARBON_TONNE": {Code: "CARBON_TONNE", Dimension: "CARBON", Precision: 3, RoundingMode: "HALF_EVEN"},
@@ -308,6 +315,8 @@ func TestToProtoMoneyAmount(t *testing.T) {
 
 // TestToDomainMoney tests conversion of proto MoneyAmount to domain Money.
 func TestToDomainMoney(t *testing.T) {
+	resolver := newTestResolver()
+	ctx := context.Background()
 	tests := []struct {
 		name           string
 		proto          *commonv1.MoneyAmount
@@ -436,7 +445,7 @@ func TestToDomainMoney(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := adapters.ToDomainMoney(tt.proto)
+			result, err := adapters.ToDomainMoney(ctx, resolver, tt.proto)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -482,6 +491,9 @@ func TestBalanceTypeRoundTrip(t *testing.T) {
 
 // TestMoneyRoundTrip tests that converting domain->proto->domain preserves the value.
 func TestMoneyRoundTrip(t *testing.T) {
+	resolver := newTestResolver()
+	ctx := context.Background()
+
 	testCases := []struct {
 		amount   string
 		currency domain.Currency
@@ -504,7 +516,7 @@ func TestMoneyRoundTrip(t *testing.T) {
 			proto := adapters.ToProtoMoneyAmount(original)
 
 			// Proto -> Domain
-			result, err := adapters.ToDomainMoney(proto)
+			result, err := adapters.ToDomainMoney(ctx, resolver, proto)
 			require.NoError(t, err)
 
 			// Compare amounts (may have precision differences for sub-nano values)
@@ -524,6 +536,9 @@ func TestMoneyRoundTrip(t *testing.T) {
 
 // TestProtoToProtoMoneyRoundTrip tests proto->domain->proto preserves original proto values.
 func TestProtoToProtoMoneyRoundTrip(t *testing.T) {
+	resolver := newTestResolver()
+	ctx := context.Background()
+
 	testCases := []struct {
 		name         string
 		currencyCode string
@@ -551,7 +566,7 @@ func TestProtoToProtoMoneyRoundTrip(t *testing.T) {
 			}
 
 			// Proto -> Domain
-			domainMoney, err := adapters.ToDomainMoney(original)
+			domainMoney, err := adapters.ToDomainMoney(ctx, resolver, original)
 			require.NoError(t, err)
 
 			// Domain -> Proto
@@ -692,6 +707,9 @@ func TestToProtoInstrumentAmountFromAsset(t *testing.T) {
 
 // TestToDomainMoneyFromInstrumentAmount tests conversion of proto InstrumentAmount to domain Money.
 func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
+	resolver := newTestResolver()
+	ctx := context.Background()
+
 	tests := []struct {
 		name         string
 		proto        *quantityv1.InstrumentAmount
@@ -734,6 +752,28 @@ func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
 			expectCode:   "EUR",
 		},
 		{
+			name: "valid KWH non-fiat instrument",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "500.123456",
+				InstrumentCode: "KWH",
+				Version:        1,
+			},
+			expectError:  false,
+			expectAmount: "500.123456",
+			expectCode:   "KWH",
+		},
+		{
+			name: "valid CARBON_TONNE non-fiat instrument",
+			proto: &quantityv1.InstrumentAmount{
+				Amount:         "12.5",
+				InstrumentCode: "CARBON_TONNE",
+				Version:        1,
+			},
+			expectError:  false,
+			expectAmount: "12.5",
+			expectCode:   "CARBON_TONNE",
+		},
+		{
 			name:        "nil InstrumentAmount returns error",
 			proto:       nil,
 			expectError: true,
@@ -760,10 +800,10 @@ func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
 			errContains: "invalid amount",
 		},
 		{
-			name: "non-currency code returns error",
+			name: "unknown instrument code returns error",
 			proto: &quantityv1.InstrumentAmount{
 				Amount:         "100",
-				InstrumentCode: "KWH", // Not a currency
+				InstrumentCode: "UNKNOWN_ASSET",
 				Version:        1,
 			},
 			expectError: true,
@@ -783,7 +823,7 @@ func TestToDomainMoneyFromInstrumentAmount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := adapters.ToDomainMoneyFromInstrumentAmount(tt.proto)
+			result, err := adapters.ToDomainMoneyFromInstrumentAmount(ctx, resolver, tt.proto)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -926,6 +966,9 @@ func TestToDomainAssetFromInstrumentAmount(t *testing.T) {
 
 // TestRoundTripMoneyToInstrumentAmount tests round-trip conversion preserves precision.
 func TestRoundTripMoneyToInstrumentAmount(t *testing.T) {
+	resolver := newTestResolver()
+	ctx := context.Background()
+
 	tests := []struct {
 		name     string
 		amount   string
@@ -960,7 +1003,7 @@ func TestRoundTripMoneyToInstrumentAmount(t *testing.T) {
 			proto := adapters.ToProtoInstrumentAmount(original)
 
 			// Proto -> Domain
-			result, err := adapters.ToDomainMoneyFromInstrumentAmount(proto)
+			result, err := adapters.ToDomainMoneyFromInstrumentAmount(ctx, resolver, proto)
 			require.NoError(t, err)
 
 			// Compare
