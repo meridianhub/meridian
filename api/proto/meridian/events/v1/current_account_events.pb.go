@@ -7,16 +7,15 @@
 package eventsv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v11 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	v1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -2337,36 +2336,34 @@ func file_meridian_events_v1_current_account_events_proto_rawDescGZIP() []byte {
 	return file_meridian_events_v1_current_account_events_proto_rawDescData
 }
 
-var (
-	file_meridian_events_v1_current_account_events_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
-	file_meridian_events_v1_current_account_events_proto_goTypes  = []any{
-		(*AccountCreatedEvent)(nil),           // 0: meridian.events.v1.AccountCreatedEvent
-		(*AccountStatusChangedEvent)(nil),     // 1: meridian.events.v1.AccountStatusChangedEvent
-		(*AccountFrozenEvent)(nil),            // 2: meridian.events.v1.AccountFrozenEvent
-		(*AccountUnfrozenEvent)(nil),          // 3: meridian.events.v1.AccountUnfrozenEvent
-		(*AccountClosedEvent)(nil),            // 4: meridian.events.v1.AccountClosedEvent
-		(*TransactionInitiatedEvent)(nil),     // 5: meridian.events.v1.TransactionInitiatedEvent
-		(*TransactionCompletedEvent)(nil),     // 6: meridian.events.v1.TransactionCompletedEvent
-		(*AccountTransactionFailedEvent)(nil), // 7: meridian.events.v1.AccountTransactionFailedEvent
-		(*WithdrawalStatusUpdatedEvent)(nil),  // 8: meridian.events.v1.WithdrawalStatusUpdatedEvent
-		(*OverdraftConfiguredEvent)(nil),      // 9: meridian.events.v1.OverdraftConfiguredEvent
-		(*OverdraftLimitExceededEvent)(nil),   // 10: meridian.events.v1.OverdraftLimitExceededEvent
-		nil,                                   // 11: meridian.events.v1.AccountCreatedEvent.MetadataEntry
-		nil,                                   // 12: meridian.events.v1.AccountStatusChangedEvent.MetadataEntry
-		nil,                                   // 13: meridian.events.v1.AccountFrozenEvent.MetadataEntry
-		nil,                                   // 14: meridian.events.v1.AccountUnfrozenEvent.MetadataEntry
-		nil,                                   // 15: meridian.events.v1.AccountClosedEvent.MetadataEntry
-		nil,                                   // 16: meridian.events.v1.TransactionInitiatedEvent.MetadataEntry
-		nil,                                   // 17: meridian.events.v1.TransactionCompletedEvent.MetadataEntry
-		nil,                                   // 18: meridian.events.v1.AccountTransactionFailedEvent.MetadataEntry
-		nil,                                   // 19: meridian.events.v1.WithdrawalStatusUpdatedEvent.MetadataEntry
-		nil,                                   // 20: meridian.events.v1.OverdraftConfiguredEvent.MetadataEntry
-		nil,                                   // 21: meridian.events.v1.OverdraftLimitExceededEvent.MetadataEntry
-		(*timestamppb.Timestamp)(nil),         // 22: google.protobuf.Timestamp
-		(*v1.InstrumentAmount)(nil),           // 23: meridian.quantity.v1.InstrumentAmount
-		(v11.PostingDirection)(0),             // 24: meridian.common.v1.PostingDirection
-	}
-)
+var file_meridian_events_v1_current_account_events_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_meridian_events_v1_current_account_events_proto_goTypes = []any{
+	(*AccountCreatedEvent)(nil),           // 0: meridian.events.v1.AccountCreatedEvent
+	(*AccountStatusChangedEvent)(nil),     // 1: meridian.events.v1.AccountStatusChangedEvent
+	(*AccountFrozenEvent)(nil),            // 2: meridian.events.v1.AccountFrozenEvent
+	(*AccountUnfrozenEvent)(nil),          // 3: meridian.events.v1.AccountUnfrozenEvent
+	(*AccountClosedEvent)(nil),            // 4: meridian.events.v1.AccountClosedEvent
+	(*TransactionInitiatedEvent)(nil),     // 5: meridian.events.v1.TransactionInitiatedEvent
+	(*TransactionCompletedEvent)(nil),     // 6: meridian.events.v1.TransactionCompletedEvent
+	(*AccountTransactionFailedEvent)(nil), // 7: meridian.events.v1.AccountTransactionFailedEvent
+	(*WithdrawalStatusUpdatedEvent)(nil),  // 8: meridian.events.v1.WithdrawalStatusUpdatedEvent
+	(*OverdraftConfiguredEvent)(nil),      // 9: meridian.events.v1.OverdraftConfiguredEvent
+	(*OverdraftLimitExceededEvent)(nil),   // 10: meridian.events.v1.OverdraftLimitExceededEvent
+	nil,                                   // 11: meridian.events.v1.AccountCreatedEvent.MetadataEntry
+	nil,                                   // 12: meridian.events.v1.AccountStatusChangedEvent.MetadataEntry
+	nil,                                   // 13: meridian.events.v1.AccountFrozenEvent.MetadataEntry
+	nil,                                   // 14: meridian.events.v1.AccountUnfrozenEvent.MetadataEntry
+	nil,                                   // 15: meridian.events.v1.AccountClosedEvent.MetadataEntry
+	nil,                                   // 16: meridian.events.v1.TransactionInitiatedEvent.MetadataEntry
+	nil,                                   // 17: meridian.events.v1.TransactionCompletedEvent.MetadataEntry
+	nil,                                   // 18: meridian.events.v1.AccountTransactionFailedEvent.MetadataEntry
+	nil,                                   // 19: meridian.events.v1.WithdrawalStatusUpdatedEvent.MetadataEntry
+	nil,                                   // 20: meridian.events.v1.OverdraftConfiguredEvent.MetadataEntry
+	nil,                                   // 21: meridian.events.v1.OverdraftLimitExceededEvent.MetadataEntry
+	(*timestamppb.Timestamp)(nil),         // 22: google.protobuf.Timestamp
+	(*v1.InstrumentAmount)(nil),           // 23: meridian.quantity.v1.InstrumentAmount
+	(v11.PostingDirection)(0),             // 24: meridian.common.v1.PostingDirection
+}
 var file_meridian_events_v1_current_account_events_proto_depIdxs = []int32{
 	22, // 0: meridian.events.v1.AccountCreatedEvent.timestamp:type_name -> google.protobuf.Timestamp
 	11, // 1: meridian.events.v1.AccountCreatedEvent.metadata:type_name -> meridian.events.v1.AccountCreatedEvent.MetadataEntry

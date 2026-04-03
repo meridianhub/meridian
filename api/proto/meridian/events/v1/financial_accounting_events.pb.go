@@ -7,16 +7,15 @@
 package eventsv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	v11 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -1673,25 +1672,23 @@ func file_meridian_events_v1_financial_accounting_events_proto_rawDescGZIP() []b
 	return file_meridian_events_v1_financial_accounting_events_proto_rawDescData
 }
 
-var (
-	file_meridian_events_v1_financial_accounting_events_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
-	file_meridian_events_v1_financial_accounting_events_proto_goTypes  = []any{
-		(*FinancialBookingLogInitiatedEvent)(nil),  // 0: meridian.events.v1.FinancialBookingLogInitiatedEvent
-		(*FinancialBookingLogUpdatedEvent)(nil),    // 1: meridian.events.v1.FinancialBookingLogUpdatedEvent
-		(*FinancialBookingLogPostedEvent)(nil),     // 2: meridian.events.v1.FinancialBookingLogPostedEvent
-		(*FinancialBookingLogClosedEvent)(nil),     // 3: meridian.events.v1.FinancialBookingLogClosedEvent
-		(*LedgerPostingCapturedEvent)(nil),         // 4: meridian.events.v1.LedgerPostingCapturedEvent
-		(*LedgerPostingAmendedEvent)(nil),          // 5: meridian.events.v1.LedgerPostingAmendedEvent
-		(*LedgerPostingPostedEvent)(nil),           // 6: meridian.events.v1.LedgerPostingPostedEvent
-		(*LedgerPostingRejectedEvent)(nil),         // 7: meridian.events.v1.LedgerPostingRejectedEvent
-		(*FinancialBookingLogControlledEvent)(nil), // 8: meridian.events.v1.FinancialBookingLogControlledEvent
-		(*BalanceValidationFailedEvent)(nil),       // 9: meridian.events.v1.BalanceValidationFailedEvent
-		(*timestamppb.Timestamp)(nil),              // 10: google.protobuf.Timestamp
-		(v1.TransactionStatus)(0),                  // 11: meridian.common.v1.TransactionStatus
-		(*v11.InstrumentAmount)(nil),               // 12: meridian.quantity.v1.InstrumentAmount
-		(v1.PostingDirection)(0),                   // 13: meridian.common.v1.PostingDirection
-	}
-)
+var file_meridian_events_v1_financial_accounting_events_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_meridian_events_v1_financial_accounting_events_proto_goTypes = []any{
+	(*FinancialBookingLogInitiatedEvent)(nil),  // 0: meridian.events.v1.FinancialBookingLogInitiatedEvent
+	(*FinancialBookingLogUpdatedEvent)(nil),    // 1: meridian.events.v1.FinancialBookingLogUpdatedEvent
+	(*FinancialBookingLogPostedEvent)(nil),     // 2: meridian.events.v1.FinancialBookingLogPostedEvent
+	(*FinancialBookingLogClosedEvent)(nil),     // 3: meridian.events.v1.FinancialBookingLogClosedEvent
+	(*LedgerPostingCapturedEvent)(nil),         // 4: meridian.events.v1.LedgerPostingCapturedEvent
+	(*LedgerPostingAmendedEvent)(nil),          // 5: meridian.events.v1.LedgerPostingAmendedEvent
+	(*LedgerPostingPostedEvent)(nil),           // 6: meridian.events.v1.LedgerPostingPostedEvent
+	(*LedgerPostingRejectedEvent)(nil),         // 7: meridian.events.v1.LedgerPostingRejectedEvent
+	(*FinancialBookingLogControlledEvent)(nil), // 8: meridian.events.v1.FinancialBookingLogControlledEvent
+	(*BalanceValidationFailedEvent)(nil),       // 9: meridian.events.v1.BalanceValidationFailedEvent
+	(*timestamppb.Timestamp)(nil),              // 10: google.protobuf.Timestamp
+	(v1.TransactionStatus)(0),                  // 11: meridian.common.v1.TransactionStatus
+	(*v11.InstrumentAmount)(nil),               // 12: meridian.quantity.v1.InstrumentAmount
+	(v1.PostingDirection)(0),                   // 13: meridian.common.v1.PostingDirection
+}
 var file_meridian_events_v1_financial_accounting_events_proto_depIdxs = []int32{
 	10, // 0: meridian.events.v1.FinancialBookingLogInitiatedEvent.timestamp:type_name -> google.protobuf.Timestamp
 	11, // 1: meridian.events.v1.FinancialBookingLogUpdatedEvent.status:type_name -> meridian.common.v1.TransactionStatus
