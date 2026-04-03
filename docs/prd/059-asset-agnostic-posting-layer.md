@@ -186,9 +186,11 @@ conversion paths.
    for instrument validation. **Critical:** `decimalFromCents()` at
    `posting_service.go:78` hardcodes division by 100, and `DepositEvent.AmountCents`
    is cent-based. After removing ParseCurrency, KWH amounts would silently get
-   divided by 100 - data corruption. Either change `DepositEvent` to carry a
-   decimal string + instrument code, or use `InstrumentResolver` to look up
-   precision and apply the correct divisor.
+   divided by 100 - data corruption. **Recommended fix:** Change `DepositEvent`
+   to carry a decimal string amount + instrument code (aligning with
+   `InstrumentAmount`'s string-based precision model). This is preferred over
+   using `InstrumentResolver` to compute a divisor because it eliminates the
+   cent-based assumption entirely rather than parameterizing it.
 
 4. **Seed script:** Remove the KWH skip workaround in `cmd/seed-dev/cmd/fixtures.go`.
 
