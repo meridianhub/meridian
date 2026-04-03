@@ -89,7 +89,9 @@ var NewMoney = func(currencyCode string, amountMinorUnits int64) (Amount, error)
 // NewMoneyFromInstrument creates an Amount from persisted instrument_code + dimension and minor-unit amount.
 // Returns ErrInvalidCurrency if dimension is not "CURRENCY".
 //
-// Deprecated: Use NewAmountFromInstrument for new code which supports all dimensions.
+// Deprecated: Use NewAmountFromInstrument instead. NewMoneyFromInstrument rejects non-CURRENCY
+// dimensions (e.g. ENERGY, CARBON, COMPUTE) and hard-codes precision=2. All callers have been
+// migrated to NewAmountFromInstrument. This function will be removed in a future release.
 var NewMoneyFromInstrument = func(instrumentCode, dimension string, amountMinorUnits int64) (Amount, error) {
 	if strings.ToUpper(dimension) != quantity.DimensionCurrency {
 		return Amount{}, ErrInvalidCurrency
