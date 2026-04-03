@@ -42,7 +42,7 @@ import {
   type ManifestNodeType,
   type ManifestGraph as ManifestGraphModel,
 } from '../lib/manifest-graph-model'
-import { NODE_TYPE_REGISTRY, getNodeThemes, getLayerPriority } from '../lib/node-type-registry'
+import { NODE_TYPE_REGISTRY, getNodeThemes } from '../lib/node-type-registry'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 import { useEventChain } from '../hooks/use-event-chain'
 import { EventChainPanel } from './event-chain-panel'
@@ -64,7 +64,7 @@ const EDGE_LEGEND: { label: string; color: string; dashed?: boolean }[] = [
   { label: 'Converts to', color: 'var(--graph-valuation-rule)' },
 ]
 
-const LAYER_PRIORITY = getLayerPriority()
+
 
 // Trigger type display
 function getTriggerBadge(trigger: string): { label: string; variant: string } {
@@ -592,9 +592,6 @@ async function layoutManifestGraph(
     id: n.id,
     width: NODE_WIDTH,
     height: NODE_BASE_HEIGHT + NODE_PADDING,
-    layoutOptions: {
-      'elk.layered.layering.layerChoiceConstraint': LAYER_PRIORITY[n.type],
-    },
   }))
 
   const rfEdges = buildReactFlowEdges(filteredEdges)
@@ -619,9 +616,12 @@ async function layoutManifestGraph(
       }
     },
     {
-      direction: 'DOWN',
-      nodeNodeSpacing: '50',
-      layerSpacing: '80',
+      algorithm: 'force',
+      nodeNodeSpacing: '80',
+      extra: {
+        'elk.force.iterations': '300',
+        'elk.force.repulsion': '5.0',
+      },
     },
   )
 
