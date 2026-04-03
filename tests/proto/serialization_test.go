@@ -96,6 +96,18 @@ func TestProtoSerialization(t *testing.T) {
 		if decoded.PostingDirection != original.PostingDirection {
 			t.Errorf("posting_direction mismatch: got %v, want %v", decoded.PostingDirection, original.PostingDirection)
 		}
+		if decoded.PostingAmount == nil {
+			t.Fatal("posting_amount mismatch: got nil, want non-nil")
+		}
+		if decoded.PostingAmount.Amount != original.PostingAmount.Amount {
+			t.Errorf("posting_amount.amount mismatch: got %v, want %v", decoded.PostingAmount.Amount, original.PostingAmount.Amount)
+		}
+		if decoded.PostingAmount.InstrumentCode != original.PostingAmount.InstrumentCode {
+			t.Errorf("posting_amount.instrument_code mismatch: got %v, want %v", decoded.PostingAmount.InstrumentCode, original.PostingAmount.InstrumentCode)
+		}
+		if decoded.PostingAmount.Version != original.PostingAmount.Version {
+			t.Errorf("posting_amount.version mismatch: got %v, want %v", decoded.PostingAmount.Version, original.PostingAmount.Version)
+		}
 	})
 
 	t.Run("Event message serialization", func(t *testing.T) {
