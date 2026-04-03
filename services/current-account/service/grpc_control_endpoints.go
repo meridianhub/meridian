@@ -347,7 +347,7 @@ func (s *Service) publishAccountClosedEvent(
 	closingBalance := &quantityv1.InstrumentAmount{
 		Amount:         account.Balance().Amount().String(),
 		InstrumentCode: account.Balance().InstrumentCode(),
-		Version:        1,
+		Version:        int32(account.Balance().Instrument().Version),
 	}
 	event := &eventsv1.AccountClosedEvent{
 		EventId:        uuid.New().String(),
