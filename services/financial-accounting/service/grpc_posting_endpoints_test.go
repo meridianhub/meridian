@@ -7,10 +7,10 @@ import (
 	"github.com/google/uuid"
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -20,9 +20,10 @@ import (
 func validCaptureRequest(bookingLogID uuid.UUID) *financialaccountingv1.CaptureLedgerPostingRequest {
 	return &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: bookingLogID.String(),
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
 		AccountId:        "ACC-001",
@@ -124,10 +125,10 @@ func TestCaptureLedgerPosting_ZeroAmount(t *testing.T) {
 	svc := mustNewFinancialAccountingService(t, repo, &mockEventPublisher{}, &mockIdempotencyService{})
 
 	req := validCaptureRequest(uuid.New())
-	req.PostingAmount = &money.Money{
-		CurrencyCode: "GBP",
-		Units:        0,
-		Nanos:        0,
+	req.PostingAmount = &quantityv1.InstrumentAmount{
+		Amount:         "0",
+		InstrumentCode: "GBP",
+		Version:        1,
 	}
 
 	resp, err := svc.CaptureLedgerPosting(ctx, req)

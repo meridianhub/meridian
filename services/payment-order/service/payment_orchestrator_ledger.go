@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/payment-order/domain"
-	"google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -74,7 +74,7 @@ func (o *PaymentOrchestrator) PostLedgerEntries(ctx context.Context, po *domain.
 	}
 
 	amountCents := domain.ToMinorUnits(po.Amount)
-	postingAmount := buildPostingAmount(currencyCode, amountCents)
+	postingAmount := buildPostingAmount(currencyCode, amountCents, po.Amount.Instrument.Precision)
 	valueDate := timestamppb.Now()
 
 	// Determine if we should use the 4-posting flow with internal clearing
@@ -131,12 +131,36 @@ func (o *PaymentOrchestrator) createBookingLog(ctx context.Context, po *domain.P
 	return bookingLogResp.FinancialBookingLog.Id, nil
 }
 
-// buildPostingAmount converts cents to google.type.Money format.
-func buildPostingAmount(currencyCode string, amountCents int64) *money.Money {
-	return &money.Money{
-		CurrencyCode: currencyCode,
-		Units:        amountCents / 100,
-		Nanos:        int32((amountCents % 100) * 10000000),
+// buildPostingAmount converts minor units to InstrumentAmount format.
+// precision determines the number of decimal places (e.g., 2 for GBP, 0 for JPY, 3 for KWD).
+func buildPostingAmount(instrumentCode string, amountMinorUnits int64, precision int) *quantityv1.InstrumentAmount {
+	if precision <= 0 {
+		return &quantityv1.InstrumentAmount{
+			Amount:         fmt.Sprintf("%d", amountMinorUnits),
+			InstrumentCode: instrumentCode,
+			Version:        1,
+		}
+	}
+
+	divisor := int64(1)
+	for range precision {
+		divisor *= 10
+	}
+
+	sign := ""
+	abs := amountMinorUnits
+	if abs < 0 {
+		sign = "-"
+		abs = -abs
+	}
+
+	majorUnits := abs / divisor
+	minorUnits := abs % divisor
+	format := fmt.Sprintf("%%s%%d.%%0%dd", precision)
+	return &quantityv1.InstrumentAmount{
+		Amount:         fmt.Sprintf(format, sign, majorUnits, minorUnits),
+		InstrumentCode: instrumentCode,
+		Version:        1,
 	}
 }
 
@@ -169,7 +193,7 @@ func (o *PaymentOrchestrator) postLedgerEntriesStandard(
 	ctx context.Context,
 	po *domain.PaymentOrder,
 	bookingLogID string,
-	postingAmount *money.Money,
+	postingAmount *quantityv1.InstrumentAmount,
 	valueDate *timestamppb.Timestamp,
 	contraAccountID string,
 	amountCents int64,
@@ -219,7 +243,7 @@ func (o *PaymentOrchestrator) capturePosting(
 	ctx context.Context,
 	po *domain.PaymentOrder,
 	bookingLogID string,
-	postingAmount *money.Money,
+	postingAmount *quantityv1.InstrumentAmount,
 	valueDate *timestamppb.Timestamp,
 	accountID string,
 	idempKeyPrefix string,
@@ -298,7 +322,7 @@ func (o *PaymentOrchestrator) postLedgerEntriesWithClearing(
 	ctx context.Context,
 	po *domain.PaymentOrder,
 	bookingLogID string,
-	postingAmount *money.Money,
+	postingAmount *quantityv1.InstrumentAmount,
 	valueDate *timestamppb.Timestamp,
 	clearingAccountID string,
 	contraAccountID string,
@@ -339,7 +363,7 @@ func (o *PaymentOrchestrator) postCustomerToClearingLeg(
 	ctx context.Context,
 	po *domain.PaymentOrder,
 	bookingLogID string,
-	postingAmount *money.Money,
+	postingAmount *quantityv1.InstrumentAmount,
 	valueDate *timestamppb.Timestamp,
 	clearingAccountID string,
 	amountCents int64,
@@ -366,7 +390,7 @@ func (o *PaymentOrchestrator) postClearingToGatewayLeg(
 	ctx context.Context,
 	po *domain.PaymentOrder,
 	bookingLogID string,
-	postingAmount *money.Money,
+	postingAmount *quantityv1.InstrumentAmount,
 	valueDate *timestamppb.Timestamp,
 	clearingAccountID string,
 	contraAccountID string,

@@ -8,7 +8,7 @@ import (
 	"buf.build/go/protovalidate"
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
-	"google.golang.org/genproto/googleapis/type/money"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -48,10 +48,10 @@ func TestLedgerPostingCreation(t *testing.T) {
 		Id:                    "posting-123",
 		FinancialBookingLogId: "log-456",
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "GBP",
-			Units:        100,
-			Nanos:        50,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "100.00000005",
+			InstrumentCode: "GBP",
+			Version:        1,
 		},
 		AccountId:     "acc-789",
 		ValueDate:     now,
@@ -66,11 +66,11 @@ func TestLedgerPostingCreation(t *testing.T) {
 	if posting.PostingDirection != commonv1.PostingDirection_POSTING_DIRECTION_DEBIT {
 		t.Errorf("Expected DEBIT direction, got %v", posting.PostingDirection)
 	}
-	if posting.PostingAmount.CurrencyCode != "GBP" {
-		t.Errorf("Expected GBP currency, got %s", posting.PostingAmount.CurrencyCode)
+	if posting.PostingAmount.InstrumentCode != "GBP" {
+		t.Errorf("Expected GBP currency, got %s", posting.PostingAmount.InstrumentCode)
 	}
-	if posting.PostingAmount.Units != 100 {
-		t.Errorf("Expected 100 units, got %d", posting.PostingAmount.Units)
+	if posting.PostingAmount.Amount != "100.00000005" {
+		t.Errorf("Expected 100.00000005 amount, got %s", posting.PostingAmount.Amount)
 	}
 }
 
@@ -142,10 +142,10 @@ func TestCaptureLedgerPostingRequest(t *testing.T) {
 	req := &financialaccountingv1.CaptureLedgerPostingRequest{
 		FinancialBookingLogId: "log-123",
 		PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-		PostingAmount: &money.Money{
-			CurrencyCode: "USD",
-			Units:        250,
-			Nanos:        0,
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         "250",
+			InstrumentCode: "USD",
+			Version:        1,
 		},
 		AccountId: "acc-456",
 		ValueDate: now,
@@ -347,10 +347,10 @@ func TestValidation_PositivePostingAmount(t *testing.T) {
 				Id:                    "posting-1",
 				FinancialBookingLogId: "log-1",
 				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        100,
-					Nanos:        0,
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         "100",
+					InstrumentCode: "GBP",
+					Version:        1,
 				},
 				AccountId: "acc-123",
 				ValueDate: now,
@@ -365,10 +365,10 @@ func TestValidation_PositivePostingAmount(t *testing.T) {
 				Id:                    "posting-2",
 				FinancialBookingLogId: "log-2",
 				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "USD",
-					Units:        0,
-					Nanos:        50000000, // 0.05 USD
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         "0.05",
+					InstrumentCode: "USD",
+					Version:        1,
 				},
 				AccountId: "acc-456",
 				ValueDate: now,
@@ -383,10 +383,10 @@ func TestValidation_PositivePostingAmount(t *testing.T) {
 				Id:                    "posting-3",
 				FinancialBookingLogId: "log-3",
 				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        0,
-					Nanos:        0,
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         "0",
+					InstrumentCode: "GBP",
+					Version:        1,
 				},
 				AccountId: "acc-789",
 				ValueDate: now,
@@ -402,10 +402,10 @@ func TestValidation_PositivePostingAmount(t *testing.T) {
 				Id:                    "posting-4",
 				FinancialBookingLogId: "log-4",
 				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "EUR",
-					Units:        -50,
-					Nanos:        0,
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         "-50",
+					InstrumentCode: "EUR",
+					Version:        1,
 				},
 				AccountId: "acc-999",
 				ValueDate: now,
@@ -492,10 +492,10 @@ func TestValidation_AccountIDPattern(t *testing.T) {
 				Id:                    "posting-1",
 				FinancialBookingLogId: "log-1",
 				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        100,
-					Nanos:        0,
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         "100",
+					InstrumentCode: "GBP",
+					Version:        1,
 				},
 				AccountId: tt.accountID,
 				ValueDate: now,
@@ -537,10 +537,10 @@ func TestValidation_CaptureLedgerPostingRequest(t *testing.T) {
 			req: &financialaccountingv1.CaptureLedgerPostingRequest{
 				FinancialBookingLogId: "log-123",
 				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        100,
-					Nanos:        50,
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         "100.00000005",
+					InstrumentCode: "GBP",
+					Version:        1,
 				},
 				AccountId: "acc-valid-123",
 				ValueDate: now,
@@ -556,10 +556,10 @@ func TestValidation_CaptureLedgerPostingRequest(t *testing.T) {
 			req: &financialaccountingv1.CaptureLedgerPostingRequest{
 				FinancialBookingLogId: "log-123",
 				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        0,
-					Nanos:        0,
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         "0",
+					InstrumentCode: "GBP",
+					Version:        1,
 				},
 				AccountId: "acc-123",
 				ValueDate: now,
@@ -572,10 +572,10 @@ func TestValidation_CaptureLedgerPostingRequest(t *testing.T) {
 			req: &financialaccountingv1.CaptureLedgerPostingRequest{
 				FinancialBookingLogId: "log-123",
 				PostingDirection:      commonv1.PostingDirection_POSTING_DIRECTION_CREDIT,
-				PostingAmount: &money.Money{
-					CurrencyCode: "GBP",
-					Units:        100,
-					Nanos:        0,
+				PostingAmount: &quantityv1.InstrumentAmount{
+					Amount:         "100",
+					InstrumentCode: "GBP",
+					Version:        1,
 				},
 				AccountId: "acc@invalid#123",
 				ValueDate: now,

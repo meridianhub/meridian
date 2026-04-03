@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/current-account/adapters/persistence"
 	"github.com/meridianhub/meridian/services/current-account/domain"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
@@ -255,6 +256,15 @@ func decimalToMoneyAmount(amount decimal.Decimal, currency string) *commonpb.Mon
 			Units:        units,
 			Nanos:        int32(nanos),
 		},
+	}
+}
+
+// decimalToInstrumentAmount converts a decimal amount and instrument code to a proto InstrumentAmount.
+func decimalToInstrumentAmount(amount decimal.Decimal, instrumentCode string) *quantityv1.InstrumentAmount {
+	return &quantityv1.InstrumentAmount{
+		Amount:         amount.String(),
+		InstrumentCode: instrumentCode,
+		Version:        1,
 	}
 }
 

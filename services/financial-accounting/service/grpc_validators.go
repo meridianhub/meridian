@@ -73,7 +73,7 @@ type capturePostingParams struct {
 
 // validateCapturePostingRequest validates the non-idempotency fields of a CaptureLedgerPostingRequest.
 func validateCapturePostingRequest(req *financialaccountingv1.CaptureLedgerPostingRequest) (*capturePostingParams, error) {
-	postingAmount, err := fromProtoMoney(req.GetPostingAmount())
+	postingAmount, err := fromProtoInstrumentAmount(req.GetPostingAmount())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid posting_amount: %v", err)
 	}
@@ -184,11 +184,11 @@ func (s *FinancialAccountingService) buildListPostingsParams(
 		return params, status.Error(codes.InvalidArgument, "value_date_from must be before or equal to value_date_to")
 	}
 
-	if req.Currency != "" {
-		if err := s.validateInstrumentCode(ctx, req.Currency); err != nil {
+	if req.InstrumentCode != "" {
+		if err := s.validateInstrumentCode(ctx, req.InstrumentCode); err != nil {
 			return params, err
 		}
-		params.Currency = req.Currency
+		params.Currency = req.InstrumentCode
 	}
 	if req.Status != commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED {
 		params.Status = fromProtoTransactionStatus(req.Status).String()

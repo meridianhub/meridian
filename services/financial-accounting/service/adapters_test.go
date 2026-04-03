@@ -8,9 +8,9 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genproto/googleapis/type/money"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/domain"
 )
 
@@ -175,68 +175,68 @@ func TestToProtoLedgerPosting_ValidPosting(t *testing.T) {
 	assert.Equal(t, "OK", result.PostingResult)
 	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, result.Status)
 	assert.NotNil(t, result.PostingAmount)
-	assert.Equal(t, "GBP", result.PostingAmount.CurrencyCode)
+	assert.Equal(t, "GBP", result.PostingAmount.InstrumentCode)
+	assert.Equal(t, "100", result.PostingAmount.Amount)
 }
 
-func TestToProtoMoney_WholeAmount(t *testing.T) {
+func TestToProtoInstrumentAmount_WholeAmount(t *testing.T) {
 	inst := domain.MustCurrencyToInstrument(domain.CurrencyUSD)
 	m := domain.NewMoney(decimal.NewFromInt(42), inst)
 
-	result := toProtoMoney(m)
-	assert.Equal(t, "USD", result.CurrencyCode)
-	assert.Equal(t, int64(42), result.Units)
-	assert.Equal(t, int32(0), result.Nanos)
+	result := toProtoInstrumentAmount(m)
+	assert.Equal(t, "USD", result.InstrumentCode)
+	assert.Equal(t, "42", result.Amount)
 }
 
-func TestToProtoMoney_FractionalAmount(t *testing.T) {
+func TestToProtoInstrumentAmount_FractionalAmount(t *testing.T) {
 	inst := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
 	amount, _ := decimal.NewFromString("123.456789")
 	m := domain.NewMoney(amount, inst)
 
-	result := toProtoMoney(m)
-	assert.Equal(t, "GBP", result.CurrencyCode)
-	assert.Equal(t, int64(123), result.Units)
-	assert.Equal(t, int32(456789000), result.Nanos)
+	result := toProtoInstrumentAmount(m)
+	assert.Equal(t, "GBP", result.InstrumentCode)
+	assert.Equal(t, "123.456789", result.Amount)
 }
 
-func TestFromProtoMoney_ValidMoney(t *testing.T) {
-	protoMoney := &money.Money{
-		CurrencyCode: "GBP",
-		Units:        100,
-		Nanos:        500000000, // 0.5
+func TestFromProtoInstrumentAmount_Valid(t *testing.T) {
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "100.5",
+		InstrumentCode: "GBP",
+		Version:        1,
 	}
 
-	result, err := fromProtoMoney(protoMoney)
+	result, err := fromProtoInstrumentAmount(ia)
 	require.NoError(t, err)
 	assert.Equal(t, "100.5", result.Amount.String())
 	assert.Equal(t, "GBP", result.Instrument.Code)
 }
 
-func TestFromProtoMoney_NilMoney(t *testing.T) {
-	_, err := fromProtoMoney(nil)
+func TestFromProtoInstrumentAmount_Nil(t *testing.T) {
+	_, err := fromProtoInstrumentAmount(nil)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrNilMoney)
+	assert.ErrorIs(t, err, ErrNilInstrumentAmount)
 }
 
-func TestFromProtoMoney_InvalidCurrency(t *testing.T) {
-	protoMoney := &money.Money{
-		CurrencyCode: "INVALID",
-		Units:        100,
+func TestFromProtoInstrumentAmount_InvalidAmount(t *testing.T) {
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "not-a-number",
+		InstrumentCode: "USD",
+		Version:        1,
 	}
 
-	_, err := fromProtoMoney(protoMoney)
+	_, err := fromProtoInstrumentAmount(ia)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid currency")
+	assert.Contains(t, err.Error(), "invalid amount")
 }
 
-func TestFromProtoMoney_ZeroNanos(t *testing.T) {
-	protoMoney := &money.Money{
-		CurrencyCode: "USD",
-		Units:        50,
-		Nanos:        0,
+func TestFromProtoInstrumentAmount_WholeAmount(t *testing.T) {
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "50",
+		InstrumentCode: "USD",
+		Version:        1,
 	}
 
-	result, err := fromProtoMoney(protoMoney)
+	result, err := fromProtoInstrumentAmount(ia)
 	require.NoError(t, err)
 	assert.Equal(t, "50", result.Amount.String())
 }

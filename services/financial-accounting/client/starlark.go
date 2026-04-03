@@ -10,10 +10,10 @@ import (
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/shopspring/decimal"
-	moneypb "google.golang.org/genproto/googleapis/type/money"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -367,10 +367,10 @@ func buildCapturePostingRequest(ctx *saga.StarlarkContext, params map[string]any
 		FinancialBookingLogId: bookingLogID,
 		AccountId:             accountID,
 		PostingDirection:      direction,
-		PostingAmount: &moneypb.Money{
-			CurrencyCode: currencyStr,
-			Units:        amount.IntPart(),
-			Nanos:        int32(amount.Sub(decimal.NewFromInt(amount.IntPart())).Mul(decimal.NewFromInt(1_000_000_000)).IntPart()),
+		PostingAmount: &quantityv1.InstrumentAmount{
+			Amount:         amount.String(),
+			InstrumentCode: currencyStr,
+			Version:        1,
 		},
 		ValueDate: timestamppb.Now(),
 		IdempotencyKey: &commonv1.IdempotencyKey{

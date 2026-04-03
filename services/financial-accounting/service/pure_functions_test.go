@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	quantityv1 "github.com/meridianhub/meridian/api/proto/meridian/quantity/v1"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genproto/googleapis/type/money"
 
 	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
@@ -391,40 +391,40 @@ func TestToProtoMoney_ZeroAmount(t *testing.T) {
 	assert.Equal(t, int32(0), result.Nanos)
 }
 
-// --- Additional fromProtoMoney edge cases ---
+// --- Additional fromProtoInstrumentAmount edge cases ---
 
 func TestFromProtoMoney_NegativeUnits(t *testing.T) {
-	protoMoney := &money.Money{
-		CurrencyCode: "GBP",
-		Units:        -50,
-		Nanos:        0,
+	protoMoney := &quantityv1.InstrumentAmount{
+		Amount:         "-50",
+		InstrumentCode: "GBP",
+		Version:        1,
 	}
 
-	result, err := fromProtoMoney(protoMoney)
+	result, err := fromProtoInstrumentAmount(protoMoney)
 	require.NoError(t, err)
 	assert.Equal(t, "-50", result.Amount.String())
 }
 
 func TestFromProtoMoney_NegativeNanos(t *testing.T) {
-	protoMoney := &money.Money{
-		CurrencyCode: "USD",
-		Units:        -1,
-		Nanos:        -500000000,
+	protoMoney := &quantityv1.InstrumentAmount{
+		Amount:         "-1.5",
+		InstrumentCode: "USD",
+		Version:        1,
 	}
 
-	result, err := fromProtoMoney(protoMoney)
+	result, err := fromProtoInstrumentAmount(protoMoney)
 	require.NoError(t, err)
 	assert.Equal(t, "-1.5", result.Amount.String())
 }
 
-func TestFromProtoMoney_LargeUnits(t *testing.T) {
-	protoMoney := &money.Money{
-		CurrencyCode: "GBP",
-		Units:        9999999,
-		Nanos:        999000000,
+func TestFromProtoInstrumentAmount_LargeAmount(t *testing.T) {
+	protoMoney := &quantityv1.InstrumentAmount{
+		Amount:         "9999999.999",
+		InstrumentCode: "GBP",
+		Version:        1,
 	}
 
-	result, err := fromProtoMoney(protoMoney)
+	result, err := fromProtoInstrumentAmount(protoMoney)
 	require.NoError(t, err)
 	assert.Equal(t, "9999999.999", result.Amount.String())
 }
@@ -605,7 +605,7 @@ func TestErrorSentinels(t *testing.T) {
 	assert.NotNil(t, ErrOutboxRepositoryNil)
 	assert.NotNil(t, ErrRegistryUnavailable)
 	assert.NotNil(t, ErrEmptyUUID)
-	assert.NotNil(t, ErrNilMoney)
+	assert.NotNil(t, ErrNilInstrumentAmount)
 	assert.NotNil(t, ErrNoClearingAccountFound)
 	assert.NotNil(t, ErrMultipleClearingAccounts)
 	assert.NotNil(t, ErrAccountResolverClientNil)
@@ -655,14 +655,14 @@ func TestExtractUserFromContext_WithValidUser(t *testing.T) {
 	assert.Equal(t, "user-123", result)
 }
 
-// --- toProtoMoney roundtrip with fromProtoMoney ---
+// --- toProtoInstrumentAmount roundtrip with fromProtoInstrumentAmount ---
 
-func TestProtoMoney_Roundtrip(t *testing.T) {
+func TestProtoInstrumentAmount_Roundtrip(t *testing.T) {
 	inst := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
 	original := domain.NewMoney(decimal.RequireFromString("123.45"), inst)
 
-	proto := toProtoMoney(original)
-	roundtripped, err := fromProtoMoney(proto)
+	proto := toProtoInstrumentAmount(original)
+	roundtripped, err := fromProtoInstrumentAmount(proto)
 	require.NoError(t, err)
 
 	assert.True(t, original.Amount.Equal(roundtripped.Amount),
@@ -940,25 +940,26 @@ func TestProcessDeposit_EmptyAccountID(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to create debit posting")
 }
 
-// --- fromProtoMoney nil input ---
+// --- fromProtoInstrumentAmount nil input ---
 
 func TestFromProtoMoney_NilInput(t *testing.T) {
-	_, err := fromProtoMoney(nil)
+	_, err := fromProtoInstrumentAmount(nil)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrNilMoney)
+	assert.ErrorIs(t, err, ErrNilInstrumentAmount)
 }
 
-// --- fromProtoMoney unsupported currency code ---
+// --- fromProtoInstrumentAmount accepts any instrument code ---
 
-func TestFromProtoMoney_UnsupportedCurrencyCode(t *testing.T) {
-	protoMoney := &money.Money{
-		CurrencyCode: "INVALID",
-		Units:        100,
-		Nanos:        0,
+func TestFromProtoInstrumentAmount_AnyInstrumentCode(t *testing.T) {
+	ia := &quantityv1.InstrumentAmount{
+		Amount:         "100",
+		InstrumentCode: "KWH",
+		Version:        1,
 	}
-	_, err := fromProtoMoney(protoMoney)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid currency")
+	result, err := fromProtoInstrumentAmount(ia)
+	require.NoError(t, err)
+	assert.Equal(t, "KWH", result.Instrument.Code)
+	assert.Equal(t, "100", result.Amount.String())
 }
 
 // --- mapClearingTypeToPurpose additional coverage ---

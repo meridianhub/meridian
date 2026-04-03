@@ -400,9 +400,9 @@ func formatPosting(posting *financialaccountingv1.LedgerPosting) map[string]inte
 	}
 	if posting.PostingAmount != nil {
 		entry["amount"] = map[string]interface{}{
-			"currency_code": posting.PostingAmount.CurrencyCode,
-			"units":         posting.PostingAmount.Units,
-			"nanos":         posting.PostingAmount.Nanos,
+			"amount":          posting.PostingAmount.Amount,
+			"instrument_code": posting.PostingAmount.InstrumentCode,
+			"version":         posting.PostingAmount.Version,
 		}
 	}
 	if posting.ValueDate != nil {

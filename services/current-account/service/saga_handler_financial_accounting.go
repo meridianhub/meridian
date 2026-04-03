@@ -132,13 +132,11 @@ func currentAccountFinAcctCapturePosting(ctx *saga.StarlarkContext, params map[s
 		"direction", posting.direction,
 		"posting_type", posting.postingType)
 
-	protoAmount := decimalToMoneyAmount(posting.amount, posting.currency)
-
 	resp, err := deps.FinAcctClient.CaptureLedgerPosting(ctx,
 		&financialaccountingv1.CaptureLedgerPostingRequest{
 			FinancialBookingLogId: posting.bookingLogID,
 			PostingDirection:      posting.pbDirection,
-			PostingAmount:         protoAmount.Amount,
+			PostingAmount:         decimalToInstrumentAmount(posting.amount, posting.currency),
 			AccountId:             posting.accountID,
 			ValueDate:             timestamppb.Now(),
 			IdempotencyKey: &commonpb.IdempotencyKey{
@@ -334,13 +332,11 @@ func currentAccountFinAcctCompensatePosting(ctx *saga.StarlarkContext, params ma
 		"direction", posting.direction,
 		"posting_type", posting.postingType)
 
-	protoAmount := decimalToMoneyAmount(posting.amount, posting.currency)
-
 	_, err = deps.FinAcctClient.CaptureLedgerPosting(ctx,
 		&financialaccountingv1.CaptureLedgerPostingRequest{
 			FinancialBookingLogId: posting.bookingLogID,
 			PostingDirection:      posting.pbDirection,
-			PostingAmount:         protoAmount.Amount,
+			PostingAmount:         decimalToInstrumentAmount(posting.amount, posting.currency),
 			AccountId:             posting.accountID,
 			ValueDate:             timestamppb.Now(),
 			IdempotencyKey: &commonpb.IdempotencyKey{
