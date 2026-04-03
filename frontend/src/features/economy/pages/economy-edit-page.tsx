@@ -2,10 +2,34 @@ import { useCallback, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ConnectError, Code } from '@connectrpc/connect'
 import yaml from 'js-yaml'
-import { create } from '@bufbuild/protobuf'
+import { create, toJson, fromJson } from '@bufbuild/protobuf'
 import { useApiClients } from '@/api/context'
 import { manifestKeys } from '@/lib/query-keys'
 import { ManifestSchema, type Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
+
+/** Convert a proto Manifest to a plain object without $typeName fields. */
+function manifestToPlainObject(manifest: Manifest): Record<string, unknown> {
+  try {
+    return toJson(ManifestSchema, manifest) as Record<string, unknown>
+  } catch {
+    // Fallback for plain objects (e.g. in tests) - strip protobuf $typeName
+    return JSON.parse(JSON.stringify(manifest, (key, value) => {
+      if (key === '$typeName') return undefined
+      if (typeof value === 'bigint') return value.toString()
+      return value
+    })) as Record<string, unknown>
+  }
+}
+
+/** Parse a plain object (from YAML) into a proto Manifest. */
+function plainObjectToManifest(obj: Record<string, unknown>): Manifest {
+  try {
+    return fromJson(ManifestSchema, obj)
+  } catch {
+    // Fallback for environments where fromJson is unavailable
+    return create(ManifestSchema, obj)
+  }
+}
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ManifestEditor } from '../components/manifest-editor'
@@ -81,8 +105,8 @@ export function EconomyEditPage() {
   if (!initialised && !isLoading && !isError && (data !== undefined || isNotFound)) {
     const loadedManifest = data?.version?.manifest
     if (loadedManifest) {
-      // Convert proto manifest → plain object → YAML string
-      const plainObj = JSON.parse(JSON.stringify(loadedManifest)) as Record<string, unknown>
+      // Convert proto manifest → clean plain object (no $typeName) → YAML string
+      const plainObj = manifestToPlainObject(loadedManifest)
       const yamlStr = yaml.dump(plainObj, { lineWidth: 120 })
       setManifestYaml(yamlStr)
       setDraftManifest(loadedManifest)
@@ -116,7 +140,7 @@ export function EconomyEditPage() {
       try {
         const parsed = yaml.load(value) as Record<string, unknown> | null
         if (parsed && typeof parsed === 'object') {
-          const manifest = create(ManifestSchema, parsed)
+          const manifest = plainObjectToManifest(parsed)
           setDraftManifest(manifest)
           setYamlParseError(false)
           validate(manifest)
@@ -136,7 +160,7 @@ export function EconomyEditPage() {
   }, [])
 
   const handleReloadManifest = useCallback((serverManifest: Manifest) => {
-    const plainObj = JSON.parse(JSON.stringify(serverManifest)) as Record<string, unknown>
+    const plainObj = manifestToPlainObject(serverManifest)
     const yamlStr = yaml.dump(plainObj, { lineWidth: 120 })
     setManifestYaml(yamlStr)
     setDraftManifest(serverManifest)
