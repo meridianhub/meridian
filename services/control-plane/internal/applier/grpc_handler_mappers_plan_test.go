@@ -56,12 +56,14 @@ func TestBuildExecutorInputFromPlan_FiltersNoChangeActions(t *testing.T) {
 	require.NotNil(t, input)
 	assert.Equal(t, "2.0", input.ManifestVersion)
 
-	// GBP is NO_CHANGE and should be excluded
-	assert.Len(t, input.Instruments, 2)
-	assert.Equal(t, "USD", input.Instruments[0].Code)
-	assert.Equal(t, "CREATE", input.Instruments[0].Action)
-	assert.Equal(t, "KWH", input.Instruments[1].Code)
-	assert.Equal(t, "UPDATE", input.Instruments[1].Action)
+	// All instruments always included (idempotent, needed for account type pre-checks)
+	assert.Len(t, input.Instruments, 3)
+	assert.Equal(t, "GBP", input.Instruments[0].Code)
+	assert.Equal(t, "NO_CHANGE", input.Instruments[0].Action)
+	assert.Equal(t, "USD", input.Instruments[1].Code)
+	assert.Equal(t, "CREATE", input.Instruments[1].Action)
+	assert.Equal(t, "KWH", input.Instruments[2].Code)
+	assert.Equal(t, "UPDATE", input.Instruments[2].Action)
 }
 
 func TestBuildExecutorInputFromPlan_IncludesDeprecateActions(t *testing.T) {

@@ -123,12 +123,18 @@ func buildActionableMap(plan *differ.DiffPlan) map[string]differ.ActionType {
 	return actionable
 }
 
-// extractInstrumentsFromPlan adds instruments with actionable changes to the input.
+// extractInstrumentsFromPlan adds ALL manifest instruments to the input,
+// regardless of diff action. Instruments are always included because:
+// 1. The register+activate handlers are fully idempotent
+// 2. Account type pre-checks require instruments to be ACTIVE in the tenant schema
+// 3. The diff may mark instruments as NO_CHANGE even when they need reactivation
+//    (e.g., DEPRECATED instruments with matching proto fields, or instruments
+//    only present in the public/platform schema but not the tenant schema)
 func extractInstrumentsFromPlan(mf *controlplanev1.Manifest, input *ApplyManifestInput, actionable map[string]differ.ActionType) {
 	for _, inst := range mf.GetInstruments() {
 		action, ok := actionable[resourceKey(differ.ResourceInstrument, inst.GetCode())]
 		if !ok {
-			continue
+			action = differ.ActionCreate // default for instruments not in diff plan
 		}
 		dim := instrumentTypeToDimension(inst.GetType(), inst.GetDimensions().GetUnit())
 		if dim == "" {
