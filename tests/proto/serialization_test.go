@@ -116,10 +116,9 @@ func TestProtoSerialization(t *testing.T) {
 			PostingId:        "LP-123",
 			BookingLogId:     "FBL-456",
 			PostingDirection: commonv1.PostingDirection_POSTING_DIRECTION_DEBIT,
-			PostingAmount: &money.Money{
-				CurrencyCode: "GBP",
-				Units:        1000,
-				Nanos:        0,
+			PostingAmount: &quantityv1.InstrumentAmount{
+				Amount:         "1000.00",
+				InstrumentCode: "GBP",
 			},
 			AccountId: "ACC-789",
 			ValueDate: now,
