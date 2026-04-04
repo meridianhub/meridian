@@ -431,6 +431,16 @@ func (r *Repository) UpdateMetadata(ctx context.Context, id tenant.TenantID, met
 	return nil
 }
 
+// GetMetadata returns the metadata map for a tenant. Returns ErrTenantNotFound if
+// the tenant does not exist.
+func (r *Repository) GetMetadata(ctx context.Context, id tenant.TenantID) (map[string]interface{}, error) {
+	t, err := r.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return t.Metadata, nil
+}
+
 // Ping checks database connectivity.
 func (r *Repository) Ping(ctx context.Context) error {
 	var result int

@@ -15,9 +15,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/domain"
-	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
+
+// TenantMetadataStore provides read/write access to tenant metadata.
+// Implemented by the tenant persistence repository.
+type TenantMetadataStore interface {
+	GetMetadata(ctx context.Context, id tenant.TenantID) (map[string]interface{}, error)
+	UpdateMetadata(ctx context.Context, id tenant.TenantID, metadata map[string]interface{}) error
+}
 
 // Metadata keys for self-registered admin credentials stored on the tenant record.
 // These MUST match the exported constants in services/api-gateway/registration_handler.go
@@ -37,16 +43,16 @@ var ErrNilTenantRepo = errors.New("self-registered admin hook: tenant repository
 // tenant-owner role, and clears the credentials from metadata.
 type SelfRegisteredAdminHook struct {
 	identityRepo domain.Repository
-	tenantRepo   *tenantpersistence.Repository
+	tenantStore  TenantMetadataStore
 	logger       *slog.Logger
 }
 
 // NewSelfRegisteredAdminHook creates a new hook for provisioning self-registered admin identities.
-func NewSelfRegisteredAdminHook(identityRepo domain.Repository, tenantRepo *tenantpersistence.Repository, logger *slog.Logger) (*SelfRegisteredAdminHook, error) {
+func NewSelfRegisteredAdminHook(identityRepo domain.Repository, tenantStore TenantMetadataStore, logger *slog.Logger) (*SelfRegisteredAdminHook, error) {
 	if identityRepo == nil {
 		return nil, ErrNilRepository
 	}
-	if tenantRepo == nil {
+	if tenantStore == nil {
 		return nil, ErrNilTenantRepo
 	}
 	if logger == nil {
@@ -54,7 +60,7 @@ func NewSelfRegisteredAdminHook(identityRepo domain.Repository, tenantRepo *tena
 	}
 	return &SelfRegisteredAdminHook{
 		identityRepo: identityRepo,
-		tenantRepo:   tenantRepo,
+		tenantStore:  tenantStore,
 		logger:       logger,
 	}, nil
 }
@@ -74,14 +80,14 @@ func (h *SelfRegisteredAdminHook) AsPostProvisioningHook() func(ctx context.Cont
 // If no registration metadata is present (e.g., tenant was created via API, not
 // self-registration), this is a no-op.
 func (h *SelfRegisteredAdminHook) Provision(ctx context.Context, tenantID tenant.TenantID) error {
-	// Read tenant to get registration metadata.
-	t, err := h.tenantRepo.GetByID(ctx, tenantID)
+	// Read tenant metadata to check for registration credentials.
+	metadata, err := h.tenantStore.GetMetadata(ctx, tenantID)
 	if err != nil {
-		return fmt.Errorf("reading tenant %s: %w", tenantID, err)
+		return fmt.Errorf("reading tenant metadata for %s: %w", tenantID, err)
 	}
 
-	emailRaw, hasEmail := t.Metadata[MetaKeyRegistrationEmail]
-	hashRaw, hasHash := t.Metadata[MetaKeyRegistrationPasswordHash]
+	emailRaw, hasEmail := metadata[MetaKeyRegistrationEmail]
+	hashRaw, hasHash := metadata[MetaKeyRegistrationPasswordHash]
 
 	if !hasEmail || !hasHash {
 		h.logger.InfoContext(ctx, "self-registered admin hook: no registration metadata, skipping",
@@ -110,7 +116,7 @@ func (h *SelfRegisteredAdminHook) Provision(ctx context.Context, tenantID tenant
 
 	// Clear registration credentials from tenant metadata.
 	// This is fatal: leaving a bcrypt hash in metadata violates minimal credential retention.
-	if err := h.clearRegistrationMetadata(ctx, tenantID, t.Metadata); err != nil {
+	if err := h.clearRegistrationMetadata(ctx, tenantID, metadata); err != nil {
 		return fmt.Errorf("clearing registration metadata for tenant %s: %w", tenantID, err)
 	}
 
@@ -178,5 +184,5 @@ func (h *SelfRegisteredAdminHook) clearRegistrationMetadata(ctx context.Context,
 		cleaned[k] = v
 	}
 
-	return h.tenantRepo.UpdateMetadata(ctx, tenantID, cleaned)
+	return h.tenantStore.UpdateMetadata(ctx, tenantID, cleaned)
 }

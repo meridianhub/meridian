@@ -7,22 +7,32 @@ import (
 
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
 	"github.com/meridianhub/meridian/services/identity/domain"
-	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewSelfRegisteredAdminHook_NilIdentityRepo(t *testing.T) {
-	_, err := NewSelfRegisteredAdminHook(nil, &tenantpersistence.Repository{}, slog.Default())
-	assert.ErrorIs(t, err, ErrNilRepository)
-}
-
-// mockIdentityRepo satisfies domain.Repository for testing nil tenant repo validation.
+// mockIdentityRepo satisfies domain.Repository for testing.
 type mockIdentityRepo struct {
 	domain.Repository
 }
 
-func TestNewSelfRegisteredAdminHook_NilTenantRepo(t *testing.T) {
+// mockTenantMetadataStore satisfies TenantMetadataStore for testing.
+type mockTenantMetadataStore struct{}
+
+func (m *mockTenantMetadataStore) GetMetadata(_ context.Context, _ tenant.TenantID) (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockTenantMetadataStore) UpdateMetadata(_ context.Context, _ tenant.TenantID, _ map[string]interface{}) error {
+	return nil
+}
+
+func TestNewSelfRegisteredAdminHook_NilIdentityRepo(t *testing.T) {
+	_, err := NewSelfRegisteredAdminHook(nil, &mockTenantMetadataStore{}, slog.Default())
+	assert.ErrorIs(t, err, ErrNilRepository)
+}
+
+func TestNewSelfRegisteredAdminHook_NilTenantStore(t *testing.T) {
 	_, err := NewSelfRegisteredAdminHook(&mockIdentityRepo{}, nil, slog.Default())
 	assert.ErrorIs(t, err, ErrNilTenantRepo)
 }
