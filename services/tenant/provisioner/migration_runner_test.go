@@ -519,7 +519,7 @@ func repoRoot(t *testing.T) string {
 	_, filename, _, ok := runtime.Caller(0)
 	require.True(t, ok, "failed to get test file path")
 	// Test file is at services/tenant/provisioner/migration_runner_test.go
-	// Repo root is 4 levels up
+	// filepath.Dir gives provisioner/, then 3 levels up to repo root
 	return filepath.Join(filepath.Dir(filename), "..", "..", "..")
 }
 
@@ -567,6 +567,10 @@ func TestProcessMigrationSQL_AllMigrations_Parse(t *testing.T) {
 			t.Run(relPath, func(t *testing.T) {
 				rewritten := p.processMigrationSQL(m.Content, "org_ci_test")
 				statements := splitSQLStatements(rewritten)
+
+				// Guard: migration files should produce at least one statement
+				require.NotEmpty(t, statements,
+					"migration %s produced zero statements after processing", m.Filename)
 
 				for i, stmt := range statements {
 					trimmed := strings.TrimSpace(stmt)
