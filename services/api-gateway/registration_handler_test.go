@@ -24,8 +24,9 @@ import (
 // --- Stub implementations ---
 
 type stubTenantCreator struct {
-	createFn func(ctx context.Context, tenantID, slug, displayName string, metadata map[string]interface{}) (*gateway.CreateTenantResult, error)
-	deleteFn func(ctx context.Context, tenantID string) error
+	createFn        func(ctx context.Context, tenantID, slug, displayName string, metadata map[string]interface{}) (*gateway.CreateTenantResult, error)
+	deleteFn        func(ctx context.Context, tenantID string) error
+	clearMetadataFn func(ctx context.Context, tenantID string) error
 }
 
 func (s *stubTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string, metadata map[string]interface{}) (*gateway.CreateTenantResult, error) {
@@ -35,6 +36,13 @@ func (s *stubTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, di
 func (s *stubTenantCreator) DeleteTenant(ctx context.Context, tenantID string) error {
 	if s.deleteFn != nil {
 		return s.deleteFn(ctx, tenantID)
+	}
+	return nil
+}
+
+func (s *stubTenantCreator) ClearTenantMetadata(ctx context.Context, tenantID string) error {
+	if s.clearMetadataFn != nil {
+		return s.clearMetadataFn(ctx, tenantID)
 	}
 	return nil
 }

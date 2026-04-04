@@ -246,8 +246,7 @@ func startProvisioningWorker(ctx context.Context, prov *tenantprovisioner.Postgr
 	// Self-registered admin: creates the admin identity from registration metadata
 	// stored by the registration handler. Must run after all reference data hooks
 	// so the identity schema has instruments, account types, etc. available.
-	tenantRepo := tenantpersistence.NewRepository(conns.gormDB("tenant"))
-	selfRegHook, hookErr := identitybootstrap.NewSelfRegisteredAdminHook(identityRepo, tenantRepo, logger)
+	selfRegHook, hookErr := identitybootstrap.NewSelfRegisteredAdminHook(identityRepo, repo, logger)
 	if hookErr != nil {
 		_ = prov.Close()
 		return nil, nil, fmt.Errorf("self-registered admin hook: %w", hookErr)

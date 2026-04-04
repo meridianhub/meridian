@@ -55,6 +55,9 @@ type TenantCreator interface {
 	// DeleteTenant removes a tenant. Used as compensation when identity provisioning
 	// fails after tenant creation, preventing orphaned tenants.
 	DeleteTenant(ctx context.Context, tenantID string) error
+	// ClearTenantMetadata removes all metadata from a tenant record.
+	// Used to clean up registration credentials after sync identity provisioning.
+	ClearTenantMetadata(ctx context.Context, tenantID string) error
 }
 
 // SlugChecker abstracts slug availability checks for the registration handler.
@@ -258,6 +261,11 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 					"tenant_id", result.TenantID, "error", delErr)
 			}
 			return regErr.status, nil, regErr
+		}
+		// Clear registration credentials from tenant metadata (best-effort).
+		if clearErr := h.tenantCreator.ClearTenantMetadata(ctx, result.TenantID); clearErr != nil {
+			h.logger.WarnContext(ctx, "registration: failed to clear credentials from tenant metadata",
+				"tenant_id", result.TenantID, "error", clearErr)
 		}
 	}
 

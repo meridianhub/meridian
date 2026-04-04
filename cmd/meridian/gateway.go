@@ -17,6 +17,7 @@ import (
 	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/env"
 	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -205,6 +206,7 @@ var errNilTenantResponse = fmt.Errorf("InitiateTenant returned nil tenant")
 // gateway.TenantCreator interface used by RegistrationHandler.
 type loopbackTenantCreator struct {
 	client     tenantv1.TenantServiceClient
+	tenantRepo *tenantpersistence.Repository
 	baseDomain string
 	logger     *slog.Logger
 }
@@ -224,13 +226,14 @@ func (a *loopbackTenantCreator) CreateTenant(ctx context.Context, tenantID, slug
 	}
 
 	// Pass registration metadata through to the tenant record.
+	// Metadata conversion must succeed - async provisioning relies on credentials
+	// being present in the tenant record for the post-provisioning hook.
 	if len(metadata) > 0 {
 		pbMeta, err := structpb.NewStruct(metadata)
 		if err != nil {
-			a.logger.Warn("failed to convert registration metadata to protobuf struct", "error", err)
-		} else {
-			req.Metadata = pbMeta
+			return nil, fmt.Errorf("failed to convert registration metadata: %w", err)
 		}
+		req.Metadata = pbMeta
 	}
 
 	resp, err := a.client.InitiateTenant(ctx, req)
@@ -252,6 +255,17 @@ func (a *loopbackTenantCreator) DeleteTenant(ctx context.Context, tenantID strin
 		Status:   tenantv1.TenantStatus_TENANT_STATUS_DEPROVISIONED,
 	})
 	return err
+}
+
+func (a *loopbackTenantCreator) ClearTenantMetadata(ctx context.Context, tenantID string) error {
+	if a.tenantRepo == nil {
+		return nil
+	}
+	tid, err := tenant.NewTenantID(tenantID)
+	if err != nil {
+		return fmt.Errorf("invalid tenant ID: %w", err)
+	}
+	return a.tenantRepo.UpdateMetadata(ctx, tid, map[string]interface{}{})
 }
 
 // loopbackSlugChecker adapts the tenant persistence repository to the
@@ -307,8 +321,9 @@ func wireRegistration(identityDB, tenantDB *gorm.DB, rawConn *grpc.ClientConn, b
 	identityRepo := identitypersistence.NewRepository(identityDB)
 	tenantClient := tenantv1.NewTenantServiceClient(rawConn)
 
-	creator := &loopbackTenantCreator{client: tenantClient, baseDomain: baseDomain, logger: logger}
-	slugChecker := &loopbackSlugChecker{repo: tenantpersistence.NewRepository(tenantDB)}
+	tenantRepo := tenantpersistence.NewRepository(tenantDB)
+	creator := &loopbackTenantCreator{client: tenantClient, tenantRepo: tenantRepo, baseDomain: baseDomain, logger: logger}
+	slugChecker := &loopbackSlugChecker{repo: tenantRepo}
 
 	emailVerificationRequired := env.GetEnvAsBool("EMAIL_VERIFICATION_REQUIRED", false)
 

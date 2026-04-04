@@ -19,10 +19,13 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
-// Metadata keys matching the registration handler constants.
+// Metadata keys for self-registered admin credentials stored on the tenant record.
+// These MUST match the exported constants in services/api-gateway/registration_handler.go
+// (MetaKeyRegistrationEmail, MetaKeyRegistrationPasswordHash). The test file verifies
+// they stay in sync.
 const (
-	metaKeyRegistrationEmail        = "_registration_email"
-	metaKeyRegistrationPasswordHash = "_registration_password_hash"
+	MetaKeyRegistrationEmail        = "_registration_email"
+	MetaKeyRegistrationPasswordHash = "_registration_password_hash"
 )
 
 // ErrNilTenantRepo is returned when a nil tenant repository is passed to NewSelfRegisteredAdminHook.
@@ -77,8 +80,8 @@ func (h *SelfRegisteredAdminHook) Provision(ctx context.Context, tenantID tenant
 		return fmt.Errorf("reading tenant %s: %w", tenantID, err)
 	}
 
-	emailRaw, hasEmail := t.Metadata[metaKeyRegistrationEmail]
-	hashRaw, hasHash := t.Metadata[metaKeyRegistrationPasswordHash]
+	emailRaw, hasEmail := t.Metadata[MetaKeyRegistrationEmail]
+	hashRaw, hasHash := t.Metadata[MetaKeyRegistrationPasswordHash]
 
 	if !hasEmail || !hasHash {
 		h.logger.InfoContext(ctx, "self-registered admin hook: no registration metadata, skipping",
@@ -106,11 +109,9 @@ func (h *SelfRegisteredAdminHook) Provision(ctx context.Context, tenantID tenant
 	}
 
 	// Clear registration credentials from tenant metadata.
+	// This is fatal: leaving a bcrypt hash in metadata violates minimal credential retention.
 	if err := h.clearRegistrationMetadata(ctx, tenantID, t.Metadata); err != nil {
-		// Non-fatal: identity was created successfully. Log and continue.
-		h.logger.WarnContext(ctx, "self-registered admin hook: failed to clear registration metadata",
-			"tenant_id", tenantID,
-			"error", err)
+		return fmt.Errorf("clearing registration metadata for tenant %s: %w", tenantID, err)
 	}
 
 	h.logger.InfoContext(ctx, "self-registered admin identity provisioned",
@@ -171,7 +172,7 @@ func (h *SelfRegisteredAdminHook) clearRegistrationMetadata(ctx context.Context,
 	// Copy metadata without registration keys.
 	cleaned := make(map[string]interface{}, len(metadata))
 	for k, v := range metadata {
-		if k == metaKeyRegistrationEmail || k == metaKeyRegistrationPasswordHash {
+		if k == MetaKeyRegistrationEmail || k == MetaKeyRegistrationPasswordHash {
 			continue
 		}
 		cleaned[k] = v
