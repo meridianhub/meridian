@@ -54,7 +54,7 @@ func TestBuildServiceStatusData(t *testing.T) {
 
 	assert.Equal(t, "Reference Data", result[2].Name)
 	assert.Equal(t, "failed", result[2].Status)
-	assert.Equal(t, "migration failed", result[2].Error)
+	assert.Equal(t, "Provisioning failed", result[2].Error)
 
 	assert.Equal(t, "Transaction", result[3].Name)
 	assert.Equal(t, "pending", result[3].Status)

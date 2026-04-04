@@ -57,7 +57,7 @@ func buildServiceStatusData(statuses []domain.ProvisioningStatus) []serviceStatu
 			}
 		}
 		if s.ErrorMessage != nil {
-			sd.Error = *s.ErrorMessage
+			sd.Error = "Provisioning failed"
 		}
 		result = append(result, sd)
 	}
