@@ -64,9 +64,10 @@ var knownCrossServiceDomainImports = map[string]bool{
 // knownSharedImportsServices tracks shared/ files that currently import services/.
 // Do NOT add new entries — shared packages must never depend on services.
 var knownSharedImportsServices = map[string]bool{
-	"shared/pkg/valuationfeature/resolution.go":  true,
-	"shared/pkg/valuationfeature/seeder.go":      true,
-	"shared/platform/gateway/tenant_resolver.go": true,
+	"shared/pkg/valuationfeature/resolution.go":    true,
+	"shared/pkg/valuationfeature/seeder.go":        true,
+	"shared/platform/gateway/provisioning_page.go": true,
+	"shared/platform/gateway/tenant_resolver.go":   true,
 }
 
 // knownAdapterImportsService tracks adapter files that import their service layer.

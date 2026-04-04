@@ -38,6 +38,24 @@ var (
 	ErrNilLogger       = errors.New("logger cannot be nil")
 )
 
+// provisioningAllowedPaths are URL paths that bypass the provisioning page
+// block, allowing requests through even when the tenant is being provisioned.
+// This enables the progress page to poll for status updates.
+var provisioningAllowedPaths = []string{
+	"/api/provisioning-status",
+}
+
+// isProvisioningAllowedPath returns true if the path should bypass the
+// provisioning block (e.g., status polling endpoint).
+func isProvisioningAllowedPath(path string) bool {
+	for _, p := range provisioningAllowedPaths {
+		if path == p {
+			return true
+		}
+	}
+	return false
+}
+
 // ErrTenantNotFound is returned when a tenant cannot be found by slug.
 var ErrTenantNotFound = errors.New("tenant not found")
 
@@ -66,6 +84,12 @@ type slugCache interface {
 // tenantRepository defines the repository interface for tenant lookups.
 type tenantRepository interface {
 	GetBySlug(ctx context.Context, slug string) (*domain.Tenant, error)
+}
+
+// ProvisioningStatusProvider retrieves per-service provisioning status for a tenant.
+// When set on the middleware, the provisioning progress page displays per-service detail.
+type ProvisioningStatusProvider interface {
+	FindProvisioningStatusByTenantID(ctx context.Context, tenantID string) ([]domain.ProvisioningStatus, error)
 }
 
 // platformPaths lists URL path prefixes that operate at the platform level
@@ -107,6 +131,10 @@ type TenantResolverMiddleware struct {
 	baseDomain   string
 	logger       *slog.Logger
 	localDevMode bool
+	// provisioningStatusProvider, when set, enables the provisioning progress
+	// page to display per-service provisioning status. Optional - if nil, the
+	// page shows a generic progress indicator without service-level detail.
+	provisioningStatusProvider ProvisioningStatusProvider
 	// displayNameCache stores slug -> cachedDisplayName. Each entry binds
 	// the display name to the tenant ID it was fetched with, so a stale
 	// slug->ID mapping on a peer instance never pairs the wrong display
@@ -160,6 +188,13 @@ func NewTenantResolverMiddleware(
 		logger:       logger,
 		localDevMode: localDevMode,
 	}, nil
+}
+
+// SetProvisioningStatusProvider configures the optional per-service provisioning
+// status provider. When set, the provisioning progress page shows detailed
+// per-service status instead of a generic progress indicator.
+func (m *TenantResolverMiddleware) SetProvisioningStatusProvider(p ProvisioningStatusProvider) {
+	m.provisioningStatusProvider = p
 }
 
 // extractSlugFromRequest extracts and validates the tenant slug from request
@@ -302,6 +337,19 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 				slog.String("tenant_status", string(resolved.Status)),
 				slog.Int64("resolution_time_ms", resolutionTimeMs),
 			)
+
+			// For provisioning states, serve a progress page instead of a bare 503.
+			// Allow the provisioning status polling endpoint through so the page
+			// can fetch updates.
+			if resolved.Status == domain.StatusProvisioningPending || resolved.Status == domain.StatusProvisioning {
+				if isProvisioningAllowedPath(r.URL.Path) {
+					m.serveProvisioningStatusJSON(w, r, resolved)
+					return
+				}
+				m.serveProvisioningPage(w, r, resolved, slug)
+				return
+			}
+
 			http.Error(w, "Tenant not provisioned", http.StatusServiceUnavailable)
 			return
 		}
@@ -328,6 +376,51 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 		// Step 8: Call next handler
 		next.ServeHTTP(w, r)
 	})
+}
+
+// serveProvisioningPage renders the provisioning progress page for tenants
+// that are still being set up. The page auto-polls for status updates and
+// redirects to the tenant dashboard once provisioning completes.
+func (m *TenantResolverMiddleware) serveProvisioningPage(w http.ResponseWriter, r *http.Request, resolved resolvedTenant, slug string) {
+	displayName := resolved.DisplayName
+	if displayName == "" {
+		displayName = slug
+	}
+
+	services := m.fetchProvisioningStatuses(r.Context(), resolved.ID)
+
+	data := provisioningPageData{
+		TenantName: displayName,
+		TenantSlug: slug,
+		TenantID:   resolved.ID.String(),
+		Status:     string(resolved.Status),
+		Services:   services,
+		StatusJSON: marshalServicesJSON(services),
+	}
+	serveProvisioningPage(w, data)
+}
+
+// serveProvisioningStatusJSON responds with JSON provisioning status for the
+// polling endpoint used by the provisioning progress page.
+func (m *TenantResolverMiddleware) serveProvisioningStatusJSON(w http.ResponseWriter, r *http.Request, resolved resolvedTenant) {
+	services := m.fetchProvisioningStatuses(r.Context(), resolved.ID)
+	serveProvisioningStatusJSON(w, string(resolved.Status), services)
+}
+
+// fetchProvisioningStatuses retrieves per-service status if a provider is configured.
+func (m *TenantResolverMiddleware) fetchProvisioningStatuses(ctx context.Context, tenantID tenant.TenantID) []serviceStatusData {
+	if m.provisioningStatusProvider == nil {
+		return nil
+	}
+	statuses, err := m.provisioningStatusProvider.FindProvisioningStatusByTenantID(ctx, tenantID.String())
+	if err != nil {
+		m.logger.Warn("failed to fetch provisioning statuses",
+			slog.String("tenant_id", tenantID.String()),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	return buildServiceStatusData(statuses)
 }
 
 // handleResolutionError writes the appropriate HTTP error for a tenant resolution failure.
