@@ -155,8 +155,9 @@ Database: meridian_current_account
 
 - Each service has its own PostgreSQL database
 - Each organization gets its own schema within each service database
-- Connection URL includes `search_path` for org routing: `postgres://...?search_path=org_acme_bank`
+- The search_path is set transactionally via `SET LOCAL search_path TO org_<id>` by `shared/platform/db/gorm_tenant_scope.go`
 - Queries use unqualified table names; PostgreSQL resolves via `search_path`
+- As of PR #2125, `public` is **not** in the search_path — reference data is replicated into each tenant schema on provisioning rather than shared via public. See [data-model.md](../architecture/data-model.md#tenant-isolation-mechanism) for the current mechanism.
 
 ### Naming Conventions
 
@@ -484,7 +485,9 @@ If migrating from golang-migrate:
 * Maintain migration history (no need to replay all migrations)
 * Continue using immutability principles
 
-### CockroachDB Compatibility Considerations
+### CockroachDB Compatibility Considerations (Historical)
+
+> **Note:** Meridian now targets PostgreSQL 16 exclusively. The constraints below are retained because existing migrations were authored under CockroachDB compatibility rules and continue to follow them (no PL/pgSQL, split column-add from partial-index-add, explicit timestamp columns instead of range types). New migrations should follow the same conventions for consistency, but the underlying runtime is Postgres. See [data-model.md](../architecture/data-model.md) for the current topology and [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for historical context.
 
 While CockroachDB is PostgreSQL-compatible, some PostgreSQL features are **not supported**:
 
