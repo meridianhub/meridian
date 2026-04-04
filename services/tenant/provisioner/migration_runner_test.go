@@ -534,9 +534,13 @@ func TestProcessMigrationSQL_AllMigrations_Parse(t *testing.T) {
 	// Known-broken migrations that produce invalid SQL through processMigrationSQL.
 	// Each entry documents the bug so the skip is auditable.
 	knownBroken := map[string]string{
-		// processMigrationSQL rewrites "party"."attributes" (table.column) as
-		// "org_ci_test"."attributes" (schema.table) - COMMENT ON COLUMN becomes invalid.
-		"party/migrations/20260221000001_add_party_attributes.sql": "COMMENT ON COLUMN rewrite bug: schema name replaces table name in column reference",
+		// processMigrationSQL rewrites "schema"."column" (table.column) as
+		// "org_ci_test"."column" (schema.column) - COMMENT ON COLUMN becomes invalid.
+		// All three share the same root cause: naive string replacement treats the
+		// second identifier in COMMENT ON COLUMN as a table name.
+		"party/migrations/20260221000001_add_party_attributes.sql":          "COMMENT ON COLUMN rewrite bug: schema name replaces table name in column reference",
+		"payment-order/migrations/20251216000001_initial.sql":               "COMMENT ON COLUMN rewrite bug: payment_order schema pattern corrupts column references",
+		"payment-order/migrations/20260123000001_bucket_aware_solvency.sql": "COMMENT ON COLUMN rewrite bug: payment_order schema pattern corrupts column references",
 	}
 
 	entries, err := os.ReadDir(servicesDir)
@@ -576,6 +580,26 @@ func TestProcessMigrationSQL_AllMigrations_Parse(t *testing.T) {
 					trimmed := strings.TrimSpace(stmt)
 					assert.NotEmpty(t, trimmed,
 						"statement %d in %s is empty after processing", i, m.Filename)
+
+					// Targeted check: if processMigrationSQL rewrites a
+					// COMMENT ON COLUMN (tenant schema appears in the text),
+					// the result must have 3 dot-separated quoted identifiers
+					// ("schema"."table"."column"). The known bug produces
+					// only 2 ("schema"."column").
+					upper := strings.ToUpper(trimmed)
+					if strings.HasPrefix(upper, "COMMENT ON COLUMN") &&
+						strings.Contains(trimmed, `"org_ci_test"`) {
+						dotParts := strings.SplitN(trimmed, ".", 4)
+						quotedParts := 0
+						for _, p := range dotParts {
+							if strings.Contains(p, `"`) {
+								quotedParts++
+							}
+						}
+						assert.GreaterOrEqual(t, quotedParts, 3,
+							"COMMENT ON COLUMN in %s was rewritten with tenant schema but has only %d quoted identifiers (need schema.table.column = 3)",
+							m.Filename, quotedParts)
+					}
 				}
 			})
 			tested++
