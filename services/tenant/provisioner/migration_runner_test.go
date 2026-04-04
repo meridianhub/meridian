@@ -533,6 +533,30 @@ COMMENT ON COLUMN "party"."attributes" IS 'JSON attributes';`
 		"COMMENT ON COLUMN must preserve table.column reference")
 }
 
+// TestIsCommentStatement_SkipsLeadingComments verifies that isCommentStatement
+// recognizes COMMENT statements even when preceded by line or block comments.
+func TestIsCommentStatement_SkipsLeadingComments(t *testing.T) {
+	cases := []struct {
+		name string
+		stmt string
+		want bool
+	}{
+		{"plain", `COMMENT ON COLUMN "t"."c" IS 'x'`, true},
+		{"leading whitespace", "   \n\tCOMMENT ON TABLE t IS 'x'", true},
+		{"leading line comment", "-- audit note\nCOMMENT ON COLUMN t.c IS 'x'", true},
+		{"leading block comment", "/* audit */ COMMENT ON COLUMN t.c IS 'x'", true},
+		{"mixed leading comments", "-- header\n/* block */\n-- another\nCOMMENT ON TABLE t IS 'x'", true},
+		{"not a comment statement", `ALTER TABLE "party"."customers" ADD COLUMN x INT`, false},
+		{"block comment mid-statement", `ALTER /* comment */ TABLE t ADD COLUMN x INT`, false},
+		{"unterminated block comment", "/* unterminated COMMENT ON COLUMN", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isCommentStatement(tc.stmt))
+		})
+	}
+}
+
 // repoRoot returns the repository root by walking up from the test file location.
 func repoRoot(t *testing.T) string {
 	t.Helper()

@@ -410,16 +410,54 @@ func (p *PostgresProvisioner) processMigrationSQL(sql, schemaName string) string
 // statement (COMMENT ON TABLE/COLUMN/INDEX/etc). These must not be rewritten
 // by the schema-pattern replacer because "table"."column" in COMMENT ON COLUMN
 // is a column reference, not a schema qualifier.
+//
+// Leading whitespace, line comments (-- ...), and block comments (/* ... */)
+// are stripped before checking for the COMMENT keyword so a statement like
+// "/* audit */ COMMENT ON COLUMN ..." is still recognized.
 func isCommentStatement(stmt string) bool {
-	// Strip leading whitespace and SQL line comments to find the first keyword.
-	for _, line := range strings.Split(stmt, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+	rest, ok := stripLeadingNoise(stmt)
+	if !ok {
+		return false
+	}
+	// First real token - check for COMMENT keyword followed by whitespace or end.
+	const keyword = "COMMENT"
+	if len(rest) < len(keyword) || !strings.EqualFold(rest[:len(keyword)], keyword) {
+		return false
+	}
+	if len(rest) == len(keyword) {
+		return true
+	}
+	next := rest[len(keyword)]
+	return next == ' ' || next == '\t' || next == '\n' || next == '\r'
+}
+
+// stripLeadingNoise removes leading whitespace, SQL line comments (-- ...),
+// and block comments (/* ... */) from a SQL fragment. Returns the remaining
+// text and true on success, or "" and false if the fragment contains only
+// noise or an unterminated block comment.
+func stripLeadingNoise(s string) (string, bool) {
+	for {
+		s = strings.TrimLeft(s, " \t\r\n")
+		if s == "" {
+			return "", false
+		}
+		if strings.HasPrefix(s, "--") {
+			if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+				s = s[nl+1:]
+				continue
+			}
+			return "", false
+		}
+		if strings.HasPrefix(s, "/*") {
+			end := strings.Index(s[2:], "*/")
+			if end < 0 {
+				return "", false // unterminated block comment
+			}
+			s = s[2+end+2:]
 			continue
 		}
-		return strings.HasPrefix(strings.ToUpper(trimmed), "COMMENT ")
+		return s, true
 	}
-	return false
 }
 
 // splitSQLStatements splits SQL content into individual statements.
