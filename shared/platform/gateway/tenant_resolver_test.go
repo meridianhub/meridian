@@ -399,7 +399,7 @@ func TestResolveTenant(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache returns tenant ID
-		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, "active", nil)
 
 		// Create middleware with pre-populated display name cache
 		middleware := &TenantResolverMiddleware{
@@ -431,7 +431,7 @@ func TestResolveTenant(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Slug cache hit but display name cache is empty
-		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, "active", nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
 
 		// Create middleware (no pre-populated display name cache)
@@ -461,9 +461,9 @@ func TestResolveTenant(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache miss (empty TenantID), DB returns tenant
-		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
-		mockCache.On("Set", ctx, testSlug, testTenantID).Return(nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "active").Return(nil)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -492,7 +492,7 @@ func TestResolveTenant(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache miss, DB returns domain.ErrNotFound
-		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, domain.ErrNotFound)
 
 		// Create middleware
@@ -523,9 +523,9 @@ func TestResolveTenant(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache miss, DB succeeds, but cache write fails
-		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
-		mockCache.On("Set", ctx, testSlug, testTenantID).Return(errCacheWriteFailed)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "active").Return(errCacheWriteFailed)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -554,9 +554,9 @@ func TestResolveTenant(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache read fails, but DB succeeds
-		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), errCacheReadTimeout)
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", errCacheReadTimeout)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
-		mockCache.On("Set", ctx, testSlug, testTenantID).Return(nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "active").Return(nil)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -585,7 +585,7 @@ func TestResolveTenant(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache miss, DB fails with non-not-found error
-		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, errDatabaseLost)
 
 		// Create middleware
@@ -620,7 +620,7 @@ func TestResolveTenant(t *testing.T) {
 		cancel()
 
 		// Setup: Cache returns context.Canceled error, DB also respects cancellation
-		mockCache.On("Get", cancelledCtx, testSlug).Return(tenant.TenantID(""), context.Canceled)
+		mockCache.On("Get", cancelledCtx, testSlug).Return(tenant.TenantID(""), "", context.Canceled)
 		mockRepo.On("GetBySlug", cancelledCtx, testSlug).Return(nil, context.Canceled)
 
 		// Create middleware
@@ -666,7 +666,7 @@ func TestServeHTTP(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache hit
-		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, "active", nil)
 
 		// Create middleware with pre-populated display name cache
 		middleware := &TenantResolverMiddleware{
@@ -760,7 +760,7 @@ func TestServeHTTP(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache miss, DB returns domain.ErrNotFound
-		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, domain.ErrNotFound)
 
 		// Create middleware
@@ -803,9 +803,9 @@ func TestServeHTTP(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache miss, DB hit, cache write succeeds
-		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
-		mockCache.On("Set", ctx, testSlug, testTenantID).Return(nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "active").Return(nil)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -850,7 +850,7 @@ func TestServeHTTP(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache hit
-		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, "active", nil)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -889,7 +889,7 @@ func TestServeHTTP(t *testing.T) {
 		multiLevelTenantID := tenant.MustNewTenantID("tenant_456")
 
 		// Setup: Cache hit for multi-level slug
-		mockCache.On("Get", ctx, multiLevelSlug).Return(multiLevelTenantID, nil)
+		mockCache.On("Get", ctx, multiLevelSlug).Return(multiLevelTenantID, "active", nil)
 
 		// Create middleware
 		middleware := &TenantResolverMiddleware{
@@ -929,7 +929,7 @@ func TestServeHTTP(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache miss, DB error (transient failure)
-		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
 		mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, errDatabaseLost)
 
 		// Create middleware
@@ -960,6 +960,166 @@ func TestServeHTTP(t *testing.T) {
 		assert.Contains(t, rec.Body.String(), "Service temporarily unavailable",
 			"response should contain 'Service temporarily unavailable'")
 		assert.False(t, nextCalled, "next handler should not be called")
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("provisioning_pending tenant returns 503 with Tenant not provisioned", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		pendingTenant := &domain.Tenant{
+			ID:          testTenantID,
+			DisplayName: "Acme Corp",
+			Slug:        testSlug,
+			Status:      domain.StatusProvisioningPending,
+		}
+
+		// Setup: Cache miss, DB returns tenant in provisioning_pending state
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(pendingTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "provisioning_pending").Return(nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "should return 503 for non-active tenant")
+		assert.Contains(t, rec.Body.String(), "Tenant not provisioned")
+		assert.False(t, nextCalled, "next handler should not be called")
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("provisioning tenant returns 503 from cache", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache hit with non-active status
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, "provisioning", nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
+
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "should return 503 for provisioning tenant")
+		assert.Contains(t, rec.Body.String(), "Tenant not provisioned")
+		assert.False(t, nextCalled, "next handler should not be called")
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertNotCalled(t, "GetBySlug")
+	})
+
+	t.Run("suspended tenant returns 503", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		suspendedTenant := &domain.Tenant{
+			ID:          testTenantID,
+			DisplayName: "Acme Corp",
+			Slug:        testSlug,
+			Status:      domain.StatusSuspended,
+		}
+
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(suspendedTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "suspended").Return(nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "should return 503 for suspended tenant")
+		assert.Contains(t, rec.Body.String(), "Tenant not provisioned")
+		assert.False(t, nextCalled, "next handler should not be called")
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("active tenant passes through", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		// Setup: Cache miss, DB returns active tenant
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(testTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "active").Return(nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/test", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code, "should return 200 for active tenant")
+		assert.True(t, nextCalled, "next handler should be called")
 
 		mockCache.AssertExpectations(t)
 		mockRepo.AssertExpectations(t)
@@ -1036,7 +1196,7 @@ func TestLocalDevMode(t *testing.T) {
 		logger := slog.Default()
 
 		// Setup: Cache hit for the header-provided slug
-		mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, "active", nil)
 
 		// Create middleware with localDevMode enabled
 		middleware := &TenantResolverMiddleware{
@@ -1119,7 +1279,7 @@ func TestLocalDevMode(t *testing.T) {
 		headerTenantID := tenant.MustNewTenantID("tenant_header")
 
 		// Setup: Cache hit for header slug (NOT subdomain slug)
-		mockCache.On("Get", ctx, headerSlug).Return(headerTenantID, nil)
+		mockCache.On("Get", ctx, headerSlug).Return(headerTenantID, "active", nil)
 
 		// Create middleware with localDevMode enabled
 		middleware := &TenantResolverMiddleware{
@@ -1166,7 +1326,7 @@ func TestLocalDevMode(t *testing.T) {
 		subdomainTenantID := tenant.MustNewTenantID("tenant_subdomain")
 
 		// Setup: Cache hit for subdomain slug
-		mockCache.On("Get", ctx, subdomainSlug).Return(subdomainTenantID, nil)
+		mockCache.On("Get", ctx, subdomainSlug).Return(subdomainTenantID, "active", nil)
 
 		// Create middleware with localDevMode enabled
 		middleware := &TenantResolverMiddleware{
@@ -1263,7 +1423,7 @@ func TestLocalDevMode(t *testing.T) {
 		for _, validSlug := range validSlugs {
 			t.Run(validSlug, func(t *testing.T) {
 				mockCache := new(MockSlugCache)
-				mockCache.On("Get", ctx, validSlug).Return(validSlugTenantID, nil)
+				mockCache.On("Get", ctx, validSlug).Return(validSlugTenantID, "active", nil)
 
 				middleware := &TenantResolverMiddleware{
 					slugCache:    mockCache,
@@ -1305,7 +1465,7 @@ func TestHandlerOptionalTenant_WithValidSubdomain(t *testing.T) {
 	mockRepo := new(MockTenantRepository)
 	logger := slog.Default()
 
-	mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+	mockCache.On("Get", ctx, testSlug).Return(testTenantID, "active", nil)
 
 	middleware := &TenantResolverMiddleware{
 		slugCache:  mockCache,
@@ -1427,7 +1587,7 @@ func TestHandlerOptionalTenant_TenantNotFoundInDB(t *testing.T) {
 	logger := slog.Default()
 
 	// Cache miss, DB returns not found
-	mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), nil)
+	mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
 	mockRepo.On("GetBySlug", ctx, testSlug).Return(nil, domain.ErrNotFound)
 
 	middleware := &TenantResolverMiddleware{
@@ -1470,7 +1630,7 @@ func TestHandlerOptionalTenant_LocalDevMode_ValidSlugFromHeader(t *testing.T) {
 	mockCache := new(MockSlugCache)
 	mockRepo := new(MockTenantRepository)
 
-	mockCache.On("Get", ctx, testSlug).Return(testTenantID, nil)
+	mockCache.On("Get", ctx, testSlug).Return(testTenantID, "active", nil)
 
 	middleware := &TenantResolverMiddleware{
 		slugCache:    mockCache,
