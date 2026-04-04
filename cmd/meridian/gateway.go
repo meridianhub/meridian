@@ -128,6 +128,9 @@ func wireGateway(grpcPort, httpPort int, databaseURL string, tenantDB *gorm.DB, 
 		return nil, fmt.Errorf("failed to create tenant resolver: %w", err)
 	}
 
+	// Enable per-service provisioning status on the progress page.
+	tenantResolver.SetProvisioningStatusProvider(tenantRepo)
+
 	// Wire public tenant info endpoint for login page branding.
 	tenantInfoHandler := gateway.NewTenantInfoHandler(logger)
 	opts = append(opts, gateway.WithTenantInfoHandler(tenantInfoHandler))

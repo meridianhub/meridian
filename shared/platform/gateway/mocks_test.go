@@ -10,8 +10,9 @@ import (
 
 // Compile-time interface checks to ensure mocks implement the required interfaces
 var (
-	_ slugCache        = (*MockSlugCache)(nil)
-	_ tenantRepository = (*MockTenantRepository)(nil)
+	_ slugCache                  = (*MockSlugCache)(nil)
+	_ tenantRepository           = (*MockTenantRepository)(nil)
+	_ ProvisioningStatusProvider = (*MockProvisioningStatusProvider)(nil)
 )
 
 // MockSlugCache is a mock implementation of slugCache for testing.
@@ -44,4 +45,17 @@ func (m *MockTenantRepository) GetBySlug(ctx context.Context, slug string) (*dom
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*domain.Tenant), args.Error(1)
+}
+
+// MockProvisioningStatusProvider is a mock implementation of ProvisioningStatusProvider for testing.
+type MockProvisioningStatusProvider struct {
+	mock.Mock
+}
+
+func (m *MockProvisioningStatusProvider) FindProvisioningStatusByTenantID(ctx context.Context, tenantID string) ([]domain.ProvisioningStatus, error) {
+	args := m.Called(ctx, tenantID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]domain.ProvisioningStatus), args.Error(1)
 }

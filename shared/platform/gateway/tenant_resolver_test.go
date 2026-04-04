@@ -965,7 +965,7 @@ func TestServeHTTP(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 
-	t.Run("provisioning_pending tenant returns 503 with Tenant not provisioned", func(t *testing.T) {
+	t.Run("provisioning_pending tenant serves progress page", func(t *testing.T) {
 		mockCache := new(MockSlugCache)
 		mockRepo := new(MockTenantRepository)
 		logger := slog.Default()
@@ -1001,20 +1001,22 @@ func TestServeHTTP(t *testing.T) {
 		handler := middleware.Handler(next)
 		handler.ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "should return 503 for non-active tenant")
-		assert.Contains(t, rec.Body.String(), "Tenant not provisioned")
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "should return 503 for provisioning tenant")
+		assert.Contains(t, rec.Header().Get("Content-Type"), "text/html", "should serve HTML progress page")
+		assert.Contains(t, rec.Body.String(), "Setting up your workspace")
+		assert.Contains(t, rec.Body.String(), "Acme Corp")
 		assert.False(t, nextCalled, "next handler should not be called")
 
 		mockCache.AssertExpectations(t)
 		mockRepo.AssertExpectations(t)
 	})
 
-	t.Run("provisioning tenant returns 503 from cache", func(t *testing.T) {
+	t.Run("provisioning tenant serves progress page from cache", func(t *testing.T) {
 		mockCache := new(MockSlugCache)
 		mockRepo := new(MockTenantRepository)
 		logger := slog.Default()
 
-		// Setup: Cache hit with non-active status
+		// Setup: Cache hit with provisioning status
 		mockCache.On("Get", ctx, testSlug).Return(testTenantID, "provisioning", nil)
 
 		middleware := &TenantResolverMiddleware{
@@ -1038,11 +1040,105 @@ func TestServeHTTP(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "should return 503 for provisioning tenant")
-		assert.Contains(t, rec.Body.String(), "Tenant not provisioned")
+		assert.Contains(t, rec.Header().Get("Content-Type"), "text/html", "should serve HTML progress page")
+		assert.Contains(t, rec.Body.String(), "Setting up your workspace")
 		assert.False(t, nextCalled, "next handler should not be called")
 
 		mockCache.AssertExpectations(t)
 		mockRepo.AssertNotCalled(t, "GetBySlug")
+	})
+
+	t.Run("provisioning status endpoint returns JSON for provisioning tenant", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		mockProvider := new(MockProvisioningStatusProvider)
+		logger := slog.Default()
+
+		// Setup: Cache hit with provisioning status
+		mockCache.On("Get", ctx, testSlug).Return(testTenantID, "provisioning", nil)
+		mockProvider.On("FindProvisioningStatusByTenantID", ctx, testTenantID.String()).Return([]domain.ProvisioningStatus{
+			{ServiceName: "party", Status: domain.ServiceStatusCompleted},
+			{ServiceName: "account", Status: domain.ServiceStatusInProgress},
+		}, nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:                  mockCache,
+			tenantRepo:                 mockRepo,
+			baseDomain:                 baseDomain,
+			logger:                     logger,
+			provisioningStatusProvider: mockProvider,
+		}
+		middleware.displayNameCache.Store(testSlug, cachedDisplayName{tenantID: testTenantID, displayName: "Acme Corp"})
+
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/provisioning-status", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code, "should return 200 for provisioning status endpoint")
+		assert.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+		assert.Contains(t, rec.Body.String(), `"status":"provisioning"`)
+		assert.Contains(t, rec.Body.String(), `"name":"Party"`)
+		assert.Contains(t, rec.Body.String(), `"name":"Account"`)
+		assert.False(t, nextCalled, "next handler should not be called")
+
+		mockCache.AssertExpectations(t)
+		mockProvider.AssertExpectations(t)
+	})
+
+	t.Run("provisioning progress page includes per-service status when provider set", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		mockProvider := new(MockProvisioningStatusProvider)
+		logger := slog.Default()
+
+		pendingTenant := &domain.Tenant{
+			ID:          testTenantID,
+			DisplayName: "Test Corp",
+			Slug:        testSlug,
+			Status:      domain.StatusProvisioning,
+		}
+
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(pendingTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "provisioning").Return(nil)
+		mockProvider.On("FindProvisioningStatusByTenantID", ctx, testTenantID.String()).Return([]domain.ProvisioningStatus{
+			{ServiceName: "reference_data", Status: domain.ServiceStatusCompleted},
+			{ServiceName: "party", Status: domain.ServiceStatusInProgress},
+			{ServiceName: "account", Status: domain.ServiceStatusPending},
+		}, nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:                  mockCache,
+			tenantRepo:                 mockRepo,
+			baseDomain:                 baseDomain,
+			logger:                     logger,
+			provisioningStatusProvider: mockProvider,
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+		body := rec.Body.String()
+		assert.Contains(t, body, "Test Corp")
+		assert.Contains(t, body, "Reference Data")
+		assert.Contains(t, body, "Party")
+		assert.Contains(t, body, "Account")
+
+		mockProvider.AssertExpectations(t)
 	})
 
 	t.Run("suspended tenant returns 503", func(t *testing.T) {
