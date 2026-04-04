@@ -848,18 +848,20 @@ func newStubSlugCache() *stubSlugCache {
 	return &stubSlugCache{entries: make(map[string]tenant.TenantID)}
 }
 
-func (c *stubSlugCache) Get(_ context.Context, slug string) (tenant.TenantID, error) {
+func (c *stubSlugCache) Get(_ context.Context, slug string) (tenant.TenantID, string, error) {
 	id, ok := c.entries[slug]
 	if !ok {
-		return "", nil // cache miss
+		return "", "", nil // cache miss
 	}
-	return id, nil
+	return id, "", nil
 }
 
-func (c *stubSlugCache) Set(_ context.Context, slug string, tenantID tenant.TenantID) error {
+func (c *stubSlugCache) Set(_ context.Context, slug string, tenantID tenant.TenantID, _ string) error {
 	c.entries[slug] = tenantID
 	return nil
 }
+
+func (c *stubSlugCache) Invalidate(_ context.Context, _ string) {}
 
 // stubTenantRepo is a minimal tenant repository for testing.
 // It satisfies the unexported tenantRepository interface used by NewTenantResolverMiddleware.

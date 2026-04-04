@@ -56,18 +56,20 @@ type authFlowSlugCache struct {
 	entries map[string]tenant.TenantID
 }
 
-func (c *authFlowSlugCache) Get(_ context.Context, slug string) (tenant.TenantID, error) {
+func (c *authFlowSlugCache) Get(_ context.Context, slug string) (tenant.TenantID, string, error) {
 	id, ok := c.entries[slug]
 	if !ok {
-		return "", nil
+		return "", "", nil
 	}
-	return id, nil
+	return id, "", nil
 }
 
-func (c *authFlowSlugCache) Set(_ context.Context, slug string, tenantID tenant.TenantID) error {
+func (c *authFlowSlugCache) Set(_ context.Context, slug string, tenantID tenant.TenantID, _ string) error {
 	c.entries[slug] = tenantID
 	return nil
 }
+
+func (c *authFlowSlugCache) Invalidate(_ context.Context, _ string) {}
 
 // authFlowTenantRepo satisfies the tenantRepository interface for TenantResolverMiddleware.
 type authFlowTenantRepo struct {
