@@ -243,6 +243,16 @@ func startProvisioningWorker(ctx context.Context, prov *tenantprovisioner.Postgr
 	valuationSeeder := refvaluation.NewSeeder(refDataPool)
 	w.RegisterPostProvisioningHook("valuation-defaults", valuationSeeder.AsPostProvisioningHook())
 
+	// Self-registered admin: creates the admin identity from registration metadata
+	// stored by the registration handler. Must run after all reference data hooks
+	// so the identity schema has instruments, account types, etc. available.
+	selfRegHook, hookErr := identitybootstrap.NewSelfRegisteredAdminHook(identityRepo, repo, logger)
+	if hookErr != nil {
+		_ = prov.Close()
+		return nil, nil, fmt.Errorf("self-registered admin hook: %w", hookErr)
+	}
+	w.RegisterPostProvisioningHook("self-registered-admin", selfRegHook.AsPostProvisioningHook())
+
 	go w.Start(ctx)
 	logger.Info("provisioning worker started")
 

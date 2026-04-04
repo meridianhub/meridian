@@ -24,17 +24,25 @@ import (
 // --- Stub implementations ---
 
 type stubTenantCreator struct {
-	createFn func(ctx context.Context, tenantID, slug, displayName string) (string, error)
-	deleteFn func(ctx context.Context, tenantID string) error
+	createFn        func(ctx context.Context, tenantID, slug, displayName string, metadata map[string]interface{}) (*gateway.CreateTenantResult, error)
+	deleteFn        func(ctx context.Context, tenantID string) error
+	clearMetadataFn func(ctx context.Context, tenantID string) error
 }
 
-func (s *stubTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error) {
-	return s.createFn(ctx, tenantID, slug, displayName)
+func (s *stubTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string, metadata map[string]interface{}) (*gateway.CreateTenantResult, error) {
+	return s.createFn(ctx, tenantID, slug, displayName, metadata)
 }
 
 func (s *stubTenantCreator) DeleteTenant(ctx context.Context, tenantID string) error {
 	if s.deleteFn != nil {
 		return s.deleteFn(ctx, tenantID)
+	}
+	return nil
+}
+
+func (s *stubTenantCreator) ClearTenantMetadata(ctx context.Context, tenantID string) error {
+	if s.clearMetadataFn != nil {
+		return s.clearMetadataFn(ctx, tenantID)
 	}
 	return nil
 }
@@ -158,8 +166,8 @@ func (s *stubSlugChecker) IsSlugAvailable(ctx context.Context, slug string) (boo
 
 func defaultStubs() (*stubTenantCreator, *stubIdentityRepo) {
 	tc := &stubTenantCreator{
-		createFn: func(_ context.Context, tenantID, _, _ string) (string, error) {
-			return tenantID, nil
+		createFn: func(_ context.Context, tenantID, _, _ string, _ map[string]interface{}) (*gateway.CreateTenantResult, error) {
+			return &gateway.CreateTenantResult{TenantID: tenantID}, nil
 		},
 	}
 	ir := &stubIdentityRepo{}
@@ -215,11 +223,11 @@ func TestRegistrationHandler_Success(t *testing.T) {
 	tc, ir := defaultStubs()
 
 	var capturedTenantID, capturedSlug, capturedDisplayName string
-	tc.createFn = func(_ context.Context, tenantID, slug, displayName string) (string, error) {
+	tc.createFn = func(_ context.Context, tenantID, slug, displayName string, _ map[string]interface{}) (*gateway.CreateTenantResult, error) {
 		capturedTenantID = tenantID
 		capturedSlug = slug
 		capturedDisplayName = displayName
-		return tenantID, nil
+		return &gateway.CreateTenantResult{TenantID: tenantID}, nil
 	}
 
 	var capturedIdentityEmail string
@@ -258,9 +266,9 @@ func TestRegistrationHandler_DefaultDisplayName(t *testing.T) {
 	tc, ir := defaultStubs()
 
 	var capturedDisplayName string
-	tc.createFn = func(_ context.Context, tenantID, _, displayName string) (string, error) {
+	tc.createFn = func(_ context.Context, tenantID, _, displayName string, _ map[string]interface{}) (*gateway.CreateTenantResult, error) {
 		capturedDisplayName = displayName
-		return tenantID, nil
+		return &gateway.CreateTenantResult{TenantID: tenantID}, nil
 	}
 
 	h := newRegistrationHandler(t, tc, ir)
@@ -344,8 +352,8 @@ func TestRegistrationHandler_WeakPassword(t *testing.T) {
 
 func TestRegistrationHandler_SlugTaken(t *testing.T) {
 	tc, ir := defaultStubs()
-	tc.createFn = func(_ context.Context, _, _, _ string) (string, error) {
-		return "", status.Error(codes.AlreadyExists, "tenant acme_corp already exists")
+	tc.createFn = func(_ context.Context, _, _, _ string, _ map[string]interface{}) (*gateway.CreateTenantResult, error) {
+		return nil, status.Error(codes.AlreadyExists, "tenant acme_corp already exists")
 	}
 
 	h := newRegistrationHandler(t, tc, ir)
@@ -364,8 +372,8 @@ func TestRegistrationHandler_SlugTaken(t *testing.T) {
 
 func TestRegistrationHandler_TenantCreationFails(t *testing.T) {
 	tc, ir := defaultStubs()
-	tc.createFn = func(_ context.Context, _, _, _ string) (string, error) {
-		return "", errors.New("database connection lost")
+	tc.createFn = func(_ context.Context, _, _, _ string, _ map[string]interface{}) (*gateway.CreateTenantResult, error) {
+		return nil, errors.New("database connection lost")
 	}
 
 	h := newRegistrationHandler(t, tc, ir)
@@ -636,8 +644,8 @@ func TestSlugAvailable_MethodNotAllowed(t *testing.T) {
 
 func TestRegistrationHandler_VerificationRequired_Success(t *testing.T) {
 	tc := &stubTenantCreator{
-		createFn: func(_ context.Context, tenantID, _, _ string) (string, error) {
-			return tenantID, nil
+		createFn: func(_ context.Context, tenantID, _, _ string, _ map[string]interface{}) (*gateway.CreateTenantResult, error) {
+			return &gateway.CreateTenantResult{TenantID: tenantID}, nil
 		},
 	}
 
@@ -693,4 +701,85 @@ func TestRegistrationHandler_NoVerificationRequired_DefaultBehavior(t *testing.T
 	assert.Equal(t, http.StatusCreated, w.Code)
 	resp := parseResponse(t, w)
 	assert.Equal(t, false, resp["verification_required"])
+}
+
+// --- Async Provisioning Tests ---
+
+func TestRegistrationHandler_AsyncProvisioning_DefersIdentityCreation(t *testing.T) {
+	var capturedMetadata map[string]interface{}
+	tc := &stubTenantCreator{
+		createFn: func(_ context.Context, tenantID, _, _ string, metadata map[string]interface{}) (*gateway.CreateTenantResult, error) {
+			capturedMetadata = metadata
+			return &gateway.CreateTenantResult{
+				TenantID:            tenantID,
+				ProvisioningPending: true,
+			}, nil
+		},
+	}
+
+	identitySaveCalled := false
+	ir := &stubIdentityRepo{
+		saveIdentityWithRolesFn: func(_ context.Context, _ *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
+			identitySaveCalled = true
+			return nil
+		},
+	}
+
+	h := newRegistrationHandler(t, tc, ir)
+	w := postRegister(h, map[string]string{
+		"slug":     "acme-corp",
+		"email":    "admin@acme.com",
+		"password": "SecurePass123!",
+	})
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	resp := parseResponse(t, w)
+	assert.Equal(t, true, resp["provisioning_pending"])
+	assert.Equal(t, "acme_corp", resp["tenant_id"])
+	assert.Equal(t, "https://acme-corp.meridian.app/login", resp["login_url"])
+
+	// Identity should NOT be created inline - deferred to post-provisioning hook.
+	assert.False(t, identitySaveCalled, "identity should not be created when provisioning is pending")
+
+	// Registration metadata should be passed to tenant creation.
+	assert.Contains(t, capturedMetadata, gateway.MetaKeyRegistrationEmail)
+	assert.Equal(t, "admin@acme.com", capturedMetadata[gateway.MetaKeyRegistrationEmail])
+	assert.Contains(t, capturedMetadata, gateway.MetaKeyRegistrationPasswordHash)
+	assert.NotEmpty(t, capturedMetadata[gateway.MetaKeyRegistrationPasswordHash])
+	assert.Contains(t, capturedMetadata, gateway.MetaKeyRegistrationEmailVerifyRequired)
+}
+
+func TestRegistrationHandler_SyncProvisioning_CreatesIdentityInline(t *testing.T) {
+	tc := &stubTenantCreator{
+		createFn: func(_ context.Context, tenantID, _, _ string, _ map[string]interface{}) (*gateway.CreateTenantResult, error) {
+			return &gateway.CreateTenantResult{
+				TenantID:            tenantID,
+				ProvisioningPending: false,
+			}, nil
+		},
+	}
+
+	identitySaveCalled := false
+	ir := &stubIdentityRepo{
+		saveIdentityWithRolesFn: func(_ context.Context, _ *identitydomain.Identity, _ []*identitydomain.RoleAssignment) error {
+			identitySaveCalled = true
+			return nil
+		},
+	}
+
+	h := newRegistrationHandler(t, tc, ir)
+	w := postRegister(h, map[string]string{
+		"slug":     "acme-corp",
+		"email":    "admin@acme.com",
+		"password": "SecurePass123!",
+	})
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	resp := parseResponse(t, w)
+	assert.Equal(t, false, resp["provisioning_pending"])
+
+	// Identity should be created inline when no async provisioning.
+	assert.True(t, identitySaveCalled, "identity should be created inline when provisioning is not pending")
 }

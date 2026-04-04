@@ -58,7 +58,10 @@ func (s *stubTenantServiceClient) UpdateTenantStatus(_ context.Context, req *ten
 func TestLoopbackTenantCreator_CreateTenant(t *testing.T) {
 	stub := &stubTenantServiceClient{
 		initiateResp: &tenantv1.InitiateTenantResponse{
-			Tenant: &tenantv1.Tenant{TenantId: "acme_corp"},
+			Tenant: &tenantv1.Tenant{
+				TenantId: "acme_corp",
+				Status:   tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING,
+			},
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -69,10 +72,11 @@ func TestLoopbackTenantCreator_CreateTenant(t *testing.T) {
 		logger:     logger,
 	}
 
-	tenantID, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp")
+	result, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp", nil)
 
 	require.NoError(t, err)
-	assert.Equal(t, "acme_corp", tenantID)
+	assert.Equal(t, "acme_corp", result.TenantID)
+	assert.True(t, result.ProvisioningPending)
 	assert.True(t, stub.initiateCalled)
 	assert.Equal(t, "acme_corp", stub.initiateReq.TenantId)
 	assert.Equal(t, "Acme Corp", stub.initiateReq.DisplayName)
@@ -85,7 +89,10 @@ func TestLoopbackTenantCreator_CreateTenant(t *testing.T) {
 func TestLoopbackTenantCreator_CreateTenant_EmptyBaseDomain(t *testing.T) {
 	stub := &stubTenantServiceClient{
 		initiateResp: &tenantv1.InitiateTenantResponse{
-			Tenant: &tenantv1.Tenant{TenantId: "acme_corp"},
+			Tenant: &tenantv1.Tenant{
+				TenantId: "acme_corp",
+				Status:   tenantv1.TenantStatus_TENANT_STATUS_ACTIVE,
+			},
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -96,9 +103,10 @@ func TestLoopbackTenantCreator_CreateTenant_EmptyBaseDomain(t *testing.T) {
 		logger:     logger,
 	}
 
-	_, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp")
+	result, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp", nil)
 
 	require.NoError(t, err)
+	assert.False(t, result.ProvisioningPending)
 	assert.Equal(t, "acme-corp", stub.initiateReq.Subdomain,
 		"when baseDomain is empty, subdomain should be just the slug")
 }
@@ -111,10 +119,35 @@ func TestLoopbackTenantCreator_CreateTenant_NilTenantInResponse(t *testing.T) {
 
 	creator := &loopbackTenantCreator{client: stub, logger: logger}
 
-	_, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp")
+	_, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp", nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil tenant")
+}
+
+func TestLoopbackTenantCreator_CreateTenant_PassesMetadata(t *testing.T) {
+	stub := &stubTenantServiceClient{
+		initiateResp: &tenantv1.InitiateTenantResponse{
+			Tenant: &tenantv1.Tenant{
+				TenantId: "acme_corp",
+				Status:   tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING,
+			},
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	creator := &loopbackTenantCreator{client: stub, baseDomain: "test.local", logger: logger}
+
+	metadata := map[string]interface{}{
+		"_registration_email":         "admin@acme.com",
+		"_registration_password_hash": "$2a$10$fakehash",
+	}
+	_, err := creator.CreateTenant(context.Background(), "acme_corp", "acme-corp", "Acme Corp", metadata)
+
+	require.NoError(t, err)
+	require.NotNil(t, stub.initiateReq.Metadata)
+	assert.Equal(t, "admin@acme.com", stub.initiateReq.Metadata.Fields["_registration_email"].GetStringValue())
+	assert.Equal(t, "$2a$10$fakehash", stub.initiateReq.Metadata.Fields["_registration_password_hash"].GetStringValue())
 }
 
 func TestLoopbackTenantCreator_DeleteTenant(t *testing.T) {
