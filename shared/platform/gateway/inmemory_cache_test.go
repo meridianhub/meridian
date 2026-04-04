@@ -61,34 +61,37 @@ func TestInMemorySlugCache_Get(t *testing.T) {
 		cache := NewInMemorySlugCache()
 		defer cache.Stop()
 
-		tenantID, err := cache.Get(ctx, "nonexistent")
+		tenantID, status, err := cache.Get(ctx, "nonexistent")
 
 		require.NoError(t, err)
 		assert.True(t, tenantID.IsEmpty(), "should return empty TenantID for cache miss")
+		assert.Empty(t, status)
 	})
 
-	t.Run("returns cached tenant ID on hit", func(t *testing.T) {
+	t.Run("returns cached tenant ID and status on hit", func(t *testing.T) {
 		cache := NewInMemorySlugCache()
 		defer cache.Stop()
 
 		expectedTenantID := tenant.MustNewTenantID("tenant_123")
-		err := cache.Set(ctx, "acme", expectedTenantID)
+		err := cache.Set(ctx, "acme", expectedTenantID, "active")
 		require.NoError(t, err)
 
-		tenantID, err := cache.Get(ctx, "acme")
+		tenantID, status, err := cache.Get(ctx, "acme")
 
 		require.NoError(t, err)
 		assert.Equal(t, expectedTenantID, tenantID)
+		assert.Equal(t, "active", status)
 	})
 
 	t.Run("returns empty TenantID for empty slug", func(t *testing.T) {
 		cache := NewInMemorySlugCache()
 		defer cache.Stop()
 
-		tenantID, err := cache.Get(ctx, "")
+		tenantID, status, err := cache.Get(ctx, "")
 
 		require.NoError(t, err)
 		assert.True(t, tenantID.IsEmpty())
+		assert.Empty(t, status)
 	})
 
 	t.Run("respects context cancellation", func(t *testing.T) {
@@ -98,27 +101,29 @@ func TestInMemorySlugCache_Get(t *testing.T) {
 		cancelledCtx, cancel := context.WithCancel(ctx)
 		cancel()
 
-		tenantID, err := cache.Get(cancelledCtx, "acme")
+		tenantID, status, err := cache.Get(cancelledCtx, "acme")
 
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.True(t, tenantID.IsEmpty())
+		assert.Empty(t, status)
 	})
 }
 
 func TestInMemorySlugCache_Set(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("stores tenant ID successfully", func(t *testing.T) {
+	t.Run("stores tenant ID and status successfully", func(t *testing.T) {
 		cache := NewInMemorySlugCache()
 		defer cache.Stop()
 
 		expectedTenantID := tenant.MustNewTenantID("tenant_123")
-		err := cache.Set(ctx, "acme", expectedTenantID)
+		err := cache.Set(ctx, "acme", expectedTenantID, "active")
 		require.NoError(t, err)
 
-		tenantID, err := cache.Get(ctx, "acme")
+		tenantID, status, err := cache.Get(ctx, "acme")
 		require.NoError(t, err)
 		assert.Equal(t, expectedTenantID, tenantID)
+		assert.Equal(t, "active", status)
 	})
 
 	t.Run("overwrites existing entry", func(t *testing.T) {
@@ -128,22 +133,23 @@ func TestInMemorySlugCache_Set(t *testing.T) {
 		firstTenantID := tenant.MustNewTenantID("tenant_1")
 		secondTenantID := tenant.MustNewTenantID("tenant_2")
 
-		err := cache.Set(ctx, "acme", firstTenantID)
+		err := cache.Set(ctx, "acme", firstTenantID, "provisioning")
 		require.NoError(t, err)
 
-		err = cache.Set(ctx, "acme", secondTenantID)
+		err = cache.Set(ctx, "acme", secondTenantID, "active")
 		require.NoError(t, err)
 
-		tenantID, err := cache.Get(ctx, "acme")
+		tenantID, status, err := cache.Get(ctx, "acme")
 		require.NoError(t, err)
 		assert.Equal(t, secondTenantID, tenantID)
+		assert.Equal(t, "active", status)
 	})
 
 	t.Run("ignores empty slug", func(t *testing.T) {
 		cache := NewInMemorySlugCache()
 		defer cache.Stop()
 
-		err := cache.Set(ctx, "", tenant.MustNewTenantID("tenant_123"))
+		err := cache.Set(ctx, "", tenant.MustNewTenantID("tenant_123"), "active")
 		require.NoError(t, err)
 		assert.Equal(t, 0, cache.Size())
 	})
@@ -155,10 +161,50 @@ func TestInMemorySlugCache_Set(t *testing.T) {
 		cancelledCtx, cancel := context.WithCancel(ctx)
 		cancel()
 
-		err := cache.Set(cancelledCtx, "acme", tenant.MustNewTenantID("tenant_123"))
+		err := cache.Set(cancelledCtx, "acme", tenant.MustNewTenantID("tenant_123"), "active")
 
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.Equal(t, 0, cache.Size())
+	})
+}
+
+func TestInMemorySlugCache_Invalidate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("removes existing entry", func(t *testing.T) {
+		cache := NewInMemorySlugCache()
+		defer cache.Stop()
+
+		tenantID := tenant.MustNewTenantID("tenant_123")
+		err := cache.Set(ctx, "acme", tenantID, "active")
+		require.NoError(t, err)
+		assert.Equal(t, 1, cache.Size())
+
+		cache.Invalidate(ctx, "acme")
+
+		assert.Equal(t, 0, cache.Size())
+		result, _, err := cache.Get(ctx, "acme")
+		require.NoError(t, err)
+		assert.True(t, result.IsEmpty())
+	})
+
+	t.Run("no-op for nonexistent slug", func(t *testing.T) {
+		cache := NewInMemorySlugCache()
+		defer cache.Stop()
+
+		cache.Invalidate(ctx, "nonexistent")
+		assert.Equal(t, 0, cache.Size())
+	})
+
+	t.Run("no-op for empty slug", func(t *testing.T) {
+		cache := NewInMemorySlugCache()
+		defer cache.Stop()
+
+		err := cache.Set(ctx, "acme", tenant.MustNewTenantID("tenant_123"), "active")
+		require.NoError(t, err)
+
+		cache.Invalidate(ctx, "")
+		assert.Equal(t, 1, cache.Size())
 	})
 }
 
@@ -174,20 +220,21 @@ func TestInMemorySlugCache_TTLExpiration(t *testing.T) {
 		defer cache.Stop()
 
 		tenantID := tenant.MustNewTenantID("tenant_123")
-		err := cache.Set(ctx, "acme", tenantID)
+		err := cache.Set(ctx, "acme", tenantID, "active")
 		require.NoError(t, err)
 
 		// Verify entry exists
-		result, err := cache.Get(ctx, "acme")
+		result, status, err := cache.Get(ctx, "acme")
 		require.NoError(t, err)
 		assert.Equal(t, tenantID, result)
+		assert.Equal(t, "active", status)
 
 		// Wait for expiration using await
 		err = await.New().
 			AtMost(1 * time.Second).
 			PollInterval(10 * time.Millisecond).
 			Until(func() bool {
-				result, _ := cache.Get(ctx, "acme")
+				result, _, _ := cache.Get(ctx, "acme")
 				return result.IsEmpty()
 			})
 
@@ -199,13 +246,14 @@ func TestInMemorySlugCache_TTLExpiration(t *testing.T) {
 		defer cache.Stop()
 
 		tenantID := tenant.MustNewTenantID("tenant_123")
-		err := cache.Set(ctx, "acme", tenantID)
+		err := cache.Set(ctx, "acme", tenantID, "active")
 		require.NoError(t, err)
 
 		// Should still be valid
-		result, err := cache.Get(ctx, "acme")
+		result, status, err := cache.Get(ctx, "acme")
 		require.NoError(t, err)
 		assert.Equal(t, tenantID, result)
+		assert.Equal(t, "active", status)
 	})
 }
 
@@ -220,7 +268,7 @@ func TestInMemorySlugCache_BackgroundCleanup(t *testing.T) {
 		defer cache.Stop()
 
 		tenantID := tenant.MustNewTenantID("tenant_123")
-		err := cache.Set(ctx, "acme", tenantID)
+		err := cache.Set(ctx, "acme", tenantID, "active")
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, cache.Size())
@@ -244,18 +292,19 @@ func TestInMemorySlugCache_BackgroundCleanup(t *testing.T) {
 		defer cache.Stop()
 
 		tenantID := tenant.MustNewTenantID("tenant_123")
-		err := cache.Set(ctx, "acme", tenantID)
+		err := cache.Set(ctx, "acme", tenantID, "active")
 		require.NoError(t, err)
 
 		// Intentional sleep: Wait for multiple cleanup cycles to run (50ms interval x 3 = 150ms)
 		// to verify they don't remove entries that haven't expired (1 hour TTL).
-		time.Sleep(150 * time.Millisecond) //nolint:forbidigo // verifies non-expired entries are NOT removed — no condition to poll against
+		time.Sleep(150 * time.Millisecond) //nolint:forbidigo // verifies non-expired entries are NOT removed - no condition to poll against
 
 		// Entry should still exist
 		assert.Equal(t, 1, cache.Size())
-		result, err := cache.Get(ctx, "acme")
+		result, status, err := cache.Get(ctx, "acme")
 		require.NoError(t, err)
 		assert.Equal(t, tenantID, result)
+		assert.Equal(t, "active", status)
 	})
 }
 
@@ -282,10 +331,10 @@ func TestInMemorySlugCache_ConcurrentAccess(t *testing.T) {
 				for j := 0; j < numOperations; j++ {
 					// Alternate between reads and writes
 					if j%2 == 0 {
-						_, err := cache.Get(ctx, slug)
+						_, _, err := cache.Get(ctx, slug)
 						assert.NoError(t, err)
 					} else {
-						err := cache.Set(ctx, slug, tenantID)
+						err := cache.Set(ctx, slug, tenantID, "active")
 						assert.NoError(t, err)
 					}
 				}
@@ -311,10 +360,10 @@ func TestInMemorySlugCache_ConcurrentAccess(t *testing.T) {
 				slug := fmt.Sprintf("slug_%d", idx)
 				tenantID := tenant.MustNewTenantID(fmt.Sprintf("tenant_%d", idx))
 
-				err := cache.Set(ctx, slug, tenantID)
+				err := cache.Set(ctx, slug, tenantID, "active")
 				assert.NoError(t, err)
 
-				result, err := cache.Get(ctx, slug)
+				result, _, err := cache.Get(ctx, slug)
 				assert.NoError(t, err)
 				assert.False(t, result.IsEmpty(), "should have cached value")
 			}(i)
@@ -362,15 +411,15 @@ func TestInMemorySlugCache_Size(t *testing.T) {
 
 		assert.Equal(t, 0, cache.Size())
 
-		err := cache.Set(ctx, "a", tenant.MustNewTenantID("t1"))
+		err := cache.Set(ctx, "a", tenant.MustNewTenantID("t1"), "active")
 		require.NoError(t, err)
 		assert.Equal(t, 1, cache.Size())
 
-		err = cache.Set(ctx, "b", tenant.MustNewTenantID("t2"))
+		err = cache.Set(ctx, "b", tenant.MustNewTenantID("t2"), "active")
 		require.NoError(t, err)
 		assert.Equal(t, 2, cache.Size())
 
-		err = cache.Set(ctx, "c", tenant.MustNewTenantID("t3"))
+		err = cache.Set(ctx, "c", tenant.MustNewTenantID("t3"), "active")
 		require.NoError(t, err)
 		assert.Equal(t, 3, cache.Size())
 	})

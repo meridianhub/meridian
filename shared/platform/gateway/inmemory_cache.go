@@ -15,9 +15,10 @@ const DefaultCacheTTL = 5 * time.Minute
 // DefaultCleanupInterval is the default interval for background cleanup of expired entries.
 const DefaultCleanupInterval = 1 * time.Minute
 
-// cacheEntry holds a cached tenant ID with its expiration time.
+// cacheEntry holds a cached tenant ID and status with its expiration time.
 type cacheEntry struct {
 	tenantID  tenant.TenantID
+	status    string
 	expiresAt time.Time
 }
 
@@ -85,19 +86,19 @@ func NewInMemorySlugCache(opts ...InMemoryCacheOption) *InMemorySlugCache {
 	return c
 }
 
-// Get retrieves a tenant ID for the given slug from the cache.
-// Returns an empty TenantID for cache miss (not an error).
+// Get retrieves a tenant ID and status for the given slug from the cache.
+// Returns an empty TenantID and empty status for cache miss (not an error).
 // Context cancellation is respected.
-func (c *InMemorySlugCache) Get(ctx context.Context, slug string) (tenant.TenantID, error) {
+func (c *InMemorySlugCache) Get(ctx context.Context, slug string) (tenant.TenantID, string, error) {
 	// Check context first
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", "", ctx.Err()
 	default:
 	}
 
 	if slug == "" {
-		return "", nil
+		return "", "", nil
 	}
 
 	c.mu.RLock()
@@ -105,23 +106,23 @@ func (c *InMemorySlugCache) Get(ctx context.Context, slug string) (tenant.Tenant
 	c.mu.RUnlock()
 
 	if !ok {
-		return "", nil
+		return "", "", nil
 	}
 
 	// Check if entry has expired
 	if entry.isExpired() {
 		// Entry expired - treat as cache miss
 		// Cleanup goroutine will eventually remove it
-		return "", nil
+		return "", "", nil
 	}
 
-	return entry.tenantID, nil
+	return entry.tenantID, entry.status, nil
 }
 
-// Set stores a tenant ID for the given slug in the cache.
+// Set stores a tenant ID and status for the given slug in the cache.
 // The entry will expire after the configured TTL.
 // Context cancellation is respected.
-func (c *InMemorySlugCache) Set(ctx context.Context, slug string, tenantID tenant.TenantID) error {
+func (c *InMemorySlugCache) Set(ctx context.Context, slug string, tenantID tenant.TenantID, status string) error {
 	// Check context first
 	select {
 	case <-ctx.Done():
@@ -136,11 +137,24 @@ func (c *InMemorySlugCache) Set(ctx context.Context, slug string, tenantID tenan
 	c.mu.Lock()
 	c.cache[slug] = cacheEntry{
 		tenantID:  tenantID,
+		status:    status,
 		expiresAt: time.Now().Add(c.ttl),
 	}
 	c.mu.Unlock()
 
 	return nil
+}
+
+// Invalidate removes a slug entry from the cache, forcing the next lookup
+// to query the database. Used when provisioning transitions occur.
+func (c *InMemorySlugCache) Invalidate(_ context.Context, slug string) {
+	if slug == "" {
+		return
+	}
+
+	c.mu.Lock()
+	delete(c.cache, slug)
+	c.mu.Unlock()
 }
 
 // Stop stops the background cleanup goroutine and releases resources.

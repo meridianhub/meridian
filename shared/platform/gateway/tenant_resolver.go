@@ -58,8 +58,9 @@ func isValidSlug(slug string) bool {
 
 // slugCache defines the caching interface for slug-to-tenant-ID mappings.
 type slugCache interface {
-	Get(ctx context.Context, slug string) (tenant.TenantID, error)
-	Set(ctx context.Context, slug string, tenantID tenant.TenantID) error
+	Get(ctx context.Context, slug string) (tenant.TenantID, string, error)
+	Set(ctx context.Context, slug string, tenantID tenant.TenantID, status string) error
+	Invalidate(ctx context.Context, slug string)
 }
 
 // tenantRepository defines the repository interface for tenant lookups.
@@ -293,6 +294,18 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
+		// Reject non-active tenants early to prevent confusing DB errors downstream
+		if resolved.Status != "" && resolved.Status != domain.StatusActive {
+			m.logger.Warn("tenant not provisioned",
+				slog.String("tenant_slug", slug),
+				slog.String("tenant_id", resolved.ID.String()),
+				slog.String("tenant_status", string(resolved.Status)),
+				slog.Int64("resolution_time_ms", resolutionTimeMs),
+			)
+			http.Error(w, "Tenant not provisioned", http.StatusServiceUnavailable)
+			return
+		}
+
 		m.logger.Debug("tenant resolved successfully",
 			slog.String("tenant_slug", slug),
 			slog.String("tenant_id", resolved.ID.String()),
@@ -399,6 +412,7 @@ func (m *TenantResolverMiddleware) extractSlug(hostHeader string) string {
 type resolvedTenant struct {
 	ID          tenant.TenantID
 	DisplayName string
+	Status      domain.Status
 }
 
 // resolveTenant performs cache-first tenant resolution with database fallback.
@@ -418,7 +432,7 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 	}
 
 	// Step 1: Try cache first (best-effort)
-	tenantID, err := m.slugCache.Get(ctx, slug)
+	tenantID, cachedStatus, err := m.slugCache.Get(ctx, slug)
 	if err != nil {
 		// Log cache read failure but don't fail the request
 		// Fall through to database lookup for resilience
@@ -427,7 +441,15 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 			slog.String("error", err.Error()),
 		)
 	} else if !tenantID.IsEmpty() {
-		return m.resolveDisplayName(ctx, slug, tenantID)
+		resolved, resolveErr := m.resolveDisplayName(ctx, slug, tenantID)
+		if resolveErr != nil {
+			return resolvedTenant{}, resolveErr
+		}
+		// Use cached status if display name came from local cache (no DB call)
+		if resolved.Status == "" && cachedStatus != "" {
+			resolved.Status = domain.Status(cachedStatus)
+		}
+		return resolved, nil
 	}
 
 	// Step 2: Cache miss or error - query database
@@ -441,7 +463,7 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 	}
 
 	// Step 3: Populate caches (best-effort)
-	if cacheErr := m.slugCache.Set(ctx, slug, tenantEntity.ID); cacheErr != nil {
+	if cacheErr := m.slugCache.Set(ctx, slug, tenantEntity.ID, string(tenantEntity.Status)); cacheErr != nil {
 		// Log cache write failures but don't fail the request
 		m.logger.Warn("failed to populate slug cache",
 			slog.String("slug", slug),
@@ -455,7 +477,7 @@ func (m *TenantResolverMiddleware) resolveTenant(ctx context.Context, slug strin
 	})
 
 	// Step 4: Return resolved tenant from database
-	return resolvedTenant{ID: tenantEntity.ID, DisplayName: tenantEntity.DisplayName}, nil
+	return resolvedTenant{ID: tenantEntity.ID, DisplayName: tenantEntity.DisplayName, Status: tenantEntity.Status}, nil
 }
 
 // resolveDisplayName handles the slug cache hit path: checks the local display
@@ -481,9 +503,9 @@ func (m *TenantResolverMiddleware) resolveDisplayName(ctx context.Context, slug 
 		})
 		// Refresh slug cache if DB returns a different tenant ID.
 		if tenantEntity.ID != tenantID {
-			_ = m.slugCache.Set(ctx, slug, tenantEntity.ID)
+			_ = m.slugCache.Set(ctx, slug, tenantEntity.ID, string(tenantEntity.Status))
 		}
-		return resolvedTenant{ID: tenantEntity.ID, DisplayName: tenantEntity.DisplayName}, nil
+		return resolvedTenant{ID: tenantEntity.ID, DisplayName: tenantEntity.DisplayName, Status: tenantEntity.Status}, nil
 	}
 	// Slug deleted - treat as authoritative even with a cached ID.
 	if errors.Is(dbErr, domain.ErrNotFound) {

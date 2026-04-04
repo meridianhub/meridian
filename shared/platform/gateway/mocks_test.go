@@ -19,14 +19,18 @@ type MockSlugCache struct {
 	mock.Mock
 }
 
-func (m *MockSlugCache) Get(ctx context.Context, slug string) (tenant.TenantID, error) {
+func (m *MockSlugCache) Get(ctx context.Context, slug string) (tenant.TenantID, string, error) {
 	args := m.Called(ctx, slug)
-	return args.Get(0).(tenant.TenantID), args.Error(1)
+	return args.Get(0).(tenant.TenantID), args.String(1), args.Error(2)
 }
 
-func (m *MockSlugCache) Set(ctx context.Context, slug string, tenantID tenant.TenantID) error {
-	args := m.Called(ctx, slug, tenantID)
+func (m *MockSlugCache) Set(ctx context.Context, slug string, tenantID tenant.TenantID, status string) error {
+	args := m.Called(ctx, slug, tenantID, status)
 	return args.Error(0)
+}
+
+func (m *MockSlugCache) Invalidate(ctx context.Context, slug string) {
+	m.Called(ctx, slug)
 }
 
 // MockTenantRepository is a mock implementation of tenantRepository for testing.
