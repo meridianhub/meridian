@@ -85,20 +85,15 @@ func TestSeeder_SeedTenant(t *testing.T) {
 
 	ctx := context.Background()
 
-	// First, sync platform defaults (prerequisite for seeder)
-	platformSync := NewPlatformSync(pool)
-	err := platformSync.SyncPlatformDefaults(ctx)
-	require.NoError(t, err)
-
 	// Create tenant schema and saga_definition table
 	tenantID := tenant.TenantID("test_tenant")
 	schemaName := tenantID.SchemaName()
 	setupTenantSchemaForSeeder(t, pool, ctx, schemaName)
 
-	// Create seeder and seed
+	// Create seeder and seed - no PlatformSync prerequisite needed
 	seeder := NewSeeder(pool)
 
-	t.Run("initial seed creates platform_ref entries", func(t *testing.T) {
+	t.Run("initial seed copies scripts directly", func(t *testing.T) {
 		err := seeder.SeedTenant(ctx, tenantID)
 		require.NoError(t, err)
 
@@ -108,9 +103,9 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 8, count, "expected 8 system sagas")
 
-		// Verify each saga has platform_ref and no script
+		// Verify each saga has script content (not platform_ref)
 		rows, err := pool.Query(ctx, `
-			SELECT name, version, status, is_system, platform_ref, script, display_name, activated_at
+			SELECT name, version, status, is_system, script, display_name, activated_at
 			FROM `+schemaName+`.saga_definition
 			WHERE is_system = true
 			ORDER BY name`)
@@ -122,29 +117,19 @@ func TestSeeder_SeedTenant(t *testing.T) {
 			var version int
 			var status string
 			var isSystem bool
-			var platformRef *uuid.UUID
 			var script *string
 			var displayName *string
 			var activatedAt interface{}
 
-			err := rows.Scan(&name, &version, &status, &isSystem, &platformRef, &script, &displayName, &activatedAt)
+			err := rows.Scan(&name, &version, &status, &isSystem, &script, &displayName, &activatedAt)
 			require.NoError(t, err)
 
 			assert.Equal(t, 1, version, "platform default should have version 1")
 			assert.Equal(t, "ACTIVE", status, "platform default should be ACTIVE")
 			assert.True(t, isSystem, "platform default should be is_system=true")
-			assert.NotNil(t, platformRef, "platform default should have platform_ref set")
-			assert.True(t, script == nil || *script == "", "platform default should NOT have a copied script")
+			assert.NotNil(t, script, "platform default should have script content")
+			assert.NotEmpty(t, *script, "platform default script should not be empty")
 			assert.NotNil(t, activatedAt, "platform default should have activated_at")
-
-			// Verify platform_ref points to actual platform saga
-			var platformName string
-			err = pool.QueryRow(ctx,
-				"SELECT name FROM public.platform_saga_definition WHERE id = $1",
-				*platformRef,
-			).Scan(&platformName)
-			require.NoError(t, err, "platform_ref should point to existing platform saga")
-			assert.Equal(t, name, platformName, "platform_ref should point to same-named platform saga")
 		}
 		require.NoError(t, rows.Err())
 	})
@@ -191,47 +176,46 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		assert.Equal(t, expectedIDs, ids, "UUIDs should be deterministic")
 	})
 
-	t.Run("seeded sagas resolve script via platform fallback", func(t *testing.T) {
-		// Query using LEFT JOIN to resolve the script, matching how postgres_registry.go works
-		var resolvedScript string
-		var usedFallback bool
+	t.Run("seeded sagas have script content", func(t *testing.T) {
+		var script string
 		err := pool.QueryRow(ctx, `
-			SELECT
-				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback
-			FROM `+schemaName+`.saga_definition sd
-			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
-			WHERE sd.name = 'current_account_withdrawal' AND sd.is_system = true
-		`).Scan(&resolvedScript, &usedFallback)
+			SELECT script
+			FROM `+schemaName+`.saga_definition
+			WHERE name = 'current_account_withdrawal' AND is_system = true
+		`).Scan(&script)
 		require.NoError(t, err)
 
-		assert.NotEmpty(t, resolvedScript, "resolved script should not be empty")
-		assert.True(t, usedFallback, "script should come from platform fallback")
-		assert.Contains(t, resolvedScript, "current_account_withdrawal",
-			"resolved script should contain withdrawal saga content")
+		assert.NotEmpty(t, script, "script should not be empty")
+		assert.Contains(t, script, "current_account_withdrawal",
+			"script should contain withdrawal saga content")
 	})
 }
 
-func TestSeeder_SeedTenant_FailsWithoutPlatformSync(t *testing.T) {
+func TestSeeder_SeedTenant_SelfContained(t *testing.T) {
 	pool, cleanup := setupPlatformTestDB(t)
 	defer cleanup()
 
 	ctx := context.Background()
 
-	// Do NOT sync platform defaults
-	// Create tenant schema
+	// Do NOT sync platform defaults - seeder should be self-contained
+	// (reads from embedded filesystem, not public.platform_saga_definition)
 	tenantID := tenant.TenantID("no_sync_tenant")
 	schemaName := tenantID.SchemaName()
 	setupTenantSchemaForSeeder(t, pool, ctx, schemaName)
 
 	seeder := NewSeeder(pool)
 	err := seeder.SeedTenant(ctx, tenantID)
-	require.Error(t, err, "seeding should fail when platform sagas are not synced")
-	assert.ErrorIs(t, err, ErrPlatformSagaNotSynced)
+	require.NoError(t, err, "seeding should succeed without PlatformSync")
+
+	// Verify sagas were seeded with script content
+	var count int
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true AND script IS NOT NULL AND script != ''").Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 8, count, "expected 8 system sagas with script content")
 }
 
 // setupTenantSchemaForSeeder creates the tenant schema and saga_definition table
-// for seeder integration tests. It applies the relevant migrations.
+// for seeder integration tests.
 func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Context, schemaName string) {
 	t.Helper()
 
@@ -239,6 +223,7 @@ func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 	require.NoError(t, err)
 
 	// Create saga_definition table matching the full migrated schema
+	// Note: no FK reference to public.platform_saga_definition (tenant isolation)
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS ` + schemaName + `.saga_definition (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -255,7 +240,7 @@ func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 			activated_at timestamptz NULL,
 			deprecated_at timestamptz NULL,
 			successor_id uuid NULL,
-			platform_ref uuid NULL REFERENCES public.platform_saga_definition(id) ON DELETE SET NULL,
+			platform_ref uuid NULL,
 			override_reason text NULL,
 			platform_version_at_override varchar(16) NULL,
 			validation_status text NOT NULL DEFAULT 'UNVALIDATED',
@@ -263,9 +248,7 @@ func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 			handler_call_count integer NULL,
 			validated_at timestamptz NULL,
 			PRIMARY KEY (id),
-			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version),
-			CONSTRAINT chk_saga_definition_script_source
-				CHECK (NOT (platform_ref IS NOT NULL AND script IS NOT NULL AND script != ''))
+			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version)
 		)`
 	_, err = pool.Exec(ctx, createTableSQL)
 	require.NoError(t, err)

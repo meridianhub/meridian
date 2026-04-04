@@ -12,6 +12,8 @@ import (
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	refhandler "github.com/meridianhub/meridian/services/reference-data/handler"
 	refregistry "github.com/meridianhub/meridian/services/reference-data/registry"
+	refsaga "github.com/meridianhub/meridian/services/reference-data/saga"
+	refvaluation "github.com/meridianhub/meridian/services/reference-data/valuation"
 	tenantpersistence "github.com/meridianhub/meridian/services/tenant/adapters/persistence"
 	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
 	tenantworker "github.com/meridianhub/meridian/services/tenant/worker"
@@ -186,12 +188,21 @@ func createSchemaProvisioner(baseDSN string, platformDB *gorm.DB, logger *slog.L
 
 // startProvisioningWorker starts the background worker using an initialized provisioner.
 // When prov is nil (provisioning disabled) both return values are nil.
-func startProvisioningWorker(ctx context.Context, prov *tenantprovisioner.PostgresProvisioner, platformDB *gorm.DB, identityDB *gorm.DB, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
+//
+// Registers all post-provisioning hooks in dependency order:
+//  1. admin-identity: Provisions platform admin identity
+//  2. instruments: Seeds platform instrument definitions (GBP, USD, EUR, etc.)
+//  3. saga-definitions: Seeds platform default saga scripts into tenant schema
+//  4. account-type-blueprints: Seeds canonical account type blueprints
+//  5. valuation-defaults: Seeds system valuation methods and policies
+//
+// All hooks are fail-hard: any failure prevents tenant activation.
+func startProvisioningWorker(ctx context.Context, prov *tenantprovisioner.PostgresProvisioner, conns *serviceConns, logger *slog.Logger) (*tenantworker.ProvisioningWorker, func(), error) {
 	if prov == nil {
 		return nil, nil, nil
 	}
 
-	repo := tenantpersistence.NewRepository(platformDB)
+	repo := tenantpersistence.NewRepository(conns.gormDB("tenant"))
 	w, err := tenantworker.NewProvisioningWorker(
 		repo,
 		prov,
@@ -209,8 +220,28 @@ func startProvisioningWorker(ctx context.Context, prov *tenantprovisioner.Postgr
 		return nil, nil, fmt.Errorf("create provisioning worker: %w", err)
 	}
 
-	identityRepo := identitypersistence.NewRepository(identityDB)
+	// Register post-provisioning hooks in dependency order.
+	// All hooks are fail-hard: failure prevents tenant activation.
+	identityRepo := identitypersistence.NewRepository(conns.gormDB("identity"))
 	w.RegisterPostProvisioningHook("admin-identity", identitybootstrap.AsPostProvisioningHook(identityRepo))
+
+	refDataPool := conns.pgxPool("reference-data")
+	instrumentSeeder := refregistry.NewInstrumentSeeder(refDataPool)
+	w.RegisterPostProvisioningHook("instruments", instrumentSeeder.AsPostProvisioningHook())
+
+	sagaSeeder := refsaga.NewSeeder(refDataPool)
+	w.RegisterPostProvisioningHook("saga-definitions", sagaSeeder.AsPostProvisioningHook())
+
+	accountTypeRegistry, atErr := accounttype.NewPostgresRegistry(refDataPool)
+	if atErr != nil {
+		_ = prov.Close()
+		return nil, nil, fmt.Errorf("account type registry: %w", atErr)
+	}
+	blueprintSeeder := accounttype.NewBlueprintSeeder(accountTypeRegistry)
+	w.RegisterPostProvisioningHook("account-type-blueprints", blueprintSeeder.AsPostProvisioningHook())
+
+	valuationSeeder := refvaluation.NewSeeder(refDataPool)
+	w.RegisterPostProvisioningHook("valuation-defaults", valuationSeeder.AsPostProvisioningHook())
 
 	go w.Start(ctx)
 	logger.Info("provisioning worker started")
