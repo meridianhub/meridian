@@ -41,9 +41,6 @@ var (
 // ErrTenantNotFound is returned when a tenant cannot be found by slug.
 var ErrTenantNotFound = errors.New("tenant not found")
 
-// ErrTenantNotProvisioned is returned when a tenant exists but is not yet active.
-var ErrTenantNotProvisioned = errors.New("tenant not provisioned")
-
 // slugPattern validates tenant slugs extracted from subdomains.
 // This pattern allows periods for multi-level subdomains (e.g., "acme.staging")
 // which differs from domain.slugPattern that only validates single-level slugs.
@@ -335,20 +332,13 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 
 // handleResolutionError writes the appropriate HTTP error for a tenant resolution failure.
 func (m *TenantResolverMiddleware) handleResolutionError(w http.ResponseWriter, slug string, err error, resolutionTimeMs int64) {
-	switch {
-	case errors.Is(err, ErrTenantNotFound):
+	if errors.Is(err, ErrTenantNotFound) {
 		m.logger.Warn("tenant not found",
 			slog.String("tenant_slug", slug),
 			slog.Int64("resolution_time_ms", resolutionTimeMs),
 		)
 		http.Error(w, "Tenant not found", http.StatusNotFound)
-	case errors.Is(err, ErrTenantNotProvisioned):
-		m.logger.Warn("tenant not provisioned",
-			slog.String("tenant_slug", slug),
-			slog.Int64("resolution_time_ms", resolutionTimeMs),
-		)
-		http.Error(w, "Tenant not provisioned", http.StatusServiceUnavailable)
-	default:
+	} else {
 		m.logger.Error("database error during tenant resolution",
 			slog.String("tenant_slug", slug),
 			slog.String("error", err.Error()),
