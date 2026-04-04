@@ -48,7 +48,7 @@ func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 	_, err = pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+schemaName)
 	require.NoError(t, err)
 
-	// Create platform_saga_definition in public schema (needed for LEFT JOINs in queries)
+	// Create platform_saga_definition in public schema (needed for FK constraints and platform-level operations)
 	platformTableSQL := `
 		CREATE TABLE IF NOT EXISTS public.platform_saga_definition (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),

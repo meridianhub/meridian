@@ -37,7 +37,9 @@ func seedPlatformSaga(t *testing.T, pool *pgxpool.Pool, ctx context.Context, nam
 }
 
 // seedTenantSagaWithPlatformRef inserts a saga_definition with platform_ref into a tenant schema.
-// The saga has NULL script and inherits from the platform.
+// The saga has NULL script - a legacy pattern from before tenant isolation.
+// With tenant isolation, the read queries no longer JOIN to public.platform_saga_definition,
+// so these sagas will have empty ResolvedScript.
 func seedTenantSagaWithPlatformRef(
 	t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	name string, version int, platformRefID uuid.UUID, status string,
@@ -84,6 +86,54 @@ func seedTenantSagaWithPlatformRef(
 	return id
 }
 
+// seedTenantSagaWithScript inserts a saga_definition with an actual script into a tenant schema.
+// This is the new model: scripts are copied directly into tenant schemas.
+func seedTenantSagaWithScript(
+	t *testing.T, pool *pgxpool.Pool, ctx context.Context,
+	name string, version int, script, status string,
+) uuid.UUID {
+	t.Helper()
+
+	tenantID, _ := tenant.FromContext(ctx)
+	schemaName := tenantID.SchemaName()
+
+	id := uuid.New()
+	isActive := status == "ACTIVE"
+
+	var query string
+	if isActive {
+		query = `
+			INSERT INTO saga_definition (
+				id, name, version, script, status, is_system,
+				created_at, updated_at, activated_at
+			) VALUES (
+				$1, $2, $3, $4, $5, false,
+				NOW(), NOW(), NOW()
+			)`
+	} else {
+		query = `
+			INSERT INTO saga_definition (
+				id, name, version, script, status, is_system,
+				created_at, updated_at
+			) VALUES (
+				$1, $2, $3, $4, $5, false,
+				NOW(), NOW()
+			)`
+	}
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
+	require.NoError(t, err)
+
+	_, err = tx.Exec(ctx, query, id, name, version, script, status)
+	require.NoError(t, err)
+
+	require.NoError(t, tx.Commit(ctx))
+	return id
+}
+
 // --- Subtask 8.1: Schema extension tests ---
 
 func TestFallbackResolution_SchemaConstraints(t *testing.T) {
@@ -97,9 +147,6 @@ func TestFallbackResolution_SchemaConstraints(t *testing.T) {
 	})
 
 	t.Run("allows saga with neither script nor platform_ref for ON DELETE SET NULL compatibility", func(t *testing.T) {
-		// NOTE: The constraint allows this state because ON DELETE SET NULL on the
-		// platform_ref FK can create orphaned sagas. Application logic handles validation
-		// of "at least one source" during create/update operations.
 		tenantID, _ := tenant.FromContext(ctx)
 		schemaName := tenantID.SchemaName()
 
@@ -152,31 +199,42 @@ func TestFallbackResolution_SchemaConstraints(t *testing.T) {
 	})
 }
 
-// --- Subtask 8.2: COALESCE fallback resolution tests ---
+// --- Subtask 8.2: Tenant isolation - no public schema fallback ---
 
-func TestFallbackResolution_GetActive_PlatformFallback(t *testing.T) {
+func TestFallbackResolution_GetActive_NoPublicFallback(t *testing.T) {
 	reg, pool := setupTestRegistry(t)
 	ctx := setupTenantContext(t, pool, "test-fallback-getactive")
 
-	t.Run("resolves script via platform fallback when tenant has platform_ref", func(t *testing.T) {
+	t.Run("legacy platform_ref saga has empty resolved script (no fallback)", func(t *testing.T) {
 		platformScript := "def posting_rules(ctx):\n    return ['platform_step1', 'platform_step2']"
 		platformID := seedPlatformSaga(t, pool, ctx, "fb_platform_test", platformScript)
 
-		// Create tenant saga with platform_ref (no custom script)
+		// Create tenant saga with platform_ref (no custom script) - legacy pattern
 		seedTenantSagaWithPlatformRef(t, pool, ctx, "fb_platform_test", 1, platformID, "ACTIVE")
 
-		// GetActive should resolve using platform script via COALESCE
+		// With tenant isolation, the read query no longer JOINs to public.platform_saga_definition
 		result, err := reg.GetActive(ctx, "fb_platform_test")
 		require.NoError(t, err)
-		assert.Equal(t, platformScript, result.ResolvedScript,
-			"ResolvedScript should contain platform script via COALESCE")
-		assert.True(t, result.UsedPlatformFallback,
-			"UsedPlatformFallback should be true")
+		assert.Equal(t, "", result.ResolvedScript,
+			"ResolvedScript should be empty - no public schema fallback")
+		assert.False(t, result.UsedPlatformFallback,
+			"UsedPlatformFallback should be false - fallback removed")
 		assert.Equal(t, "", result.Script,
 			"Script (tenant's own) should be empty")
 		assert.NotNil(t, result.PlatformRef,
-			"PlatformRef should be set")
+			"PlatformRef should still be set in the DB")
 		assert.Equal(t, platformID, *result.PlatformRef)
+	})
+
+	t.Run("saga with copied script resolves correctly", func(t *testing.T) {
+		tenantScript := "def posting_rules(ctx):\n    return ['tenant_custom_step']"
+		seedTenantSagaWithScript(t, pool, ctx, "fb_copied_script", 1, tenantScript, "ACTIVE")
+
+		result, err := reg.GetActive(ctx, "fb_copied_script")
+		require.NoError(t, err)
+		assert.Equal(t, tenantScript, result.ResolvedScript)
+		assert.False(t, result.UsedPlatformFallback)
+		assert.Nil(t, result.PlatformRef)
 	})
 
 	t.Run("returns tenant override script when tenant has custom script", func(t *testing.T) {
@@ -194,28 +252,28 @@ func TestFallbackResolution_GetActive_PlatformFallback(t *testing.T) {
 		result, err := reg.GetActive(ctx, "fb_tenant_override")
 		require.NoError(t, err)
 		assert.Equal(t, tenantScript, result.ResolvedScript)
-		assert.False(t, result.UsedPlatformFallback,
-			"UsedPlatformFallback should be false for custom scripts")
-		assert.Nil(t, result.PlatformRef,
-			"PlatformRef should be nil for custom scripts")
+		assert.False(t, result.UsedPlatformFallback)
+		assert.Nil(t, result.PlatformRef)
 	})
 
 	t.Run("tenant override takes precedence over system saga", func(t *testing.T) {
-		// Seed platform definition
-		platformScript := "def posting_rules(ctx): return 'system'"
-		platformID := seedPlatformSaga(t, pool, ctx, "fb_precedence", platformScript)
-
 		// Seed system saga (is_system=true, has script)
 		seedSystemSaga(t, pool, ctx, "fb_precedence")
 
-		// Create tenant override with platform_ref (should be chosen over system saga)
-		seedTenantSagaWithPlatformRef(t, pool, ctx, "fb_precedence", 2, platformID, "ACTIVE")
+		// Create tenant override (version 2, since system saga has version 1)
+		tenantDef := &saga.Definition{
+			Name:    "fb_precedence",
+			Version: 2,
+			Script:  "def posting_rules(ctx): return 'tenant'",
+		}
+		require.NoError(t, reg.CreateDraft(ctx, tenantDef))
+		require.NoError(t, reg.ActivateSaga(ctx, tenantDef.ID))
 
 		result, err := reg.GetActive(ctx, "fb_precedence")
 		require.NoError(t, err)
 		assert.False(t, result.IsSystem,
 			"tenant override should be returned, not system saga")
-		assert.True(t, result.UsedPlatformFallback)
+		assert.False(t, result.UsedPlatformFallback)
 	})
 
 	t.Run("returns platform default when no tenant override exists", func(t *testing.T) {
@@ -228,11 +286,11 @@ func TestFallbackResolution_GetActive_PlatformFallback(t *testing.T) {
 	})
 }
 
-func TestFallbackResolution_GetByID_PlatformFallback(t *testing.T) {
+func TestFallbackResolution_GetByID_NoPublicFallback(t *testing.T) {
 	reg, pool := setupTestRegistry(t)
 	ctx := setupTenantContext(t, pool, "test-fallback-getbyid")
 
-	t.Run("GetByID resolves platform script via COALESCE", func(t *testing.T) {
+	t.Run("GetByID returns empty resolved script for legacy platform_ref saga", func(t *testing.T) {
 		platformScript := "def posting_rules(ctx): return 'from_platform'"
 		platformID := seedPlatformSaga(t, pool, ctx, "getbyid_platform", platformScript)
 
@@ -240,16 +298,27 @@ func TestFallbackResolution_GetByID_PlatformFallback(t *testing.T) {
 
 		result, err := reg.GetByID(ctx, sagaID)
 		require.NoError(t, err)
-		assert.Equal(t, platformScript, result.ResolvedScript)
-		assert.True(t, result.UsedPlatformFallback)
+		assert.Equal(t, "", result.ResolvedScript,
+			"ResolvedScript should be empty - no fallback")
+		assert.False(t, result.UsedPlatformFallback)
+	})
+
+	t.Run("GetByID returns script for saga with copied script", func(t *testing.T) {
+		script := "def posting_rules(ctx): return 'direct'"
+		sagaID := seedTenantSagaWithScript(t, pool, ctx, "getbyid_direct", 1, script, "ACTIVE")
+
+		result, err := reg.GetByID(ctx, sagaID)
+		require.NoError(t, err)
+		assert.Equal(t, script, result.ResolvedScript)
+		assert.False(t, result.UsedPlatformFallback)
 	})
 }
 
-func TestFallbackResolution_GetDefinition_PlatformFallback(t *testing.T) {
+func TestFallbackResolution_GetDefinition_NoPublicFallback(t *testing.T) {
 	reg, pool := setupTestRegistry(t)
 	ctx := setupTenantContext(t, pool, "test-fallback-getdef")
 
-	t.Run("GetDefinition resolves platform script via COALESCE", func(t *testing.T) {
+	t.Run("GetDefinition returns empty resolved script for legacy platform_ref saga", func(t *testing.T) {
 		platformScript := "def posting_rules(ctx): return 'getdef_platform'"
 		platformID := seedPlatformSaga(t, pool, ctx, "getdef_test", platformScript)
 
@@ -257,22 +326,23 @@ func TestFallbackResolution_GetDefinition_PlatformFallback(t *testing.T) {
 
 		result, err := reg.GetDefinition(ctx, "getdef_test", 1)
 		require.NoError(t, err)
-		assert.Equal(t, platformScript, result.ResolvedScript)
-		assert.True(t, result.UsedPlatformFallback)
+		assert.Equal(t, "", result.ResolvedScript,
+			"ResolvedScript should be empty - no fallback")
+		assert.False(t, result.UsedPlatformFallback)
 	})
 }
 
-func TestFallbackResolution_ListByStatus_PlatformFallback(t *testing.T) {
+func TestFallbackResolution_ListByStatus_NoPublicFallback(t *testing.T) {
 	reg, pool := setupTestRegistry(t)
 	ctx := setupTenantContext(t, pool, "test-fallback-list")
 
 	platformScript := "def posting_rules(ctx): return 'list_platform'"
 	platformID := seedPlatformSaga(t, pool, ctx, "list_fb_test", platformScript)
 
-	// Create saga with platform_ref
+	// Create saga with platform_ref (legacy pattern)
 	seedTenantSagaWithPlatformRef(t, pool, ctx, "list_fb_test", 1, platformID, "ACTIVE")
 
-	// Also create a regular saga
+	// Also create a regular saga with actual script
 	regularDef := &saga.Definition{
 		Name:    "list_regular",
 		Version: 1,
@@ -281,7 +351,7 @@ func TestFallbackResolution_ListByStatus_PlatformFallback(t *testing.T) {
 	require.NoError(t, reg.CreateDraft(ctx, regularDef))
 	require.NoError(t, reg.ActivateSaga(ctx, regularDef.ID))
 
-	t.Run("ListByStatus includes resolved platform scripts", func(t *testing.T) {
+	t.Run("ListByStatus shows empty script for legacy platform_ref and real script for regular", func(t *testing.T) {
 		results, err := reg.ListByStatus(ctx, saga.StatusActive)
 		require.NoError(t, err)
 		require.True(t, len(results) >= 2)
@@ -297,8 +367,9 @@ func TestFallbackResolution_ListByStatus_PlatformFallback(t *testing.T) {
 		}
 
 		require.NotNil(t, platformRefSaga, "should find platform-ref saga")
-		assert.Equal(t, platformScript, platformRefSaga.ResolvedScript)
-		assert.True(t, platformRefSaga.UsedPlatformFallback)
+		assert.Equal(t, "", platformRefSaga.ResolvedScript,
+			"legacy platform_ref saga should have empty resolved script")
+		assert.False(t, platformRefSaga.UsedPlatformFallback)
 
 		require.NotNil(t, regularSaga, "should find regular saga")
 		assert.Equal(t, "def posting_rules(ctx): return 'regular'", regularSaga.ResolvedScript)
@@ -306,7 +377,7 @@ func TestFallbackResolution_ListByStatus_PlatformFallback(t *testing.T) {
 	})
 }
 
-// --- Subtask 8.2 negative: platform_ref pointing to deleted platform saga ---
+// --- Legacy platform_ref saga behavior ---
 
 func TestFallbackResolution_DeletedPlatformSaga(t *testing.T) {
 	reg, pool := setupTestRegistry(t)
@@ -319,18 +390,17 @@ func TestFallbackResolution_DeletedPlatformSaga(t *testing.T) {
 		// Create tenant saga pointing to it
 		seedTenantSagaWithPlatformRef(t, pool, ctx, "deleted_platform_test", 1, platformID, "ACTIVE")
 
-		// Delete the platform saga
+		// Delete the platform saga (ON DELETE SET NULL clears platform_ref)
 		_, err := pool.Exec(ctx,
 			"DELETE FROM public.platform_saga_definition WHERE id = $1", platformID)
 		require.NoError(t, err)
 
-		// GetActive should return empty resolved script (LEFT JOIN produces NULL)
+		// GetActive should return empty resolved script
 		result, err := reg.GetActive(ctx, "deleted_platform_test")
 		require.NoError(t, err)
 		assert.Equal(t, "", result.ResolvedScript,
 			"resolved script should be empty when platform definition is deleted")
-		assert.False(t, result.UsedPlatformFallback,
-			"platform fallback flag should be false when platform is missing")
+		assert.False(t, result.UsedPlatformFallback)
 	})
 }
 
@@ -372,27 +442,24 @@ func TestFallbackResolution_VersionPinning(t *testing.T) {
 
 	vp := saga.NewVersionPinning(reg)
 
-	t.Run("PinVersion pins platform version on instance", func(t *testing.T) {
-		platformScript := "def posting_rules(ctx): return 'pinned'"
-		platformID := seedPlatformSaga(t, pool, ctx, "pin_test", platformScript)
-		seedTenantSagaWithPlatformRef(t, pool, ctx, "pin_test", 1, platformID, "ACTIVE")
+	t.Run("PinVersion pins saga with copied script", func(t *testing.T) {
+		script := "def posting_rules(ctx): return 'pinned'"
+		seedTenantSagaWithScript(t, pool, ctx, "pin_test", 1, script, "ACTIVE")
 
-		// Create a new saga instance
 		instance := &pkgsaga.SagaInstance{}
 
 		def, err := vp.PinVersion(ctx, instance, "pin_test")
 		require.NoError(t, err)
 
 		assert.Equal(t, "pin_test", def.Name)
-		assert.Equal(t, platformScript, def.ResolvedScript)
-		assert.NotNil(t, instance.PlatformSagaVersionID,
-			"PlatformSagaVersionID should be set for platform-ref sagas")
-		assert.Equal(t, platformID, *instance.PlatformSagaVersionID)
+		assert.Equal(t, script, def.ResolvedScript)
+		assert.Nil(t, instance.PlatformSagaVersionID,
+			"PlatformSagaVersionID should be nil for sagas with direct scripts")
 		assert.NotEmpty(t, instance.ScriptHashAtStart)
-		assert.Equal(t, saga.ComputeScriptHash(platformScript), instance.ScriptHashAtStart)
+		assert.Equal(t, saga.ComputeScriptHash(script), instance.ScriptHashAtStart)
 	})
 
-	t.Run("PinVersion does not pin platform version for custom scripts", func(t *testing.T) {
+	t.Run("PinVersion works for custom tenant scripts", func(t *testing.T) {
 		tenantScript := "def posting_rules(ctx): return 'custom'"
 		tenantDef := &saga.Definition{
 			Name:    "pin_custom_test",
@@ -429,12 +496,13 @@ func TestFallbackResolution_ResolveForReplay(t *testing.T) {
 
 	vp := saga.NewVersionPinning(reg)
 
-	t.Run("replay resolves pinned platform version", func(t *testing.T) {
+	t.Run("replay resolves pinned platform version directly", func(t *testing.T) {
+		// Platform saga lookup bypasses search_path (queries public directly)
 		platformScript := "def posting_rules(ctx): return 'pinned_v1'"
 		platformID := seedPlatformSaga(t, pool, ctx, "replay_pin_test", platformScript)
-		sagaID := seedTenantSagaWithPlatformRef(t, pool, ctx, "replay_pin_test", 1, platformID, "ACTIVE")
+		sagaID := seedTenantSagaWithScript(t, pool, ctx, "replay_pin_test", 1, platformScript, "ACTIVE")
 
-		// Simulate a pinned instance
+		// Simulate a pinned instance from the old model (with PlatformSagaVersionID)
 		instance := &pkgsaga.SagaInstance{
 			ID:                    uuid.New(),
 			SagaDefinitionID:      sagaID,
@@ -472,7 +540,7 @@ func TestFallbackResolution_ResolveForReplay(t *testing.T) {
 		// Original platform saga
 		originalScript := "def posting_rules(ctx): return 'original'"
 		platformID := seedPlatformSaga(t, pool, ctx, "replay_update_test", originalScript)
-		sagaID := seedTenantSagaWithPlatformRef(t, pool, ctx, "replay_update_test", 1, platformID, "ACTIVE")
+		sagaID := seedTenantSagaWithScript(t, pool, ctx, "replay_update_test", 1, originalScript, "ACTIVE")
 
 		// Pin version on instance (using original script)
 		instance := &pkgsaga.SagaInstance{
@@ -494,11 +562,9 @@ func TestFallbackResolution_ResolveForReplay(t *testing.T) {
 		assert.ErrorIs(t, err, saga.ErrScriptHashMismatch)
 	})
 
-	t.Run("new instance uses NEW platform version after update", func(t *testing.T) {
-		// Create new platform saga
+	t.Run("new instance uses current script", func(t *testing.T) {
 		newScript := "def posting_rules(ctx): return 'new_version'"
-		platformID := seedPlatformSaga(t, pool, ctx, "replay_newversion_test", newScript)
-		seedTenantSagaWithPlatformRef(t, pool, ctx, "replay_newversion_test", 1, platformID, "ACTIVE")
+		seedTenantSagaWithScript(t, pool, ctx, "replay_newversion_test", 1, newScript, "ACTIVE")
 
 		// Pin version on NEW instance (should use current script)
 		instance := &pkgsaga.SagaInstance{}
@@ -524,7 +590,7 @@ func TestFallbackResolution_ResolveForReplay_Negative(t *testing.T) {
 	t.Run("replay fails when pinned platform version is deleted", func(t *testing.T) {
 		platformScript := "def posting_rules(ctx): return 'soon_deleted'"
 		platformID := seedPlatformSaga(t, pool, ctx, "replay_deleted_test", platformScript)
-		sagaID := seedTenantSagaWithPlatformRef(t, pool, ctx, "replay_deleted_test", 1, platformID, "ACTIVE")
+		sagaID := seedTenantSagaWithScript(t, pool, ctx, "replay_deleted_test", 1, platformScript, "ACTIVE")
 
 		instance := &pkgsaga.SagaInstance{
 			ID:                    uuid.New(),
@@ -533,13 +599,12 @@ func TestFallbackResolution_ResolveForReplay_Negative(t *testing.T) {
 			ScriptHashAtStart:     saga.ComputeScriptHash(platformScript),
 		}
 
-		// Delete the platform saga (ON DELETE SET NULL will null out saga_definition.platform_ref)
+		// Delete the platform saga
 		_, err := pool.Exec(ctx,
 			"DELETE FROM public.platform_saga_definition WHERE id = $1", platformID)
 		require.NoError(t, err)
 
 		// Replay should fail because the saga instance still references the platform version
-		// via PlatformSagaVersionID (which is NOT affected by ON DELETE SET NULL on saga_definition.platform_ref)
 		_, err = vp.ResolveForReplay(ctx, instance)
 		require.Error(t, err, "replay should fail when pinned platform version is deleted")
 		assert.ErrorIs(t, err, saga.ErrPinnedVersionNotFound)
@@ -548,7 +613,7 @@ func TestFallbackResolution_ResolveForReplay_Negative(t *testing.T) {
 	t.Run("replay fails with corrupted script hash", func(t *testing.T) {
 		platformScript := "def posting_rules(ctx): return 'original'"
 		platformID := seedPlatformSaga(t, pool, ctx, "replay_corrupt_test", platformScript)
-		sagaID := seedTenantSagaWithPlatformRef(t, pool, ctx, "replay_corrupt_test", 1, platformID, "ACTIVE")
+		sagaID := seedTenantSagaWithScript(t, pool, ctx, "replay_corrupt_test", 1, platformScript, "ACTIVE")
 
 		instance := &pkgsaga.SagaInstance{
 			ID:                    uuid.New(),
@@ -581,13 +646,14 @@ func TestFallbackResolution_CreateDraft_PlatformRef(t *testing.T) {
 		err := reg.CreateDraft(ctx, def)
 		require.NoError(t, err)
 
-		// Verify via GetByID
+		// Verify via GetByID - with tenant isolation, no fallback resolution
 		result, err := reg.GetByID(ctx, def.ID)
 		require.NoError(t, err)
 		assert.NotNil(t, result.PlatformRef)
 		assert.Equal(t, platformID, *result.PlatformRef)
-		assert.Equal(t, "def posting_rules(ctx): pass", result.ResolvedScript)
-		assert.True(t, result.UsedPlatformFallback)
+		assert.Equal(t, "", result.ResolvedScript,
+			"ResolvedScript should be empty - no public schema fallback")
+		assert.False(t, result.UsedPlatformFallback)
 	})
 }
 
