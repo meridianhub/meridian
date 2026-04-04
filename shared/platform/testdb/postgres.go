@@ -36,16 +36,32 @@ func WithLogLevel(level logger.LogLevel) PostgresOption {
 // This must be called before any tenant-scoped database operation that targets this tenant,
 // since WithGormTenantScope validates schema existence.
 //
+// When models are provided, GORM AutoMigrate runs inside the tenant schema so that
+// tenant-scoped queries find the same tables that were created in public by SetupPostgres.
+//
 // Example:
 //
-//	db, cleanup := testdb.SetupCockroachDB(t, models)
+//	db, cleanup := testdb.SetupPostgres(t, []interface{}{&MyEntity{}})
 //	defer cleanup()
-//	testdb.CreateTenantSchema(t, db, tenant.MustNewTenantID("test_tenant"))
-func CreateTenantSchema(t *testing.T, db *gorm.DB, tenantID interface{ SchemaName() string }) {
+//	testdb.CreateTenantSchema(t, db, tenant.MustNewTenantID("test_tenant"), &MyEntity{})
+func CreateTenantSchema(t *testing.T, db *gorm.DB, tenantID interface{ SchemaName() string }, models ...interface{}) {
 	t.Helper()
 	schema := tenantID.SchemaName()
 	if err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schema)).Error; err != nil {
 		t.Fatalf("Failed to create tenant schema %s: %v", schema, err)
+	}
+
+	if len(models) > 0 {
+		// Set search_path to tenant schema, run AutoMigrate, then reset
+		if err := db.Exec(fmt.Sprintf("SET search_path TO %q", schema)).Error; err != nil {
+			t.Fatalf("Failed to set search_path to %s: %v", schema, err)
+		}
+		if err := db.AutoMigrate(models...); err != nil {
+			t.Fatalf("Failed to auto-migrate models in tenant schema %s: %v", schema, err)
+		}
+		if err := db.Exec("SET search_path TO public").Error; err != nil {
+			t.Fatalf("Failed to reset search_path: %v", err)
+		}
 	}
 }
 
