@@ -50,6 +50,7 @@ limits, allowing any single container to exhaust host resources.
 ### PR #1712 — Enforce Saga Step Limit + Remove Dead MemoryWarningThreshold
 
 **Findings**:
+
 - HIGH-1 — `MaxStepsPerExecution = 1_000_000` was defined but `SetMaxExecutionSteps()`
   was never called on the saga runtime thread, allowing CPU exhaustion via tenant scripts.
 - HIGH-4 (partial) — `MemoryWarningThreshold` constant was defined but never referenced
@@ -157,6 +158,7 @@ are Wave 2 work (approximately 1 week)
 ### PR #1736 — Add OPA Gatekeeper Constraint + Security Defaults CI Gate
 
 **Findings**:
+
 - HIGH-3 (regression prevention) — OPA Gatekeeper had no policy blocking
   `AUTH_ENABLED: "false"` in ConfigMaps.
 - HIGH-3 (CI gate) — No CI job verified security defaults after PRs.

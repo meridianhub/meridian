@@ -286,6 +286,7 @@ message UpdateCommunicationPreferencesResponse {
 ```
 
 Key design decisions:
+
 - `category` uses a proto enum (`CorrespondenceCategory`) not a string,
   preventing invalid categories at the wire level
 - `template_data` uses `google.protobuf.Struct` (not `map<string, string>`)

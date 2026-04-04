@@ -117,6 +117,7 @@ go build ./...                # Verify generated code compiles
 Create the domain model with business rules and validation.
 
 **Convention references**:
+
 - [Error Conventions](error-conventions.md) — sentinel error naming and where to define them
 - [Repository Conventions](repository-conventions.md) — interface location, method naming, error documentation
 - [Value Types](value-types.md) — choosing between Money, Asset, and Amount for domain fields
@@ -186,6 +187,7 @@ go test ./services/{service}/domain/... -v
 Implement the repository using GORM.
 
 **Convention references**:
+
 - [Repository Conventions](repository-conventions.md) — entity-prefixed errors, TableName, optimistic locking, tenant scoping
 - [Value Types](value-types.md) — mapping Qty/Money/Amount to/from persistence columns
 
@@ -357,7 +359,7 @@ func (EntityName) TableName() string {
 **Why singular**: Natural SQL syntax (`FROM account` not `FROM accounts`)
 **Why unqualified**: Allows `search_path` to route queries to tenant schemas
 
-**Reference**: [Database-Per-Service Migration Runbook](../runbooks/database-per-service-migration.md)
+**Reference**: [Data Model Reference](../architecture/data-model.md)
 
 **Verification:**
 
@@ -1784,4 +1786,4 @@ task-master parse-prd docs/guides/new-{service}-service-checklist.md
 - [Adding Starlark Service Bindings](adding-starlark-service-bindings.md)
 - [Circuit Breaker Usage Guide](circuit-breaker-usage.md)
 - [Testcontainers Usage Guide](testcontainers-usage.md)
-- [Database-Per-Service Migration Runbook](../runbooks/database-per-service-migration.md)
+- [Data Model Reference](../architecture/data-model.md)

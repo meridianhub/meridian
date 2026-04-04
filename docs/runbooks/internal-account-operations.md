@@ -802,4 +802,4 @@ kubectl exec -it <iba-pod> -n production -- nc -zv cockroachdb 26257
 - [Incident Response](./incident-response.md) - General incident handling
 - [Disaster Recovery](./disaster-recovery.md) - Full system recovery
 - [Saga Failure Recovery](./saga-failure-recovery.md) - Transaction saga failures
-- [Database Migration](./database-per-service-migration.md) - Schema migration procedures
+- [Data Model Reference](../architecture/data-model.md) - Database topology, tenant schemas, table ownership

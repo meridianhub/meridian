@@ -293,6 +293,7 @@ func EncodePartyCursor(c PartyCursor) string {
 ```
 
 Use cursor pagination when:
+
 - The dataset is large (thousands of rows)
 - Stable ordering is required under concurrent inserts
 - The caller needs to resume from a previous position

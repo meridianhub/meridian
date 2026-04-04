@@ -88,11 +88,13 @@ API. This PRD includes the API work, not just frontend pages.
 New endpoints in payment-order service (or api-gateway BFF):
 
 **Billing Runs**:
+
 - `GET /api/v1/billing/runs` - list billing runs with pagination,
   filter by status
 - `GET /api/v1/billing/runs/{runId}` - detail with invoice summary
 
 **Invoices**:
+
 - `GET /api/v1/billing/invoices` - list invoices with pagination,
   filter by status, party, billing run
 - `GET /api/v1/billing/invoices/{invoiceId}` - detail with line items
@@ -104,6 +106,7 @@ New endpoints in payment-order service (or api-gateway BFF):
   (cancels pending emails)
 
 **Email Status** (joins across billing and notification tables):
+
 - `GET /api/v1/billing/invoices/{invoiceId}/emails` - list email
   audit log entries for this invoice (by idempotency key pattern
   `invoice-{id}` and `dunning-*-{id}`)
@@ -143,6 +146,7 @@ Filters: status, party, billing run.
 **Detail** - Route: `/billing/invoices/:invoiceId`
 
 Tabs:
+
 - **Overview**: Invoice header, party info, status timeline, due date
 - **Line Items**: Table of line items from JSONB (description, quantity,
   unit price, amount)
@@ -150,6 +154,7 @@ Tabs:
   (sent, delivered, bounced with timestamps and bounce reasons)
 
 Actions (conditional on status):
+
 - "Resend Email" (any status) - re-queues invoice email
 - "Mark as Paid" (ISSUED or OVERDUE) - manual payment confirmation
 - "Void Invoice" (ISSUED or OVERDUE) - voids and cancels pending emails

@@ -24,8 +24,6 @@ scenarios.
 
 ### Operations & Troubleshooting
 
-- **[database-per-service-migration.md](database-per-service-migration.md)** - Procedures for
-  migrating to database-per-service architecture
 - **[internal-account-operations.md](internal-account-operations.md)** - Internal account
   operational procedures and reconciliation
 - **[market-information-operations.md](market-information-operations.md)** - Market data operations,

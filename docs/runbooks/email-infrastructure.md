@@ -84,6 +84,7 @@ After adding records, verify in the Resend dashboard (Settings > Domains). DNS p
 ### Worker not starting
 
 Check logs for `email worker disabled`. Common causes:
+
 - `EMAIL_MODE=disabled` (intentional in dev)
 - `EMAIL_MODE=live` but `RESEND_API_KEY` not set
 - Template parsing failure (check embedded templates)
@@ -120,6 +121,7 @@ Monitor via Prometheus metric:
 ### Webhook delivery failures
 
 If the Resend webhook is not updating delivery status:
+
 - Verify `RESEND_WEBHOOK_SECRET` matches the signing secret in the Resend dashboard
 - Check that the webhook endpoint is accessible: `POST /webhooks/resend`
 - Review audit table for received events:

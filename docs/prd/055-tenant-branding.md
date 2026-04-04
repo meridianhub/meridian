@@ -42,6 +42,7 @@ resolution, only injecting `tenantID` and `slug` into the request
 context.
 
 JWT minting happens in two places:
+
 - `services/api-gateway/auth_handler.go` - password-based login
 - `services/api-gateway/auth_sso_handler.go` - SSO/OIDC callback
 
@@ -98,6 +99,7 @@ Add `GET /api/tenant-info` to the gateway as a public endpoint
 - This serves the login page where no JWT exists yet
 
 **Abuse protections:**
+
 - The endpoint resolves tenant from the request's subdomain (Host
   header), not from a query parameter. There is no lookup-by-slug
   input - a caller must already be on the tenant's subdomain to
@@ -117,12 +119,14 @@ Add `GET /api/tenant-info` to the gateway as a public endpoint
 ### 4. Frontend: consume tenant display name (frontend)
 
 **Login page:**
+
 - Call `/api/tenant-info` on mount when on a tenant subdomain
 - Show the tenant's display name as the page title
 - Fall back to formatted slug if the endpoint is unavailable
 - Update document title to match
 
 **Header:**
+
 - For tenant users: read `x-tenant-display-name` from JWT claims
 - For platform admins: use `currentTenant.name` (already available
   from tenant selector)
@@ -130,6 +134,7 @@ Add `GET /api/tenant-info` to the gateway as a public endpoint
   `volterra-energy` becomes `Volterra Energy`), then to "Meridian"
 
 **Document title:**
+
 - Set `document.title` dynamically based on tenant context
 - Pattern: `"{Tenant Name} - Operations Console"` on tenant
   subdomains, `"Meridian Operations Console"` on bare domain

@@ -1,18 +1,14 @@
 ---
 name: database-per-service-migration
-description: Step-by-step guide for migrating from single shared database to database-per-service architecture
-triggers:
-
-  - Migrating to database-per-service architecture
-  - Setting up new service databases
-  - Database isolation for microservices
-  - Multi-tenant database setup
+description: "[ARCHIVED] Historical runbook. The database-per-service migration is complete. See docs/architecture/data-model.md for the current topology."
+status: archived
+triggers: []
 
 instructions: |
-  Create separate database per service following naming convention meridian_<service>.
-  Set up schema-per-tenant within each database. Configure dedicated database users
-  with restricted grants. Update Atlas configuration per service. Use gRPC for
-  cross-service data access instead of SQL joins.
+  ARCHIVED. This runbook documented the one-time migration from a shared database
+  to database-per-service. That work is complete - every service already owns its
+  own Postgres database with schema-per-tenant isolation. For the current topology,
+  see docs/architecture/data-model.md.
 ---
 
 # Database-Per-Service Migration Runbook
@@ -394,5 +390,5 @@ kubectl scale deployment current-account --replicas=3 -n production
 
 - [ADR-002: Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
 - [ADR-003: Database Schema Migrations](../adr/0003-database-schema-migrations.md)
-- [Incident Response Runbook](./incident-response.md)
-- [Disaster Recovery Runbook](./disaster-recovery.md)
+- [Incident Response Runbook](../runbooks/incident-response.md)
+- [Disaster Recovery Runbook](../runbooks/disaster-recovery.md)
