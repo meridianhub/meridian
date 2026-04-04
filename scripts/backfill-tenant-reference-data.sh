@@ -35,7 +35,7 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 echo "Backfilling tenant reference data..."
-echo "Database: ${DATABASE_URL%%@*}@***"
+echo "Database: ${DATABASE_URL%%://*}://***"
 
 # Find all tenant schemas
 SCHEMAS=$(psql "$DATABASE_URL" -t -A -c "

@@ -52,15 +52,16 @@ func CreateTenantSchema(t *testing.T, db *gorm.DB, tenantID interface{ SchemaNam
 	}
 
 	if len(models) > 0 {
-		// Set search_path to tenant schema, run AutoMigrate, then reset
-		if err := db.Exec(fmt.Sprintf("SET search_path TO %q", schema)).Error; err != nil {
-			t.Fatalf("Failed to set search_path to %s: %v", schema, err)
-		}
-		if err := db.AutoMigrate(models...); err != nil {
+		// Use a transaction so SET LOCAL + AutoMigrate share the same connection.
+		// SET LOCAL is transaction-scoped and auto-reverts on commit.
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(fmt.Sprintf("SET LOCAL search_path TO %q", schema)).Error; err != nil {
+				return fmt.Errorf("set search_path to %s: %w", schema, err)
+			}
+			return tx.AutoMigrate(models...)
+		})
+		if err != nil {
 			t.Fatalf("Failed to auto-migrate models in tenant schema %s: %v", schema, err)
-		}
-		if err := db.Exec("SET search_path TO public").Error; err != nil {
-			t.Fatalf("Failed to reset search_path: %v", err)
 		}
 	}
 }
