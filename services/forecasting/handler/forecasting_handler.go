@@ -93,6 +93,12 @@ func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.Co
 		return nil, s.mapDomainError(err, strategyID)
 	}
 
+	// Verify the strategy belongs to the requesting tenant to prevent cross-tenant access.
+	// FindByID queries by UUID only (no tenant filter), so the ownership check is enforced here.
+	if strategy.TenantID() != string(tenantID) {
+		return nil, status.Errorf(codes.NotFound, "strategy %s not found", strategyID)
+	}
+
 	if strategy.Status() != domain.StrategyStatusActive {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"strategy %s is in %s status, must be ACTIVE", strategyID, strategy.Status())

@@ -236,6 +236,43 @@ func TestComputeForwardCurve_StrategyNotFound(t *testing.T) {
 	assert.Equal(t, codes.NotFound, s.Code())
 }
 
+func TestComputeForwardCurve_CrossTenantAccess_ReturnsNotFound(t *testing.T) {
+	strategyID := uuid.New()
+	// Strategy belongs to a different tenant than the requester.
+	otherTenantStrategy := domain.NewForecastingStrategyBuilder().
+		WithID(strategyID).
+		WithTenantID("org_other_tenant").
+		WithName("other-tenant-strategy").
+		WithStarlarkCode(simpleStarlarkScript).
+		WithHorizonHours(24).
+		WithGranularityHours(1).
+		WithSchedule("0 * * * *").
+		WithInputDatasetCodes([]string{"UTIL"}).
+		WithOutputDatasetCode("FORECAST").
+		WithStatus(domain.StrategyStatusActive).
+		WithVersion(1).
+		Build()
+
+	repo := &mockStrategyRepo{
+		findByIDFn: func(_ context.Context, _ uuid.UUID) (domain.ForecastingStrategy, error) {
+			return otherTenantStrategy, nil
+		},
+	}
+	svc := newTestService(t, repo, nil, nil)
+
+	// Request comes from org_test_tenant, but the strategy belongs to org_other_tenant.
+	ctx := tenantCtx("org_test_tenant")
+	_, err := svc.ComputeForwardCurve(ctx, &forecastingv1.ComputeForwardCurveRequest{
+		StrategyId: strategyID.String(),
+	})
+
+	require.Error(t, err)
+	s, ok := status.FromError(err)
+	require.True(t, ok)
+	// Must return NotFound (not Forbidden) to avoid leaking that the strategy exists.
+	assert.Equal(t, codes.NotFound, s.Code())
+}
+
 func TestComputeForwardCurve_DraftStatus_FailedPrecondition(t *testing.T) {
 	strategyID := uuid.New()
 	repo := &mockStrategyRepo{
