@@ -122,6 +122,9 @@ for SCHEMA in $SCHEMAS; do
                     id, code, version, dimension, precision, status, is_system,
                     fungibility_key_expression, display_name, description,
                     created_at, updated_at, activated_at
+                -- Note: gen_random_uuid() differs from InstrumentSeeder's deterministic UUIDs
+                -- (uuid.NewSHA1). This is acceptable for backfill of existing tenants since
+                -- ON CONFLICT ensures idempotency by code+version, not by ID.
                 ) VALUES (
                     gen_random_uuid(), '$CODE', 1, '$DIMENSION', $PRECISION, 'ACTIVE', true,
                     '', '$CODE instrument', 'Platform default instrument: $CODE',
