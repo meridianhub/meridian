@@ -113,7 +113,7 @@ func setupLoadTestContainer(tb testingTB) *loadTestContainer {
 		tb.Fatalf("Failed to start PostgreSQL container: %v", err)
 	}
 
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping,public")
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping")
 	if err != nil {
 		tb.Fatalf("Failed to get connection string: %v", err)
 	}

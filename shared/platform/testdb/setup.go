@@ -143,7 +143,7 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, cfg *setupConfig, cleanup func
 	// Use a transaction to pin the connection for SET search_path +
 	// AutoMigrate so they are guaranteed to execute on the same session.
 	err = db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error; err != nil {
+		if err := tx.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error; err != nil {
 			return fmt.Errorf("set search_path to %s: %w", schemaName, err)
 		}
 

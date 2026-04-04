@@ -74,7 +74,7 @@ func seedTenantSagaWithPlatformRef(
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, query, id, name, version, status, platformRefID)
@@ -106,7 +106,7 @@ func TestFallbackResolution_SchemaConstraints(t *testing.T) {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
 
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		// Insert with NULL script AND no platform_ref -- allowed at DB level
@@ -132,7 +132,7 @@ func TestFallbackResolution_SchemaConstraints(t *testing.T) {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
 
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		// Try to insert with BOTH script AND platform_ref

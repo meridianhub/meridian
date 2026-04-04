@@ -38,7 +38,7 @@ func setupLienTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	require.NoError(t, err)
 
 	// Set search_path so tables are created in the tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// AutoMigrate account and lien entities
@@ -1411,7 +1411,7 @@ func setupAtomicValuationLienTest(t *testing.T, engine ValuationEngine, accountB
 	require.NoError(t, err)
 
 	// Set search_path so tables are created in the tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create account table (uses "account" table name like valuation engine tests)

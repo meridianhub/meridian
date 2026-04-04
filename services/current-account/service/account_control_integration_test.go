@@ -36,7 +36,7 @@ func setupControlTestDB(t *testing.T) (*persistence.Repository, *persistence.Lie
 	require.NoError(t, err)
 
 	// Set search_path
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// Create account table with status_history support using raw DDL

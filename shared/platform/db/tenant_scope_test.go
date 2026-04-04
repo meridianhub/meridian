@@ -87,8 +87,8 @@ func TestWithTenantScope_Success(t *testing.T) {
 	if !mock.execCalled {
 		t.Error("WithTenantScope should execute SET LOCAL query")
 	}
-	// Schema name should be quoted and include public
-	expected := `SET LOCAL search_path TO "org_acme_bank", public`
+	// Schema name should be quoted (no public schema fallback)
+	expected := `SET LOCAL search_path TO "org_acme_bank"`
 	if mock.execQuery != expected {
 		t.Errorf("Query = %q, want %q", mock.execQuery, expected)
 	}
@@ -193,7 +193,7 @@ func TestWithTenantScope_SchemaNameQuoting(t *testing.T) {
 			if err != nil {
 				t.Fatalf("WithTenantScope returned unexpected error: %v", err)
 			}
-			expected := "SET LOCAL search_path TO " + tt.expectedSchema + ", public"
+			expected := "SET LOCAL search_path TO " + tt.expectedSchema
 			if mock.execQuery != expected {
 				t.Errorf("Query = %q, want %q", mock.execQuery, expected)
 			}

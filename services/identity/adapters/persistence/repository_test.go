@@ -48,7 +48,7 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.C
 
 	// Wrap in transaction to guarantee session affinity for search_path operations
 	err = db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error; err != nil {
+		if err := tx.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error; err != nil {
 			return err
 		}
 		if err := tx.AutoMigrate(identityModels...); err != nil {
@@ -56,7 +56,7 @@ func setupTenantSchema(t *testing.T, db *gorm.DB, tid tenant.TenantID) context.C
 		}
 		// Restore search_path to the primary tenant schema
 		primarySchema := tenant.TenantID(testTenantIDStr).SchemaName()
-		return tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(primarySchema))).Error
+		return tx.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(primarySchema))).Error
 	})
 	require.NoError(t, err)
 

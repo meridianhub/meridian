@@ -282,7 +282,7 @@ func setupTestContainer(t *testing.T) *testContainer {
 	}
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		t.Fatalf("Failed to set search_path: %v", err)
 	}

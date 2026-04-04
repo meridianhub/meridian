@@ -47,7 +47,7 @@ func setupIntegrationDB(t *testing.T) (*gorm.DB, func()) {
 	require.NoError(t, err)
 
 	migrationSQL := `
-		SET search_path TO ` + quoted + `, public;
+		SET search_path TO ` + quoted + `;
 
 		CREATE TABLE IF NOT EXISTS "settlement_run" (
 			"id" uuid NOT NULL DEFAULT gen_random_uuid(),

@@ -135,7 +135,7 @@ func setupPartyIntegrationTestDB(t *testing.T) (*gorm.DB, context.Context, func(
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// AutoMigrate the account entity in the tenant schema

@@ -48,7 +48,7 @@ func setupMultiTenantTestDB(t *testing.T) (db *gorm.DB, ctxA context.Context, ct
 		require.NoError(t, err, "failed to create schema %s", schema)
 
 		// Set search_path to the tenant schema so AutoMigrate creates tables there
-		err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schema))).Error
+		err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schema))).Error
 		require.NoError(t, err, "failed to set search_path for %s", schema)
 
 		err = db.AutoMigrate(

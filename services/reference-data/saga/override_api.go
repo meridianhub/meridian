@@ -283,7 +283,7 @@ func (s *OverrideService) runMigrationTx(
 		_ = tx.Rollback(ctx)
 	}()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", schemaName))
 	if err != nil {
 		return nil, fmt.Errorf("set search_path: %w", err)
 	}

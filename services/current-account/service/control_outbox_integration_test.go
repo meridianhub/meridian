@@ -36,7 +36,7 @@ func setupControlOutboxDB(t *testing.T) (*gorm.DB, *persistence.Repository, *per
 	require.NoError(t, err)
 
 	// Set search_path (applies to the pinned connection for all subsequent queries)
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// Create account table (same DDL as setupControlTestDB)

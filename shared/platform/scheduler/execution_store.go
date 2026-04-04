@@ -199,7 +199,7 @@ func (s *PgExecutionStore) setSearchPath(ctx context.Context, tx pgx.Tx) error {
 		return nil
 	}
 	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
-	_, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
+	_, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", schemaName))
 	if err != nil {
 		return fmt.Errorf("set tenant schema: %w", err)
 	}

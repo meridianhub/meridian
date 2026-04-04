@@ -47,7 +47,7 @@ func SetupTenantSchema(t *testing.T, db *gorm.DB, tenantID string) *TenantTestCo
 	}
 
 	// Set search_path to tenant schema so subsequent operations use it
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q", schemaName)).Error
 	if err != nil {
 		t.Fatalf("Failed to set search_path to %s: %v", schemaName, err)
 	}

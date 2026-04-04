@@ -167,7 +167,7 @@ func setupKafkaCascadeTest(t *testing.T) *kafkaCascadeTestEnv {
 		service_name VARCHAR(100) NOT NULL
 	)`).Error)
 
-	require.NoError(t, db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error)
+	require.NoError(t, db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error)
 
 	ctx := tenant.WithTenant(bgCtx, tid)
 

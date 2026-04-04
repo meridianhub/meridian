@@ -16,14 +16,14 @@ import (
 //  1. Extracts the tenant ID from context using tenant.FromContext
 //  2. Returns ErrMissingTenantContext if tenant is missing (fail-fast)
 //  3. Generates schema name via orgID.SchemaName() (returns "org_{id}")
-//  4. Executes SET LOCAL search_path TO <schema>, public
+//  4. Executes SET LOCAL search_path TO <schema>
 //  5. Returns the same DB for chaining
 //
 // SET LOCAL ensures the search_path automatically reverts when the transaction
 // commits or rolls back - no manual cleanup needed.
 //
-// The public schema is included in search_path to allow read access to shared
-// reference data.
+// The public schema is NOT included in search_path. All reference data
+// (instruments, sagas, account types) is replicated into tenant schemas.
 //
 // Example usage:
 //
@@ -45,13 +45,13 @@ func WithTenantScope(ctx context.Context, db DB) (DB, error) {
 	schemaName := pq.QuoteIdentifier(orgID.SchemaName())
 
 	// SET LOCAL is transaction-scoped - automatically reverts on commit/rollback
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
+	query := fmt.Sprintf("SET LOCAL search_path TO %s", schemaName)
 	if _, err := db.ExecContext(ctx, query); err != nil {
 		return nil, fmt.Errorf("failed to set tenant schema scope: %w", err)
 	}
 
 	// Verify the tenant schema actually exists - PostgreSQL allows SET LOCAL to non-existent schemas,
-	// which would silently fall through to public schema and leak cross-tenant data.
+	// which would cause queries to fail with missing table errors.
 	rawSchema := orgID.SchemaName()
 	var schemaExists bool
 	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = $1)", rawSchema).Scan(&schemaExists); err != nil {

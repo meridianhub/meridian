@@ -6228,7 +6228,7 @@ func setupWithdrawalTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	schemaName := tid.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 	err = db.AutoMigrate(&persistence.CurrentAccountEntity{}, &persistence.LienEntity{}, &persistence.WithdrawalEntity{})
 	require.NoError(t, err)

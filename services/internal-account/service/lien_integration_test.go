@@ -79,7 +79,7 @@ func setupLienIntegrationDB(t *testing.T) (*Service, *gorm.DB, context.Context, 
 	)`, schemaName)).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q", schemaName)).Error
 	require.NoError(t, err)
 
 	ctx := tenant.WithTenant(context.Background(), tid)

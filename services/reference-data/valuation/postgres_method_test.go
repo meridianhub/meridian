@@ -50,7 +50,7 @@ func seedSystemMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, nam
 	id := uuid.New()
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
 		INSERT INTO valuation_method (

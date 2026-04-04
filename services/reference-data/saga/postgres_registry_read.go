@@ -9,23 +9,26 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// GetByID retrieves a specific saga by its UUID, resolving platform fallback if needed.
+// sagaSelectColumns is the standard column list for saga definition queries.
+// Scripts are stored directly in the tenant schema (no cross-schema fallback).
+const sagaSelectColumns = `
+	sd.id, sd.name, sd.version,
+	COALESCE(sd.script, '') AS resolved_script,
+	sd.script,
+	sd.status, sd.is_system,
+	sd.preconditions_expression, sd.display_name, sd.description,
+	sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
+	sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
+	false AS used_platform_fallback,
+	sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at`
+
+// GetByID retrieves a specific saga by its UUID.
 func (r *PostgresRegistry) GetByID(ctx context.Context, id uuid.UUID) (*Definition, error) {
 	var result *Definition
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		query := `
-			SELECT sd.id, sd.name, sd.version,
-				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
-				sd.script,
-				sd.status, sd.is_system,
-				sd.preconditions_expression, sd.display_name, sd.description,
-				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
-				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
-				sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
+		query := `SELECT ` + sagaSelectColumns + `
 			FROM saga_definition sd
-			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 			WHERE sd.id = $1`
 
 		row := tx.QueryRow(ctx, query, id)
@@ -47,23 +50,13 @@ func (r *PostgresRegistry) GetByID(ctx context.Context, id uuid.UUID) (*Definiti
 	return result, nil
 }
 
-// GetDefinition retrieves a specific saga by name and version, resolving platform fallback if needed.
+// GetDefinition retrieves a specific saga by name and version.
 func (r *PostgresRegistry) GetDefinition(ctx context.Context, name string, version int) (*Definition, error) {
 	var result *Definition
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		query := `
-			SELECT sd.id, sd.name, sd.version,
-				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
-				sd.script,
-				sd.status, sd.is_system,
-				sd.preconditions_expression, sd.display_name, sd.description,
-				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
-				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
-				sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
+		query := `SELECT ` + sagaSelectColumns + `
 			FROM saga_definition sd
-			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 			WHERE sd.name = $1 AND sd.version = $2`
 
 		row := tx.QueryRow(ctx, query, name, version)
@@ -85,27 +78,20 @@ func (r *PostgresRegistry) GetDefinition(ctx context.Context, name string, versi
 	return result, nil
 }
 
-// GetActive retrieves the active saga for a name using tenant resolution with platform fallback.
+// GetActive retrieves the active saga for a name using tenant resolution.
 // Resolution order:
 //  1. Tenant override (is_system=FALSE, status=ACTIVE, highest version)
-//     - If tenant saga has platform_ref, resolve script via COALESCE with platform
 //  2. Platform default (is_system=TRUE, status=ACTIVE, highest version)
-//     - System sagas may also have platform_ref for script inheritance
 func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definition, error) {
 	var result *Definition
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		// Step 1: Try tenant override (is_system=FALSE) with platform fallback via LEFT JOIN
+		// Step 1: Try tenant override (is_system=FALSE)
 		row := tx.QueryRow(ctx, activeSagaQuery(false), name)
 		def, err := r.scanDefinitionWithFallback(row)
 		if err == nil {
-			if def.UsedPlatformFallback {
-				r.logger.Debug("resolved saga using platform fallback",
-					"name", name, "saga_id", def.ID, "platform_ref", def.PlatformRef)
-			} else {
-				r.logger.Debug("resolved saga using tenant override",
-					"name", name, "saga_id", def.ID)
-			}
+			r.logger.Debug("resolved saga using tenant override",
+				"name", name, "saga_id", def.ID)
 			result = def
 			return nil
 		}
@@ -135,43 +121,23 @@ func (r *PostgresRegistry) GetActive(ctx context.Context, name string) (*Definit
 	return result, nil
 }
 
-// activeSagaQuery returns the SQL query for fetching active saga definitions with platform fallback.
+// activeSagaQuery returns the SQL query for fetching active saga definitions.
 // The isSystem parameter controls whether to query tenant overrides (false) or platform defaults (true).
 func activeSagaQuery(isSystem bool) string {
-	return `
-		SELECT sd.id, sd.name, sd.version,
-			COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
-			sd.script,
-			sd.status, sd.is_system,
-			sd.preconditions_expression, sd.display_name, sd.description,
-			sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
-			sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-			psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
-			sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
+	return `SELECT ` + sagaSelectColumns + `
 		FROM saga_definition sd
-		LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 		WHERE sd.name = $1 AND sd.status = 'ACTIVE' AND sd.is_system = ` + fmt.Sprintf("%t", isSystem) + `
 		ORDER BY sd.version DESC
 		LIMIT 1`
 }
 
-// ListByStatus retrieves all sagas with the specified status, resolving platform fallback.
+// ListByStatus retrieves all sagas with the specified status.
 func (r *PostgresRegistry) ListByStatus(ctx context.Context, status Status) ([]*Definition, error) {
 	var result []*Definition
 
 	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
-		query := `
-			SELECT sd.id, sd.name, sd.version,
-				COALESCE(NULLIF(sd.script, ''), psd.script, '') AS resolved_script,
-				sd.script,
-				sd.status, sd.is_system,
-				sd.preconditions_expression, sd.display_name, sd.description,
-				sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
-				sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-				psd.script IS NOT NULL AND (sd.script IS NULL OR sd.script = '') AS used_platform_fallback,
-				sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at
+		query := `SELECT ` + sagaSelectColumns + `
 			FROM saga_definition sd
-			LEFT JOIN public.platform_saga_definition psd ON sd.platform_ref = psd.id
 			WHERE sd.status = $1
 			ORDER BY sd.name, sd.version DESC`
 

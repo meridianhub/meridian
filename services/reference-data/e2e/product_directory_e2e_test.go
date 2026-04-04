@@ -68,7 +68,7 @@ func applyAccountTypeSchema(t *testing.T, pool *pgxpool.Pool, schemaName string)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	// account_type_definitions table
@@ -128,7 +128,7 @@ func applyAccountTypeSchema(t *testing.T, pool *pgxpool.Pool, schemaName string)
 	require.NoError(t, err)
 	defer func() { _ = tx2.Rollback(ctx) }()
 
-	_, err = tx2.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx2.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx2.Exec(ctx, `
@@ -175,7 +175,7 @@ func applyAccountTypeSchema(t *testing.T, pool *pgxpool.Pool, schemaName string)
 	require.NoError(t, err)
 	defer func() { _ = tx3.Rollback(ctx) }()
 
-	_, err = tx3.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx3.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx3.Exec(ctx, `
@@ -196,7 +196,7 @@ func applySagaSchema(t *testing.T, pool *pgxpool.Pool, schemaName string) {
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, `
@@ -279,7 +279,7 @@ func seedInstrument(t *testing.T, pool *pgxpool.Pool, ctx context.Context, code,
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, `
@@ -306,7 +306,7 @@ func seedActiveSaga(t *testing.T, pool *pgxpool.Pool, ctx context.Context, name,
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, `
@@ -346,7 +346,7 @@ func countActiveDefinitions(t *testing.T, pool *pgxpool.Pool, ctx context.Contex
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	var count int
@@ -368,7 +368,7 @@ func countAllDefinitions(t *testing.T, pool *pgxpool.Pool, ctx context.Context, 
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	var count int

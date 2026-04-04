@@ -232,7 +232,7 @@ func applyMigrationsToSchema(t *testing.T, pool *pgxpool.Pool, service string, s
 		_ = tx.Rollback(ctx)
 	}()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	if err != nil {
 		t.Fatalf("Failed to set search_path: %v", err)
 	}

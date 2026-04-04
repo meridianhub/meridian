@@ -43,7 +43,7 @@ func setupPartyTypeTestDB(t *testing.T) (*gorm.DB, interface{ String() string },
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	return db, tid, cleanup

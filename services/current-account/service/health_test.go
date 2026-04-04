@@ -33,7 +33,7 @@ func setupTestRepository(t *testing.T) *persistence.Repository {
 	require.NoError(t, err)
 
 	// Set search_path so AutoMigrate creates tables in the tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// AutoMigrate in the tenant schema

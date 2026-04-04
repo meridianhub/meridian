@@ -54,7 +54,7 @@ func SetupBalanceIntegrationTestContainer(t *testing.T) *BalanceIntegrationTestC
 	require.NoError(t, err, "Failed to start PostgreSQL container")
 
 	// Get connection string with search_path configured
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping,public")
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping")
 	require.NoError(t, err, "Failed to get connection string")
 
 	// Create connection pool
@@ -112,7 +112,7 @@ func SetupBalanceIntegrationTestContainerWithClient(t *testing.T, client domain.
 	)
 	require.NoError(t, err, "Failed to start PostgreSQL container")
 
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping,public")
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping")
 	require.NoError(t, err, "Failed to get connection string")
 
 	poolConfig, err := pgxpool.ParseConfig(connStr)

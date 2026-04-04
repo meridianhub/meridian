@@ -103,7 +103,7 @@ func (h *TenantHelper) setSearchPath(ctx context.Context, tx pgx.Tx) error {
 	}
 
 	schemaName := pgx.Identifier{tenantID.SchemaName()}.Sanitize()
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
+	query := fmt.Sprintf("SET LOCAL search_path TO %s", schemaName)
 
 	_, err := tx.Exec(ctx, query)
 	if err != nil {

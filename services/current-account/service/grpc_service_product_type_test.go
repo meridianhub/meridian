@@ -99,7 +99,7 @@ func setupProductTypeTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	require.NoError(t, err)
 
 	// AutoMigrate tables in tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	err = db.AutoMigrate(&persistence.CurrentAccountEntity{}, &vf.Entity{})

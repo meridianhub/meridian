@@ -74,7 +74,7 @@ func SetupStressTestContainer(t *testing.T) *StressTestContainer {
 	)
 	require.NoError(t, err, "Failed to start PostgreSQL container")
 
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping,public")
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping")
 	require.NoError(t, err, "Failed to get connection string")
 
 	// Configure pool with higher limits for stress testing

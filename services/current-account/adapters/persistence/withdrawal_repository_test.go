@@ -53,7 +53,7 @@ func setupWithdrawalTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant
@@ -487,7 +487,7 @@ func TestWithdrawalRepository_WithTx(t *testing.T) {
 	// Set search_path for the transaction
 	tid := tenant.TenantID(withdrawalTestTenantID)
 	schemaName := tid.SchemaName()
-	err := tx.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err := tx.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Use WithTx to create repository scoped to transaction

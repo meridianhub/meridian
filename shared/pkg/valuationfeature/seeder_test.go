@@ -288,7 +288,7 @@ func TestProductTypeSeeder_SeedFromProductType_MultipleTenants(t *testing.T) {
 	schemaName2 := tid2.SchemaName()
 	err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", pq.QuoteIdentifier(schemaName2))).Error
 	require.NoError(t, err)
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName2))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName2))).Error
 	require.NoError(t, err)
 	err = db.AutoMigrate(&Entity{})
 	require.NoError(t, err)
@@ -298,7 +298,7 @@ func TestProductTypeSeeder_SeedFromProductType_MultipleTenants(t *testing.T) {
 	require.NoError(t, err)
 	// Restore search_path to the primary tenant
 	primarySchema := tenant.TenantID(testTenantID).SchemaName()
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(primarySchema))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(primarySchema))).Error
 	require.NoError(t, err)
 
 	ctx2 := tenant.WithTenant(context.Background(), tid2)
