@@ -667,12 +667,7 @@ GRANT ALL ON DATABASE meridian_current_account TO current_account_svc;
 
 ### Migration Strategy
 
-See [Database-Per-Service Migration Runbook](../runbooks/database-per-service-migration.md) for:
-
-- Step-by-step migration guide
-- Rollback procedures
-- Verification checklists
-- Lessons learned
+The initial database-per-service migration is complete. See the [archived migration runbook](../archive/database-per-service-migration.md) for historical context, or the [Data Model Reference](../architecture/data-model.md) for the current topology.
 
 ### Consequences
 
@@ -693,4 +688,5 @@ See [Database-Per-Service Migration Runbook](../runbooks/database-per-service-mi
 ### References
 
 * [ADR-003: Database Schema Migrations](./0003-database-schema-migrations.md)
-* [Migration Runbook](../runbooks/database-per-service-migration.md)
+* [Data Model Reference](../architecture/data-model.md)
+* [Migration Runbook (archived)](../archive/database-per-service-migration.md)

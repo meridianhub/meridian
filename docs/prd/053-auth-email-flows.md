@@ -108,6 +108,7 @@ concern bridging the party service to authentication (see PRD 031).
 ### Task 2: Email verification flow (3 points)
 
 **Backend**:
+
 - Migration: `email_verification_tokens` table (token_hash, identity_id,
   expires_at, consumed_at)
 - On registration (when verification required): generate token via
@@ -119,6 +120,7 @@ concern bridging the party service to authentication (see PRD 031).
   (3/hour per identity via DB count query on outbox)
 
 **Frontend**:
+
 - Post-registration "check your email" page with resend button
 - Verification landing page (success, expired, already-verified, invalid
   states)
@@ -127,6 +129,7 @@ concern bridging the party service to authentication (see PRD 031).
 ### Task 3: Password reset flow (3 points)
 
 **Backend**:
+
 - Migration: `password_reset_tokens` table (token_hash, identity_id,
   expires_at, consumed_at)
 - `POST /api/v1/forgot-password` - always returns 200 (timing-safe:
@@ -142,6 +145,7 @@ concern bridging the party service to authentication (see PRD 031).
   INTERVAL '1 hour'`
 
 **Frontend**:
+
 - "Forgot password?" link on login page
 - Email input form -> "check your email" confirmation
 - Reset form (new password + confirm) -> success -> redirect to login

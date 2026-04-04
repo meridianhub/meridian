@@ -17,11 +17,13 @@ sub-directories with distinct responsibilities.
 ### Decision Guide
 
 Place new code in **`pkg/`** if it:
+
 - Encodes a domain concept (e.g., a new quantity dimension or settlement type)
 - Is a utility tightly coupled to domain types (e.g., amount arithmetic)
 - Must remain independent of infrastructure concerns for testability
 
 Place new code in **`platform/`** if it:
+
 - Wraps or configures an external dependency (database, message broker, cache, auth)
 - Provides cross-cutting infrastructure with no domain meaning (health checks, rate limiting, sandboxing)
 - Is consumed identically by all services regardless of domain context

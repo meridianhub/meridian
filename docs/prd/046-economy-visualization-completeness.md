@@ -101,6 +101,7 @@ both need updating:
    from the manifest. Currently shows 4 types in Resources tab.
 
 These serve complementary roles:
+
 - **Overview** = visual map + high-level summary (graph-first)
 - **Explorer** = detailed browse by resource type (list-first)
 
@@ -225,6 +226,7 @@ extraction paths:
 - `party_type` — from `manifest.partyTypes[]`
 
 Edge types:
+
 - `sourced_by` — market_data_set → market_data_source
 - `typed_as` — internal_account → account_type
 - `denominated_in` — internal_account → instrument
@@ -247,6 +249,7 @@ Add node components following the existing `memo()` pattern
 (`InstrumentNode`, `AccountTypeNode`, etc.).
 
 **ELK layer priorities** (lower = higher in graph):
+
 - Instruments: 50
 - Market Data Sources: 45
 - Market Data Sets: 40
@@ -268,6 +271,7 @@ types, market data) hidden by default — toggled on via filter.
 
 **Grouped filter panel**: Group toggles into 6 categories
 instead of 13 individual checkboxes:
+
 - Financial Core (instruments, account types, valuation rules)
 - Workflows (sagas)
 - Market Data (sources, sets)
@@ -295,6 +299,7 @@ to the Explorer page for the full breakdown.
 #### 2f. Double-click navigation
 
 Add navigation targets for all new types:
+
 - market_data_source/set → `/market-data`
 - organization → `/parties`
 - internal_account → `/internal-accounts`
@@ -370,6 +375,7 @@ type can follow in later PRDs.
 `ReconcileManifest` output. Drift items as a DataTable:
 resource_type, code, drift_type (MISSING, MODIFIED, EXTRA),
 description. "Run Reconciliation" button with:
+
 - Loading state during RPC (can take 5-30 seconds)
 - Warning display when services are unreachable
 - "No manifest applied" message for pre-045 tenants

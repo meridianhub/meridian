@@ -174,6 +174,7 @@ type TemplateRenderer interface {
 ```
 
 **Three Sender implementations**:
+
 - `resend.Sender` - production, wraps Resend Go SDK with circuit breaker
 - `log.Sender` - writes to application log, no API call (for `EMAIL_MODE=log`)
 - `noop.Sender` - discards silently (for `EMAIL_MODE=disabled` and tests)
@@ -235,6 +236,7 @@ Four templates using Go `html/template` with `embed.FS`, stored in
 | `account-frozen.html` | Account frozen (dunning level 3) | account ID, frozen reason, support contact |
 
 **Design principles**:
+
 - Single dunning template with severity parameter (reduces duplication,
   ensures brand consistency across escalation levels)
 - Responsive HTML (single-column, mobile-first)
@@ -361,6 +363,7 @@ Adapted from `shared/platform/events/metrics.go` (rename subsystem):
 | `email_circuit_breaker_state` | Gauge | 0=closed, 1=half-open, 2=open |
 
 **Alerting rules** (Prometheus/Alertmanager):
+
 - `email_outbox_pending_total > 100` for 5 minutes -> warn (backlog)
 - `email_outbox_dead_letter_total` increase > 0 -> alert (permanent failure)
 - `email_circuit_breaker_state == 2` for 5 minutes -> alert (Resend down)
@@ -437,6 +440,7 @@ payment-order service.
 ### Task 2: Email service package (3 points)
 
 `shared/pkg/email/`:
+
 - `sender.go` - `Sender` interface, `Message` type
 - `template.go` - `TemplateRenderer` using `html/template` + `embed.FS`
 - `outbox.go` - Outbox repository (write, read pending, update status,
@@ -449,6 +453,7 @@ payment-order service.
 - `noop/provider.go` - No-op sender for tests
 
 **Reuse explicitly**:
+
 - `circuitbreaker.go` wrapping Resend client
 - `shared/pkg/tokens/` for any future token operations
 - Go `html/template` only (lint rule: no `text/template` in email package)
@@ -457,6 +462,7 @@ payment-order service.
 
 Implement `dispatch.DispatchableInstruction` for `EmailOutboxRow`. Write a
 `BatchProcessor` callback that:
+
 1. Renders template via `TemplateRenderer`
 2. For dunning emails: checks invoice status, cancels if PAID
 3. Calls `Sender.Send()` with idempotency key as Resend header
@@ -481,6 +487,7 @@ as the event worker. Add circuit breaker state gauge. Mechanical adaptation.
 ### Task 5: Resend webhook endpoint (2 points)
 
 `POST /api/v1/webhooks/resend`:
+
 - Verify `Svix-Signature` header (Resend webhook signing)
 - Parse event type: `email.delivered`, `email.bounced`, `email.complained`
 - Look up audit log entry by `provider_id`
@@ -493,6 +500,7 @@ is the auth mechanism).
 ### Task 6: Templates (3 points)
 
 Four templates in `shared/pkg/email/templates/`:
+
 - `invoice.html` + `invoice.txt`
 - `dunning-notice.html` + `dunning-notice.txt` (parameterized: severity
   1/2/3 with `{{if eq .Severity 1}}` blocks)
@@ -566,6 +574,7 @@ EMAIL_BASE_URL=https://meridianhub.cloud
 ```
 
 **EMAIL_MODE**:
+
 - `disabled` - No outbox writes, no sending. For unit tests.
 - `log` - Writes outbox + audit log, renders templates, but does not call
   Resend API. For integration tests and CI.
