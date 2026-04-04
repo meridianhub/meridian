@@ -390,5 +390,5 @@ kubectl scale deployment current-account --replicas=3 -n production
 
 - [ADR-002: Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
 - [ADR-003: Database Schema Migrations](../adr/0003-database-schema-migrations.md)
-- [Incident Response Runbook](./incident-response.md)
-- [Disaster Recovery Runbook](./disaster-recovery.md)
+- [Incident Response Runbook](../runbooks/incident-response.md)
+- [Disaster Recovery Runbook](../runbooks/disaster-recovery.md)
