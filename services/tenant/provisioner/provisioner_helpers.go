@@ -124,8 +124,7 @@ func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName
 //
 // For each service:
 //   - If SentinelTable is set, verifies that specific table exists
-//   - If SentinelTable is empty, verifies at least one table exists in the schema
-//   - Services with no migrations (empty SentinelTable) that have no tables are OK
+//   - If SentinelTable is empty, verification is skipped (service has no required tables)
 //
 // Returns nil if verification passes, or an error listing which services failed.
 func (p *PostgresProvisioner) verifySchemaProvisioned(ctx context.Context, schemaName string, logger *slog.Logger) error {
@@ -162,19 +161,9 @@ func (p *PostgresProvisioner) verifySchemaProvisioned(ctx context.Context, schem
 				failedServices = append(failedServices, fmt.Sprintf("%s (missing table: %s)", svc.Name, svc.SentinelTable))
 			}
 		} else {
-			// No sentinel table configured - check that at least one table exists
-			var tableCount int64
-			err := serviceDB.WithContext(bypassCtx(ctx)).Raw(
-				`SELECT COUNT(*) FROM information_schema.tables
-				 WHERE table_schema = ?`, schemaName,
-			).Scan(&tableCount).Error
-			if err != nil {
-				logger.Error("failed to count tables in schema",
-					"service", svc.Name,
-					"error", err)
-				failedServices = append(failedServices, fmt.Sprintf("%s (query error: %v)", svc.Name, err))
-			}
-			// tableCount == 0 is acceptable for services with no migrations
+			// No sentinel table configured - service has no required tables
+			// (e.g., internal-account, reconciliation). Skip verification.
+			logger.Debug("no sentinel table configured, skipping verification", "service", svc.Name)
 		}
 	}
 

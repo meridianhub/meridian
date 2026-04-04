@@ -301,7 +301,8 @@ type ServiceConfig struct {
 	// SentinelTable is the name of a table that must exist after migrations complete.
 	// Used for post-migration verification to detect partial provisioning where
 	// the schema exists but migrations failed silently.
-	// If empty, verification checks that at least one table exists in the schema.
+	// If empty, the service is assumed to have no required tables and verification
+	// is skipped (e.g., services that only need a schema namespace without migrations).
 	SentinelTable string
 }
 
