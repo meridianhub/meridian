@@ -88,9 +88,9 @@ func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.Co
 		return nil, status.Errorf(codes.Unauthenticated, "tenant context required")
 	}
 
-	strategy, err := s.repo.FindByID(ctx, strategyID)
+	strategy, err := s.loadAuthorizedStrategy(ctx, strategyID, tenantID)
 	if err != nil {
-		return nil, s.mapDomainError(err, strategyID)
+		return nil, err
 	}
 
 	if strategy.Status() != domain.StrategyStatusActive {
@@ -133,6 +133,20 @@ func (s *Service) ComputeForwardCurve(ctx context.Context, req *forecastingv1.Co
 	}
 
 	return buildForwardCurveResponse(strategy, strategyID, points, now, computeDuration), nil
+}
+
+// loadAuthorizedStrategy retrieves a strategy by ID and verifies ownership.
+// FindByID has no tenant filter, so this enforces cross-tenant access prevention.
+// Returns NotFound (not PermissionDenied) to avoid leaking strategy existence.
+func (s *Service) loadAuthorizedStrategy(ctx context.Context, id uuid.UUID, tenantID tenant.TenantID) (domain.ForecastingStrategy, error) {
+	strategy, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return domain.ForecastingStrategy{}, s.mapDomainError(err, id)
+	}
+	if strategy.TenantID() != string(tenantID) {
+		return domain.ForecastingStrategy{}, status.Errorf(codes.NotFound, "strategy %s not found", id)
+	}
+	return strategy, nil
 }
 
 // buildStrategyInput constructs the StrategyInput from the strategy domain object and execution context.
