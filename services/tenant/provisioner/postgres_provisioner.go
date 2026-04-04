@@ -126,6 +126,14 @@ func (p *PostgresProvisioner) ProvisionSchemas(ctx context.Context, tenantID ten
 		return err
 	}
 
+	// Verify expected tables exist before transitioning to active.
+	// This catches partial provisioning where schema exists but migrations failed silently.
+	if err := p.verifySchemaProvisioned(ctx, tenantID.SchemaName(), logger); err != nil {
+		logger.Error("schema verification failed after migrations", "error", err)
+		p.markProvisioningFailed(ctx, status, err.Error())
+		return err
+	}
+
 	// Mark as active
 	status.State = StateActive
 	status.UpdatedAt = timeNow()

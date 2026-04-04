@@ -84,4 +84,9 @@ var (
 	// ErrHookPanic indicates a post-provisioning hook panicked.
 	// The recovered panic value is wrapped in the error chain.
 	ErrHookPanic = errors.New("post-provisioning hook panicked")
+
+	// ErrSchemaVerificationFailed indicates that post-migration table verification failed.
+	// The tenant schema exists but expected tables were not created, indicating
+	// migrations ran but did not produce the expected database objects.
+	ErrSchemaVerificationFailed = errors.New("schema provisioning verification failed: expected tables not found")
 )

@@ -118,6 +118,61 @@ func (p *PostgresProvisioner) dropSchemaInAllDBs(ctx context.Context, schemaName
 	return nil
 }
 
+// verifySchemaProvisioned checks that expected tables exist in the tenant schema
+// after migrations have been applied. This closes the partial-provisioning gap
+// where the schema namespace exists but migrations failed halfway through.
+//
+// For each service:
+//   - If SentinelTable is set, verifies that specific table exists
+//   - If SentinelTable is empty, verification is skipped (service has no required tables)
+//
+// Returns nil if verification passes, or an error listing which services failed.
+func (p *PostgresProvisioner) verifySchemaProvisioned(ctx context.Context, schemaName string, logger *slog.Logger) error {
+	var failedServices []string
+
+	for _, svc := range p.config.Services {
+		serviceDB, ok := p.serviceDbs[svc.Name]
+		if !ok {
+			continue // Already caught by provisionSingleService
+		}
+
+		if svc.SentinelTable != "" {
+			// Check for specific sentinel table
+			var exists bool
+			err := serviceDB.WithContext(bypassCtx(ctx)).Raw(
+				`SELECT EXISTS(
+					SELECT 1 FROM information_schema.tables
+					WHERE table_schema = ? AND table_name = ?
+				)`, schemaName, svc.SentinelTable,
+			).Scan(&exists).Error
+			if err != nil {
+				logger.Error("failed to verify sentinel table",
+					"service", svc.Name,
+					"sentinel_table", svc.SentinelTable,
+					"error", err)
+				failedServices = append(failedServices, fmt.Sprintf("%s (query error: %v)", svc.Name, err))
+				continue
+			}
+			if !exists {
+				logger.Error("sentinel table missing after migration",
+					"service", svc.Name,
+					"schema", schemaName,
+					"sentinel_table", svc.SentinelTable)
+				failedServices = append(failedServices, fmt.Sprintf("%s (missing table: %s)", svc.Name, svc.SentinelTable))
+			}
+		} else {
+			// No sentinel table configured - service has no required tables
+			// (e.g., internal-account, reconciliation). Skip verification.
+			logger.Debug("no sentinel table configured, skipping verification", "service", svc.Name)
+		}
+	}
+
+	if len(failedServices) > 0 {
+		return fmt.Errorf("%w: %s", ErrSchemaVerificationFailed, strings.Join(failedServices, "; "))
+	}
+	return nil
+}
+
 // isAlreadyExistsError checks if the error indicates an object already exists.
 //
 // IDEMPOTENCY: This is a key idempotency mechanism for migrations. When a migration
