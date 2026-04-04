@@ -97,7 +97,7 @@ func (g *GuardedPgxPool) BeginTenantTx(ctx context.Context) (pgx.Tx, error) {
 	}
 
 	schemaName := pq.QuoteIdentifier(tid.SchemaName())
-	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)); err != nil {
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", schemaName)); err != nil {
 		_ = tx.Rollback(ctx)
 		return nil, fmt.Errorf("set tenant schema: %w", err)
 	}

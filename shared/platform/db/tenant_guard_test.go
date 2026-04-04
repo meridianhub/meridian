@@ -107,7 +107,7 @@ func TestTenantGuard_AllowsQueryWithTenantScope(t *testing.T) {
 
 	// WithGormTenantScope requires an active transaction
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_acme_bank").
@@ -142,7 +142,7 @@ func TestTenantGuard_AllowsCreateWithTenantScope(t *testing.T) {
 
 	// WithGormTenantScope requires an active transaction
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_acme_bank").
@@ -176,7 +176,7 @@ func TestTenantGuard_AllowsWithinTenantTransaction(t *testing.T) {
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_acme_bank").

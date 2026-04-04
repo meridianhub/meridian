@@ -186,7 +186,7 @@ func run(logger *slog.Logger, grpcPort, httpPort int) error {
 	}
 
 	// Start workers
-	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, infra.schemaProv, infra.conns.gormDB("tenant"), infra.conns.gormDB("identity"), logger)
+	provisioningWorker, provisionerCleanup, err := startProvisioningWorker(ctx, infra.schemaProv, infra.conns, logger)
 	if err != nil {
 		return fmt.Errorf("provisioning worker: %w", err)
 	}

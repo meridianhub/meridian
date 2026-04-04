@@ -260,7 +260,7 @@ func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.D
 	}
 
 	// Set search_path to the tenant schema for unqualified table names
-	setPathQuery := fmt.Sprintf("SET search_path TO %s, public", quoteIdentifier(schemaName))
+	setPathQuery := fmt.Sprintf("SET search_path TO %s", quoteIdentifier(schemaName))
 
 	var lastVersion string
 	for _, mig := range migrations {

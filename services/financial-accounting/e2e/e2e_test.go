@@ -97,7 +97,7 @@ func setupMultiServiceTenantSchema(t *testing.T, db *gorm.DB, tenantID tenant.Te
 	applyPositionKeepingSchema(t, db, schemaName)
 
 	// Set search_path to tenant schema for all subsequent GORM operations
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err, "Failed to set search_path to tenant schema")
 
 	// Create context with tenant

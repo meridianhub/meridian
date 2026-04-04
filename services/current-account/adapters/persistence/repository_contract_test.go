@@ -30,7 +30,7 @@ var contractTestTenantID = tenant.MustNewTenantID("contract_test")
 func TestFindByID_UsesAccountID(t *testing.T) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&CurrentAccountEntity{}})
 	defer cleanup()
-	testdb.CreateTenantSchema(t, db, contractTestTenantID)
+	testdb.CreateTenantSchema(t, db, contractTestTenantID, &CurrentAccountEntity{})
 
 	repo := NewRepository(db)
 	ctx := tenant.WithTenant(context.Background(), contractTestTenantID)
@@ -62,7 +62,7 @@ func TestFindByID_UsesAccountID(t *testing.T) {
 func TestFindByIDForUpdate_UsesAccountID(t *testing.T) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&CurrentAccountEntity{}})
 	defer cleanup()
-	testdb.CreateTenantSchema(t, db, contractTestTenantID)
+	testdb.CreateTenantSchema(t, db, contractTestTenantID, &CurrentAccountEntity{})
 
 	repo := NewRepository(db)
 	ctx := tenant.WithTenant(context.Background(), contractTestTenantID)
@@ -87,7 +87,7 @@ func TestFindByIDForUpdate_UsesAccountID(t *testing.T) {
 func TestDelete_UsesAccountID(t *testing.T) {
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{&CurrentAccountEntity{}})
 	defer cleanup()
-	testdb.CreateTenantSchema(t, db, contractTestTenantID)
+	testdb.CreateTenantSchema(t, db, contractTestTenantID, &CurrentAccountEntity{})
 
 	repo := NewRepository(db)
 	ctx := tenant.WithTenant(context.Background(), contractTestTenantID)

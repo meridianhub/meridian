@@ -56,7 +56,7 @@ func setupOrgScopedTestDB(t *testing.T) (*gorm.DB, *Repository, context.Context,
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	ctx := tenant.WithTenant(context.Background(), tid)

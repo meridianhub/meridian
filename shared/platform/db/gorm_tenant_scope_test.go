@@ -37,7 +37,7 @@ func TestWithGormTenantScope_SetsSearchPath(t *testing.T) {
 
 	// WithGormTenantScope requires an active transaction
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_acme_bank").
@@ -120,7 +120,7 @@ func TestWithGormTenantTransaction_SetsSearchPathAndExecutes(t *testing.T) {
 
 	// Expect transaction begin, SET LOCAL, schema check, and commit
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_acme_bank").
@@ -215,7 +215,7 @@ func TestWithGormTenantScope_SpecialCharacters_QuotedProperly(t *testing.T) {
 
 			// WithGormTenantScope requires an active transaction
 			mock.ExpectBegin()
-			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
+			expected := "SET LOCAL search_path TO " + tc.expectedSchema
 			mock.ExpectExec(expected).
 				WillReturnResult(sqlmock.NewResult(0, 0))
 			mock.ExpectQuery(`SELECT EXISTS`).
@@ -255,7 +255,7 @@ func TestWithGormTenantScope_DatabaseError_ReturnsError(t *testing.T) {
 
 	// WithGormTenantScope requires an active transaction
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnError(errDatabaseConnectionLost)
 	mock.ExpectRollback()
 
@@ -292,7 +292,7 @@ func TestWithGormTenantTransaction_DatabaseError_ReturnsError(t *testing.T) {
 
 	// Expect transaction begin, SET LOCAL failure, and rollback
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnError(errSchemaDoesNotExist)
 	mock.ExpectRollback()
 
@@ -327,7 +327,7 @@ func TestWithGormTenantScope_NonExistentSchema_ReturnsError(t *testing.T) {
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_nonexistent_tenant", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_nonexistent_tenant"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_nonexistent_tenant").
@@ -362,7 +362,7 @@ func TestWithGormTenantScope_SchemaVerificationFailure_ReturnsError(t *testing.T
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_acme_bank").
@@ -444,7 +444,7 @@ func TestWithGormTenantScope_MaliciousSchemaNames_ProperlyEscaped(t *testing.T) 
 
 			// WithGormTenantScope requires an active transaction
 			mock.ExpectBegin()
-			expected := "SET LOCAL search_path TO " + tc.expectedSchema + ", public"
+			expected := "SET LOCAL search_path TO " + tc.expectedSchema
 			mock.ExpectExec(expected).
 				WillReturnResult(sqlmock.NewResult(0, 0))
 			schemaName := tenant.TenantID(tc.tenantID).SchemaName()

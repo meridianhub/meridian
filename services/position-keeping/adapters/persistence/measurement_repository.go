@@ -40,7 +40,7 @@ func (r *MeasurementRepository) setSearchPath(ctx context.Context, tx pgx.Tx) er
 	}
 
 	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
+	query := fmt.Sprintf("SET LOCAL search_path TO %s", schemaName)
 	_, err := tx.Exec(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to set tenant schema scope: %w", err)

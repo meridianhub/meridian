@@ -127,7 +127,7 @@ func (s *Seeder) SeedTenant(ctx context.Context, tenantID tenant.TenantID) error
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	schemaName := pq.QuoteIdentifier(tenantID.SchemaName())
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", schemaName))
 	if err != nil {
 		return fmt.Errorf("set search_path: %w", err)
 	}
@@ -194,6 +194,12 @@ func (s *Seeder) seedPolicies(ctx context.Context, tx pgx.Tx) error {
 		}
 	}
 	return nil
+}
+
+// AsPostProvisioningHook returns a function compatible with the provisioning worker's
+// PostProvisioningHook signature.
+func (s *Seeder) AsPostProvisioningHook() func(ctx context.Context, tenantID tenant.TenantID) error {
+	return s.SeedTenant
 }
 
 func sha256Hash(content string) string {

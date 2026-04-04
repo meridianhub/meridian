@@ -112,7 +112,7 @@ func applyReferenceDataSchema(t *testing.T, pool *pgxpool.Pool, schemaName strin
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	// Create instrument_definition table
@@ -236,7 +236,7 @@ func applyPositionKeepingSchema(t *testing.T, pool *pgxpool.Pool, schemaName str
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	// Create position table (append-only)
@@ -333,7 +333,7 @@ func seedSystemInstrument(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, query, code, dimension, precision)
@@ -356,7 +356,7 @@ func insertPositionErr(pool *pgxpool.Pool, ctx context.Context, accountID, instr
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName))); err != nil {
+	if _, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName))); err != nil {
 		return uuid.Nil, err
 	}
 
@@ -395,7 +395,7 @@ func getAggregatedPosition(t *testing.T, pool *pgxpool.Pool, ctx context.Context
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	var totalAmount decimal.Decimal
@@ -778,7 +778,7 @@ func TestE2E_BucketAggregation(t *testing.T) {
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback(ctx) }()
 
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		// Query all aggregated positions for the account/instrument
@@ -1223,7 +1223,7 @@ func TestE2E_CrossServiceValidationFlow(t *testing.T) {
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback(ctx) }()
 
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		var totalCredits decimal.Decimal
@@ -1393,7 +1393,7 @@ func TestE2E_HighVolumeAggregation(t *testing.T) {
 		tx, err := pool.Begin(ctx)
 		require.NoError(t, err)
 
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		// Prepare batch insert
@@ -1428,7 +1428,7 @@ func TestE2E_HighVolumeAggregation(t *testing.T) {
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback(ctx) }()
 
-		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+		_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		aggregateStart := time.Now()

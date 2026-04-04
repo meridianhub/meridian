@@ -178,7 +178,7 @@ func setupTestServices(t *testing.T) (*service.PostingService, context.Context, 
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	// Create context with tenant

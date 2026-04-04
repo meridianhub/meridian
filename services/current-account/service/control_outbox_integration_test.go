@@ -36,7 +36,7 @@ func setupControlOutboxDB(t *testing.T) (*gorm.DB, *persistence.Repository, *per
 	require.NoError(t, err)
 
 	// Set search_path (applies to the pinned connection for all subsequent queries)
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", quotedSchema)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", quotedSchema)).Error
 	require.NoError(t, err)
 
 	// Create account table (same DDL as setupControlTestDB)
@@ -94,7 +94,9 @@ func setupControlOutboxDB(t *testing.T) (*gorm.DB, *persistence.Repository, *per
 	)`, quotedSchema)).Error
 	require.NoError(t, err)
 
-	// Create event_outbox table in public schema (shared across tenants)
+	// Create event_outbox table in tenant schema.
+	// The outbox insert happens within a tenant-scoped transaction (search_path = tenant schema),
+	// so the table must exist in the tenant schema, not public.
 	err = db.AutoMigrate(&events.EventOutbox{})
 	require.NoError(t, err, "failed to create event_outbox table")
 

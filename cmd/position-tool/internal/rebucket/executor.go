@@ -359,7 +359,7 @@ func (e *Executor) setSearchPath(ctx context.Context, tx pgx.Tx) error {
 
 	// SchemaName() returns "org_" + lowercase(tenantID), validated at construction
 	schemaName := pgx.Identifier{tenantID.SchemaName()}.Sanitize()
-	query := fmt.Sprintf("SET LOCAL search_path TO %s, public", schemaName)
+	query := fmt.Sprintf("SET LOCAL search_path TO %s", schemaName)
 	_, err := tx.Exec(ctx, query)
 	if err != nil {
 		return fmt.Errorf("failed to set tenant schema scope: %w", err)

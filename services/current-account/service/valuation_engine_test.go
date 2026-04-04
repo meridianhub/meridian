@@ -124,7 +124,7 @@ func setupValuationEngineTestWithEngine(t *testing.T, engine ValuationEngine) (*
 		WHERE lifecycle_status = 'ACTIVE' AND valid_to = '9999-12-31 23:59:59+00'`, schemaName)).Error
 	require.NoError(t, err)
 
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q", schemaName)).Error
 	require.NoError(t, err)
 
 	ctx := tenant.WithTenant(context.Background(), tid)

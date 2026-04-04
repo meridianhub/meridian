@@ -54,7 +54,7 @@ func seedSystemInstrument(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, query, code)

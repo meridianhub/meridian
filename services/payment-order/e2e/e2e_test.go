@@ -229,7 +229,7 @@ func setupMultiServiceSchema(t *testing.T, db *gorm.DB, tenantID tenant.TenantID
 	applyPaymentOrderSchema(t, db, schemaName)
 
 	// Set search_path to tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)

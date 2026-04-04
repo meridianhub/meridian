@@ -74,7 +74,7 @@ func TestTenantAudit_LogsSchemaAccess(t *testing.T) {
 
 	// WithGormTenantScopeAndLogger requires an active transaction
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_acme_bank").
@@ -111,7 +111,7 @@ func TestTenantAudit_LogsSchemaAccessWithService(t *testing.T) {
 
 	// WithGormTenantScopeAndLogger requires an active transaction
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_beta_corp", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_beta_corp"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`SELECT EXISTS`).
 		WithArgs("org_beta_corp").
@@ -161,7 +161,7 @@ func TestTenantAudit_NoLogOnDatabaseError(t *testing.T) {
 
 	// WithGormTenantScopeAndLogger requires an active transaction
 	mock.ExpectBegin()
-	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank", public`).
+	mock.ExpectExec(`SET LOCAL search_path TO "org_acme_bank"`).
 		WillReturnError(errAuditTestDBFailed)
 	mock.ExpectRollback()
 

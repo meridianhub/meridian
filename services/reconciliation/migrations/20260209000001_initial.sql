@@ -1,6 +1,6 @@
 -- Reconciliation Service Schema
 -- Uses unqualified table names (relies on database-per-service architecture)
--- Tenant isolation via SET LOCAL search_path TO org_{tenant_id}, public
+-- Tenant isolation via SET LOCAL search_path TO org_{tenant_id}
 
 -- Create "settlement_run" table (CR - Command Record)
 CREATE TABLE "settlement_run" (

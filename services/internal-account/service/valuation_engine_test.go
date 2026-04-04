@@ -100,7 +100,7 @@ func setupValuationEngineTest(t *testing.T) (*Service, *gorm.DB, context.Context
 	require.NoError(t, err)
 
 	// Set default search_path to include tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaName)).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %q", schemaName)).Error
 	require.NoError(t, err)
 
 	ctx := tenant.WithTenant(context.Background(), tid)

@@ -397,7 +397,7 @@ func TestStaffIsolation_DifferentTenants(t *testing.T) {
 	schemaB := tenant.TenantID("tenant_b").SchemaName()
 	err := gormDB.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %q", schemaB)).Error
 	require.NoError(t, err)
-	err = gormDB.Exec(fmt.Sprintf("SET search_path TO %q, public", schemaB)).Error
+	err = gormDB.Exec(fmt.Sprintf("SET search_path TO %q", schemaB)).Error
 	require.NoError(t, err)
 	createStaffTables(t, gormDB, schemaB)
 	ctxB := tenant.WithTenant(context.Background(), "tenant_b")

@@ -474,10 +474,9 @@ func TestFindByID_WithOrganizationContext_IsolatesData(t *testing.T) {
 	_, err = repo.FindByID(ctx, party.ID())
 	require.NoError(t, err, "Party should be findable with tenant context")
 
-	// With organization context, the search_path changes to org_acme_bank,public.
-	// Since the parties table only exists in public, this should still work
-	// (public is included in search_path), but the isolation is enforced at the
-	// schema level when org schemas are properly set up.
+	// With organization context, the search_path changes to org_acme_bank.
+	// The parties table must exist in the tenant schema for queries to work.
+	// Complete tenant isolation means no public schema fallback.
 	orgID := tenant.TenantID("acme_bank")
 	orgCtx := tenant.WithTenant(ctx, orgID)
 

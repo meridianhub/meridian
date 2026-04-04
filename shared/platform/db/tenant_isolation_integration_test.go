@@ -325,7 +325,7 @@ func TestWithGormTenantScope_Integration_NonExistentSchema_ReturnsError(t *testi
 // TestWithGormTenantScope_Integration_NonExistentSchema_NeverExposesPublicData is a security
 // regression test that verifies a non-existent tenant schema cannot access data in the
 // public schema. Before the fail-fast fix, PostgreSQL silently accepted non-existent schemas
-// in search_path and fell through to public, leaking cross-tenant data.
+// in search_path. With public removed from search_path, this risk is eliminated.
 func TestWithGormTenantScope_Integration_NonExistentSchema_NeverExposesPublicData(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

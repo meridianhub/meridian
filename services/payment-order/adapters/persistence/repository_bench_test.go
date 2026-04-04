@@ -79,7 +79,7 @@ func setupBenchDB(b *testing.B) (*gorm.DB, context.Context, func()) {
 	}
 
 	// Set search_path to tenant schema
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error
+	err = db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error
 	if err != nil {
 		b.Fatalf("setupBenchDB: failed to set search_path: %v", err)
 	}

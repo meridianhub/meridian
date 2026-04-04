@@ -246,7 +246,7 @@ func applyInternalAccountSchema(t *testing.T, pool *pgxpool.Pool, schemaName str
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	// Create internal_account table
@@ -346,7 +346,7 @@ func applyPositionKeepingSchema(t *testing.T, pool *pgxpool.Pool, schemaName str
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	// Create position table (append-only)
@@ -442,7 +442,7 @@ func createAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accoun
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, `
@@ -475,7 +475,7 @@ func insertPosition(t *testing.T, pool *pgxpool.Pool, ctx context.Context, accou
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	var attrsJSON interface{}
@@ -506,7 +506,7 @@ func getAggregatedBalance(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	var totalAmount decimal.Decimal
@@ -534,7 +534,7 @@ func updateAccountStatus(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	// Get current status
@@ -585,7 +585,7 @@ func getStatusHistory(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	rows, err := tx.Query(ctx, `
@@ -1713,7 +1713,7 @@ func softDeletePosition(t *testing.T, pool *pgxpool.Pool, ctx context.Context, p
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s, public", pq.QuoteIdentifier(schemaName)))
+	_, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL search_path TO %s", pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, `UPDATE position SET deleted_at = NOW() WHERE id = $1`, positionID)

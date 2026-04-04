@@ -48,7 +48,7 @@ func setupTestContainer(t *testing.T) *testContainer {
 	require.NoError(t, err)
 
 	// Get connection string with search_path configured
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping,public")
+	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable", "search_path=position_keeping")
 	require.NoError(t, err)
 
 	// Create connection pool

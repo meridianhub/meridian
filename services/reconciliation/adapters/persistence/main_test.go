@@ -88,7 +88,7 @@ func runMigrations(db *gorm.DB) error {
 
 	migrationSQL := `
 		CREATE SCHEMA IF NOT EXISTS ` + quoted + `;
-		SET search_path TO ` + quoted + `, public;
+		SET search_path TO ` + quoted + `;
 
 		CREATE TABLE IF NOT EXISTS "settlement_run" (
 			"id" uuid NOT NULL DEFAULT gen_random_uuid(),

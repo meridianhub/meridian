@@ -23,18 +23,17 @@ var schemaDDL string
 
 // TestContainer holds the test database container, connection pool, and repository instances.
 type TestContainer struct {
-	container *postgres.PostgresContainer
-	Pool      *pgxpool.Pool
-	Repos     *persistence.Repositories
+	container      *postgres.PostgresContainer
+	Pool           *pgxpool.Pool
+	Repos          *persistence.Repositories
+	MasterTenantID tenant.TenantID // The master tenant used for shared/hierarchical data lookups
 }
 
 // SetupTestContainer creates a PostgreSQL testcontainer with the market_information schema loaded.
 func SetupTestContainer(t *testing.T) *TestContainer {
 	t.Helper()
-
 	ctx := context.Background()
 
-	// Create PostgreSQL container with explicit wait strategy
 	pgContainer, err := postgres.Run(ctx,
 		"postgres:16-alpine",
 		postgres.WithDatabase("test_market_information"),
@@ -48,28 +47,51 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 	)
 	require.NoError(t, err, "Failed to start PostgreSQL container")
 
-	// Get connection string
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err, "Failed to get connection string")
 
-	// Create connection pool
 	poolConfig, err := pgxpool.ParseConfig(connStr)
 	require.NoError(t, err, "Failed to parse pool config")
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	require.NoError(t, err, "Failed to create connection pool")
 
-	// Load schema
 	loadSchema(t, pool)
+	pool = setupMasterSchema(ctx, t, pool, poolConfig)
 
-	// Create repositories with test master tenant
-	repos := persistence.NewRepositories(pool, "test_master")
+	masterTenantID := "test_master"
+	repos := persistence.NewRepositories(pool, masterTenantID)
+	masterTID, err := tenant.NewTenantID(masterTenantID)
+	require.NoError(t, err, "Failed to parse master tenant ID")
 
 	return &TestContainer{
-		container: pgContainer,
-		Pool:      pool,
-		Repos:     repos,
+		container:      pgContainer,
+		Pool:           pool,
+		Repos:          repos,
+		MasterTenantID: masterTID,
 	}
+}
+
+// setupMasterSchema creates the master tenant schema with tables and sets it as the
+// database default search_path. Returns a reconnected pool that uses the new default.
+func setupMasterSchema(ctx context.Context, t *testing.T, pool *pgxpool.Pool, poolConfig *pgxpool.Config) *pgxpool.Pool {
+	t.Helper()
+	masterSchema := "org_test_master"
+
+	_, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+masterSchema)
+	require.NoError(t, err, "Failed to create master tenant schema")
+	err = loadSchemaInSchema(ctx, pool, masterSchema)
+	require.NoError(t, err, "Failed to load schema into master tenant schema")
+
+	// Set default search_path so non-tenant-scoped queries use the master schema
+	_, err = pool.Exec(ctx, "ALTER DATABASE test_market_information SET search_path TO "+masterSchema)
+	require.NoError(t, err, "Failed to set default search_path")
+
+	// Reconnect to pick up the new default search_path
+	pool.Close()
+	pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
+	require.NoError(t, err, "Failed to reconnect with new search_path")
+	return pool
 }
 
 // Cleanup closes the connection pool and terminates the container.
@@ -97,63 +119,46 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 // CreateTenantSchema creates a tenant-specific schema for testing multi-tenant scenarios.
 func (tc *TestContainer) CreateTenantSchema(tenantIDStr string) (tenant.TenantID, error) {
 	ctx := context.Background()
-
 	tenantID, err := tenant.NewTenantID(tenantIDStr)
 	if err != nil {
 		return tenant.TenantID(""), fmt.Errorf("invalid tenant ID: %w", err)
 	}
 
 	schemaName := tenantID.SchemaName()
-	// Use pgx.Identifier for proper SQL identifier quoting to prevent injection
 	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
 
-	// Create schema
-	_, err = tc.Pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+quotedSchema)
-	if err != nil {
+	if _, err = tc.Pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+quotedSchema); err != nil {
 		return tenant.TenantID(""), fmt.Errorf("failed to create schema %s: %w", schemaName, err)
 	}
-
-	// Set search path and create tables in tenant schema
-	_, err = tc.Pool.Exec(ctx, "SET search_path TO "+quotedSchema)
-	if err != nil {
-		return tenant.TenantID(""), fmt.Errorf("failed to set search_path: %w", err)
-	}
-
-	// Create tenant-specific tables (same structure as public schema)
-	err = loadSchemaInSchema(ctx, tc.Pool, schemaName)
-	if err != nil {
+	if err = loadSchemaInSchema(ctx, tc.Pool, schemaName); err != nil {
 		return tenant.TenantID(""), fmt.Errorf("failed to load schema: %w", err)
 	}
 
-	// Copy shared datasets from public schema to tenant schema.
-	// This allows tenant observations to reference shared dataset definitions.
-	// Note: quotedSchema is safely quoted via pgx.Identifier.Sanitize() above.
-	_, err = tc.Pool.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.dataset_definition
-		SELECT * FROM public.dataset_definition
-		WHERE is_shared = TRUE
-	`, quotedSchema))
-	if err != nil {
-		return tenant.TenantID(""), fmt.Errorf("failed to copy shared datasets: %w", err)
-	}
-
-	// Copy data sources from public schema to tenant schema
-	// Data sources are needed for observations to have valid foreign keys
-	_, err = tc.Pool.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.data_source
-		SELECT * FROM public.data_source
-	`, quotedSchema))
-	if err != nil {
-		return tenant.TenantID(""), fmt.Errorf("failed to copy data sources: %w", err)
-	}
-
-	// Reset search path to default
-	_, err = tc.Pool.Exec(ctx, "SET search_path TO public")
-	if err != nil {
-		return tenant.TenantID(""), fmt.Errorf("failed to reset search_path: %w", err)
+	// Copy reference data from master schema (where repos save it) to tenant schema
+	masterSchema := pgx.Identifier{tc.MasterTenantID.SchemaName()}.Sanitize()
+	if err = tc.copyReferenceData(ctx, quotedSchema, masterSchema); err != nil {
+		return tenant.TenantID(""), err
 	}
 
 	return tenantID, nil
+}
+
+// copyReferenceData copies shared datasets and data sources from master to tenant schema.
+func (tc *TestContainer) copyReferenceData(ctx context.Context, tenantSchema, masterSchema string) error {
+	_, err := tc.Pool.Exec(ctx, fmt.Sprintf(
+		`INSERT INTO %s.dataset_definition SELECT * FROM %s.dataset_definition WHERE is_shared = TRUE`,
+		tenantSchema, masterSchema))
+	if err != nil {
+		return fmt.Errorf("failed to copy shared datasets: %w", err)
+	}
+
+	_, err = tc.Pool.Exec(ctx, fmt.Sprintf(
+		`INSERT INTO %s.data_source SELECT * FROM %s.data_source`,
+		tenantSchema, masterSchema))
+	if err != nil {
+		return fmt.Errorf("failed to copy data sources: %w", err)
+	}
+	return nil
 }
 
 // WithTenant wraps a context with tenant information.
@@ -161,10 +166,19 @@ func (tc *TestContainer) WithTenant(ctx context.Context, tenantID tenant.TenantI
 	return tenant.WithTenant(ctx, tenantID)
 }
 
+// MasterContext returns a context scoped to the master tenant.
+// Use this when saving reference data (datasets, data sources) that the observation
+// repository's hierarchical lookup will query via the master tenant schema.
+func (tc *TestContainer) MasterContext(ctx context.Context) context.Context {
+	return tenant.WithTenant(ctx, tc.MasterTenantID)
+}
+
 // GrantTenantEntitlement grants access to a dataset for a tenant.
+// Uses public.tenant_data_entitlements explicitly because the production code's
+// checkTenantAccess queries public.tenant_data_entitlements directly.
 func (tc *TestContainer) GrantTenantEntitlement(ctx context.Context, tenantID tenant.TenantID, datasetCode string, expiresAt *time.Time) error {
 	query := `
-		INSERT INTO tenant_data_entitlements (tenant_id, dataset_code, is_active, expires_at)
+		INSERT INTO public.tenant_data_entitlements (tenant_id, dataset_code, is_active, expires_at)
 		VALUES ($1, $2, TRUE, $3)
 		ON CONFLICT (tenant_id, dataset_code)
 		DO UPDATE SET is_active = TRUE, expires_at = EXCLUDED.expires_at`
@@ -177,9 +191,10 @@ func (tc *TestContainer) GrantTenantEntitlement(ctx context.Context, tenantID te
 }
 
 // RevokeTenantEntitlement revokes access to a dataset for a tenant.
+// Uses public.tenant_data_entitlements explicitly to match checkTenantAccess.
 func (tc *TestContainer) RevokeTenantEntitlement(ctx context.Context, tenantID tenant.TenantID, datasetCode string) error {
 	query := `
-		UPDATE tenant_data_entitlements
+		UPDATE public.tenant_data_entitlements
 		SET is_active = FALSE
 		WHERE tenant_id = $1 AND dataset_code = $2`
 

@@ -22,9 +22,9 @@ import (
 )
 
 // PostProvisioningHook is called after schema provisioning succeeds but before
-// marking the tenant as active. Hooks are non-blocking - errors are logged but
-// do not prevent tenant activation. This allows for best-effort initialization
-// of tenant-specific resources (e.g., default internal accounts).
+// marking the tenant as active. Hook failures are fatal - they prevent tenant
+// activation and mark provisioning as failed. This ensures tenants are never
+// activated with incomplete reference data (instruments, sagas, account types).
 type PostProvisioningHook func(ctx context.Context, tenantID tenant.TenantID) error
 
 // ProvisioningWorker polls for tenants in PROVISIONING_PENDING status
@@ -220,9 +220,8 @@ func (w *ProvisioningWorker) Stop() {
 }
 
 // RegisterPostProvisioningHook adds a hook to be called after schema provisioning succeeds.
-// Hooks are executed in registration order and are non-blocking - errors are logged
-// but do not prevent tenant activation. Use this for best-effort initialization like
-// creating default internal accounts.
+// Hooks are executed in registration order and are fail-hard - any hook failure
+// prevents tenant activation and marks provisioning as failed.
 //
 // The name parameter is used for logging to identify which hook succeeded or failed.
 func (w *ProvisioningWorker) RegisterPostProvisioningHook(name string, hook PostProvisioningHook) {
@@ -234,18 +233,17 @@ func (w *ProvisioningWorker) RegisterPostProvisioningHook(name string, hook Post
 }
 
 // executePostProvisioningHooks runs all registered hooks sequentially.
-// Errors are logged but do not stop execution of subsequent hooks.
-// Returns the count of hooks that succeeded.
-func (w *ProvisioningWorker) executePostProvisioningHooks(ctx context.Context, tenantID tenant.TenantID) int {
+// Any hook failure is fatal - it stops execution and returns the error.
+// This ensures tenants are never activated with incomplete reference data.
+func (w *ProvisioningWorker) executePostProvisioningHooks(ctx context.Context, tenantID tenant.TenantID) error {
 	if len(w.postProvisioningHooks) == 0 {
-		return 0
+		return nil
 	}
 
 	w.logger.Debug("executing post-provisioning hooks",
 		"tenant_id", tenantID,
 		"hook_count", len(w.postProvisioningHooks))
 
-	succeeded := 0
 	for _, nh := range w.postProvisioningHooks {
 		if err := func() (err error) {
 			defer func() {
@@ -255,25 +253,22 @@ func (w *ProvisioningWorker) executePostProvisioningHooks(ctx context.Context, t
 			}()
 			return nh.hook(ctx, tenantID)
 		}(); err != nil {
-			// Log error but continue - hooks are non-blocking
-			w.logger.Warn("post-provisioning hook failed",
+			w.logger.Error("post-provisioning hook failed - aborting tenant activation",
 				"tenant_id", tenantID,
 				"hook_name", nh.name,
 				"error", err)
-		} else {
-			w.logger.Debug("post-provisioning hook succeeded",
-				"tenant_id", tenantID,
-				"hook_name", nh.name)
-			succeeded++
+			return fmt.Errorf("post-provisioning hook %q failed: %w", nh.name, err)
 		}
+		w.logger.Debug("post-provisioning hook succeeded",
+			"tenant_id", tenantID,
+			"hook_name", nh.name)
 	}
 
-	w.logger.Info("post-provisioning hooks completed",
+	w.logger.Info("all post-provisioning hooks completed",
 		"tenant_id", tenantID,
-		"succeeded", succeeded,
 		"total", len(w.postProvisioningHooks))
 
-	return succeeded
+	return nil
 }
 
 // checkFailedProvisioningAlerts checks for persistent provisioning failures
@@ -423,7 +418,9 @@ func (w *ProvisioningWorker) executeProvisioningWithRetry(ctx context.Context, t
 
 		err := w.provisioner.ProvisionSchemas(ctx, tenantID)
 		if err == nil {
-			w.markTenantAsActive(ctx, tenantID, attempts)
+			if hookErr := w.markTenantAsActive(ctx, tenantID, attempts); hookErr != nil {
+				return attempts, hookErr
+			}
 			return 0, nil
 		}
 
@@ -465,25 +462,26 @@ func (w *ProvisioningWorker) checkContextCancellation(ctx context.Context, tenan
 }
 
 // markTenantAsActive updates tenant status to active after successful provisioning.
-// Before marking as active, it executes any registered post-provisioning hooks
-// (e.g., creating default internal accounts). Hook failures are logged but
-// do not prevent tenant activation.
-func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID tenant.TenantID, attempt int) {
+// Before marking as active, it executes any registered post-provisioning hooks.
+// Hook failures are fatal - they prevent tenant activation.
+// Returns nil on success, or an error if hooks or status update failed.
+func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID tenant.TenantID, attempt int) error {
 	w.logger.Info("provisioning succeeded",
 		"tenant_id", tenantID,
 		"attempt", attempt)
 
-	// Execute post-provisioning hooks (non-blocking)
-	// These hooks can initialize tenant-specific resources like default internal accounts.
-	// Failures are logged but do not prevent tenant activation.
-	w.executePostProvisioningHooks(ctx, tenantID)
+	// Execute post-provisioning hooks (fail-hard)
+	// Hook failures prevent tenant activation to ensure complete reference data.
+	if err := w.executePostProvisioningHooks(ctx, tenantID); err != nil {
+		return fmt.Errorf("post-provisioning hooks: %w", err)
+	}
 
 	tenant, getErr := w.repo.GetByID(ctx, tenantID)
 	if getErr != nil {
 		w.logger.Error("failed to get tenant after successful provisioning",
 			"tenant_id", tenantID,
 			"error", getErr)
-		return
+		return nil // Schema is provisioned, status update failure is non-fatal
 	}
 
 	_, updateErr := w.repo.UpdateStatus(ctx, tenantID, domain.StatusActive, tenant.Version)
@@ -493,6 +491,7 @@ func (w *ProvisioningWorker) markTenantAsActive(ctx context.Context, tenantID te
 			"version", tenant.Version,
 			"error", updateErr)
 	}
+	return nil
 }
 
 // markTenantAsFailed updates tenant status to provisioning_failed with error details.

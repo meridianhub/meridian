@@ -11,15 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestE2E_ProvisioningOverrideMigration exercises the full lifecycle:
+// TestE2E_ProvisioningOverride exercises the full lifecycle:
 // 1. Sync platform defaults
-// 2. Provision a new tenant (seeder creates platform_ref entries)
-// 3. Verify platform fallback resolution works
+// 2. Provision a new tenant (seeder copies scripts directly into tenant schema)
+// 3. Verify scripts are resolved from tenant schema (no public fallback)
 // 4. Override a saga with custom script
-// 5. Verify override takes priority over platform default
-// 6. Provision another tenant with old-style copies
-// 7. Migrate old tenant to platform refs
-func TestE2E_ProvisioningOverrideMigration(t *testing.T) {
+// 5. Verify override takes priority over system default
+func TestE2E_ProvisioningOverride(t *testing.T) {
 	pool, cleanup := setupPlatformTestDB(t)
 	defer cleanup()
 
@@ -30,7 +28,7 @@ func TestE2E_ProvisioningOverrideMigration(t *testing.T) {
 	err := platformSync.SyncPlatformDefaults(ctx)
 	require.NoError(t, err)
 
-	// Step 2: Provision tenant alpha (new-style with platform_ref)
+	// Step 2: Provision tenant alpha (scripts copied directly into tenant schema)
 	alphaID := tenant.TenantID("alpha_corp")
 	alphaSchema := alphaID.SchemaName()
 	setupTenantSchemaForSeeder(t, pool, ctx, alphaSchema)
@@ -40,16 +38,19 @@ func TestE2E_ProvisioningOverrideMigration(t *testing.T) {
 	err = seeder.SeedTenant(ctx, alphaID)
 	require.NoError(t, err)
 
-	// Step 3: Verify platform fallback resolution
+	// Step 3: Verify scripts are self-contained in tenant schema
 	alphaCtx := tenant.WithTenant(ctx, alphaID)
 	registry := NewPostgresRegistry(pool, nil)
 
 	activeDef, err := registry.GetActive(alphaCtx, "current_account_withdrawal")
 	require.NoError(t, err)
 	assert.True(t, activeDef.IsSystem, "should resolve system saga")
-	assert.True(t, activeDef.UsedPlatformFallback, "should use platform fallback")
+	assert.False(t, activeDef.UsedPlatformFallback,
+		"should not use platform fallback - scripts copied directly")
 	assert.NotEmpty(t, activeDef.ResolvedScript, "resolved script should not be empty")
-	assert.NotNil(t, activeDef.PlatformRef, "platform_ref should be set")
+	assert.NotEmpty(t, activeDef.Script, "script should be copied directly into tenant")
+	assert.Nil(t, activeDef.PlatformRef,
+		"platform_ref should be nil - scripts are self-contained")
 
 	// Step 4: Create tenant override
 	overrideSvc := NewOverrideService(pool, registry)
@@ -95,55 +96,13 @@ def posting_rules(ctx):
 	assert.Equal(t, "Alpha Corp requires UK compliance checks on all withdrawals",
 		activeDef.OverrideReason)
 
-	// Non-overridden sagas should still use platform fallback
+	// Non-overridden sagas should resolve from tenant's own script copy
 	depositDef, err := registry.GetActive(alphaCtx, "current_account_deposit")
 	require.NoError(t, err)
 	assert.True(t, depositDef.IsSystem, "deposit should still use system saga")
-	assert.True(t, depositDef.UsedPlatformFallback, "deposit should use platform fallback")
-
-	// Step 6: Provision tenant beta (old-style with script copies)
-	betaID := tenant.TenantID("beta_corp")
-	betaSchema := betaID.SchemaName()
-	setupTenantSchemaForSeeder(t, pool, ctx, betaSchema)
-
-	// Insert old-style script-copied sagas
-	scripts, err := GetEmbeddedScripts()
-	require.NoError(t, err)
-
-	e2eDefaults, e2eDefaultsErr := PlatformDefaults()
-	require.NoError(t, e2eDefaultsErr)
-	for _, meta := range e2eDefaults {
-		script, ok := scripts[meta.Filename+".star"]
-		require.True(t, ok, "expected embedded script %s.star", meta.Filename)
-		require.NotEmpty(t, script)
-		_, err := pool.Exec(ctx, `
-			INSERT INTO `+betaSchema+`.saga_definition (
-				name, version, script, status, is_system,
-				display_name, description, created_at, updated_at, activated_at
-			) VALUES ($1, 1, $2, 'ACTIVE', true, $3, $4, now(), now(), now())`,
-			meta.Name, script, meta.DisplayName, meta.Description)
-		require.NoError(t, err)
-	}
-
-	// Step 7: Migrate beta to platform refs
-	migrationResults, err := overrideSvc.MigrateToPlatformRef(ctx, betaID, false)
-	require.NoError(t, err)
-
-	migratedCount := 0
-	for _, r := range migrationResults {
-		if r.Action == "migrated" {
-			migratedCount++
-		}
-	}
-	assert.Equal(t, 8, migratedCount, "all 8 sagas should be migrated")
-
-	// Verify beta's sagas now use platform_ref
-	betaCtx := tenant.WithTenant(ctx, betaID)
-	betaWithdrawal, err := registry.GetActive(betaCtx, "current_account_withdrawal")
-	require.NoError(t, err)
-	assert.True(t, betaWithdrawal.IsSystem)
-	assert.NotNil(t, betaWithdrawal.PlatformRef, "should now have platform_ref")
-	assert.True(t, betaWithdrawal.UsedPlatformFallback, "should use platform fallback after migration")
+	assert.False(t, depositDef.UsedPlatformFallback,
+		"deposit should use copied script, not platform fallback")
+	assert.NotEmpty(t, depositDef.ResolvedScript, "deposit should have script content")
 }
 
 // TestE2E_SeededSagasAreActive verifies that seeded sagas are immediately ACTIVE.
@@ -165,18 +124,23 @@ func TestE2E_SeededSagasAreActive(t *testing.T) {
 	err = seeder.SeedTenant(ctx, tenantID)
 	require.NoError(t, err)
 
-	// Verify all seeded sagas are ACTIVE
+	// Verify all seeded sagas are ACTIVE with scripts copied directly
 	rows, err := pool.Query(ctx,
-		"SELECT name, status FROM "+schemaName+".saga_definition WHERE is_system = true ORDER BY name")
+		"SELECT name, status, script FROM "+schemaName+".saga_definition WHERE is_system = true ORDER BY name")
 	require.NoError(t, err)
 	defer rows.Close()
 
 	var count int
 	for rows.Next() {
 		var name, status string
-		err := rows.Scan(&name, &status)
+		var script *string
+		err := rows.Scan(&name, &status, &script)
 		require.NoError(t, err)
 		assert.Equal(t, "ACTIVE", status, "seeded saga %s should be ACTIVE", name)
+		assert.NotNil(t, script, "seeded saga %s should have script content (not NULL)", name)
+		if script != nil {
+			assert.NotEmpty(t, *script, "seeded saga %s should have non-empty script", name)
+		}
 		count++
 	}
 	require.NoError(t, rows.Err())
