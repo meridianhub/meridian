@@ -19,6 +19,7 @@ import (
 	platformgateway "github.com/meridianhub/meridian/shared/platform/gateway"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/structpb"
 	"gorm.io/gorm"
 )
 
@@ -208,26 +209,41 @@ type loopbackTenantCreator struct {
 	logger     *slog.Logger
 }
 
-func (a *loopbackTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error) {
+func (a *loopbackTenantCreator) CreateTenant(ctx context.Context, tenantID, slug, displayName string, metadata map[string]interface{}) (*gateway.CreateTenantResult, error) {
 	subdomain := slug
 	if a.baseDomain != "" {
 		subdomain = slug + "." + a.baseDomain
 	}
 
-	resp, err := a.client.InitiateTenant(ctx, &tenantv1.InitiateTenantRequest{
+	req := &tenantv1.InitiateTenantRequest{
 		TenantId:        tenantID,
 		DisplayName:     displayName,
 		Slug:            slug,
 		Subdomain:       subdomain,
 		SettlementAsset: "USD",
-	})
+	}
+
+	// Pass registration metadata through to the tenant record.
+	if len(metadata) > 0 {
+		pbMeta, err := structpb.NewStruct(metadata)
+		if err != nil {
+			a.logger.Warn("failed to convert registration metadata to protobuf struct", "error", err)
+		} else {
+			req.Metadata = pbMeta
+		}
+	}
+
+	resp, err := a.client.InitiateTenant(ctx, req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if resp.Tenant == nil {
-		return "", errNilTenantResponse
+		return nil, errNilTenantResponse
 	}
-	return resp.Tenant.TenantId, nil
+	return &gateway.CreateTenantResult{
+		TenantID:            resp.Tenant.TenantId,
+		ProvisioningPending: resp.Tenant.Status == tenantv1.TenantStatus_TENANT_STATUS_PROVISIONING_PENDING,
+	}, nil
 }
 
 func (a *loopbackTenantCreator) DeleteTenant(ctx context.Context, tenantID string) error {

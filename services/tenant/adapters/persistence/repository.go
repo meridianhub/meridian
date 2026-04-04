@@ -414,6 +414,23 @@ func (r *Repository) FindProvisioningStatusByTenantID(ctx context.Context, tenan
 	return statuses, nil
 }
 
+// UpdateMetadata replaces the metadata JSONB column for a tenant.
+// Used by post-provisioning hooks to clear registration credentials after identity creation.
+func (r *Repository) UpdateMetadata(ctx context.Context, id tenant.TenantID, metadata map[string]interface{}) error {
+	result := r.conn(ctx).
+		Model(&TenantEntity{}).
+		Where("id = ?", id.String()).
+		Update("metadata", JSONMap(metadata))
+
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrTenantNotFound
+	}
+	return nil
+}
+
 // Ping checks database connectivity.
 func (r *Repository) Ping(ctx context.Context) error {
 	var result int

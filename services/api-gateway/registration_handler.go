@@ -37,11 +37,21 @@ var (
 	errEmailAlreadyRegistered   = errors.New("email already registered in this tenant")
 )
 
+// CreateTenantResult holds the outcome of a tenant creation request.
+type CreateTenantResult struct {
+	TenantID string
+	// ProvisioningPending is true when the tenant requires async schema provisioning
+	// before it becomes active. When true, identity creation must be deferred to
+	// a post-provisioning hook and credentials stored in tenant metadata.
+	ProvisioningPending bool
+}
+
 // TenantCreator abstracts tenant creation for the registration handler.
 type TenantCreator interface {
 	// CreateTenant creates a new tenant with the given ID, slug, and display name.
-	// Returns the tenant ID on success.
-	CreateTenant(ctx context.Context, tenantID, slug, displayName string) (string, error)
+	// The metadata map is stored on the tenant record (used for registration credentials
+	// when provisioning is async).
+	CreateTenant(ctx context.Context, tenantID, slug, displayName string, metadata map[string]interface{}) (*CreateTenantResult, error)
 	// DeleteTenant removes a tenant. Used as compensation when identity provisioning
 	// fails after tenant creation, preventing orphaned tenants.
 	DeleteTenant(ctx context.Context, tenantID string) error
@@ -119,6 +129,7 @@ type registrationResponse struct {
 	TenantID             string `json:"tenant_id"`
 	LoginURL             string `json:"login_url"`
 	VerificationRequired bool   `json:"verification_required"`
+	ProvisioningPending  bool   `json:"provisioning_pending"`
 }
 
 // HandleRegister handles POST /api/v1/register.
@@ -155,9 +166,10 @@ func (h *RegistrationHandler) HandleRegister(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	h.logger.InfoContext(ctx, "registration: tenant and admin identity created",
+	h.logger.InfoContext(ctx, "registration: tenant created",
 		"tenant_id", resp.TenantID,
 		"slug", req.Slug,
+		"provisioning_pending", resp.ProvisioningPending,
 		"client_ip", clientIP)
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -185,7 +197,19 @@ func (h *RegistrationHandler) parseAndValidateRequest(r *http.Request) (*registr
 	return &req, nil
 }
 
+// Metadata keys used to store self-registered admin credentials on the tenant record.
+// These are read by the self-registered admin post-provisioning hook and cleared after
+// the identity is created, so they never persist beyond tenant activation.
+const (
+	MetaKeyRegistrationEmail        = "_registration_email"
+	MetaKeyRegistrationPasswordHash = "_registration_password_hash"
+)
+
 // executeRegistration performs tenant creation and identity provisioning.
+// When the tenant requires async provisioning, admin credentials are stored in tenant
+// metadata and identity creation is deferred to a post-provisioning hook.
+// When provisioning is synchronous (tenant immediately active), the identity is
+// created inline as before.
 // Returns (httpStatus, response, error). On success error is nil.
 func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *registrationRequest) (int, *registrationResponse, error) {
 	tenantID := strings.ReplaceAll(req.Slug, "-", "_")
@@ -194,7 +218,21 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 		displayName = req.Slug
 	}
 
-	createdTenantID, err := h.tenantCreator.CreateTenant(ctx, tenantID, req.Slug, displayName)
+	// Hash password early so we can store it in metadata for async provisioning.
+	passwordHash, err := credentials.HashPassword(req.Password)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "registration: failed to hash password", "error", err)
+		return http.StatusInternalServerError, nil, errIdentityCreationFailed
+	}
+
+	// Include registration credentials in tenant metadata so the post-provisioning
+	// hook can create the admin identity after schema provisioning completes.
+	metadata := map[string]interface{}{
+		MetaKeyRegistrationEmail:        req.Email,
+		MetaKeyRegistrationPasswordHash: passwordHash,
+	}
+
+	result, err := h.tenantCreator.CreateTenant(ctx, tenantID, req.Slug, displayName, metadata)
 	if err != nil {
 		if isAlreadyExistsError(err) {
 			return http.StatusConflict, nil, errSlugTaken
@@ -204,14 +242,23 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 		return http.StatusInternalServerError, nil, errTenantCreationFailed
 	}
 
-	regErr := h.provisionAdminIdentity(ctx, createdTenantID, req.Email, req.Password)
-	if regErr != nil {
-		// Compensate: delete orphaned tenant to allow the user to retry.
-		if delErr := h.tenantCreator.DeleteTenant(ctx, createdTenantID); delErr != nil {
-			h.logger.ErrorContext(ctx, "registration: failed to compensate (delete tenant)",
-				"tenant_id", createdTenantID, "error", delErr)
+	if result.ProvisioningPending {
+		// Tenant requires async provisioning - identity will be created by the
+		// self-registered admin post-provisioning hook after schemas are ready.
+		h.logger.InfoContext(ctx, "registration: tenant created with async provisioning, identity deferred to post-provisioning hook",
+			"tenant_id", result.TenantID,
+			"slug", req.Slug)
+	} else {
+		// Tenant is immediately active - create identity inline.
+		regErr := h.provisionAdminIdentity(ctx, result.TenantID, req.Email, passwordHash)
+		if regErr != nil {
+			// Compensate: delete orphaned tenant to allow the user to retry.
+			if delErr := h.tenantCreator.DeleteTenant(ctx, result.TenantID); delErr != nil {
+				h.logger.ErrorContext(ctx, "registration: failed to compensate (delete tenant)",
+					"tenant_id", result.TenantID, "error", delErr)
+			}
+			return regErr.status, nil, regErr
 		}
-		return regErr.status, nil, regErr
 	}
 
 	loginURL := fmt.Sprintf("https://%s.%s/login", req.Slug, h.baseDomain)
@@ -220,9 +267,10 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 	}
 
 	return http.StatusCreated, &registrationResponse{
-		TenantID:             createdTenantID,
+		TenantID:             result.TenantID,
 		LoginURL:             loginURL,
 		VerificationRequired: h.emailVerificationRequired,
+		ProvisioningPending:  result.ProvisioningPending,
 	}, nil
 }
 
@@ -240,7 +288,8 @@ func newRegistrationError(status int, inner error) *registrationError {
 }
 
 // provisionAdminIdentity creates the initial admin identity within the new tenant's scope.
-func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenantIDStr, emailAddr, password string) *registrationError {
+// The passwordHash parameter is a pre-computed bcrypt hash.
+func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenantIDStr, emailAddr, passwordHash string) *registrationError {
 	tid, err := tenant.NewTenantID(tenantIDStr)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "registration: invalid tenant ID from creation",
@@ -250,7 +299,7 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 
 	tenantCtx := tenant.WithTenant(ctx, tid)
 
-	identity, regErr := h.buildAdminIdentity(ctx, tid, emailAddr, password)
+	identity, regErr := h.buildAdminIdentity(ctx, tid, emailAddr, passwordHash)
 	if regErr != nil {
 		return regErr
 	}
@@ -273,9 +322,9 @@ func (h *RegistrationHandler) provisionAdminIdentity(ctx context.Context, tenant
 	return nil
 }
 
-// buildAdminIdentity creates a new identity with the given credentials and activates it
-// if email verification is not required.
-func (h *RegistrationHandler) buildAdminIdentity(ctx context.Context, tid tenant.TenantID, emailAddr, password string) (*identitydomain.Identity, *registrationError) {
+// buildAdminIdentity creates a new identity with the given pre-computed password hash
+// and activates it if email verification is not required.
+func (h *RegistrationHandler) buildAdminIdentity(ctx context.Context, tid tenant.TenantID, emailAddr, passwordHash string) (*identitydomain.Identity, *registrationError) {
 	var identity *identitydomain.Identity
 	var err error
 	if h.emailVerificationRequired {
@@ -287,13 +336,7 @@ func (h *RegistrationHandler) buildAdminIdentity(ctx context.Context, tid tenant
 		return nil, newRegistrationError(http.StatusBadRequest, fmt.Errorf("%w: %w", errIdentityCreationFailed, err))
 	}
 
-	hash, err := credentials.HashPassword(password)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "registration: failed to hash password", "error", err)
-		return nil, newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
-	}
-
-	if err := identity.SetPassword(hash); err != nil {
+	if err := identity.SetPassword(passwordHash); err != nil {
 		h.logger.ErrorContext(ctx, "registration: failed to set password", "error", err)
 		return nil, newRegistrationError(http.StatusInternalServerError, errIdentityCreationFailed)
 	}
