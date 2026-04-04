@@ -94,14 +94,11 @@ func setupControlOutboxDB(t *testing.T) (*gorm.DB, *persistence.Repository, *per
 	)`, quotedSchema)).Error
 	require.NoError(t, err)
 
-	// Create event_outbox table in public schema (shared across tenants).
-	// Temporarily reset search_path since AutoMigrate uses unqualified table names.
-	err = db.Exec("SET search_path TO public").Error
-	require.NoError(t, err)
+	// Create event_outbox table in tenant schema.
+	// The outbox insert happens within a tenant-scoped transaction (search_path = tenant schema),
+	// so the table must exist in the tenant schema, not public.
 	err = db.AutoMigrate(&events.EventOutbox{})
 	require.NoError(t, err, "failed to create event_outbox table")
-	err = db.Exec(fmt.Sprintf("SET search_path TO %s", quotedSchema)).Error
-	require.NoError(t, err)
 
 	repo := persistence.NewRepository(db)
 	lienRepo := persistence.NewLienRepository(db)
