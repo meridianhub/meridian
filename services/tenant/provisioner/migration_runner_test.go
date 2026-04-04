@@ -498,19 +498,39 @@ func TestReadMigrationFiles_SortingConsistency(t *testing.T) {
 	assert.Equal(t, "20251205000001_b.sql", migrations[4].Filename)
 }
 
-// TestProcessMigrationSQL_CommentOnColumn_BugDocumentation documents the known bug
-// where processMigrationSQL incorrectly rewrites COMMENT ON COLUMN "party"."attributes"
-// as "org_test_tenant"."attributes" (schema.table instead of table.column).
-func TestProcessMigrationSQL_CommentOnColumn_BugDocumentation(t *testing.T) {
+// TestProcessMigrationSQL_CommentOnColumn_NotRewritten verifies that
+// processMigrationSQL preserves COMMENT ON COLUMN "party"."attributes" rather
+// than rewriting it as "org_test_tenant"."attributes" (schema.column instead
+// of table.column). In COMMENT ON COLUMN, the "schema"."table" pattern is
+// actually table.column, so schema-pattern rewriting must be skipped for
+// COMMENT statements.
+func TestProcessMigrationSQL_CommentOnColumn_NotRewritten(t *testing.T) {
 	p := newMinimalProvisioner(nil)
 	sql := `COMMENT ON COLUMN "party"."attributes" IS 'JSON attributes';`
 	result := p.processMigrationSQL(sql, "org_test_tenant")
 
-	// Known issue: "attributes" is treated as a table name instead of column name.
-	// The rewriter turns "party"."attributes" into "org_test_tenant"."attributes"
-	// which means COMMENT ON COLUMN "org_test_tenant"."attributes" - schema.table, not table.column.
-	assert.Contains(t, result, `"org_test_tenant"."attributes"`,
-		"Documents known bug: COMMENT ON COLUMN incorrectly rewritten")
+	// The table name "party" must be preserved so the column reference
+	// remains valid (table.column), not corrupted to schema.column.
+	assert.Contains(t, result, `"party"."attributes"`,
+		"COMMENT ON COLUMN must preserve table.column reference")
+	assert.NotContains(t, result, `"org_test_tenant"."attributes"`,
+		"COMMENT ON COLUMN must not be rewritten with tenant schema")
+}
+
+// TestProcessMigrationSQL_CommentOnColumn_MixedWithDDL verifies that COMMENT
+// statements are skipped while neighboring DDL is still rewritten correctly.
+func TestProcessMigrationSQL_CommentOnColumn_MixedWithDDL(t *testing.T) {
+	p := newMinimalProvisioner(nil)
+	sql := `ALTER TABLE "party"."customers" ADD COLUMN attributes JSONB;
+COMMENT ON COLUMN "party"."attributes" IS 'JSON attributes';`
+	result := p.processMigrationSQL(sql, "org_test_tenant")
+
+	// DDL reference to "party"."customers" is a real schema qualifier - rewrite it.
+	assert.Contains(t, result, `"org_test_tenant"."customers"`,
+		"ALTER TABLE schema reference must be rewritten")
+	// COMMENT ON COLUMN "party"."attributes" is table.column - leave it alone.
+	assert.Contains(t, result, `"party"."attributes"`,
+		"COMMENT ON COLUMN must preserve table.column reference")
 }
 
 // repoRoot returns the repository root by walking up from the test file location.
@@ -532,16 +552,11 @@ func TestProcessMigrationSQL_AllMigrations_Parse(t *testing.T) {
 	servicesDir := filepath.Join(root, "services")
 
 	// Known-broken migrations that produce invalid SQL through processMigrationSQL.
-	// Each entry documents the bug so the skip is auditable.
-	knownBroken := map[string]string{
-		// processMigrationSQL rewrites "schema"."column" (table.column) as
-		// "org_ci_test"."column" (schema.column) - COMMENT ON COLUMN becomes invalid.
-		// All three share the same root cause: naive string replacement treats the
-		// second identifier in COMMENT ON COLUMN as a table name.
-		"party/migrations/20260221000001_add_party_attributes.sql":          "COMMENT ON COLUMN rewrite bug: schema name replaces table name in column reference",
-		"payment-order/migrations/20251216000001_initial.sql":               "COMMENT ON COLUMN rewrite bug: payment_order schema pattern corrupts column references",
-		"payment-order/migrations/20260123000001_bucket_aware_solvency.sql": "COMMENT ON COLUMN rewrite bug: payment_order schema pattern corrupts column references",
-	}
+	// Empty after the COMMENT ON COLUMN rewriter fix: processMigrationSQL now
+	// skips COMMENT statements so previously-broken migrations parse cleanly.
+	// Left in place as an extension point for any future statement-shape bugs
+	// the rewriter cannot handle.
+	knownBroken := map[string]string{}
 
 	entries, err := os.ReadDir(servicesDir)
 	require.NoError(t, err, "failed to read services directory")
