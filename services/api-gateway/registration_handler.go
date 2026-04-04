@@ -204,8 +204,9 @@ func (h *RegistrationHandler) parseAndValidateRequest(r *http.Request) (*registr
 // These are read by the self-registered admin post-provisioning hook and cleared after
 // the identity is created, so they never persist beyond tenant activation.
 const (
-	MetaKeyRegistrationEmail        = "_registration_email"
-	MetaKeyRegistrationPasswordHash = "_registration_password_hash"
+	MetaKeyRegistrationEmail               = "_registration_email"
+	MetaKeyRegistrationPasswordHash        = "_registration_password_hash"
+	MetaKeyRegistrationEmailVerifyRequired = "_registration_email_verify_required"
 )
 
 // executeRegistration performs tenant creation and identity provisioning.
@@ -231,8 +232,9 @@ func (h *RegistrationHandler) executeRegistration(ctx context.Context, req *regi
 	// Include registration credentials in tenant metadata so the post-provisioning
 	// hook can create the admin identity after schema provisioning completes.
 	metadata := map[string]interface{}{
-		MetaKeyRegistrationEmail:        req.Email,
-		MetaKeyRegistrationPasswordHash: passwordHash,
+		MetaKeyRegistrationEmail:               req.Email,
+		MetaKeyRegistrationPasswordHash:        passwordHash,
+		MetaKeyRegistrationEmailVerifyRequired: h.emailVerificationRequired,
 	}
 
 	result, err := h.tenantCreator.CreateTenant(ctx, tenantID, req.Slug, displayName, metadata)

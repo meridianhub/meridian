@@ -44,6 +44,8 @@ func TestMetadataKeyConstants_InSyncWithGateway(t *testing.T) {
 		"bootstrap.MetaKeyRegistrationEmail must match gateway.MetaKeyRegistrationEmail")
 	assert.Equal(t, gateway.MetaKeyRegistrationPasswordHash, MetaKeyRegistrationPasswordHash,
 		"bootstrap.MetaKeyRegistrationPasswordHash must match gateway.MetaKeyRegistrationPasswordHash")
+	assert.Equal(t, gateway.MetaKeyRegistrationEmailVerifyRequired, MetaKeyRegistrationEmailVerifyRequired,
+		"bootstrap.MetaKeyRegistrationEmailVerifyRequired must match gateway.MetaKeyRegistrationEmailVerifyRequired")
 }
 
 func TestSelfRegisteredAdminHook_AsPostProvisioningHook(t *testing.T) {

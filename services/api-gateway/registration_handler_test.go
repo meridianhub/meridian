@@ -747,6 +747,7 @@ func TestRegistrationHandler_AsyncProvisioning_DefersIdentityCreation(t *testing
 	assert.Equal(t, "admin@acme.com", capturedMetadata[gateway.MetaKeyRegistrationEmail])
 	assert.Contains(t, capturedMetadata, gateway.MetaKeyRegistrationPasswordHash)
 	assert.NotEmpty(t, capturedMetadata[gateway.MetaKeyRegistrationPasswordHash])
+	assert.Contains(t, capturedMetadata, gateway.MetaKeyRegistrationEmailVerifyRequired)
 }
 
 func TestRegistrationHandler_SyncProvisioning_CreatesIdentityInline(t *testing.T) {

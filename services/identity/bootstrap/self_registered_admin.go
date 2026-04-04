@@ -30,12 +30,17 @@ type TenantMetadataStore interface {
 // (MetaKeyRegistrationEmail, MetaKeyRegistrationPasswordHash). The test file verifies
 // they stay in sync.
 const (
-	MetaKeyRegistrationEmail        = "_registration_email"
-	MetaKeyRegistrationPasswordHash = "_registration_password_hash"
+	MetaKeyRegistrationEmail               = "_registration_email"
+	MetaKeyRegistrationPasswordHash        = "_registration_password_hash"
+	MetaKeyRegistrationEmailVerifyRequired = "_registration_email_verify_required"
 )
 
-// ErrNilTenantRepo is returned when a nil tenant repository is passed to NewSelfRegisteredAdminHook.
-var ErrNilTenantRepo = errors.New("self-registered admin hook: tenant repository must not be nil")
+var (
+	// ErrNilTenantRepo is returned when a nil tenant repository is passed to NewSelfRegisteredAdminHook.
+	ErrNilTenantRepo = errors.New("self-registered admin hook: tenant repository must not be nil")
+	// ErrInvalidRegistrationMetadata is returned when registration metadata is malformed.
+	ErrInvalidRegistrationMetadata = errors.New("self-registered admin hook: invalid registration metadata")
+)
 
 // SelfRegisteredAdminHook creates self-registered admin identities from tenant
 // metadata after schema provisioning completes. It reads the admin email and
@@ -89,28 +94,29 @@ func (h *SelfRegisteredAdminHook) Provision(ctx context.Context, tenantID tenant
 	emailRaw, hasEmail := metadata[MetaKeyRegistrationEmail]
 	hashRaw, hasHash := metadata[MetaKeyRegistrationPasswordHash]
 
-	if !hasEmail || !hasHash {
+	// No registration metadata at all - not a self-registration, skip.
+	if !hasEmail && !hasHash {
 		h.logger.InfoContext(ctx, "self-registered admin hook: no registration metadata, skipping",
 			"tenant_id", tenantID)
 		return nil
 	}
 
+	// Partial metadata is an error - both keys must be present and valid.
 	email, ok := emailRaw.(string)
 	if !ok || email == "" {
-		h.logger.WarnContext(ctx, "self-registered admin hook: invalid email in metadata, skipping",
-			"tenant_id", tenantID)
-		return nil
+		return fmt.Errorf("%w: missing or invalid email for tenant %s", ErrInvalidRegistrationMetadata, tenantID)
 	}
 
 	passwordHash, ok := hashRaw.(string)
 	if !ok || passwordHash == "" {
-		h.logger.WarnContext(ctx, "self-registered admin hook: invalid password hash in metadata, skipping",
-			"tenant_id", tenantID)
-		return nil
+		return fmt.Errorf("%w: missing or invalid password hash for tenant %s", ErrInvalidRegistrationMetadata, tenantID)
 	}
 
+	// Check if email verification is required (stored by registration handler).
+	emailVerifyRequired, _ := metadata[MetaKeyRegistrationEmailVerifyRequired].(bool)
+
 	// Create the identity in the tenant's schema.
-	if err := h.createAdminIdentity(ctx, tenantID, email, passwordHash); err != nil {
+	if err := h.createAdminIdentity(ctx, tenantID, email, passwordHash, emailVerifyRequired); err != nil {
 		return fmt.Errorf("creating self-registered admin identity in tenant %s: %w", tenantID, err)
 	}
 
@@ -121,13 +127,14 @@ func (h *SelfRegisteredAdminHook) Provision(ctx context.Context, tenantID tenant
 	}
 
 	h.logger.InfoContext(ctx, "self-registered admin identity provisioned",
-		"tenant_id", tenantID,
-		"email", email)
+		"tenant_id", tenantID)
 	return nil
 }
 
-// createAdminIdentity creates an active identity with tenant-owner role.
-func (h *SelfRegisteredAdminHook) createAdminIdentity(ctx context.Context, tenantID tenant.TenantID, email, passwordHash string) error {
+// createAdminIdentity creates an identity with tenant-owner role.
+// When emailVerifyRequired is true, the identity is created in PENDING_VERIFICATION state;
+// otherwise it is activated immediately.
+func (h *SelfRegisteredAdminHook) createAdminIdentity(ctx context.Context, tenantID tenant.TenantID, email, passwordHash string, emailVerifyRequired bool) error {
 	tenantCtx := tenant.WithTenant(ctx, tenantID)
 
 	// Check if identity already exists (idempotency).
@@ -137,12 +144,16 @@ func (h *SelfRegisteredAdminHook) createAdminIdentity(ctx context.Context, tenan
 	}
 	if existing != nil {
 		h.logger.InfoContext(ctx, "self-registered admin already exists, skipping creation",
-			"tenant_id", tenantID,
-			"email", email)
+			"tenant_id", tenantID)
 		return nil
 	}
 
-	identity, err := domain.NewIdentity(tenantID, email)
+	var identity *domain.Identity
+	if emailVerifyRequired {
+		identity, err = domain.NewSelfRegisteredIdentity(tenantID, email, true)
+	} else {
+		identity, err = domain.NewIdentity(tenantID, email)
+	}
 	if err != nil {
 		return fmt.Errorf("creating identity domain object: %w", err)
 	}
@@ -151,8 +162,10 @@ func (h *SelfRegisteredAdminHook) createAdminIdentity(ctx context.Context, tenan
 		return fmt.Errorf("setting password: %w", err)
 	}
 
-	if err := identity.Activate(); err != nil {
-		return fmt.Errorf("activating identity: %w", err)
+	if !emailVerifyRequired {
+		if err := identity.Activate(); err != nil {
+			return fmt.Errorf("activating identity: %w", err)
+		}
 	}
 
 	now := time.Now()
@@ -178,7 +191,7 @@ func (h *SelfRegisteredAdminHook) clearRegistrationMetadata(ctx context.Context,
 	// Copy metadata without registration keys.
 	cleaned := make(map[string]interface{}, len(metadata))
 	for k, v := range metadata {
-		if k == MetaKeyRegistrationEmail || k == MetaKeyRegistrationPasswordHash {
+		if k == MetaKeyRegistrationEmail || k == MetaKeyRegistrationPasswordHash || k == MetaKeyRegistrationEmailVerifyRequired {
 			continue
 		}
 		cleaned[k] = v
