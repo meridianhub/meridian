@@ -1896,6 +1896,163 @@ func TestPostgresProvisioner_PostProvisioningHooks_PanicRecovery(t *testing.T) {
 	assert.Equal(t, StateActive, status.State)
 }
 
+func TestPostgresProvisioner_VerifySchemaProvisioned_SentinelTable(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("sentinel_test")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	// Create migration that creates a specific table
+	svcDir := filepath.Join(tc.migDir, "sentinel-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_init.sql", `
+		CREATE TABLE my_sentinel (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{
+				Name:          "sentinel-service",
+				MigrationPath: svcDir,
+				DatabaseURL:   tc.connStr,
+				SentinelTable: "my_sentinel",
+			},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Provision should succeed - sentinel table is created by migration
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateActive, status.State)
+}
+
+func TestPostgresProvisioner_VerifySchemaProvisioned_MissingSentinelTable(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("missing_sentinel")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	// Create migration that creates a table with a DIFFERENT name than the sentinel
+	svcDir := filepath.Join(tc.migDir, "wrong-table-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_init.sql", `
+		CREATE TABLE some_other_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{
+				Name:          "wrong-table-service",
+				MigrationPath: svcDir,
+				DatabaseURL:   tc.connStr,
+				SentinelTable: "expected_table_that_doesnt_exist",
+			},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Provision should fail verification - sentinel table doesn't exist
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrSchemaVerificationFailed)
+
+	// Status should be failed
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateFailed, status.State)
+	assert.Contains(t, status.ErrorMessage, "expected_table_that_doesnt_exist")
+}
+
+func TestPostgresProvisioner_VerifySchemaProvisioned_NoSentinelWithTables(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("no_sentinel_ok")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	// Service with no sentinel table configured but has migrations
+	svcDir := filepath.Join(tc.migDir, "no-sentinel-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	createTestMigration(t, svcDir, "20251201000000_init.sql", `
+		CREATE TABLE any_table (id UUID PRIMARY KEY DEFAULT gen_random_uuid());
+	`)
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{
+				Name:          "no-sentinel-service",
+				MigrationPath: svcDir,
+				DatabaseURL:   tc.connStr,
+				// SentinelTable intentionally empty
+			},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Should succeed - no sentinel check, tables exist
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateActive, status.State)
+}
+
+func TestPostgresProvisioner_VerifySchemaProvisioned_EmptySchemaNoSentinel(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	tenantID := tenant.MustNewTenantID("empty_schema")
+	createTestTenant(t, tc.db, tenantID.String())
+
+	// Service with no sentinel and no migrations - should succeed (e.g., internal-account)
+	svcDir := filepath.Join(tc.migDir, "empty-service")
+	require.NoError(t, os.MkdirAll(svcDir, 0o755))
+	// No migration files
+
+	config := &Config{
+		Services: []ServiceConfig{
+			{
+				Name:          "empty-service",
+				MigrationPath: svcDir,
+				DatabaseURL:   tc.connStr,
+				// SentinelTable intentionally empty
+			},
+		},
+		ProvisioningTimeout: 30 * time.Second,
+	}
+
+	prov, err := NewPostgresProvisioner(tc.db, config)
+	require.NoError(t, err)
+	defer prov.Close()
+
+	// Should succeed - empty service with no sentinel is OK
+	err = prov.ProvisionSchemas(context.Background(), tenantID)
+	require.NoError(t, err)
+
+	status, err := prov.GetProvisioningStatus(context.Background(), tenantID)
+	require.NoError(t, err)
+	assert.Equal(t, StateActive, status.State)
+}
+
 func TestNewPostgresProvisioner_NilPlatformDB(t *testing.T) {
 	config := &Config{
 		Services: []ServiceConfig{

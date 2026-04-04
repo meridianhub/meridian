@@ -297,6 +297,12 @@ type ServiceConfig struct {
 	// If empty, falls back to a constructed URL based on service name:
 	// postgres://meridian_{service}_user@cockroachdb:26257/meridian_{service}?sslmode=disable
 	DatabaseURL string
+
+	// SentinelTable is the name of a table that must exist after migrations complete.
+	// Used for post-migration verification to detect partial provisioning where
+	// the schema exists but migrations failed silently.
+	// If empty, verification checks that at least one table exists in the schema.
+	SentinelTable string
 }
 
 // PostProvisioningHook is called after successful schema provisioning for a tenant.
@@ -380,32 +386,38 @@ func DefaultConfig() *Config {
 	}
 }
 
-// defaultServiceNames lists all BIAN services that require schema provisioning.
+// defaultServiceDefs lists all BIAN services that require schema provisioning.
 // Order matters: services are provisioned in the order listed.
-var defaultServiceNames = []string{
-	"party",
-	"current-account",
-	"position-keeping",
-	"financial-accounting",
-	"payment-order",
-	"market-information",
-	"reference-data",
+// SentinelTable is the primary domain table created by the first migration;
+// its presence confirms migrations ran to completion.
+var defaultServiceDefs = []struct {
+	Name          string
+	SentinelTable string // empty for services with no provisioner-specific migrations
+}{
+	{"party", "party"},
+	{"current-account", "account"},
+	{"position-keeping", "financial_position_log"},
+	{"financial-accounting", "financial_booking_log"},
+	{"payment-order", "payment_order"},
+	{"market-information", "data_source"},
+	{"reference-data", "instrument_definition"},
 	// Services below require org_<tenant> schemas for tenant-scoped
 	// queries but have no provisioner-specific migrations.
-	"internal-account",
-	"reconciliation",
-	"identity",
-	"control-plane",
+	{"internal-account", ""},
+	{"reconciliation", ""},
+	{"identity", ""},
+	{"control-plane", ""},
 }
 
 // buildDefaultServiceConfigs constructs ServiceConfig entries for all default services.
 func buildDefaultServiceConfigs(basePath string) []ServiceConfig {
-	configs := make([]ServiceConfig, 0, len(defaultServiceNames))
-	for _, name := range defaultServiceNames {
+	configs := make([]ServiceConfig, 0, len(defaultServiceDefs))
+	for _, def := range defaultServiceDefs {
 		configs = append(configs, ServiceConfig{
-			Name:          name,
-			MigrationPath: basePath + "/" + name,
-			DatabaseURL:   getServiceDatabaseURL(name),
+			Name:          def.Name,
+			MigrationPath: basePath + "/" + def.Name,
+			DatabaseURL:   getServiceDatabaseURL(def.Name),
+			SentinelTable: def.SentinelTable,
 		})
 	}
 	return configs
