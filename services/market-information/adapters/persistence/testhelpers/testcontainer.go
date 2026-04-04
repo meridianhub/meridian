@@ -32,10 +32,8 @@ type TestContainer struct {
 // SetupTestContainer creates a PostgreSQL testcontainer with the market_information schema loaded.
 func SetupTestContainer(t *testing.T) *TestContainer {
 	t.Helper()
-
 	ctx := context.Background()
 
-	// Create PostgreSQL container with explicit wait strategy
 	pgContainer, err := postgres.Run(ctx,
 		"postgres:16-alpine",
 		postgres.WithDatabase("test_market_information"),
@@ -49,45 +47,20 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 	)
 	require.NoError(t, err, "Failed to start PostgreSQL container")
 
-	// Get connection string
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err, "Failed to get connection string")
 
-	// Create connection pool
 	poolConfig, err := pgxpool.ParseConfig(connStr)
 	require.NoError(t, err, "Failed to parse pool config")
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	require.NoError(t, err, "Failed to create connection pool")
 
-	// Load schema into public schema (used by non-tenant-scoped tests)
 	loadSchema(t, pool)
+	pool = setupMasterSchema(ctx, t, pool, poolConfig)
 
-	// Create master tenant schema with the same tables.
-	// The market-information service uses a master tenant for hierarchical lookup
-	// (shared dataset fallback). Without public in search_path, the master tenant
-	// needs its own schema with all required tables.
 	masterTenantID := "test_master"
-	masterSchema := "org_" + masterTenantID
-	_, err = pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+masterSchema)
-	require.NoError(t, err, "Failed to create master tenant schema")
-	err = loadSchemaInSchema(ctx, pool, masterSchema)
-	require.NoError(t, err, "Failed to load schema into master tenant schema")
-
-	// Set default search_path to master tenant schema for non-tenant-scoped queries.
-	// Tests that don't explicitly set a tenant context will use the master schema,
-	// matching production behavior where the master tenant is the default context.
-	_, err = pool.Exec(ctx, "ALTER DATABASE test_market_information SET search_path TO "+masterSchema)
-	require.NoError(t, err, "Failed to set default search_path")
-
-	// Reconnect to pick up the new default search_path
-	pool.Close()
-	pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
-	require.NoError(t, err, "Failed to reconnect with new search_path")
-
-	// Create repositories with test master tenant
 	repos := persistence.NewRepositories(pool, masterTenantID)
-
 	masterTID, err := tenant.NewTenantID(masterTenantID)
 	require.NoError(t, err, "Failed to parse master tenant ID")
 
@@ -97,6 +70,28 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 		Repos:          repos,
 		MasterTenantID: masterTID,
 	}
+}
+
+// setupMasterSchema creates the master tenant schema with tables and sets it as the
+// database default search_path. Returns a reconnected pool that uses the new default.
+func setupMasterSchema(ctx context.Context, t *testing.T, pool *pgxpool.Pool, poolConfig *pgxpool.Config) *pgxpool.Pool {
+	t.Helper()
+	masterSchema := "org_test_master"
+
+	_, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+masterSchema)
+	require.NoError(t, err, "Failed to create master tenant schema")
+	err = loadSchemaInSchema(ctx, pool, masterSchema)
+	require.NoError(t, err, "Failed to load schema into master tenant schema")
+
+	// Set default search_path so non-tenant-scoped queries use the master schema
+	_, err = pool.Exec(ctx, "ALTER DATABASE test_market_information SET search_path TO "+masterSchema)
+	require.NoError(t, err, "Failed to set default search_path")
+
+	// Reconnect to pick up the new default search_path
+	pool.Close()
+	pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
+	require.NoError(t, err, "Failed to reconnect with new search_path")
+	return pool
 }
 
 // Cleanup closes the connection pool and terminates the container.
@@ -124,64 +119,46 @@ func loadSchema(t *testing.T, pool *pgxpool.Pool) {
 // CreateTenantSchema creates a tenant-specific schema for testing multi-tenant scenarios.
 func (tc *TestContainer) CreateTenantSchema(tenantIDStr string) (tenant.TenantID, error) {
 	ctx := context.Background()
-
 	tenantID, err := tenant.NewTenantID(tenantIDStr)
 	if err != nil {
 		return tenant.TenantID(""), fmt.Errorf("invalid tenant ID: %w", err)
 	}
 
 	schemaName := tenantID.SchemaName()
-	// Use pgx.Identifier for proper SQL identifier quoting to prevent injection
 	quotedSchema := pgx.Identifier{schemaName}.Sanitize()
 
-	// Create schema
-	_, err = tc.Pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+quotedSchema)
-	if err != nil {
+	if _, err = tc.Pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+quotedSchema); err != nil {
 		return tenant.TenantID(""), fmt.Errorf("failed to create schema %s: %w", schemaName, err)
 	}
-
-	// Set search path and create tables in tenant schema
-	_, err = tc.Pool.Exec(ctx, "SET search_path TO "+quotedSchema)
-	if err != nil {
-		return tenant.TenantID(""), fmt.Errorf("failed to set search_path: %w", err)
-	}
-
-	// Create tenant-specific tables (same structure as public schema)
-	err = loadSchemaInSchema(ctx, tc.Pool, schemaName)
-	if err != nil {
+	if err = loadSchemaInSchema(ctx, tc.Pool, schemaName); err != nil {
 		return tenant.TenantID(""), fmt.Errorf("failed to load schema: %w", err)
 	}
 
-	// Copy shared datasets from master schema to tenant schema.
-	// Reference data is saved to the master schema (org_test_master) via the default search_path,
-	// not to public. This allows tenant observations to reference shared dataset definitions.
+	// Copy reference data from master schema (where repos save it) to tenant schema
 	masterSchema := pgx.Identifier{tc.MasterTenantID.SchemaName()}.Sanitize()
-	_, err = tc.Pool.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.dataset_definition
-		SELECT * FROM %s.dataset_definition
-		WHERE is_shared = TRUE
-	`, quotedSchema, masterSchema))
-	if err != nil {
-		return tenant.TenantID(""), fmt.Errorf("failed to copy shared datasets: %w", err)
-	}
-
-	// Copy data sources from master schema to tenant schema
-	// Data sources are needed for observations to have valid foreign keys
-	_, err = tc.Pool.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.data_source
-		SELECT * FROM %s.data_source
-	`, quotedSchema, masterSchema))
-	if err != nil {
-		return tenant.TenantID(""), fmt.Errorf("failed to copy data sources: %w", err)
-	}
-
-	// Reset search path to master schema (the database default)
-	_, err = tc.Pool.Exec(ctx, "SET search_path TO "+masterSchema)
-	if err != nil {
-		return tenant.TenantID(""), fmt.Errorf("failed to reset search_path: %w", err)
+	if err = tc.copyReferenceData(ctx, quotedSchema, masterSchema); err != nil {
+		return tenant.TenantID(""), err
 	}
 
 	return tenantID, nil
+}
+
+// copyReferenceData copies shared datasets and data sources from master to tenant schema.
+func (tc *TestContainer) copyReferenceData(ctx context.Context, tenantSchema, masterSchema string) error {
+	_, err := tc.Pool.Exec(ctx, fmt.Sprintf(
+		`INSERT INTO %s.dataset_definition SELECT * FROM %s.dataset_definition WHERE is_shared = TRUE`,
+		tenantSchema, masterSchema))
+	if err != nil {
+		return fmt.Errorf("failed to copy shared datasets: %w", err)
+	}
+
+	_, err = tc.Pool.Exec(ctx, fmt.Sprintf(
+		`INSERT INTO %s.data_source SELECT * FROM %s.data_source`,
+		tenantSchema, masterSchema))
+	if err != nil {
+		return fmt.Errorf("failed to copy data sources: %w", err)
+	}
+	return nil
 }
 
 // WithTenant wraps a context with tenant information.
