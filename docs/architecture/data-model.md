@@ -29,7 +29,9 @@ This document is the single reference for how Meridian stores relational data. I
 4. Per-service table ownership
 5. Cross-tenant access (the only permitted pattern)
 
-**Database target.** Meridian is designed to run on **CockroachDB in production**. The `develop` and `demo` environments currently run PostgreSQL 16 because it is faster to boot locally and sufficient for end-to-end testing, and CockroachDB is PostgreSQL wire-compatible. Migrations, schema DDL, and runtime SQL are therefore written to the **common subset** of PostgreSQL and CockroachDB: no PL/pgSQL, no range types (`TSTZRANGE`), no exclusion constraints, no `LISTEN/NOTIFY`, split column-add from partial-index-add, and so on. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full compatibility rules and [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for the compatibility audit. Anything in this document that says "Postgres" applies equally to CockroachDB unless explicitly noted.
+**Database target.** Meridian is designed to run on **CockroachDB in production**. The `develop` and `demo` environments currently run PostgreSQL 16 because it is faster to boot locally and sufficient for end-to-end testing, and CockroachDB is PostgreSQL wire-compatible. Migrations, schema DDL, and runtime SQL are written to the **common subset** of PostgreSQL and CockroachDB: no PL/pgSQL, no range types (`TSTZRANGE`), no exclusion constraints, no `LISTEN/NOTIFY`, split column-add from partial-index-add, and so on. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full compatibility rules and [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for the compatibility audit. Anything in this document that says "Postgres" applies equally to CockroachDB unless explicitly noted.
+
+> **Enforcement.** Atlas currently validates migrations against a `docker://postgres/16/dev` dev database. CockroachDB compatibility is enforced by **developer discipline and code review**, not by automated tooling. When adding a migration, verify it against the compatibility rules in ADR-0003 manually.
 
 ## Topology at a Glance
 
@@ -309,9 +311,11 @@ erDiagram
     PARTY_TYPE_DEFINITION {
         uuid id PK
         varchar tenant_id
-        string code
-        jsonb json_schema
-        string cel_expression
+        varchar party_type
+        text attribute_schema
+        text validation_cel
+        text eligibility_cel
+        bigint version
     }
 ```
 
@@ -353,22 +357,28 @@ erDiagram
     ACCOUNT ||--o{ WEBHOOK_DELIVERIES : notifies
     ACCOUNT {
         uuid id PK
-        string account_number
+        varchar account_id
+        varchar account_identification
+        varchar account_type
+        varchar currency
         uuid party_id
-        string status
+        bigint balance
+        bigint available_balance
+        varchar status
     }
     LIEN {
         uuid id PK
         uuid account_id FK
-        decimal amount
-        string status
-        uuid payment_order_id
+        bigint amount_cents
+        varchar currency
+        varchar status
+        varchar payment_order_reference
     }
     WITHDRAWAL {
         uuid id PK
         uuid account_id FK
-        decimal amount
-        string reference
+        bigint amount_cents
+        varchar reference
     }
 ```
 
@@ -687,7 +697,7 @@ flowchart LR
     IBA -. account_type_code .-> ATD
     POS -. instrument_code .-> INST
     IBA -. asset_code .-> INST
-    CAL -. payment_order_id .-> PMO
+    CAL -. payment_order_reference .-> PMO
     PMO -. lien_id .-> CAL
     INV -. payment_order_id .-> PMO
     FBL -. reference_id .-> FPL
@@ -734,7 +744,7 @@ Meridian uses [Atlas](https://atlasgo.io/) for schema management. Each service h
 - `services/<service>/atlas/atlas.hcl` — Atlas config (env: local, ci, production)
 - `atlas.sum` — integrity hash, must be regenerated after any migration change (`atlas migrate hash`)
 
-Atlas diffs against GORM models loaded by `utilities/atlas-loader`, which is the source of truth for desired schema. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full workflow and the CockroachDB compatibility rules that all migrations must follow (split column-add from partial-index-add, no PL/pgSQL, no range types, etc.).
+Atlas diffs against GORM models loaded by `utilities/atlas-loader`, which is the source of truth for desired schema. Atlas's dev database is `docker://postgres/16/dev`, so it validates SQL syntax against PostgreSQL - **not** against CockroachDB. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full workflow and the CockroachDB compatibility rules that developers must follow when authoring migrations (split column-add from partial-index-add, no PL/pgSQL, no range types, etc.). Compliance is enforced via code review, not tooling.
 
 ## Recent Changes
 
