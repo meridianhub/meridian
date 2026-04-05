@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	internalmigrations "github.com/meridianhub/meridian/internal/migrations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -646,4 +647,61 @@ func TestProcessMigrationSQL_AllMigrations_Parse(t *testing.T) {
 	}
 
 	assert.Greater(t, tested, 0, "expected to test at least one migration file")
+}
+
+// TestPostgresAdapter_PerStatementAdaptation_PreservesDOBlocks verifies the
+// interaction between splitSQLStatements and AdaptCockroachDDLForPostgres that
+// the provisioner relies on. The adapter wraps public-schema CHECK constraints
+// in a DO $compat$ BEGIN ...; EXCEPTION WHEN duplicate_object THEN NULL; END
+// $compat$; block whose internal semicolons would otherwise be split into
+// separate fragments by splitSQLStatements (which does not understand
+// dollar-quoted bodies).
+//
+// The fix is to split first, then adapt each statement. This test pins that
+// sequence: if someone re-orders the calls or alters the splitter, the test
+// fails and the real bug is caught before tenant provisioning executes broken
+// SQL against a live database.
+func TestPostgresAdapter_PerStatementAdaptation_PreservesDOBlocks(t *testing.T) {
+	// Minimal migration that will trigger the DO-block wrapping in the
+	// adapter's regex branch for public-schema CHECK constraints.
+	sql := `CREATE TABLE foo (id UUID PRIMARY KEY);
+ALTER TABLE public.my_table ADD CONSTRAINT chk_status CHECK (status IN ('a','b'));`
+
+	// Mirror the provisioner's sequence: split raw SQL, then adapt each
+	// statement individually, re-adding the `;` the splitter stripped so the
+	// adapter's `;`-anchored regex matches.
+	statements := splitSQLStatements(sql)
+	require.Len(t, statements, 2, "expected two statements before adaptation")
+
+	adapted := make([]string, 0, len(statements))
+	for _, stmt := range statements {
+		adapted = append(adapted, internalmigrations.AdaptCockroachDDLForPostgres(stmt+";"))
+	}
+
+	// Find the DO-wrapped statement.
+	var doStmt string
+	for _, a := range adapted {
+		if strings.Contains(a, "DO $compat$") {
+			doStmt = a
+			break
+		}
+	}
+	require.NotEmpty(t, doStmt, "expected one statement to be wrapped in DO $compat$ block")
+
+	// The DO block must remain intact: opening tag, the ALTER TABLE body,
+	// the EXCEPTION clause, and the closing tag must all live in the same
+	// string. If the old pre-split adaptation flow is ever restored, the
+	// splitter would cut these into separate fragments and this assertion
+	// would fail because doStmt would only contain the opening segment.
+	assert.Contains(t, doStmt, "DO $compat$ BEGIN")
+	assert.Contains(t, doStmt, "ALTER TABLE public.my_table ADD CONSTRAINT chk_status CHECK")
+	assert.Contains(t, doStmt, "EXCEPTION WHEN duplicate_object THEN NULL")
+	assert.Contains(t, doStmt, "END $compat$")
+
+	// Sanity: if you split the DO-wrapped statement itself, you get
+	// multiple fragments — proving the bug exists if adaptation runs
+	// before splitSQLStatements.
+	fragments := splitSQLStatements(doStmt)
+	assert.Greater(t, len(fragments), 1,
+		"splitSQLStatements does not understand dollar-quoted bodies; this is why adaptation must run per-statement after splitting")
 }

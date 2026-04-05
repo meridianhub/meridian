@@ -300,7 +300,17 @@ jobs:
             #      run against completely empty schemas, matching the E2E path
             #      which is known to pass.
             #
+            # Stop meridian-develop BEFORE resetting state. The worker polls
+            # tenant.status every 10s, so if the app is still running when we
+            # flip tenants to provisioning_pending it will race with this
+            # script: start provisioning against half-cleaned databases and
+            # then get interrupted when we issue the restart. Stopping first
+            # eliminates the race, and starting (not restarting) afterwards
+            # lets the worker observe the fully-reset state on boot.
+            #
             # Must run AFTER migrations so the provisioner uses up-to-date DDL.
+            docker compose -f docker-compose.develop.yml stop meridian-develop
+
             SERVICE_DBS="meridian_party meridian_current_account meridian_position_keeping meridian_financial_accounting meridian_payment_order meridian_market_information meridian_reference_data meridian_internal_account meridian_reconciliation meridian_identity meridian_control_plane"
             for DB in $SERVICE_DBS; do
               docker exec postgres-develop psql -U meridian -d $DB -tA -c "
@@ -315,10 +325,10 @@ jobs:
               UPDATE tenant SET status = 'provisioning_pending', updated_at = NOW() WHERE status != 'deprovisioned';
               UPDATE tenant_provisioning SET state = 'pending', service_schemas = '[]'::jsonb, error_message = '' WHERE state != 'deprovisioned';
             "
-            # Restart so the app picks up migrated schemas and provisions tenant
-            # schemas (SCHEMA_PROVISIONING_ENABLED=true). Without this, seed-dev
-            # fails on fresh databases because tenant schemas don't exist yet.
-            docker compose -f docker-compose.develop.yml restart meridian-develop
+            # Start the app back up with the reset state in place. The
+            # provisioning worker will claim the pending tenants on its first
+            # poll and re-run all migrations against the newly empty schemas.
+            docker compose -f docker-compose.develop.yml start meridian-develop
 
       - name: Seed develop data
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
