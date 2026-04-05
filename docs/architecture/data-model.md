@@ -231,7 +231,7 @@ Tables listed below live in the `org_<tenant_id>` schema of the service database
 
 The diagrams below show intra-service relationships (enforced by foreign keys inside each service database). Cross-service references - for example `current_account.account.party_id` pointing at `party.party.id` - are **not** foreign keys; they are UUIDs resolved via gRPC at write time. The final diagram shows those logical references.
 
-Audit tables (`audit_log`, `audit_outbox`, `event_outbox`) and outbox tables are present in most services but omitted from these diagrams for readability.
+Audit tables (`audit_log`, `audit_outbox`, `event_outbox`) and outbox tables are present in most services but omitted from these diagrams for readability. Attribute blocks show the most meaningful ~8-10 columns per table; housekeeping columns (`created_at`, `updated_at`, `created_by`, `updated_by`, `deleted_at`, `version`) are omitted unless they carry domain meaning. Column names and types are taken from the canonical Atlas migrations in `services/<service>/migrations/` (the source of truth for `develop` and `demo`).
 
 ### Platform Tier (`meridian_platform`)
 
@@ -243,40 +243,61 @@ erDiagram
     STAFF_USER ||--o{ API_KEY : issues
     TENANT {
         varchar id PK
-        string display_name
-        string settlement_asset
-        string status
+        varchar display_name
+        varchar settlement_asset
+        varchar subdomain
+        varchar slug
+        varchar party_id
+        varchar status
+        jsonb metadata
     }
     TENANT_PROVISIONING {
-        varchar tenant_id PK
-        string state
+        varchar tenant_id PK_FK
+        varchar state
         jsonb service_schemas
+        text error_message
     }
     TENANT_PROVISIONING_STATUS {
-        serial id PK
+        int id PK
         varchar tenant_id FK
-        string service_name
-        string status
+        varchar service_name
+        varchar status
+        varchar migration_version
+        int retry_count
     }
     MANIFEST_VERSION {
         uuid id PK
-        jsonb manifest
-        jsonb relationship_graph
+        int version
+        jsonb manifest_json
+        varchar applied_by
+        varchar apply_status
+        uuid apply_job_id
+        text diff_summary
     }
     MANIFEST_APPLY_JOB {
         uuid id PK
-        uuid manifest_version_id
+        int manifest_version
         uuid saga_execution_id
+        varchar status
+        text error
     }
     STAFF_USER {
         uuid id PK
-        string email
-        string role
+        varchar email
+        varchar name
+        varchar role
+        varchar status
+        varchar auth_provider_id
     }
     API_KEY {
         uuid id PK
         uuid staff_user_id FK
-        timestamp revoked_at
+        varchar key_prefix
+        bytea key_hash
+        text_arr scopes
+        int rate_limit_rps
+        timestamptz expires_at
+        timestamptz revoked_at
     }
 ```
 
@@ -293,20 +314,60 @@ erDiagram
     PARTY_TYPE_DEFINITION ||--o{ PARTY : typed_by
     PARTY {
         uuid id PK
-        string type
-        string status
-        string external_reference
+        varchar party_type
+        varchar legal_name
+        varchar display_name
+        varchar status
+        varchar external_reference
+        varchar external_reference_type
     }
     PARTY_ASSOCIATION {
         uuid id PK
         uuid party_id FK
         uuid related_party_id FK
-        string relationship_type
+        varchar relationship_type
+    }
+    PARTY_DEMOGRAPHIC {
+        uuid id PK
+        uuid party_id FK
+        jsonb socio_economic_data
+        jsonb employment_history
+        varchar income_level
+        varchar education_level
+    }
+    PARTY_BANK_RELATION {
+        uuid id PK
+        uuid party_id FK
+        varchar account_officer_id
+        varchar relationship_manager_id
+        varchar assigned_branch
+    }
+    PARTY_REFERENCE {
+        uuid id PK
+        uuid party_id FK
+        varchar reference_type
+        varchar reference_value
+        varchar issuing_authority
+        date expiry_date
+    }
+    PARTY_PAYMENT_METHOD {
+        uuid id PK
+        uuid party_id FK
+        varchar provider
+        varchar provider_customer_id
+        varchar provider_method_id
+        varchar method_type
+        boolean is_default
+        varchar status
     }
     PARTY_VERIFICATION {
         uuid id PK
         uuid party_id FK
-        string verification_status
+        varchar verification_id
+        varchar provider
+        varchar status
+        decimal risk_score
+        timestamptz completed_at
     }
     PARTY_TYPE_DEFINITION {
         uuid id PK
@@ -315,7 +376,7 @@ erDiagram
         text attribute_schema
         text validation_cel
         text eligibility_cel
-        bigint version
+        text error_message_cel
     }
 ```
 
@@ -329,22 +390,45 @@ erDiagram
     IDENTITY ||--o{ PASSWORD_RESET_TOKEN : resets
     IDENTITY {
         uuid id PK
-        string email
-        string status
-        string external_idp_subject
+        varchar email
+        varchar status
+        varchar password_hash
+        varchar external_idp
+        varchar external_sub
+        bigint failed_attempts
     }
     ROLE_ASSIGNMENT {
         uuid id PK
         uuid identity_id FK
-        string role
-        timestamp expires_at
-        timestamp revoked_at
+        uuid granted_by FK
+        varchar role
+        timestamptz expires_at
+        timestamptz revoked_at
+        uuid revoked_by FK
     }
     INVITATION {
         uuid id PK
         uuid identity_id FK
-        string token_hash
-        string status
+        uuid invited_by FK
+        varchar token_hash
+        timestamptz expires_at
+        varchar status
+    }
+    EMAIL_VERIFICATION_TOKEN {
+        uuid id PK
+        varchar tenant_id
+        uuid identity_id FK
+        varchar token_hash
+        timestamptz expires_at
+        timestamptz consumed_at
+    }
+    PASSWORD_RESET_TOKEN {
+        uuid id PK
+        varchar tenant_id
+        uuid identity_id FK
+        varchar token_hash
+        timestamptz expires_at
+        timestamptz consumed_at
     }
 ```
 
@@ -364,6 +448,7 @@ erDiagram
         uuid party_id
         bigint balance
         bigint available_balance
+        bigint overdraft_limit
         varchar status
     }
     LIEN {
@@ -373,12 +458,25 @@ erDiagram
         varchar currency
         varchar status
         varchar payment_order_reference
+        timestamptz expires_at
     }
     WITHDRAWAL {
         uuid id PK
         uuid account_id FK
         bigint amount_cents
+        varchar currency
+        varchar status
         varchar reference
+    }
+    WEBHOOK_DELIVERIES {
+        uuid id PK
+        varchar event_id
+        varchar event_type
+        varchar tenant_id
+        varchar account_id
+        varchar webhook_url
+        varchar status
+        int attempts
     }
 ```
 
@@ -390,23 +488,35 @@ erDiagram
     INTERNAL_BANK_ACCOUNT ||--o{ LIEN : reserves
     INTERNAL_BANK_ACCOUNT {
         uuid id PK
-        string account_type
-        string dimension
-        string asset_code
-        string status
+        varchar account_id
+        varchar account_code
+        varchar name
+        varchar account_type
+        varchar instrument_code
+        varchar dimension
+        varchar status
+        varchar correspondent_bank_id
+        jsonb attributes
     }
     INTERNAL_BANK_ACCOUNT_STATUS_HISTORY {
         uuid id PK
-        uuid account_id FK
-        string from_status
-        string to_status
+        varchar account_id FK
+        varchar from_status
+        varchar to_status
+        text reason
+        varchar changed_by
+        timestamptz changed_at
     }
     LIEN {
         uuid id PK
         uuid account_id FK
-        decimal reserved_quantity
-        decimal valued_amount
-        string status
+        bigint amount_cents
+        varchar currency
+        varchar bucket_id
+        varchar status
+        varchar payment_order_reference
+        jsonb reserved_quantity
+        jsonb valued_amount
     }
 ```
 
@@ -420,27 +530,68 @@ erDiagram
     FINANCIAL_POSITION_LOG ||--o{ MEASUREMENT : measures
     FINANCIAL_POSITION_LOG {
         uuid id PK
-        uuid reference_id
-        string status
-        decimal opening_balance
+        uuid log_id
+        varchar account_id
+        varchar current_status
+        varchar reconciliation_status
+        decimal opening_balance_amount
+        char opening_balance_currency
+        text failure_reason
     }
     TRANSACTION_LOG_ENTRY {
         uuid id PK
+        uuid entry_id
         uuid financial_position_log_id FK
-        string direction
-        decimal amount
+        uuid transaction_id
+        varchar account_id
+        bigint amount_cents
+        char currency
+        varchar direction
+        varchar source
+    }
+    AUDIT_TRAIL_ENTRY {
+        uuid id PK
+        uuid audit_id
+        uuid financial_position_log_id FK
+        varchar user_id
+        varchar action
+        text details
+        jsonb system_context
+    }
+    TRANSACTION_LINEAGE {
+        uuid id PK
+        uuid financial_position_log_id FK
+        uuid transaction_id
+        uuid parent_transaction_id
+        jsonb child_transaction_ids
+        varchar transaction_type
+    }
+    MEASUREMENT {
+        uuid id PK
+        uuid financial_position_log_id FK
+        varchar measurement_type
+        decimal value
+        varchar unit
+        jsonb metadata
     }
     POSITION {
         uuid id PK
+        varchar account_id
+        varchar instrument_code
+        varchar bucket_key
+        decimal amount
+        varchar dimension
+        jsonb attributes
         uuid reference_id
-        string dimension
-        string bucket_key
-        decimal quantity
     }
     RESERVATION {
         uuid lien_id PK
-        uuid reference_id
-        decimal projected_balance
+        varchar account_id
+        varchar instrument_code
+        varchar bucket_id
+        decimal reserved_amount
+        varchar status
+        timestamptz executed_at
     }
 ```
 
@@ -453,16 +604,24 @@ erDiagram
     FINANCIAL_BOOKING_LOG ||--o{ LEDGER_POSTING : posts
     FINANCIAL_BOOKING_LOG {
         uuid id PK
-        string idempotency_key
+        varchar financial_account_type
+        varchar product_service_reference
+        varchar business_unit_reference
         text chart_of_accounts_rules
-        string status
+        varchar base_currency
+        varchar status
+        varchar idempotency_key
     }
     LEDGER_POSTING {
         uuid id PK
         uuid financial_booking_log_id FK
-        string posting_direction
-        decimal amount
-        date value_date
+        varchar posting_direction
+        bigint amount_cents
+        varchar currency
+        varchar account_id
+        timestamptz value_date
+        varchar status
+        varchar correlation_id
     }
 ```
 
@@ -476,37 +635,70 @@ erDiagram
     SAGA_DEFINITION ||--o| SAGA_DEFINITION : superseded_by
     INSTRUMENT_DEFINITION {
         uuid id PK
-        string code
+        varchar code
         int version
-        string dimension
+        varchar dimension
         int precision
-        string status
+        varchar status
+        text validation_expression
+        text fungibility_key_expression
+        jsonb attribute_schema
+        varchar display_name
     }
     VALUATION_METHOD {
         uuid id PK
-        text starlark_script
-        timestamp valid_from
-        timestamp valid_to
-        string status
+        varchar name
+        int version
+        varchar input_instrument
+        varchar output_instrument
+        text logic_script
+        varchar logic_hash
+        text_arr required_policies
+        varchar lifecycle_status
+        boolean is_system
+        timestamptz valid_from
+        timestamptz valid_to
     }
     VALUATION_POLICY {
         uuid id PK
-        string cel_expression
+        varchar name
+        int version
+        text cel_expression
+        varchar cel_hash
+        jsonb input_schema
+        varchar output_type
         int estimated_cost
-        timestamp valid_from
+        varchar lifecycle_status
+        boolean is_system
     }
     SAGA_DEFINITION {
         uuid id PK
-        text starlark_script
+        varchar name
+        int version
+        text script
+        varchar status
+        boolean is_system
+        text preconditions_expression
         uuid successor_id FK
-        string status
     }
     ACCOUNT_TYPE_DEFINITIONS {
         uuid id PK
-        string code
+        varchar code
         int version
-        string behavior_class
+        varchar display_name
+        varchar normal_balance
+        varchar behavior_class
+        varchar instrument_code
+        text validation_cel
+        text bucketing_cel
+        jsonb attribute_schema
+        varchar status
+        boolean is_system
         uuid successor_id FK
+    }
+    ACCOUNT_TYPE_VALUATION_METHODS {
+        uuid account_type_id FK
+        uuid valuation_method_id FK
     }
 ```
 
@@ -519,34 +711,59 @@ erDiagram
     INVOICE }o--o| PAYMENT_ORDER : settled_by
     PAYMENT_ORDER {
         uuid id PK
-        string idempotency_key
-        string status
-        string lien_execution_status
+        varchar debtor_account_id
+        varchar creditor_reference
+        bigint amount_cents
+        char currency
+        varchar status
+        varchar lien_id
+        varchar gateway_reference_id
+        varchar ledger_booking_id
+        varchar idempotency_key
+        varchar lien_execution_status
     }
     SAGA_EXECUTIONS {
         uuid id PK
-        uuid payment_order_id
-        string saga_name
-        string status
+        uuid payment_order_id FK
+        varchar saga_name
+        int saga_version
+        varchar status
+        varchar correlation_id
+        jsonb input
+        jsonb output
+        bigint duration_ms
     }
     BILLING_RUN {
         uuid id PK
         varchar tenant_id
-        date period_start
-        date period_end
-        string status
+        timestamptz cycle_start
+        timestamptz cycle_end
+        varchar status
+        int dunning_level
     }
     INVOICE {
         uuid id PK
         uuid billing_run_id FK
-        uuid payment_order_id
+        varchar party_id
+        varchar account_id
+        varchar invoice_number
         jsonb line_items
+        bigint subtotal_cents
+        char currency
+        varchar status
+        uuid payment_order_id
     }
     EMAIL_OUTBOX {
         uuid id PK
         varchar tenant_id
-        string idempotency_key
-        string status
+        varchar idempotency_key
+        text_arr to_addresses
+        varchar from_address
+        varchar subject
+        varchar template_name
+        jsonb template_data
+        varchar status
+        int attempts
     }
 ```
 
@@ -560,30 +777,45 @@ erDiagram
     TENANT_DATA_ENTITLEMENTS }o--|| DATASET_DEFINITION : grants
     DATASET_DEFINITION {
         uuid id PK
-        string code
+        varchar code
         int version
-        string validation_cel
-        string status
+        varchar name
+        varchar data_category
+        text validation_expression
+        text resolution_key_expression
+        jsonb attribute_schema
+        varchar status
+        boolean is_shared
+        varchar access_level
     }
     DATA_SOURCE {
         uuid id PK
-        string name
+        varchar code
+        varchar name
         int trust_level
+        varchar status
     }
     MARKET_PRICE_OBSERVATION {
         uuid id PK
         uuid dataset_definition_id FK
         uuid data_source_id FK
+        varchar resolution_key
+        timestamptz observed_at
+        timestamptz valid_from
+        timestamptz valid_to
         int quality
-        timestamp valid_from
-        timestamp valid_to
+        numeric numeric_value
+        text text_value
         uuid superseded_by FK
+        uuid causation_id
     }
     TENANT_DATA_ENTITLEMENTS {
-        varchar tenant_id PK
-        string dataset_code PK
-        bool is_active
-        timestamp expires_at
+        uuid id PK
+        varchar tenant_id
+        varchar dataset_code
+        boolean is_active
+        timestamptz granted_at
+        timestamptz expires_at
     }
 ```
 
@@ -600,29 +832,59 @@ erDiagram
     SETTLEMENT_RUN ||--o{ BALANCE_ASSERTION : asserts
     SETTLEMENT_RUN {
         uuid id PK
-        string run_id
-        string scope
-        string settlement_type
-        string status
+        uuid run_id
+        varchar account_id
+        varchar scope
+        varchar settlement_type
+        varchar status
+        timestamptz period_start
+        timestamptz period_end
+        int variance_count
     }
     SETTLEMENT_SNAPSHOT {
         uuid id PK
+        uuid snapshot_id
         uuid run_id FK
-        decimal expected
-        decimal actual
+        varchar account_id
+        varchar instrument_code
+        decimal expected_balance
+        decimal actual_balance
         decimal variance_amount
+        varchar source_system
     }
     VARIANCE {
         uuid id PK
+        uuid variance_id
         uuid run_id FK
         uuid snapshot_id FK
-        string reason
-        string status
+        varchar account_id
+        decimal expected_amount
+        decimal actual_amount
+        decimal variance_amount
+        varchar reason
+        varchar status
+        varchar resolved_by
     }
     DISPUTE {
         uuid id PK
+        uuid dispute_id
         uuid variance_id FK
-        string status
+        uuid run_id FK
+        varchar status
+        text reason
+        text resolution
+        varchar raised_by
+    }
+    BALANCE_ASSERTION {
+        uuid id PK
+        uuid assertion_id
+        uuid run_id FK
+        varchar account_id
+        varchar instrument_code
+        text expression
+        decimal expected_balance
+        decimal actual_balance
+        varchar status
     }
 ```
 
@@ -633,26 +895,40 @@ erDiagram
     PROVIDER_CONNECTIONS ||--o{ INSTRUCTIONS : dispatches
     INSTRUCTIONS ||--o{ INSTRUCTION_ATTEMPTS : attempts
     PROVIDER_CONNECTIONS {
-        varchar tenant_id PK
+        uuid tenant_id PK
         uuid connection_id PK
-        string protocol
+        varchar provider_name
+        varchar provider_type
+        varchar protocol
+        varchar base_url
         jsonb auth_config
-        string health_status
-        string circuit_state
+        jsonb retry_policy
+        varchar health_status
+        varchar circuit_state
     }
     INSTRUCTIONS {
         uuid id PK
-        varchar tenant_id FK
+        uuid tenant_id
+        varchar instruction_type
         uuid provider_connection_id FK
-        string idempotency_key
-        string status
-        int priority
+        varchar correlation_id
+        varchar causation_id
+        jsonb payload
+        smallint priority
+        varchar status
+        timestamptz scheduled_at
+        int attempt_count
+        varchar idempotency_key
     }
     INSTRUCTION_ATTEMPTS {
         uuid id PK
         uuid instruction_id FK
         int attempt_number
-        timestamp started_at
+        timestamptz dispatched_at
+        timestamptz completed_at
+        int response_status_code
+        text error_message
+        bigint duration_ms
     }
 ```
 
