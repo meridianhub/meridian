@@ -252,7 +252,7 @@ erDiagram
         jsonb metadata
     }
     TENANT_PROVISIONING {
-        varchar tenant_id PK_FK
+        varchar tenant_id PK "FK to tenant.id"
         varchar state
         jsonb service_schemas
         text error_message
