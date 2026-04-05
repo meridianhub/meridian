@@ -1,6 +1,6 @@
 ---
 name: data-model-reference
-description: End-to-end reference for Meridian's Postgres data model - services, databases, schemas, tenant isolation, and table ownership
+description: End-to-end reference for Meridian's data model - services, databases, schemas, tenant isolation, and table ownership
 triggers:
   - Understanding how data is organised across services
   - Writing migrations or queries that cross service boundaries
@@ -11,7 +11,7 @@ triggers:
 # Meridian Data Model Reference
 
 **Document Version:** 1.0
-**Last Updated:** 2026-04-04
+**Last Updated:** 2026-04-05
 **Status:** Active
 **Related:**
 - [ADR-0002: Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
@@ -21,7 +21,7 @@ triggers:
 
 ## Overview
 
-This document is the single reference for how Meridian stores data in Postgres. It covers:
+This document is the single reference for how Meridian stores relational data. It covers:
 
 1. The database-per-service plus schema-per-tenant topology
 2. What lives in the `public` schema vs tenant (`org_<id>`) schemas
@@ -29,7 +29,9 @@ This document is the single reference for how Meridian stores data in Postgres. 
 4. Per-service table ownership
 5. Cross-tenant access (the only permitted pattern)
 
-Meridian runs on **PostgreSQL**. Earlier migrations were written to remain CockroachDB-compatible (see [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for historical context), but the current deployment target is Postgres 16.
+**Database target.** Meridian is designed to run on **CockroachDB in production**. The `develop` and `demo` environments currently run PostgreSQL 16 because it is faster to boot locally and sufficient for end-to-end testing, and CockroachDB is PostgreSQL wire-compatible. Migrations, schema DDL, and runtime SQL are written to the **common subset** of PostgreSQL and CockroachDB: no PL/pgSQL, no range types (`TSTZRANGE`), no exclusion constraints, no `LISTEN/NOTIFY`, split column-add from partial-index-add, and so on. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full compatibility rules and [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for the compatibility audit. Anything in this document that says "Postgres" applies equally to CockroachDB unless explicitly noted.
+
+> **Enforcement.** Atlas currently validates migrations against a `docker://postgres/16/dev` dev database. CockroachDB compatibility is enforced by **developer discipline and code review**, not by automated tooling. When adding a migration, verify it against the compatibility rules in ADR-0003 manually.
 
 ## Topology at a Glance
 
@@ -54,7 +56,7 @@ Meridian runs on **PostgreSQL**. Earlier migrations were written to remain Cockr
 
 **Two axes of isolation:**
 
-- **Database-per-service** — each BIAN domain service owns a distinct Postgres database (`meridian_current_account`, `meridian_party`, ...). No service reads another's database; cross-service communication is gRPC or Kafka.
+- **Database-per-service** — each BIAN domain service owns a distinct database (`meridian_current_account`, `meridian_party`, ...). No service reads another's database; cross-service communication is gRPC or Kafka.
 - **Schema-per-tenant** — within each service database, each tenant has its own schema named `org_<tenant_id>`. All tenant-owned tables are replicated into every tenant schema.
 
 Platform-level services (`control-plane`, `tenant`) share a single `meridian_platform` database and store their data in the `public` schema because their concerns span all tenants.
@@ -165,8 +167,8 @@ Tables listed below live in the `org_<tenant_id>` schema of the service database
 - `valuation_features` — per-account valuation cache
 
 **internal-account** — counterparty and operational accounts
-- `internal_bank_account` — CLEARING / NOSTRO / VOSTRO / HOLDING / SUSPENSE / REVENUE / EXPENSE / INVENTORY. Multi-asset dimension support. No balance columns — delegates to `position-keeping`.
-- `internal_bank_account_status_history` — ACTIVE / SUSPENDED / CLOSED transitions
+- `internal_account` — CLEARING / NOSTRO / VOSTRO / HOLDING / SUSPENSE / REVENUE / EXPENSE / INVENTORY. Multi-asset dimension support. No balance columns — delegates to `position-keeping`. Counterparty fields are `counterparty_id` / `counterparty_name` / `counterparty_external_ref` (renamed from `correspondent_bank_*` in 2026-02).
+- `internal_account_status_history` — ACTIVE / SUSPENDED / CLOSED transitions
 - `lien` — fund reservations with bucket-aware multi-asset valuation
 - `valuation_features`
 
@@ -225,6 +227,760 @@ Tables listed below live in the `org_<tenant_id>` schema of the service database
 **financial-gateway** — external payment provider integration
 - `event_outbox` — outbound payment instructions (most state is delegated to providers)
 
+## Entity Relationships
+
+The diagrams below show intra-service relationships (enforced by foreign keys inside each service database). Cross-service references - for example `current_account.account.party_id` pointing at `party.party.id` - are **not** foreign keys; they are UUIDs resolved via gRPC at write time. The final diagram shows those logical references.
+
+Audit tables (`audit_log`, `audit_outbox`, `event_outbox`) and outbox tables are present in most services but omitted from these diagrams for readability. Attribute blocks show the most meaningful ~8-10 columns per table; housekeeping columns (`created_at`, `updated_at`, `created_by`, `updated_by`, `deleted_at`, `version`) are omitted unless they carry domain meaning. Column names and types are taken from the canonical Atlas migrations in `services/<service>/migrations/` (the source of truth for `develop` and `demo`).
+
+### Platform Tier (`meridian_platform`)
+
+```mermaid
+erDiagram
+    TENANT ||--|| TENANT_PROVISIONING : tracks
+    TENANT ||--o{ TENANT_PROVISIONING_STATUS : per_service
+    MANIFEST_VERSION ||--o{ MANIFEST_APPLY_JOB : applies
+    STAFF_USER ||--o{ API_KEY : issues
+    TENANT {
+        varchar id PK
+        varchar display_name
+        varchar settlement_asset
+        varchar subdomain
+        varchar slug
+        varchar party_id
+        varchar status
+        jsonb metadata
+    }
+    TENANT_PROVISIONING {
+        varchar tenant_id PK "FK to tenant.id"
+        varchar state
+        jsonb service_schemas
+        text error_message
+    }
+    TENANT_PROVISIONING_STATUS {
+        int id PK
+        varchar tenant_id FK
+        varchar service_name
+        varchar status
+        varchar migration_version
+        int retry_count
+    }
+    MANIFEST_VERSION {
+        uuid id PK
+        int version
+        jsonb manifest_json
+        varchar applied_by
+        varchar apply_status
+        uuid apply_job_id
+        text diff_summary
+    }
+    MANIFEST_APPLY_JOB {
+        uuid id PK
+        int manifest_version
+        uuid saga_execution_id
+        varchar status
+        text error
+    }
+    STAFF_USER {
+        uuid id PK
+        varchar email
+        varchar name
+        varchar role
+        varchar status
+        varchar auth_provider_id
+    }
+    API_KEY {
+        uuid id PK
+        uuid staff_user_id FK
+        varchar key_prefix
+        bytea key_hash
+        text_arr scopes
+        int rate_limit_rps
+        timestamptz expires_at
+        timestamptz revoked_at
+    }
+```
+
+### Party
+
+```mermaid
+erDiagram
+    PARTY ||--o{ PARTY_ASSOCIATION : related_to
+    PARTY ||--|| PARTY_DEMOGRAPHIC : has
+    PARTY ||--|| PARTY_BANK_RELATION : has
+    PARTY ||--o{ PARTY_REFERENCE : identified_by
+    PARTY ||--o{ PARTY_PAYMENT_METHOD : pays_with
+    PARTY ||--o{ PARTY_VERIFICATION : verified_by
+    PARTY_TYPE_DEFINITION ||--o{ PARTY : typed_by
+    PARTY {
+        uuid id PK
+        varchar party_type
+        varchar legal_name
+        varchar display_name
+        varchar status
+        varchar external_reference
+        varchar external_reference_type
+    }
+    PARTY_ASSOCIATION {
+        uuid id PK
+        uuid party_id FK
+        uuid related_party_id FK
+        varchar relationship_type
+    }
+    PARTY_DEMOGRAPHIC {
+        uuid id PK
+        uuid party_id FK
+        jsonb socio_economic_data
+        jsonb employment_history
+        varchar income_level
+        varchar education_level
+    }
+    PARTY_BANK_RELATION {
+        uuid id PK
+        uuid party_id FK
+        varchar account_officer_id
+        varchar relationship_manager_id
+        varchar assigned_branch
+    }
+    PARTY_REFERENCE {
+        uuid id PK
+        uuid party_id FK
+        varchar reference_type
+        varchar reference_value
+        varchar issuing_authority
+        date expiry_date
+    }
+    PARTY_PAYMENT_METHOD {
+        uuid id PK
+        uuid party_id FK
+        varchar provider
+        varchar provider_customer_id
+        varchar provider_method_id
+        varchar method_type
+        boolean is_default
+        varchar status
+    }
+    PARTY_VERIFICATION {
+        uuid id PK
+        uuid party_id FK
+        varchar verification_id
+        varchar provider
+        varchar status
+        decimal risk_score
+        timestamptz completed_at
+    }
+    PARTY_TYPE_DEFINITION {
+        uuid id PK
+        varchar tenant_id
+        varchar party_type
+        text attribute_schema
+        text validation_cel
+        text eligibility_cel
+        text error_message_cel
+    }
+```
+
+### Identity
+
+```mermaid
+erDiagram
+    IDENTITY ||--o{ ROLE_ASSIGNMENT : granted
+    IDENTITY ||--o{ INVITATION : invited_by
+    IDENTITY ||--o{ EMAIL_VERIFICATION_TOKEN : verifies
+    IDENTITY ||--o{ PASSWORD_RESET_TOKEN : resets
+    IDENTITY {
+        uuid id PK
+        varchar email
+        varchar status
+        varchar password_hash
+        varchar external_idp
+        varchar external_sub
+        bigint failed_attempts
+    }
+    ROLE_ASSIGNMENT {
+        uuid id PK
+        uuid identity_id FK
+        uuid granted_by FK
+        varchar role
+        timestamptz expires_at
+        timestamptz revoked_at
+        uuid revoked_by FK
+    }
+    INVITATION {
+        uuid id PK
+        uuid identity_id FK
+        uuid invited_by FK
+        varchar token_hash
+        timestamptz expires_at
+        varchar status
+    }
+    EMAIL_VERIFICATION_TOKEN {
+        uuid id PK
+        varchar tenant_id
+        uuid identity_id FK
+        varchar token_hash
+        timestamptz expires_at
+        timestamptz consumed_at
+    }
+    PASSWORD_RESET_TOKEN {
+        uuid id PK
+        varchar tenant_id
+        uuid identity_id FK
+        varchar token_hash
+        timestamptz expires_at
+        timestamptz consumed_at
+    }
+```
+
+### Current Account
+
+```mermaid
+erDiagram
+    ACCOUNT ||--o{ LIEN : reserves
+    ACCOUNT ||--o{ WITHDRAWAL : debits
+    ACCOUNT ||--o{ WEBHOOK_DELIVERIES : notifies
+    ACCOUNT {
+        uuid id PK
+        varchar account_id
+        varchar account_identification
+        varchar account_type
+        varchar currency
+        uuid party_id
+        bigint balance
+        bigint available_balance
+        bigint overdraft_limit
+        varchar status
+    }
+    LIEN {
+        uuid id PK
+        uuid account_id FK
+        bigint amount_cents
+        varchar currency
+        varchar status
+        varchar payment_order_reference
+        timestamptz expires_at
+    }
+    WITHDRAWAL {
+        uuid id PK
+        uuid account_id FK
+        bigint amount_cents
+        varchar currency
+        varchar status
+        varchar reference
+    }
+    WEBHOOK_DELIVERIES {
+        uuid id PK
+        varchar event_id
+        varchar event_type
+        varchar tenant_id
+        varchar account_id
+        varchar webhook_url
+        varchar status
+        int attempts
+    }
+```
+
+### Internal Account
+
+The service is still packaged as `internal-account` but the underlying tables were renamed in PR-era 2026-02-25: `internal_bank_account` → `internal_account`, `correspondent_bank_*` → `counterparty_*`. The `lien.currency` column was subsequently renamed to `instrument_code`.
+
+```mermaid
+erDiagram
+    INTERNAL_ACCOUNT ||--o{ INTERNAL_ACCOUNT_STATUS_HISTORY : audits
+    INTERNAL_ACCOUNT ||--o{ LIEN : reserves
+    INTERNAL_ACCOUNT {
+        uuid id PK
+        varchar account_id
+        varchar account_code
+        varchar name
+        varchar account_type
+        varchar instrument_code
+        varchar dimension
+        varchar status
+        varchar counterparty_id
+        varchar counterparty_name
+        varchar counterparty_external_ref
+        jsonb attributes
+    }
+    INTERNAL_ACCOUNT_STATUS_HISTORY {
+        uuid id PK
+        varchar account_id FK
+        varchar from_status
+        varchar to_status
+        text reason
+        varchar changed_by
+        timestamptz changed_at
+    }
+    LIEN {
+        uuid id PK
+        uuid account_id FK
+        bigint amount_cents
+        varchar instrument_code
+        varchar bucket_id
+        varchar status
+        varchar payment_order_reference
+        jsonb reserved_quantity
+        jsonb valued_amount
+    }
+```
+
+### Position Keeping
+
+```mermaid
+erDiagram
+    FINANCIAL_POSITION_LOG ||--o{ TRANSACTION_LOG_ENTRY : contains
+    FINANCIAL_POSITION_LOG ||--o{ AUDIT_TRAIL_ENTRY : audits
+    FINANCIAL_POSITION_LOG ||--o{ TRANSACTION_LINEAGE : lineage
+    FINANCIAL_POSITION_LOG ||--o{ MEASUREMENT : measures
+    FINANCIAL_POSITION_LOG {
+        uuid id PK
+        uuid log_id
+        varchar account_id
+        varchar current_status
+        varchar reconciliation_status
+        decimal opening_balance_amount
+        char opening_balance_currency
+        text failure_reason
+    }
+    TRANSACTION_LOG_ENTRY {
+        uuid id PK
+        uuid entry_id
+        uuid financial_position_log_id FK
+        uuid transaction_id
+        varchar account_id
+        bigint amount_cents
+        char currency
+        varchar direction
+        varchar source
+    }
+    AUDIT_TRAIL_ENTRY {
+        uuid id PK
+        uuid audit_id
+        uuid financial_position_log_id FK
+        varchar user_id
+        varchar action
+        text details
+        jsonb system_context
+    }
+    TRANSACTION_LINEAGE {
+        uuid id PK
+        uuid financial_position_log_id FK
+        uuid transaction_id
+        uuid parent_transaction_id
+        jsonb child_transaction_ids
+        varchar transaction_type
+    }
+    MEASUREMENT {
+        uuid id PK
+        uuid financial_position_log_id FK
+        varchar measurement_type
+        decimal value
+        varchar unit
+        jsonb metadata
+    }
+    POSITION {
+        uuid id PK
+        varchar account_id
+        varchar instrument_code
+        varchar bucket_key
+        decimal amount
+        varchar dimension
+        jsonb attributes
+        uuid reference_id
+    }
+    RESERVATION {
+        uuid lien_id PK
+        varchar account_id
+        varchar instrument_code
+        varchar bucket_id
+        decimal reserved_amount
+        varchar status
+        timestamptz executed_at
+    }
+```
+
+`POSITION` is append-only and not foreign-keyed to `FINANCIAL_POSITION_LOG`; it joins by `reference_id` at read time.
+
+### Financial Accounting
+
+```mermaid
+erDiagram
+    FINANCIAL_BOOKING_LOG ||--o{ LEDGER_POSTING : posts
+    FINANCIAL_BOOKING_LOG {
+        uuid id PK
+        varchar financial_account_type
+        varchar product_service_reference
+        varchar business_unit_reference
+        text chart_of_accounts_rules
+        varchar base_currency
+        varchar status
+        varchar idempotency_key
+    }
+    LEDGER_POSTING {
+        uuid id PK
+        uuid financial_booking_log_id FK
+        varchar posting_direction
+        bigint amount_cents
+        varchar currency
+        varchar account_id
+        timestamptz value_date
+        varchar status
+        varchar correlation_id
+    }
+```
+
+### Reference Data
+
+```mermaid
+erDiagram
+    ACCOUNT_TYPE_DEFINITIONS ||--o{ ACCOUNT_TYPE_VALUATION_METHODS : valued_by
+    VALUATION_METHOD ||--o{ ACCOUNT_TYPE_VALUATION_METHODS : applied_via
+    ACCOUNT_TYPE_DEFINITIONS ||--o| ACCOUNT_TYPE_DEFINITIONS : superseded_by
+    SAGA_DEFINITION ||--o| SAGA_DEFINITION : superseded_by
+    INSTRUMENT_DEFINITION {
+        uuid id PK
+        varchar code
+        int version
+        varchar dimension
+        int precision
+        varchar status
+        text validation_expression
+        text fungibility_key_expression
+        jsonb attribute_schema
+        varchar display_name
+    }
+    VALUATION_METHOD {
+        uuid id PK
+        varchar name
+        int version
+        varchar input_instrument
+        varchar output_instrument
+        text logic_script
+        varchar logic_hash
+        text_arr required_policies
+        varchar lifecycle_status
+        boolean is_system
+        timestamptz valid_from
+        timestamptz valid_to
+    }
+    VALUATION_POLICY {
+        uuid id PK
+        varchar name
+        int version
+        text cel_expression
+        varchar cel_hash
+        jsonb input_schema
+        varchar output_type
+        int estimated_cost
+        varchar lifecycle_status
+        boolean is_system
+    }
+    SAGA_DEFINITION {
+        uuid id PK
+        varchar name
+        int version
+        text script
+        varchar status
+        boolean is_system
+        text preconditions_expression
+        uuid successor_id FK
+    }
+    ACCOUNT_TYPE_DEFINITIONS {
+        uuid id PK
+        varchar code
+        int version
+        varchar display_name
+        varchar normal_balance
+        varchar behavior_class
+        varchar instrument_code
+        text validation_cel
+        text bucketing_cel
+        jsonb attribute_schema
+        varchar status
+        boolean is_system
+        uuid successor_id FK
+    }
+    ACCOUNT_TYPE_VALUATION_METHODS {
+        uuid account_type_id FK
+        uuid valuation_method_id FK
+    }
+```
+
+### Payment Order and Billing
+
+```mermaid
+erDiagram
+    PAYMENT_ORDER ||--o{ SAGA_EXECUTIONS : runs
+    BILLING_RUN ||--o{ INVOICE : generates
+    INVOICE }o--o| PAYMENT_ORDER : settled_by
+    PAYMENT_ORDER {
+        uuid id PK
+        varchar debtor_account_id
+        varchar creditor_reference
+        bigint amount_cents
+        char currency
+        varchar status
+        varchar lien_id
+        varchar gateway_reference_id
+        varchar ledger_booking_id
+        varchar idempotency_key
+        varchar lien_execution_status
+    }
+    SAGA_EXECUTIONS {
+        uuid id PK
+        uuid payment_order_id FK
+        varchar saga_name
+        int saga_version
+        varchar status
+        varchar correlation_id
+        jsonb input
+        jsonb output
+        bigint duration_ms
+    }
+    BILLING_RUN {
+        uuid id PK
+        varchar tenant_id
+        timestamptz cycle_start
+        timestamptz cycle_end
+        varchar status
+        int dunning_level
+    }
+    INVOICE {
+        uuid id PK
+        uuid billing_run_id FK
+        varchar party_id
+        varchar account_id
+        varchar invoice_number
+        jsonb line_items
+        bigint subtotal_cents
+        char currency
+        varchar status
+        uuid payment_order_id
+    }
+    EMAIL_OUTBOX {
+        uuid id PK
+        varchar tenant_id
+        varchar idempotency_key
+        text_arr to_addresses
+        varchar from_address
+        varchar subject
+        varchar template_name
+        jsonb template_data
+        varchar status
+        int attempts
+    }
+```
+
+### Market Information
+
+```mermaid
+erDiagram
+    DATASET_DEFINITION ||--o{ MARKET_PRICE_OBSERVATION : observed_as
+    DATA_SOURCE ||--o{ MARKET_PRICE_OBSERVATION : provided_by
+    MARKET_PRICE_OBSERVATION ||--o| MARKET_PRICE_OBSERVATION : superseded_by
+    TENANT_DATA_ENTITLEMENTS }o--|| DATASET_DEFINITION : grants
+    DATASET_DEFINITION {
+        uuid id PK
+        varchar code
+        int version
+        varchar name
+        varchar data_category
+        text validation_expression
+        text resolution_key_expression
+        jsonb attribute_schema
+        varchar status
+        boolean is_shared
+        varchar access_level
+    }
+    DATA_SOURCE {
+        uuid id PK
+        varchar code
+        varchar name
+        int trust_level
+        varchar status
+    }
+    MARKET_PRICE_OBSERVATION {
+        uuid id PK
+        uuid dataset_definition_id FK
+        uuid data_source_id FK
+        varchar resolution_key
+        timestamptz observed_at
+        timestamptz valid_from
+        timestamptz valid_to
+        int quality
+        numeric numeric_value
+        text text_value
+        uuid superseded_by FK
+        uuid causation_id
+    }
+    TENANT_DATA_ENTITLEMENTS {
+        uuid id PK
+        varchar tenant_id
+        varchar dataset_code
+        boolean is_active
+        timestamptz granted_at
+        timestamptz expires_at
+    }
+```
+
+`TENANT_DATA_ENTITLEMENTS` lives in the `public` schema of `meridian_market_information` - see [Cross-Tenant Access](#cross-tenant-access).
+
+### Reconciliation
+
+```mermaid
+erDiagram
+    SETTLEMENT_RUN ||--o{ SETTLEMENT_SNAPSHOT : snapshots
+    SETTLEMENT_RUN ||--o{ VARIANCE : detects
+    SETTLEMENT_SNAPSHOT ||--o{ VARIANCE : attributed_to
+    VARIANCE ||--o{ DISPUTE : disputed_as
+    SETTLEMENT_RUN ||--o{ BALANCE_ASSERTION : asserts
+    SETTLEMENT_RUN {
+        uuid id PK
+        uuid run_id
+        varchar account_id
+        varchar scope
+        varchar settlement_type
+        varchar status
+        timestamptz period_start
+        timestamptz period_end
+        int variance_count
+    }
+    SETTLEMENT_SNAPSHOT {
+        uuid id PK
+        uuid snapshot_id
+        uuid run_id FK
+        varchar account_id
+        varchar instrument_code
+        decimal expected_balance
+        decimal actual_balance
+        decimal variance_amount
+        varchar source_system
+    }
+    VARIANCE {
+        uuid id PK
+        uuid variance_id
+        uuid run_id FK
+        uuid snapshot_id FK
+        varchar account_id
+        decimal expected_amount
+        decimal actual_amount
+        decimal variance_amount
+        varchar reason
+        varchar status
+        varchar resolved_by
+    }
+    DISPUTE {
+        uuid id PK
+        uuid dispute_id
+        uuid variance_id FK
+        uuid run_id FK
+        varchar status
+        text reason
+        text resolution
+        varchar raised_by
+    }
+    BALANCE_ASSERTION {
+        uuid id PK
+        uuid assertion_id
+        uuid run_id FK
+        varchar account_id
+        varchar instrument_code
+        text expression
+        decimal expected_balance
+        decimal actual_balance
+        varchar status
+    }
+```
+
+### Operational Gateway
+
+```mermaid
+erDiagram
+    PROVIDER_CONNECTIONS ||--o{ INSTRUCTIONS : dispatches
+    INSTRUCTIONS ||--o{ INSTRUCTION_ATTEMPTS : attempts
+    PROVIDER_CONNECTIONS {
+        uuid tenant_id PK
+        uuid connection_id PK
+        varchar provider_name
+        varchar provider_type
+        varchar protocol
+        varchar base_url
+        jsonb auth_config
+        jsonb retry_policy
+        varchar health_status
+        varchar circuit_state
+    }
+    INSTRUCTIONS {
+        uuid id PK
+        uuid tenant_id
+        varchar instruction_type
+        uuid provider_connection_id FK
+        varchar correlation_id
+        varchar causation_id
+        jsonb payload
+        smallint priority
+        varchar status
+        timestamptz scheduled_at
+        int attempt_count
+        varchar idempotency_key
+    }
+    INSTRUCTION_ATTEMPTS {
+        uuid id PK
+        uuid instruction_id FK
+        int attempt_number
+        timestamptz dispatched_at
+        timestamptz completed_at
+        int response_status_code
+        text error_message
+        bigint duration_ms
+    }
+```
+
+### Cross-Service Logical References
+
+These are UUID references resolved via gRPC at write time - there are no foreign keys crossing service boundaries. Arrows point from the holder of the reference to the authoritative owner.
+
+```mermaid
+flowchart LR
+    subgraph Party["party service"]
+        P[party]
+    end
+    subgraph CA["current-account service"]
+        ACC[account]
+        CAL[lien]
+    end
+    subgraph IA["internal-account service"]
+        IBA[internal_account]
+    end
+    subgraph PK["position-keeping service"]
+        FPL[financial_position_log]
+        POS[position]
+    end
+    subgraph FA["financial-accounting service"]
+        FBL[financial_booking_log]
+    end
+    subgraph PO["payment-order service"]
+        PMO[payment_order]
+        INV[invoice]
+    end
+    subgraph RD["reference-data service"]
+        INST[instrument_definition]
+        ATD[account_type_definitions]
+    end
+
+    ACC -. party_id .-> P
+    ACC -. account_type .-> ATD
+    IBA -. account_type .-> ATD
+    POS -. instrument_code .-> INST
+    IBA -. instrument_code .-> INST
+    CAL -. payment_order_reference .-> PMO
+    PMO -. lien_id .-> CAL
+    INV -. payment_order_id .-> PMO
+    FBL -. account_id .-> FPL
+    ACC -. account_id .-> FPL
+    IBA -. account_id .-> FPL
+```
+
 ## Cross-Tenant Access
 
 There is **exactly one** cross-tenant access pattern in the codebase:
@@ -263,7 +1019,7 @@ Meridian uses [Atlas](https://atlasgo.io/) for schema management. Each service h
 - `services/<service>/atlas/atlas.hcl` — Atlas config (env: local, ci, production)
 - `atlas.sum` — integrity hash, must be regenerated after any migration change (`atlas migrate hash`)
 
-Atlas diffs against GORM models loaded by `utilities/atlas-loader`, which is the source of truth for desired schema. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full workflow and CockroachDB-era compatibility notes that remain in the migration style (split column-add from partial-index-add, no PL/pgSQL, etc.).
+Atlas diffs against GORM models loaded by `utilities/atlas-loader`, which is the source of truth for desired schema. Atlas's dev database is `docker://postgres/16/dev`, so it validates SQL syntax against PostgreSQL - **not** against CockroachDB. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full workflow and the CockroachDB compatibility rules that developers must follow when authoring migrations (split column-add from partial-index-add, no PL/pgSQL, no range types, etc.). Compliance is enforced via code review, not tooling.
 
 ## Recent Changes
 
