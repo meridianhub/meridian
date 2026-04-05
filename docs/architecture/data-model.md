@@ -225,6 +225,477 @@ Tables listed below live in the `org_<tenant_id>` schema of the service database
 **financial-gateway** — external payment provider integration
 - `event_outbox` — outbound payment instructions (most state is delegated to providers)
 
+## Entity Relationships
+
+The diagrams below show intra-service relationships (enforced by foreign keys inside each service database). Cross-service references - for example `current_account.account.party_id` pointing at `party.party.id` - are **not** foreign keys; they are UUIDs resolved via gRPC at write time. The final diagram shows those logical references.
+
+Audit tables (`audit_log`, `audit_outbox`, `event_outbox`) and outbox tables are present in most services but omitted from these diagrams for readability.
+
+### Platform Tier (`meridian_platform`)
+
+```mermaid
+erDiagram
+    TENANT ||--|| TENANT_PROVISIONING : tracks
+    TENANT ||--o{ TENANT_PROVISIONING_STATUS : per_service
+    MANIFEST_VERSION ||--o{ MANIFEST_APPLY_JOB : applies
+    STAFF_USER ||--o{ API_KEY : issues
+    TENANT {
+        varchar id PK
+        string display_name
+        string settlement_asset
+        string status
+    }
+    TENANT_PROVISIONING {
+        varchar tenant_id PK
+        string state
+        jsonb service_schemas
+    }
+    TENANT_PROVISIONING_STATUS {
+        serial id PK
+        varchar tenant_id FK
+        string service_name
+        string status
+    }
+    MANIFEST_VERSION {
+        uuid id PK
+        jsonb manifest
+        jsonb relationship_graph
+    }
+    MANIFEST_APPLY_JOB {
+        uuid id PK
+        uuid manifest_version_id
+        uuid saga_execution_id
+    }
+    STAFF_USER {
+        uuid id PK
+        string email
+        string role
+    }
+    API_KEY {
+        uuid id PK
+        uuid staff_user_id FK
+        timestamp revoked_at
+    }
+```
+
+### Party
+
+```mermaid
+erDiagram
+    PARTY ||--o{ PARTY_ASSOCIATION : related_to
+    PARTY ||--|| PARTY_DEMOGRAPHIC : has
+    PARTY ||--|| PARTY_BANK_RELATION : has
+    PARTY ||--o{ PARTY_REFERENCE : identified_by
+    PARTY ||--o{ PARTY_PAYMENT_METHOD : pays_with
+    PARTY ||--o{ PARTY_VERIFICATION : verified_by
+    PARTY_TYPE_DEFINITION ||--o{ PARTY : typed_by
+    PARTY {
+        uuid id PK
+        string type
+        string status
+        string external_reference
+    }
+    PARTY_ASSOCIATION {
+        uuid id PK
+        uuid party_id FK
+        uuid related_party_id FK
+        string relationship_type
+    }
+    PARTY_VERIFICATION {
+        uuid id PK
+        uuid party_id FK
+        string verification_status
+    }
+    PARTY_TYPE_DEFINITION {
+        uuid id PK
+        varchar tenant_id
+        string code
+        jsonb json_schema
+        string cel_expression
+    }
+```
+
+### Identity
+
+```mermaid
+erDiagram
+    IDENTITY ||--o{ ROLE_ASSIGNMENT : granted
+    IDENTITY ||--o{ INVITATION : invited_by
+    IDENTITY ||--o{ EMAIL_VERIFICATION_TOKEN : verifies
+    IDENTITY ||--o{ PASSWORD_RESET_TOKEN : resets
+    IDENTITY {
+        uuid id PK
+        string email
+        string status
+        string external_idp_subject
+    }
+    ROLE_ASSIGNMENT {
+        uuid id PK
+        uuid identity_id FK
+        string role
+        timestamp expires_at
+        timestamp revoked_at
+    }
+    INVITATION {
+        uuid id PK
+        uuid identity_id FK
+        string token_hash
+        string status
+    }
+```
+
+### Current Account
+
+```mermaid
+erDiagram
+    ACCOUNT ||--o{ LIEN : reserves
+    ACCOUNT ||--o{ WITHDRAWAL : debits
+    ACCOUNT ||--o{ WEBHOOK_DELIVERIES : notifies
+    ACCOUNT {
+        uuid id PK
+        string account_number
+        uuid party_id
+        string status
+    }
+    LIEN {
+        uuid id PK
+        uuid account_id FK
+        decimal amount
+        string status
+        uuid payment_order_id
+    }
+    WITHDRAWAL {
+        uuid id PK
+        uuid account_id FK
+        decimal amount
+        string reference
+    }
+```
+
+### Internal Account
+
+```mermaid
+erDiagram
+    INTERNAL_BANK_ACCOUNT ||--o{ INTERNAL_BANK_ACCOUNT_STATUS_HISTORY : audits
+    INTERNAL_BANK_ACCOUNT ||--o{ LIEN : reserves
+    INTERNAL_BANK_ACCOUNT {
+        uuid id PK
+        string account_type
+        string dimension
+        string asset_code
+        string status
+    }
+    INTERNAL_BANK_ACCOUNT_STATUS_HISTORY {
+        uuid id PK
+        uuid account_id FK
+        string from_status
+        string to_status
+    }
+    LIEN {
+        uuid id PK
+        uuid account_id FK
+        decimal reserved_quantity
+        decimal valued_amount
+        string status
+    }
+```
+
+### Position Keeping
+
+```mermaid
+erDiagram
+    FINANCIAL_POSITION_LOG ||--o{ TRANSACTION_LOG_ENTRY : contains
+    FINANCIAL_POSITION_LOG ||--o{ AUDIT_TRAIL_ENTRY : audits
+    FINANCIAL_POSITION_LOG ||--o{ TRANSACTION_LINEAGE : lineage
+    FINANCIAL_POSITION_LOG ||--o{ MEASUREMENT : measures
+    FINANCIAL_POSITION_LOG {
+        uuid id PK
+        uuid reference_id
+        string status
+        decimal opening_balance
+    }
+    TRANSACTION_LOG_ENTRY {
+        uuid id PK
+        uuid financial_position_log_id FK
+        string direction
+        decimal amount
+    }
+    POSITION {
+        uuid id PK
+        uuid reference_id
+        string dimension
+        string bucket_key
+        decimal quantity
+    }
+    RESERVATION {
+        uuid lien_id PK
+        uuid reference_id
+        decimal projected_balance
+    }
+```
+
+`POSITION` is append-only and not foreign-keyed to `FINANCIAL_POSITION_LOG`; it joins by `reference_id` at read time.
+
+### Financial Accounting
+
+```mermaid
+erDiagram
+    FINANCIAL_BOOKING_LOG ||--o{ LEDGER_POSTING : posts
+    FINANCIAL_BOOKING_LOG {
+        uuid id PK
+        string idempotency_key
+        text chart_of_accounts_rules
+        string status
+    }
+    LEDGER_POSTING {
+        uuid id PK
+        uuid financial_booking_log_id FK
+        string posting_direction
+        decimal amount
+        date value_date
+    }
+```
+
+### Reference Data
+
+```mermaid
+erDiagram
+    ACCOUNT_TYPE_DEFINITIONS ||--o{ ACCOUNT_TYPE_VALUATION_METHODS : valued_by
+    VALUATION_METHOD ||--o{ ACCOUNT_TYPE_VALUATION_METHODS : applied_via
+    ACCOUNT_TYPE_DEFINITIONS ||--o| ACCOUNT_TYPE_DEFINITIONS : superseded_by
+    SAGA_DEFINITION ||--o| SAGA_DEFINITION : superseded_by
+    INSTRUMENT_DEFINITION {
+        uuid id PK
+        string code
+        int version
+        string dimension
+        int precision
+        string status
+    }
+    VALUATION_METHOD {
+        uuid id PK
+        text starlark_script
+        timestamp valid_from
+        timestamp valid_to
+        string status
+    }
+    VALUATION_POLICY {
+        uuid id PK
+        string cel_expression
+        int estimated_cost
+        timestamp valid_from
+    }
+    SAGA_DEFINITION {
+        uuid id PK
+        text starlark_script
+        uuid successor_id FK
+        string status
+    }
+    ACCOUNT_TYPE_DEFINITIONS {
+        uuid id PK
+        string code
+        int version
+        string behavior_class
+        uuid successor_id FK
+    }
+```
+
+### Payment Order and Billing
+
+```mermaid
+erDiagram
+    PAYMENT_ORDER ||--o{ SAGA_EXECUTIONS : runs
+    BILLING_RUN ||--o{ INVOICE : generates
+    INVOICE }o--o| PAYMENT_ORDER : settled_by
+    PAYMENT_ORDER {
+        uuid id PK
+        string idempotency_key
+        string status
+        string lien_execution_status
+    }
+    SAGA_EXECUTIONS {
+        uuid id PK
+        uuid payment_order_id
+        string saga_name
+        string status
+    }
+    BILLING_RUN {
+        uuid id PK
+        varchar tenant_id
+        date period_start
+        date period_end
+        string status
+    }
+    INVOICE {
+        uuid id PK
+        uuid billing_run_id FK
+        uuid payment_order_id
+        jsonb line_items
+    }
+    EMAIL_OUTBOX {
+        uuid id PK
+        varchar tenant_id
+        string idempotency_key
+        string status
+    }
+```
+
+### Market Information
+
+```mermaid
+erDiagram
+    DATASET_DEFINITION ||--o{ MARKET_PRICE_OBSERVATION : observed_as
+    DATA_SOURCE ||--o{ MARKET_PRICE_OBSERVATION : provided_by
+    MARKET_PRICE_OBSERVATION ||--o| MARKET_PRICE_OBSERVATION : superseded_by
+    TENANT_DATA_ENTITLEMENTS }o--|| DATASET_DEFINITION : grants
+    DATASET_DEFINITION {
+        uuid id PK
+        string code
+        int version
+        string validation_cel
+        string status
+    }
+    DATA_SOURCE {
+        uuid id PK
+        string name
+        int trust_level
+    }
+    MARKET_PRICE_OBSERVATION {
+        uuid id PK
+        uuid dataset_definition_id FK
+        uuid data_source_id FK
+        int quality
+        timestamp valid_from
+        timestamp valid_to
+        uuid superseded_by FK
+    }
+    TENANT_DATA_ENTITLEMENTS {
+        varchar tenant_id PK
+        string dataset_code PK
+        bool is_active
+        timestamp expires_at
+    }
+```
+
+`TENANT_DATA_ENTITLEMENTS` lives in the `public` schema of `meridian_market_information` - see [Cross-Tenant Access](#cross-tenant-access).
+
+### Reconciliation
+
+```mermaid
+erDiagram
+    SETTLEMENT_RUN ||--o{ SETTLEMENT_SNAPSHOT : snapshots
+    SETTLEMENT_RUN ||--o{ VARIANCE : detects
+    SETTLEMENT_SNAPSHOT ||--o{ VARIANCE : attributed_to
+    VARIANCE ||--o{ DISPUTE : disputed_as
+    SETTLEMENT_RUN ||--o{ BALANCE_ASSERTION : asserts
+    SETTLEMENT_RUN {
+        uuid id PK
+        string run_id
+        string scope
+        string settlement_type
+        string status
+    }
+    SETTLEMENT_SNAPSHOT {
+        uuid id PK
+        uuid run_id FK
+        decimal expected
+        decimal actual
+        decimal variance_amount
+    }
+    VARIANCE {
+        uuid id PK
+        uuid run_id FK
+        uuid snapshot_id FK
+        string reason
+        string status
+    }
+    DISPUTE {
+        uuid id PK
+        uuid variance_id FK
+        string status
+    }
+```
+
+### Operational Gateway
+
+```mermaid
+erDiagram
+    PROVIDER_CONNECTIONS ||--o{ INSTRUCTIONS : dispatches
+    INSTRUCTIONS ||--o{ INSTRUCTION_ATTEMPTS : attempts
+    PROVIDER_CONNECTIONS {
+        varchar tenant_id PK
+        uuid connection_id PK
+        string protocol
+        jsonb auth_config
+        string health_status
+        string circuit_state
+    }
+    INSTRUCTIONS {
+        uuid id PK
+        varchar tenant_id FK
+        uuid provider_connection_id FK
+        string idempotency_key
+        string status
+        int priority
+    }
+    INSTRUCTION_ATTEMPTS {
+        uuid id PK
+        uuid instruction_id FK
+        int attempt_number
+        timestamp started_at
+    }
+```
+
+### Cross-Service Logical References
+
+These are UUID references resolved via gRPC at write time - there are no foreign keys crossing service boundaries. Arrows point from the holder of the reference to the authoritative owner.
+
+```mermaid
+flowchart LR
+    subgraph Party["party service"]
+        P[party]
+    end
+    subgraph CA["current-account service"]
+        ACC[account]
+        CAL[lien]
+    end
+    subgraph IA["internal-account service"]
+        IBA[internal_bank_account]
+    end
+    subgraph PK["position-keeping service"]
+        FPL[financial_position_log]
+        POS[position]
+    end
+    subgraph FA["financial-accounting service"]
+        FBL[financial_booking_log]
+    end
+    subgraph PO["payment-order service"]
+        PMO[payment_order]
+        INV[invoice]
+    end
+    subgraph RD["reference-data service"]
+        INST[instrument_definition]
+        ATD[account_type_definitions]
+    end
+    subgraph MI["market-information service"]
+        OBS[market_price_observation]
+    end
+
+    ACC -. party_id .-> P
+    IBA -. counterparty_party_id .-> P
+    ACC -. account_type_code .-> ATD
+    IBA -. account_type_code .-> ATD
+    POS -. instrument_code .-> INST
+    IBA -. asset_code .-> INST
+    CAL -. payment_order_id .-> PMO
+    PMO -. lien_id .-> CAL
+    INV -. payment_order_id .-> PMO
+    FBL -. reference_id .-> FPL
+    ACC -. balance_ref .-> FPL
+    IBA -. balance_ref .-> FPL
+    OBS -. dataset .-> INST
+```
+
 ## Cross-Tenant Access
 
 There is **exactly one** cross-tenant access pattern in the codebase:
