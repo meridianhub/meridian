@@ -597,7 +597,7 @@ func TestSagaMigration_SchemaIsolation(t *testing.T) {
 	t.Run("same name+version can exist in different tenants", func(t *testing.T) {
 		// Insert same name+version in each tenant
 		for _, tenant := range tenants {
-			_, err := tc.pool.Exec(ctx, `SET search_path TO `+tenant)
+			_, err := tc.pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(tenant)))
 			require.NoError(t, err)
 			_, err = tc.pool.Exec(ctx, `
 				INSERT INTO saga_definition (id, name, version, script, status)
@@ -608,7 +608,7 @@ func TestSagaMigration_SchemaIsolation(t *testing.T) {
 
 		// Verify each tenant has exactly one record
 		for _, tenant := range tenants {
-			_, err := tc.pool.Exec(ctx, `SET search_path TO `+tenant)
+			_, err := tc.pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(tenant)))
 			require.NoError(t, err)
 
 			var count int

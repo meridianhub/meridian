@@ -576,13 +576,14 @@ func TestRegistryHandler_TenantOverride(t *testing.T) {
 
 	ctx := tenant.WithTenant(context.Background(), tenantID)
 	schemaName := tenantID.SchemaName()
+	quoted := pq.QuoteIdentifier(schemaName)
 
 	// Seed a system saga
-	_, err := pool.Exec(ctx, `
-		INSERT INTO `+schemaName+`.saga_definition
+	_, err := pool.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.saga_definition
 			(name, version, script, status, is_system, display_name, activated_at)
 		VALUES
-			('system_saga', 1, 'saga(name="system_saga")', 'ACTIVE', true, 'System Saga', now())`)
+			('system_saga', 1, 'saga(name="system_saga")', 'ACTIVE', true, 'System Saga', now())`, quoted))
 	require.NoError(t, err)
 
 	registry := NewPostgresRegistry(pool, nil)
@@ -614,9 +615,9 @@ func TestRegistryHandler_TenantOverride(t *testing.T) {
 	t.Run("cannot modify system saga", func(t *testing.T) {
 		// Try to get the system saga's ID
 		var systemID string
-		err := pool.QueryRow(ctx, `
-			SELECT id FROM `+schemaName+`.saga_definition
-			WHERE name = 'system_saga' AND is_system = true`).Scan(&systemID)
+		err := pool.QueryRow(ctx, fmt.Sprintf(`
+			SELECT id FROM %s.saga_definition
+			WHERE name = 'system_saga' AND is_system = true`, quoted)).Scan(&systemID)
 		require.NoError(t, err)
 
 		// Try to update it
@@ -1077,11 +1078,11 @@ func TestRegistryHandler_ListSagas_Pagination(t *testing.T) {
 	t.Run("ExcludeSystem filter", func(t *testing.T) {
 		// Insert a system saga directly
 		schemaName := tenantID.SchemaName()
-		_, err := pool.Exec(ctx, `
-			INSERT INTO `+schemaName+`.saga_definition
+		_, err := pool.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO %s.saga_definition
 				(name, version, script, status, is_system)
 			VALUES
-				('system_list_test', 1, 'saga(name="system")', 'DRAFT', true)`)
+				('system_list_test', 1, 'saga(name="system")', 'DRAFT', true)`, pq.QuoteIdentifier(schemaName)))
 		require.NoError(t, err)
 
 		// Without ExcludeSystem — system saga should be present

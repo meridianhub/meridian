@@ -597,7 +597,7 @@ func TestMigration_SchemaIsolation(t *testing.T) {
 	t.Run("same code+version can exist in different tenants", func(t *testing.T) {
 		// Insert same code+version in each tenant
 		for _, tenant := range tenants {
-			_, err := tc.pool.Exec(ctx, `SET search_path TO `+tenant)
+			_, err := tc.pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(tenant)))
 			require.NoError(t, err)
 			_, err = tc.pool.Exec(ctx, `
 				INSERT INTO instrument_definition (id, code, version, dimension, precision, status, fungibility_key_expression)
@@ -608,7 +608,7 @@ func TestMigration_SchemaIsolation(t *testing.T) {
 
 		// Verify each tenant has exactly one record
 		for _, tenant := range tenants {
-			_, err := tc.pool.Exec(ctx, `SET search_path TO `+tenant)
+			_, err := tc.pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(tenant)))
 			require.NoError(t, err)
 
 			var count int
