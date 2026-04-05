@@ -366,8 +366,14 @@ func (p *PostgresProvisioner) processMigrationSQL(sql, schemaName string) string
 	}
 	sql = strings.Join(filteredLines, "\n")
 
-	// Replace hardcoded schema references with the tenant schema
-	// Common patterns in the codebase: "current_account"."table", "party"."table", etc.
+	// Replace hardcoded schema references with the tenant schema.
+	// Applied per-statement so COMMENT ON COLUMN can be skipped: in
+	// COMMENT ON COLUMN "party"."attributes", the second identifier is a
+	// column name, not a table name. The naive rewriter would replace
+	// the table name "party" with the schema name, producing
+	// COMMENT ON COLUMN "org_tenant"."attributes" which Postgres parses
+	// as schema.table (missing the column component) and fails with
+	// "relation does not exist".
 	schemaPatterns := []string{
 		"current_account",
 		"party",
@@ -376,14 +382,82 @@ func (p *PostgresProvisioner) processMigrationSQL(sql, schemaName string) string
 		"payment_order",
 	}
 
-	for _, pattern := range schemaPatterns {
-		// Replace "schema"."table" with "tenant_schema"."table"
-		sql = strings.ReplaceAll(sql, `"`+pattern+`".`, `"`+schemaName+`".`)
-		// Also handle unquoted references
-		sql = strings.ReplaceAll(sql, pattern+".", schemaName+".")
+	statements := splitSQLStatements(sql)
+	rewritten := make([]string, 0, len(statements))
+	for _, stmt := range statements {
+		if isCommentStatement(stmt) {
+			rewritten = append(rewritten, stmt)
+			continue
+		}
+		for _, pattern := range schemaPatterns {
+			// Replace "schema"."table" with "tenant_schema"."table"
+			stmt = strings.ReplaceAll(stmt, `"`+pattern+`".`, `"`+schemaName+`".`)
+			// Also handle unquoted references
+			stmt = strings.ReplaceAll(stmt, pattern+".", schemaName+".")
+		}
+		rewritten = append(rewritten, stmt)
 	}
 
-	return sql
+	// Rejoin with semicolon terminators so the downstream splitSQLStatements
+	// call in applyMigrationList produces the same statement list.
+	if len(rewritten) == 0 {
+		return ""
+	}
+	return strings.Join(rewritten, ";\n") + ";"
+}
+
+// isCommentStatement reports whether the given SQL statement is a COMMENT
+// statement (COMMENT ON TABLE/COLUMN/INDEX/etc). These must not be rewritten
+// by the schema-pattern replacer because "table"."column" in COMMENT ON COLUMN
+// is a column reference, not a schema qualifier.
+//
+// Leading whitespace, line comments (-- ...), and block comments (/* ... */)
+// are stripped before checking for the COMMENT keyword so a statement like
+// "/* audit */ COMMENT ON COLUMN ..." is still recognized.
+func isCommentStatement(stmt string) bool {
+	rest, ok := stripLeadingNoise(stmt)
+	if !ok {
+		return false
+	}
+	// First real token - check for COMMENT keyword followed by whitespace or end.
+	const keyword = "COMMENT"
+	if len(rest) < len(keyword) || !strings.EqualFold(rest[:len(keyword)], keyword) {
+		return false
+	}
+	if len(rest) == len(keyword) {
+		return true
+	}
+	next := rest[len(keyword)]
+	return next == ' ' || next == '\t' || next == '\n' || next == '\r'
+}
+
+// stripLeadingNoise removes leading whitespace, SQL line comments (-- ...),
+// and block comments (/* ... */) from a SQL fragment. Returns the remaining
+// text and true on success, or "" and false if the fragment contains only
+// noise or an unterminated block comment.
+func stripLeadingNoise(s string) (string, bool) {
+	for {
+		s = strings.TrimLeft(s, " \t\r\n")
+		if s == "" {
+			return "", false
+		}
+		if strings.HasPrefix(s, "--") {
+			if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+				s = s[nl+1:]
+				continue
+			}
+			return "", false
+		}
+		if strings.HasPrefix(s, "/*") {
+			end := strings.Index(s[2:], "*/")
+			if end < 0 {
+				return "", false // unterminated block comment
+			}
+			s = s[2+end+2:]
+			continue
+		}
+		return s, true
+	}
 }
 
 // splitSQLStatements splits SQL content into individual statements.

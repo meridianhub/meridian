@@ -155,29 +155,30 @@ jobs:
             --migrate \
             --database-url "postgres://root@localhost:26257/defaultdb?sslmode=disable"
 
+      - name: Stage tenant migration files for provisioner
+        run: |
+          # The schema provisioner reads per-service migrations from
+          # MIGRATIONS_BASE_PATH/<service>/*.sql. In the Docker image this is
+          # /migrations/<service>, but the E2E runner runs the binary directly
+          # from dist/. Stage a flat layout under /tmp/provisioner-migrations
+          # so the provisioner can apply each service's migrations to the
+          # org_<tenant> schema when InitiateTenant fires.
+          mkdir -p /tmp/provisioner-migrations
+          for SVC in party current-account position-keeping financial-accounting payment-order market-information reference-data internal-account reconciliation identity control-plane; do
+            if [ -d "services/${SVC}/migrations" ]; then
+              cp -r "services/${SVC}/migrations" "/tmp/provisioner-migrations/${SVC}"
+            fi
+          done
+
       - name: Start meridian backend
         run: |
           DATABASE_URL="postgres://root@localhost:26257/defaultdb?sslmode=disable" \
           LOCAL_DEV_MODE=true \
           AUTH_ENABLED=false \
           SAGA_ASSET_DIR="$(pwd)" \
+          SCHEMA_PROVISIONING_ENABLED=true \
+          MIGRATIONS_BASE_PATH=/tmp/provisioner-migrations \
             ./dist/meridian >/tmp/meridian.log 2>&1 &
-
-      - name: Provision tenant schemas
-        run: |
-          # The schema provisioner is not wired into the tenant service yet,
-          # so tenants are created as immediately ACTIVE without schemas.
-          # WithGormTenantScope validates schema existence (fail-fast), so
-          # we must create org schemas in each service database before use.
-          COCKROACH="docker exec cockroachdb cockroach sql --insecure"
-          SERVICE_DBS="meridian_party meridian_current_account meridian_position_keeping meridian_financial_accounting meridian_payment_order meridian_market_information meridian_reference_data meridian_internal_account meridian_reconciliation meridian_forecasting meridian_operational_gateway meridian_financial_gateway meridian_control_plane"
-          for TENANT in dev_tenant acme_corp energy_co; do
-            SCHEMA="org_${TENANT}"
-            for DB in $SERVICE_DBS; do
-              $COCKROACH -d "$DB" -e "CREATE SCHEMA IF NOT EXISTS \"${SCHEMA}\"" 2>/dev/null || true
-            done
-            echo "Created schema ${SCHEMA} in all service databases"
-          done
 
       - name: Seed dev tenant and apply manifest
         run: |
