@@ -286,12 +286,24 @@ jobs:
             #   - tenants stuck in "pending" or "failed" from a prior broken deploy
             #   - tenants with service_schemas entries marked "migrated" but whose
             #     physical tables were never created (silent-success state)
-            # service_schemas is cleared to '[]' so provisionAllServices does not
-            # short-circuit via "service already provisioned, skipping".
+            #
+            # Two tables must be reset in tandem because the code tracks
+            # provisioning state in two places:
+            #   - tenant.status: the provisioning worker polls this via
+            #     ListByStatus(StatusProvisioningPending) (provisioning_worker.go).
+            #     Without resetting this, the worker never claims the tenant for
+            #     re-provisioning regardless of what tenant_provisioning says.
+            #   - tenant_provisioning.service_schemas: the provisioner checks this
+            #     JSONB per-service and short-circuits via "service already
+            #     provisioned, skipping" (postgres_provisioner.go) if an entry is
+            #     marked 'migrated'. Clearing to '[]' forces a full re-run.
+            #
             # Must run AFTER migrations so the provisioner uses up-to-date DDL.
             # Safe when schemas already exist (CREATE SCHEMA IF NOT EXISTS).
-            docker exec postgres-develop psql -U meridian -d meridian_platform -c \
-              "UPDATE tenant_provisioning SET state = 'pending', service_schemas = '[]'::jsonb, error_message = '' WHERE state != 'deprovisioned'"
+            docker exec postgres-develop psql -U meridian -d meridian_platform -c "
+              UPDATE tenant SET status = 'provisioning_pending', updated_at = NOW() WHERE status != 'deprovisioned';
+              UPDATE tenant_provisioning SET state = 'pending', service_schemas = '[]'::jsonb, error_message = '' WHERE state != 'deprovisioned';
+            "
             # Restart so the app picks up migrated schemas and provisions tenant
             # schemas (SCHEMA_PROVISIONING_ENABLED=true). Without this, seed-dev
             # fails on fresh databases because tenant schemas don't exist yet.
