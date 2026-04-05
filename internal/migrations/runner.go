@@ -403,7 +403,7 @@ func applyDatabaseMigrations(ctx context.Context, dsn, dbName string, migrations
 
 		sql := m.sql
 		if driver == DriverPostgres {
-			sql = adaptCockroachDDLForPostgres(sql)
+			sql = AdaptCockroachDDLForPostgres(sql)
 		}
 
 		if _, err := conn.Exec(ctx, sql); err != nil {
@@ -597,15 +597,18 @@ func runPostgresPreMigrationFixups(ctx context.Context, superuserDSN string, dri
 	return nil
 }
 
-// adaptCockroachDDLForPostgres rewrites CockroachDB-specific DDL to work on PostgreSQL.
+// AdaptCockroachDDLForPostgres rewrites CockroachDB-specific DDL to work on PostgreSQL.
 //
 // Migrations are written for CockroachDB (production). When running against
-// PostgreSQL (demo, local dev), this function translates known incompatibilities:
+// PostgreSQL (demo, develop, local dev), this function translates known
+// incompatibilities:
 //   - DROP INDEX CASCADE for unique constraints -> ALTER TABLE DROP CONSTRAINT
 //   - ADD CONSTRAINT [IF NOT EXISTS] CHECK on public-schema tables -> idempotent DO block
 //
 // This mirrors shared/platform/testdb/pgx.go:adaptCockroachDDLForPostgres.
-func adaptCockroachDDLForPostgres(sql string) string {
+// Exported so both the CLI --migrate path and the tenant provisioner can apply
+// the same adaptations when running migrations against a PostgreSQL backend.
+func AdaptCockroachDDLForPostgres(sql string) string {
 	// CockroachDB uses DROP INDEX CASCADE for unique constraints;
 	// PostgreSQL requires ALTER TABLE DROP CONSTRAINT.
 	sql = strings.ReplaceAll(sql,

@@ -280,26 +280,37 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd /opt/meridian-develop
-            # Reset tenant provisioning state so every deploy re-runs schema
-            # migrations against tenant schemas. This catches:
-            #   - stale "active" tenants whose schemas are missing (fresh DBs)
-            #   - tenants stuck in "pending" or "failed" from a prior broken deploy
-            #   - tenants with service_schemas entries marked "migrated" but whose
-            #     physical tables were never created (silent-success state)
+            # Reset tenant provisioning state and drop tenant schemas so every
+            # deploy re-provisions from scratch. Three states must be reconciled:
             #
-            # Two tables must be reset in tandem because the code tracks
-            # provisioning state in two places:
-            #   - tenant.status: the provisioning worker polls this via
-            #     ListByStatus(StatusProvisioningPending) (provisioning_worker.go).
-            #     Without resetting this, the worker never claims the tenant for
-            #     re-provisioning regardless of what tenant_provisioning says.
-            #   - tenant_provisioning.service_schemas: the provisioner checks this
-            #     JSONB per-service and short-circuits via "service already
-            #     provisioned, skipping" (postgres_provisioner.go) if an entry is
-            #     marked 'migrated'. Clearing to '[]' forces a full re-run.
+            #   1. tenant.status - the provisioning worker polls this via
+            #      ListByStatus(StatusProvisioningPending) (provisioning_worker.go).
+            #      Without resetting, the worker never claims the tenant.
+            #
+            #   2. tenant_provisioning.service_schemas - the provisioner checks
+            #      this JSONB per-service and short-circuits via "service already
+            #      provisioned, skipping" (postgres_provisioner.go). Clearing to
+            #      '[]' forces a full re-run of the loop.
+            #
+            #   3. Physical org_<tenant> schemas in each service database - if
+            #      left in place they may contain partial/stale tables from a
+            #      previous broken run, causing migrations to fail with "relation
+            #      does not exist" when they reference objects that got renamed
+            #      or dropped earlier. DROP SCHEMA CASCADE ensures migrations
+            #      run against completely empty schemas, matching the E2E path
+            #      which is known to pass.
             #
             # Must run AFTER migrations so the provisioner uses up-to-date DDL.
-            # Safe when schemas already exist (CREATE SCHEMA IF NOT EXISTS).
+            SERVICE_DBS="meridian_party meridian_current_account meridian_position_keeping meridian_financial_accounting meridian_payment_order meridian_market_information meridian_reference_data meridian_internal_account meridian_reconciliation meridian_identity meridian_control_plane"
+            for DB in $SERVICE_DBS; do
+              docker exec postgres-develop psql -U meridian -d $DB -tA -c "
+                SELECT format('DROP SCHEMA IF EXISTS %I CASCADE', nspname)
+                FROM pg_namespace WHERE nspname LIKE 'org\_%' ESCAPE '\\'
+              " | while read stmt; do
+                [ -z "$stmt" ] && continue
+                docker exec postgres-develop psql -U meridian -d $DB -c "$stmt"
+              done
+            done
             docker exec postgres-develop psql -U meridian -d meridian_platform -c "
               UPDATE tenant SET status = 'provisioning_pending', updated_at = NOW() WHERE status != 'deprovisioned';
               UPDATE tenant_provisioning SET state = 'pending', service_schemas = '[]'::jsonb, error_message = '' WHERE state != 'deprovisioned';
