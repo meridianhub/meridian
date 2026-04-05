@@ -1,6 +1,6 @@
 ---
 name: data-model-reference
-description: End-to-end reference for Meridian's Postgres data model - services, databases, schemas, tenant isolation, and table ownership
+description: End-to-end reference for Meridian's data model - services, databases, schemas, tenant isolation, and table ownership
 triggers:
   - Understanding how data is organised across services
   - Writing migrations or queries that cross service boundaries
@@ -11,7 +11,7 @@ triggers:
 # Meridian Data Model Reference
 
 **Document Version:** 1.0
-**Last Updated:** 2026-04-04
+**Last Updated:** 2026-04-05
 **Status:** Active
 **Related:**
 - [ADR-0002: Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
@@ -21,7 +21,7 @@ triggers:
 
 ## Overview
 
-This document is the single reference for how Meridian stores data in Postgres. It covers:
+This document is the single reference for how Meridian stores relational data. It covers:
 
 1. The database-per-service plus schema-per-tenant topology
 2. What lives in the `public` schema vs tenant (`org_<id>`) schemas
@@ -29,7 +29,7 @@ This document is the single reference for how Meridian stores data in Postgres. 
 4. Per-service table ownership
 5. Cross-tenant access (the only permitted pattern)
 
-Meridian runs on **PostgreSQL**. Earlier migrations were written to remain CockroachDB-compatible (see [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for historical context), but the current deployment target is Postgres 16.
+**Database target.** Meridian is designed to run on **CockroachDB in production**. The `develop` and `demo` environments currently run PostgreSQL 16 because it is faster to boot locally and sufficient for end-to-end testing, and CockroachDB is PostgreSQL wire-compatible. Migrations, schema DDL, and runtime SQL are therefore written to the **common subset** of PostgreSQL and CockroachDB: no PL/pgSQL, no range types (`TSTZRANGE`), no exclusion constraints, no `LISTEN/NOTIFY`, split column-add from partial-index-add, and so on. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full compatibility rules and [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for the compatibility audit. Anything in this document that says "Postgres" applies equally to CockroachDB unless explicitly noted.
 
 ## Topology at a Glance
 
@@ -54,7 +54,7 @@ Meridian runs on **PostgreSQL**. Earlier migrations were written to remain Cockr
 
 **Two axes of isolation:**
 
-- **Database-per-service** — each BIAN domain service owns a distinct Postgres database (`meridian_current_account`, `meridian_party`, ...). No service reads another's database; cross-service communication is gRPC or Kafka.
+- **Database-per-service** — each BIAN domain service owns a distinct database (`meridian_current_account`, `meridian_party`, ...). No service reads another's database; cross-service communication is gRPC or Kafka.
 - **Schema-per-tenant** — within each service database, each tenant has its own schema named `org_<tenant_id>`. All tenant-owned tables are replicated into every tenant schema.
 
 Platform-level services (`control-plane`, `tenant`) share a single `meridian_platform` database and store their data in the `public` schema because their concerns span all tenants.
@@ -263,7 +263,7 @@ Meridian uses [Atlas](https://atlasgo.io/) for schema management. Each service h
 - `services/<service>/atlas/atlas.hcl` — Atlas config (env: local, ci, production)
 - `atlas.sum` — integrity hash, must be regenerated after any migration change (`atlas migrate hash`)
 
-Atlas diffs against GORM models loaded by `utilities/atlas-loader`, which is the source of truth for desired schema. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full workflow and CockroachDB-era compatibility notes that remain in the migration style (split column-add from partial-index-add, no PL/pgSQL, etc.).
+Atlas diffs against GORM models loaded by `utilities/atlas-loader`, which is the source of truth for desired schema. See [ADR-0003](../adr/0003-database-schema-migrations.md) for the full workflow and the CockroachDB compatibility rules that all migrations must follow (split column-add from partial-index-add, no PL/pgSQL, no range types, etc.).
 
 ## Recent Changes
 

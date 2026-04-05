@@ -153,7 +153,7 @@ Database: meridian_current_account
        └── Tables: account, lien, audit_log, audit_outbox
 ```
 
-- Each service has its own PostgreSQL database
+- Each service has its own database (PostgreSQL in develop/demo, CockroachDB in production)
 - Each organization gets its own schema within each service database
 - The search_path is set transactionally via `SET LOCAL search_path TO org_<id>` by `shared/platform/db/gorm_tenant_scope.go`
 - Queries use unqualified table names; PostgreSQL resolves via `search_path`
@@ -485,11 +485,11 @@ If migrating from golang-migrate:
 * Maintain migration history (no need to replay all migrations)
 * Continue using immutability principles
 
-### CockroachDB Compatibility Considerations (Historical)
+### CockroachDB Compatibility Considerations
 
-> **Note:** Meridian now targets PostgreSQL 16 exclusively. The constraints below are retained because existing migrations were authored under CockroachDB compatibility rules and continue to follow them (no PL/pgSQL, split column-add from partial-index-add, explicit timestamp columns instead of range types). New migrations should follow the same conventions for consistency, but the underlying runtime is Postgres. See [data-model.md](../architecture/data-model.md) for the current topology and [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for historical context.
+> **Production target:** Meridian's production deployment target is **CockroachDB**. The `develop` and `demo` environments currently run PostgreSQL 16 (faster local boot, wire-compatible), but every migration and runtime SQL path must work unchanged on CockroachDB. The constraints below are binding for all new migrations. See [data-model.md](../architecture/data-model.md) for the current topology and [docs/reports/cockroachdb-migration-audit.md](../reports/cockroachdb-migration-audit.md) for the compatibility audit.
 
-While CockroachDB is PostgreSQL-compatible, some PostgreSQL features are **not supported**:
+While CockroachDB is PostgreSQL wire-compatible, some PostgreSQL features are **not supported**:
 
 | Feature | PostgreSQL | CockroachDB | Workaround |
 |---------|------------|-------------|------------|
