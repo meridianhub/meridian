@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/operational-gateway/adapters/passthrough"
 	"github.com/meridianhub/meridian/services/operational-gateway/adapters/persistence"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
@@ -165,7 +166,7 @@ func fixHealthStatusCheck(db *gorm.DB) error {
 		return nil // no constraint to fix
 	}
 
-	if err := db.Exec("ALTER TABLE provider_connections DROP CONSTRAINT " + constraintName).Error; err != nil {
+	if err := db.Exec(fmt.Sprintf("ALTER TABLE provider_connections DROP CONSTRAINT %s", pq.QuoteIdentifier(constraintName))).Error; err != nil {
 		return fmt.Errorf("drop old CHECK: %w", err)
 	}
 	if err := db.Exec("ALTER TABLE provider_connections ALTER COLUMN health_status SET DEFAULT 'UNKNOWN'").Error; err != nil {
@@ -192,7 +193,7 @@ func cleanTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	tables := []string{"instruction_attempts", "instructions", "instruction_routes", "provider_connections"}
 	for _, tbl := range tables {
-		if err := db.Exec("DELETE FROM " + tbl).Error; err != nil {
+		if err := db.Exec(fmt.Sprintf("DELETE FROM %s", pq.QuoteIdentifier(tbl))).Error; err != nil {
 			t.Fatalf("failed to clean table %s: %v", tbl, err)
 		}
 	}

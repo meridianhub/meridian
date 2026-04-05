@@ -2,10 +2,12 @@ package saga
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,6 +90,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 	// Create tenant schema and saga_definition table
 	tenantID := tenant.TenantID("test_tenant")
 	schemaName := tenantID.SchemaName()
+	quoted := pq.QuoteIdentifier(schemaName)
 	setupTenantSchemaForSeeder(t, pool, ctx, schemaName)
 
 	// Create seeder and seed - no PlatformSync prerequisite needed
@@ -99,16 +102,16 @@ func TestSeeder_SeedTenant(t *testing.T) {
 
 		// Verify sagas were seeded
 		var count int
-		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
+		err = pool.QueryRow(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s.saga_definition WHERE is_system = true", quoted)).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 8, count, "expected 8 system sagas")
 
 		// Verify each saga has script content (not platform_ref)
-		rows, err := pool.Query(ctx, `
+		rows, err := pool.Query(ctx, fmt.Sprintf(`
 			SELECT name, version, status, is_system, script, display_name, activated_at
-			FROM `+schemaName+`.saga_definition
+			FROM %s.saga_definition
 			WHERE is_system = true
-			ORDER BY name`)
+			ORDER BY name`, quoted))
 		require.NoError(t, err)
 		defer rows.Close()
 
@@ -141,7 +144,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 
 		// Count should still be 8
 		var count int
-		err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").Scan(&count)
+		err = pool.QueryRow(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s.saga_definition WHERE is_system = true", quoted)).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 8, count, "idempotent seed should not create duplicates")
 	})
@@ -149,7 +152,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 	t.Run("deterministic UUIDs", func(t *testing.T) {
 		// Verify UUIDs are deterministic based on saga name
 		var ids []uuid.UUID
-		rows, err := pool.Query(ctx, "SELECT id FROM "+schemaName+".saga_definition WHERE is_system = true ORDER BY name")
+		rows, err := pool.Query(ctx, fmt.Sprintf("SELECT id FROM %s.saga_definition WHERE is_system = true ORDER BY name", quoted))
 		require.NoError(t, err)
 		defer rows.Close()
 
@@ -178,11 +181,11 @@ func TestSeeder_SeedTenant(t *testing.T) {
 
 	t.Run("seeded sagas have script content", func(t *testing.T) {
 		var script string
-		err := pool.QueryRow(ctx, `
+		err := pool.QueryRow(ctx, fmt.Sprintf(`
 			SELECT script
-			FROM `+schemaName+`.saga_definition
+			FROM %s.saga_definition
 			WHERE name = 'current_account_withdrawal' AND is_system = true
-		`).Scan(&script)
+		`, quoted)).Scan(&script)
 		require.NoError(t, err)
 
 		assert.NotEmpty(t, script, "script should not be empty")
@@ -209,7 +212,7 @@ func TestSeeder_SeedTenant_SelfContained(t *testing.T) {
 
 	// Verify sagas were seeded with script content
 	var count int
-	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true AND script IS NOT NULL AND script != ''").Scan(&count)
+	err = pool.QueryRow(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s.saga_definition WHERE is_system = true AND script IS NOT NULL AND script != ''", pq.QuoteIdentifier(schemaName))).Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 8, count, "expected 8 system sagas with script content")
 }
@@ -219,13 +222,14 @@ func TestSeeder_SeedTenant_SelfContained(t *testing.T) {
 func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Context, schemaName string) {
 	t.Helper()
 
-	_, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+schemaName)
+	quoted := pq.QuoteIdentifier(schemaName)
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoted))
 	require.NoError(t, err)
 
 	// Create saga_definition table matching the full migrated schema
 	// Note: no FK reference to public.platform_saga_definition (tenant isolation)
-	createTableSQL := `
-		CREATE TABLE IF NOT EXISTS ` + schemaName + `.saga_definition (
+	createTableSQL := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s.saga_definition (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			name varchar(64) NOT NULL,
 			version integer NOT NULL DEFAULT 1,
@@ -249,7 +253,7 @@ func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 			validated_at timestamptz NULL,
 			PRIMARY KEY (id),
 			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version)
-		)`
+		)`, quoted)
 	_, err = pool.Exec(ctx, createTableSQL)
 	require.NoError(t, err)
 }

@@ -2,8 +2,10 @@ package saga
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -152,6 +154,7 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 	// Create tenant schema with saga_definition table
 	tenantID := tenant.TenantID("migrate_tenant")
 	schemaName := tenantID.SchemaName()
+	quoted := pq.QuoteIdentifier(schemaName)
 	setupTenantSchemaForSeeder(t, pool, ctx, schemaName)
 
 	// Manually insert script-copied sagas (old style, without platform_ref)
@@ -164,11 +167,11 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 		script, ok := scripts[meta.Filename+".star"]
 		require.True(t, ok, "expected embedded script %s.star", meta.Filename)
 		require.NotEmpty(t, script)
-		_, err := pool.Exec(ctx, `
-			INSERT INTO `+schemaName+`.saga_definition (
+		_, err := pool.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO %s.saga_definition (
 				name, version, script, status, is_system,
 				display_name, description, created_at, updated_at, activated_at
-			) VALUES ($1, 1, $2, 'ACTIVE', true, $3, $4, now(), now(), now())`,
+			) VALUES ($1, 1, $2, 'ACTIVE', true, $3, $4, now(), now(), now())`, quoted),
 			meta.Name, script, meta.DisplayName, meta.Description)
 		require.NoError(t, err)
 	}
@@ -196,7 +199,7 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 		// Verify nothing actually changed
 		var scriptCount int
 		err = pool.QueryRow(ctx,
-			"SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE script IS NOT NULL AND script != ''").
+			fmt.Sprintf("SELECT COUNT(*) FROM %s.saga_definition WHERE script IS NOT NULL AND script != ''", quoted)).
 			Scan(&scriptCount)
 		require.NoError(t, err)
 		assert.Equal(t, 8, scriptCount, "dry run should not modify data")
@@ -217,7 +220,7 @@ func TestOverrideService_MigrateToPlatformRef(t *testing.T) {
 		// Verify scripts are now NULL and platform_ref is set
 		var refCount int
 		err = pool.QueryRow(ctx,
-			"SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE platform_ref IS NOT NULL AND (script IS NULL OR script = '')").
+			fmt.Sprintf("SELECT COUNT(*) FROM %s.saga_definition WHERE platform_ref IS NOT NULL AND (script IS NULL OR script = '')", quoted)).
 			Scan(&refCount)
 		require.NoError(t, err)
 		assert.Equal(t, 8, refCount, "all sagas should now use platform_ref")

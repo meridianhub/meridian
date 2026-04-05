@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/cmd/position-tool/internal/infra"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/shopspring/decimal"
@@ -377,8 +378,10 @@ func (e *Exporter) streamPositions(ctx context.Context, opts ExportOptions, hand
 		return err
 	}
 
-	// Use server-side cursor for memory efficiency
-	cursorName := "export_cursor"
+	// Use server-side cursor for memory efficiency. cursorName is a hardcoded
+	// literal; quoting it with pq.QuoteIdentifier keeps the pattern uniform
+	// with other dynamic-identifier sites so copy-paste stays safe.
+	cursorName := pq.QuoteIdentifier("export_cursor")
 	query, args := e.buildSelectQuery(opts)
 
 	// Declare cursor

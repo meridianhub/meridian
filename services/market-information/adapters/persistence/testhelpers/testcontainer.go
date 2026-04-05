@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/services/market-information/adapters/persistence"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/require"
@@ -77,14 +78,15 @@ func SetupTestContainer(t *testing.T) *TestContainer {
 func setupMasterSchema(ctx context.Context, t *testing.T, pool *pgxpool.Pool, poolConfig *pgxpool.Config) *pgxpool.Pool {
 	t.Helper()
 	masterSchema := "org_test_master"
+	quoted := pq.QuoteIdentifier(masterSchema)
 
-	_, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+masterSchema)
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoted))
 	require.NoError(t, err, "Failed to create master tenant schema")
 	err = loadSchemaInSchema(ctx, pool, masterSchema)
 	require.NoError(t, err, "Failed to load schema into master tenant schema")
 
 	// Set default search_path so non-tenant-scoped queries use the master schema
-	_, err = pool.Exec(ctx, "ALTER DATABASE test_market_information SET search_path TO "+masterSchema)
+	_, err = pool.Exec(ctx, fmt.Sprintf("ALTER DATABASE test_market_information SET search_path TO %s", quoted))
 	require.NoError(t, err, "Failed to set default search_path")
 
 	// Reconnect to pick up the new default search_path

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	sagav1 "github.com/meridianhub/meridian/api/proto/meridian/saga/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga/schema"
 	"github.com/meridianhub/meridian/shared/pkg/saga/validation"
@@ -45,7 +46,8 @@ func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 	require.NoError(t, err)
 
 	schemaName := tenantID.SchemaName()
-	_, err = pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+schemaName)
+	quoted := pq.QuoteIdentifier(schemaName)
+	_, err = pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoted))
 	require.NoError(t, err)
 
 	// Create platform_saga_definition in public schema (needed for FK constraints and platform-level operations)
@@ -65,8 +67,8 @@ func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 	_, err = pool.Exec(ctx, platformTableSQL)
 	require.NoError(t, err)
 
-	createTableSQL := `
-		CREATE TABLE ` + schemaName + `.saga_definition (
+	createTableSQL := fmt.Sprintf(`
+		CREATE TABLE %s.saga_definition (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			name varchar(64) NOT NULL,
 			version integer NOT NULL DEFAULT 1,
@@ -94,12 +96,12 @@ func setupTestPostgres(t *testing.T) (*pgxpool.Pool, tenant.TenantID, func()) {
 				FOREIGN KEY (platform_ref) REFERENCES public.platform_saga_definition (id) ON DELETE SET NULL,
 			CONSTRAINT chk_saga_definition_script_source
 				CHECK (NOT (platform_ref IS NOT NULL AND script IS NOT NULL AND script != ''))
-		)`
+		)`, quoted)
 	_, err = pool.Exec(ctx, createTableSQL)
 	require.NoError(t, err)
 
 	cleanup := func() {
-		_, _ = pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+schemaName+" CASCADE")
+		_, _ = pool.Exec(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quoted))
 	}
 
 	return pool, tenantID, cleanup

@@ -1,10 +1,12 @@
 package testdb
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -60,7 +62,7 @@ func TestPostgresSetupFunctions(t *testing.T) {
 		)`)
 
 		schemaName := tc.Tenant.SchemaName()
-		err := db.Exec("INSERT INTO " + schemaName + ".test_items (id, name) VALUES (gen_random_uuid(), 'hello')").Error
+		err := db.Exec(fmt.Sprintf("INSERT INTO %s.test_items (id, name) VALUES (gen_random_uuid(), 'hello')", pq.QuoteIdentifier(schemaName))).Error
 		require.NoError(t, err)
 	})
 
