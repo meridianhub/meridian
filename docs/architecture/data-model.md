@@ -167,8 +167,8 @@ Tables listed below live in the `org_<tenant_id>` schema of the service database
 - `valuation_features` — per-account valuation cache
 
 **internal-account** — counterparty and operational accounts
-- `internal_bank_account` — CLEARING / NOSTRO / VOSTRO / HOLDING / SUSPENSE / REVENUE / EXPENSE / INVENTORY. Multi-asset dimension support. No balance columns — delegates to `position-keeping`.
-- `internal_bank_account_status_history` — ACTIVE / SUSPENDED / CLOSED transitions
+- `internal_account` — CLEARING / NOSTRO / VOSTRO / HOLDING / SUSPENSE / REVENUE / EXPENSE / INVENTORY. Multi-asset dimension support. No balance columns — delegates to `position-keeping`. Counterparty fields are `counterparty_id` / `counterparty_name` / `counterparty_external_ref` (renamed from `correspondent_bank_*` in 2026-02).
+- `internal_account_status_history` — ACTIVE / SUSPENDED / CLOSED transitions
 - `lien` — fund reservations with bucket-aware multi-asset valuation
 - `valuation_features`
 
@@ -482,11 +482,13 @@ erDiagram
 
 ### Internal Account
 
+The service is still packaged as `internal-account` but the underlying tables were renamed in PR-era 2026-02-25: `internal_bank_account` → `internal_account`, `correspondent_bank_*` → `counterparty_*`. The `lien.currency` column was subsequently renamed to `instrument_code`.
+
 ```mermaid
 erDiagram
-    INTERNAL_BANK_ACCOUNT ||--o{ INTERNAL_BANK_ACCOUNT_STATUS_HISTORY : audits
-    INTERNAL_BANK_ACCOUNT ||--o{ LIEN : reserves
-    INTERNAL_BANK_ACCOUNT {
+    INTERNAL_ACCOUNT ||--o{ INTERNAL_ACCOUNT_STATUS_HISTORY : audits
+    INTERNAL_ACCOUNT ||--o{ LIEN : reserves
+    INTERNAL_ACCOUNT {
         uuid id PK
         varchar account_id
         varchar account_code
@@ -495,10 +497,12 @@ erDiagram
         varchar instrument_code
         varchar dimension
         varchar status
-        varchar correspondent_bank_id
+        varchar counterparty_id
+        varchar counterparty_name
+        varchar counterparty_external_ref
         jsonb attributes
     }
-    INTERNAL_BANK_ACCOUNT_STATUS_HISTORY {
+    INTERNAL_ACCOUNT_STATUS_HISTORY {
         uuid id PK
         varchar account_id FK
         varchar from_status
@@ -511,7 +515,7 @@ erDiagram
         uuid id PK
         uuid account_id FK
         bigint amount_cents
-        varchar currency
+        varchar instrument_code
         varchar bucket_id
         varchar status
         varchar payment_order_reference
@@ -946,7 +950,7 @@ flowchart LR
         CAL[lien]
     end
     subgraph IA["internal-account service"]
-        IBA[internal_bank_account]
+        IBA[internal_account]
     end
     subgraph PK["position-keeping service"]
         FPL[financial_position_log]
@@ -963,23 +967,18 @@ flowchart LR
         INST[instrument_definition]
         ATD[account_type_definitions]
     end
-    subgraph MI["market-information service"]
-        OBS[market_price_observation]
-    end
 
     ACC -. party_id .-> P
-    IBA -. counterparty_party_id .-> P
-    ACC -. account_type_code .-> ATD
-    IBA -. account_type_code .-> ATD
+    ACC -. account_type .-> ATD
+    IBA -. account_type .-> ATD
     POS -. instrument_code .-> INST
-    IBA -. asset_code .-> INST
+    IBA -. instrument_code .-> INST
     CAL -. payment_order_reference .-> PMO
     PMO -. lien_id .-> CAL
     INV -. payment_order_id .-> PMO
-    FBL -. reference_id .-> FPL
-    ACC -. balance_ref .-> FPL
-    IBA -. balance_ref .-> FPL
-    OBS -. dataset .-> INST
+    FBL -. account_id .-> FPL
+    ACC -. account_id .-> FPL
+    IBA -. account_id .-> FPL
 ```
 
 ## Cross-Tenant Access
