@@ -5,11 +5,17 @@ name: Demo Reset
 # and re-seeds the volterra_energy demo tenant with fixture data.
 #
 # Required secrets (scoped to the `demo` environment, shared with deploy-demo.yml):
-#   DEPLOY_SSH_KEY  - Private SSH key for the deploy user on the Droplet
-#   DROPLET_IP      - IP address of the DigitalOcean Droplet
+#   DEPLOY_SSH_KEY        - Private SSH key for the deploy user on the Droplet
+#   DROPLET_IP            - IP address of the DigitalOcean Droplet
 #
-# The droplet host key is fetched at runtime via ssh-keyscan, matching the
-# trust model used by deploy-demo.yml (appleboy/ssh-action).
+# Optional secrets:
+#   DROPLET_SSH_HOST_KEY  - Pinned SSH host key entry for the Droplet. When set,
+#                           the runtime ssh-keyscan result is verified against
+#                           this value and the job fails on mismatch. Obtain via:
+#                             ssh-keyscan -H <droplet-ip>
+#                           If unset, the job falls back to TOFU ssh-keyscan,
+#                           matching the trust model of deploy-demo.yml
+#                           (appleboy/ssh-action).
 
 on:
   schedule:
@@ -42,10 +48,34 @@ jobs:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Add droplet to known hosts
+        env:
+          DROPLET_IP: ${{ secrets.DROPLET_IP }}
+          PINNED_HOST_KEY: ${{ secrets.DROPLET_SSH_HOST_KEY }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          ssh-keyscan -H "${{ secrets.DROPLET_IP }}" >> ~/.ssh/known_hosts
+
+          scanned=$(ssh-keyscan -H "$DROPLET_IP" 2>/dev/null)
+          if [ -z "$scanned" ]; then
+            echo "::error::ssh-keyscan returned no keys for $DROPLET_IP"
+            exit 1
+          fi
+
+          if [ -n "$PINNED_HOST_KEY" ]; then
+            # Verify scanned keys match the pinned secret (ignoring hashed-host
+            # salt differences by comparing on key type + key material).
+            scanned_keys=$(printf '%s\n' "$scanned" | awk '{print $(NF-1), $NF}' | sort -u)
+            pinned_keys=$(printf '%s\n' "$PINNED_HOST_KEY" | awk '{print $(NF-1), $NF}' | sort -u)
+            if [ "$scanned_keys" != "$pinned_keys" ]; then
+              echo "::error::Droplet host key mismatch - pinned DROPLET_SSH_HOST_KEY does not match ssh-keyscan result"
+              exit 1
+            fi
+            printf '%s\n' "$PINNED_HOST_KEY" >> ~/.ssh/known_hosts
+          else
+            echo "::warning::DROPLET_SSH_HOST_KEY not configured; trusting ssh-keyscan result (TOFU)"
+            printf '%s\n' "$scanned" >> ~/.ssh/known_hosts
+          fi
           chmod 600 ~/.ssh/known_hosts
 
       - name: Reset demo environment
