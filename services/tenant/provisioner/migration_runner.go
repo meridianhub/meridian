@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	internalmigrations "github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"gorm.io/gorm"
 )
@@ -268,23 +269,7 @@ func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.D
 			return lastVersion, ctx.Err()
 		}
 
-		// Execute migration within a transaction
-		err := db.WithContext(bypassCtx(ctx)).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Exec(setPathQuery).Error; err != nil {
-				return fmt.Errorf("set search_path: %w", err)
-			}
-
-			processedSQL := p.processMigrationSQL(mig.Content, schemaName)
-			statements := splitSQLStatements(processedSQL)
-
-			for _, stmt := range statements {
-				if err := tx.Exec(stmt).Error; err != nil {
-					return fmt.Errorf("execute migration %s: %w", mig.Filename, err)
-				}
-			}
-
-			return nil
-		})
+		err := p.applyMigrationInTransaction(ctx, db, schemaName, setPathQuery, mig)
 		if err != nil {
 			// IDEMPOTENCY: If error indicates objects already exist (duplicate_table,
 			// duplicate_schema, duplicate_object), treat as success. This handles the
@@ -300,6 +285,44 @@ func (p *PostgresProvisioner) applyMigrationList(ctx context.Context, db *gorm.D
 	}
 
 	return lastVersion, nil
+}
+
+// applyMigrationInTransaction runs a single migration file inside its own
+// transaction: SET search_path, process+adapt the SQL, then execute each
+// statement. Extracted from applyMigrationList to keep cognitive complexity
+// under the architecture baseline.
+func (p *PostgresProvisioner) applyMigrationInTransaction(ctx context.Context, db *gorm.DB, schemaName, setPathQuery string, mig migration) error {
+	return db.WithContext(bypassCtx(ctx)).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(setPathQuery).Error; err != nil {
+			return fmt.Errorf("set search_path: %w", err)
+		}
+
+		processedSQL := p.processMigrationSQL(mig.Content, schemaName)
+		statements := splitSQLStatements(processedSQL)
+
+		// When running against PostgreSQL, rewrite CockroachDB-specific DDL
+		// (e.g., DROP INDEX CASCADE for unique constraints) to Postgres-compatible
+		// equivalents on a per-statement basis AFTER splitSQLStatements. The
+		// adapter may wrap statements in DO $compat$ BEGIN ...; ...; END $compat$
+		// blocks whose internal semicolons would otherwise be split as separate
+		// statements — splitSQLStatements does not recognize dollar-quoted bodies.
+		// Splitting first and then adapting keeps each adapted unit intact.
+		usePostgresAdapter := internalmigrations.DriverFromEnv() == internalmigrations.DriverPostgres
+
+		for _, stmt := range statements {
+			if usePostgresAdapter {
+				// AdaptCockroachDDLForPostgres's regex matches patterns
+				// terminated by `;`; splitSQLStatements strips terminators,
+				// so re-add one before adaptation.
+				stmt = internalmigrations.AdaptCockroachDDLForPostgres(stmt + ";")
+			}
+			if err := tx.Exec(stmt).Error; err != nil {
+				return fmt.Errorf("execute migration %s: %w", mig.Filename, err)
+			}
+		}
+
+		return nil
+	})
 }
 
 // readMigrationFiles reads all .sql files from the migration path, sorted by filename.
