@@ -2,10 +2,12 @@ package saga
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -118,6 +120,7 @@ func TestE2E_SeededSagasAreActive(t *testing.T) {
 
 	tenantID := tenant.TenantID("active_check")
 	schemaName := tenantID.SchemaName()
+	quoted := pq.QuoteIdentifier(schemaName)
 	setupTenantSchemaForSeeder(t, pool, ctx, schemaName)
 
 	seeder := NewSeeder(pool)
@@ -126,7 +129,7 @@ func TestE2E_SeededSagasAreActive(t *testing.T) {
 
 	// Verify all seeded sagas are ACTIVE with scripts copied directly
 	rows, err := pool.Query(ctx,
-		"SELECT name, status, script FROM "+schemaName+".saga_definition WHERE is_system = true ORDER BY name")
+		fmt.Sprintf("SELECT name, status, script FROM %s.saga_definition WHERE is_system = true ORDER BY name", quoted))
 	require.NoError(t, err)
 	defer rows.Close()
 
@@ -160,6 +163,7 @@ func TestE2E_ReseedingDoesNotDuplicate(t *testing.T) {
 
 	tenantID := tenant.TenantID("reseed_test")
 	schemaName := tenantID.SchemaName()
+	quoted := pq.QuoteIdentifier(schemaName)
 	setupTenantSchemaForSeeder(t, pool, ctx, schemaName)
 
 	seeder := NewSeeder(pool)
@@ -179,7 +183,7 @@ func TestE2E_ReseedingDoesNotDuplicate(t *testing.T) {
 	// Count should still be exactly 8
 	var count int
 	err = pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM "+schemaName+".saga_definition WHERE is_system = true").
+		fmt.Sprintf("SELECT COUNT(*) FROM %s.saga_definition WHERE is_system = true", quoted)).
 		Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 8, count, "re-seeding should not create duplicates")
@@ -199,6 +203,7 @@ func TestE2E_PlatformRefIntegrityConstraint(t *testing.T) {
 
 	tenantID := tenant.TenantID("constraint_test")
 	schemaName := tenantID.SchemaName()
+	quoted := pq.QuoteIdentifier(schemaName)
 	setupTenantSchemaForSeeder(t, pool, ctx, schemaName)
 
 	// Get a platform saga ID
@@ -209,11 +214,11 @@ func TestE2E_PlatformRefIntegrityConstraint(t *testing.T) {
 	require.NoError(t, err)
 
 	// Try to insert with BOTH platform_ref and script - should fail
-	_, err = pool.Exec(ctx, `
-		INSERT INTO `+schemaName+`.saga_definition (
+	_, err = pool.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.saga_definition (
 			name, version, script, platform_ref, status, is_system,
 			created_at, updated_at
-		) VALUES ('bad_saga', 1, 'some script', $1, 'DRAFT', false, now(), now())`,
+		) VALUES ('bad_saga', 1, 'some script', $1, 'DRAFT', false, now(), now())`, quoted),
 		platformRefID)
 	require.Error(t, err, "should reject saga with both platform_ref and script")
 	assert.Contains(t, err.Error(), "23514", "should be a CHECK constraint violation")
@@ -251,8 +256,8 @@ func TestE2E_MigratorReport(t *testing.T) {
 func createSagaReferenceTable(t *testing.T, pool *pgxpool.Pool, ctx context.Context, schemaName string) {
 	t.Helper()
 
-	_, err := pool.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS `+schemaName+`.saga_reference (
+	_, err := pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s.saga_reference (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			saga_definition_id UUID NOT NULL,
 			reference_type VARCHAR(32) NOT NULL,
@@ -262,6 +267,6 @@ func createSagaReferenceTable(t *testing.T, pool *pgxpool.Pool, ctx context.Cont
 			line_number INT NOT NULL DEFAULT 0,
 			extracted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			CONSTRAINT uq_saga_ref UNIQUE (saga_definition_id, reference_type, reference_key)
-		)`)
+		)`, pq.QuoteIdentifier(schemaName)))
 	require.NoError(t, err)
 }

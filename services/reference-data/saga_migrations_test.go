@@ -2,6 +2,7 @@ package migrations_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -537,8 +539,9 @@ func TestSagaMigration_SchemaIsolation(t *testing.T) {
 	tenants := []string{"tenant_alpha", "tenant_beta", "tenant_gamma"}
 
 	for _, tenant := range tenants {
+		quoted := pq.QuoteIdentifier(tenant)
 		// Create schema for tenant
-		_, err := tc.pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS `+tenant)
+		_, err := tc.pool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", quoted))
 		require.NoError(t, err)
 
 		// Apply saga migrations to this tenant's schema
@@ -553,7 +556,7 @@ func TestSagaMigration_SchemaIsolation(t *testing.T) {
 			require.NoError(t, err)
 
 			// Set search_path to tenant schema and apply migration
-			_, err = tc.pool.Exec(ctx, `SET search_path TO `+tenant)
+			_, err = tc.pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", quoted))
 			require.NoError(t, err)
 			_, err = tc.pool.Exec(ctx, string(migrationSQL))
 			require.NoError(t, err)
@@ -594,7 +597,7 @@ func TestSagaMigration_SchemaIsolation(t *testing.T) {
 	t.Run("same name+version can exist in different tenants", func(t *testing.T) {
 		// Insert same name+version in each tenant
 		for _, tenant := range tenants {
-			_, err := tc.pool.Exec(ctx, `SET search_path TO `+tenant)
+			_, err := tc.pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(tenant)))
 			require.NoError(t, err)
 			_, err = tc.pool.Exec(ctx, `
 				INSERT INTO saga_definition (id, name, version, script, status)
@@ -605,7 +608,7 @@ func TestSagaMigration_SchemaIsolation(t *testing.T) {
 
 		// Verify each tenant has exactly one record
 		for _, tenant := range tenants {
-			_, err := tc.pool.Exec(ctx, `SET search_path TO `+tenant)
+			_, err := tc.pool.Exec(ctx, fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(tenant)))
 			require.NoError(t, err)
 
 			var count int

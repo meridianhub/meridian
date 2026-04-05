@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
 	gormpg "gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -192,7 +193,7 @@ func cleanTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	tables := []string{"instruction_attempts", "instructions", "instruction_routes", "provider_connections"}
 	for _, tbl := range tables {
-		if err := db.Exec("DELETE FROM " + tbl).Error; err != nil {
+		if err := db.Exec(fmt.Sprintf("DELETE FROM %s", pq.QuoteIdentifier(tbl))).Error; err != nil {
 			t.Fatalf("failed to clean table %s: %v", tbl, err)
 		}
 	}
