@@ -52,9 +52,6 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 	t.Cleanup(func() { pool.Close() })
 
 	// Apply public-schema migrations in order.
-	// Note: 20260406000001_remove_platform_ref.sql is NOT included here because it
-	// targets tenant-level saga_definition tables, not the public.platform_saga_definition
-	// table created by these migrations. Tenant tables are created by setupTenantSchemaForSeeder.
 	migrations := []string{
 		"20260125000001_platform_saga_definition.sql",
 		"20260127000001_fix_platform_saga_unique_constraint.sql",
@@ -65,6 +62,53 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 	}
 
 	for _, migration := range migrations {
+		migrationPath := filepath.Join("..", "migrations", migration)
+		migrationSQL, err := os.ReadFile(migrationPath)
+		require.NoError(t, err, "failed to read migration %s", migration)
+
+		_, err = pool.Exec(ctx, string(migrationSQL))
+		require.NoError(t, err, "failed to apply migration %s", migration)
+	}
+
+	// Create saga_definition with old schema (including platform_ref columns) so the
+	// remove_platform_ref migration can be applied to verify the full migration chain.
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS saga_definition (
+			id uuid NOT NULL DEFAULT gen_random_uuid(),
+			name varchar(64) NOT NULL,
+			version integer NOT NULL DEFAULT 1,
+			script text NULL,
+			status varchar(16) NOT NULL DEFAULT 'DRAFT',
+			is_system boolean NOT NULL DEFAULT FALSE,
+			preconditions_expression text NULL,
+			display_name varchar(128) NULL,
+			description text NULL,
+			created_at timestamptz NOT NULL DEFAULT now(),
+			updated_at timestamptz NOT NULL DEFAULT now(),
+			activated_at timestamptz NULL,
+			deprecated_at timestamptz NULL,
+			successor_id uuid NULL,
+			platform_ref uuid NULL,
+			override_reason text NULL,
+			platform_version_at_override varchar(16) NULL,
+			validation_status text NOT NULL DEFAULT 'UNVALIDATED',
+			complexity_score integer NULL,
+			handler_call_count integer NULL,
+			validated_at timestamptz NULL,
+			PRIMARY KEY (id),
+			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version),
+			CONSTRAINT fk_saga_definition_platform_ref
+				FOREIGN KEY (platform_ref) REFERENCES platform_saga_definition (id) ON DELETE SET NULL,
+			CONSTRAINT chk_saga_definition_script_source
+				CHECK (NOT (platform_ref IS NOT NULL AND script IS NOT NULL AND script != ''))
+		)`)
+	require.NoError(t, err, "failed to create saga_definition table")
+
+	// Apply tenant-level migration to remove platform_ref columns
+	tenantMigrations := []string{
+		"20260406000001_remove_platform_ref.sql",
+	}
+	for _, migration := range tenantMigrations {
 		migrationPath := filepath.Join("..", "migrations", migration)
 		migrationSQL, err := os.ReadFile(migrationPath)
 		require.NoError(t, err, "failed to read migration %s", migration)

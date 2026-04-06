@@ -124,6 +124,11 @@ func (h *RegistryHandler) UpdateSagaDefinition(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid saga id: %v", err)
 	}
 
+	// Reject explicit empty-script updates (script is required)
+	if req.Script != nil && *req.Script == "" {
+		return nil, status.Error(codes.InvalidArgument, "script cannot be empty")
+	}
+
 	// Only update fields that are explicitly provided (proto3 optional fields)
 	updates := &Definition{}
 	if req.Script != nil {
