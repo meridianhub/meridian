@@ -65,7 +65,7 @@ def execute_distribution():
         account_ref = build_org_account_ref(
             party_id=party_id,
             org_id=org_id,
-            instrument_code=instrument_code,
+            currency=instrument_code,
         )
 
         # Resolve the org-scoped account

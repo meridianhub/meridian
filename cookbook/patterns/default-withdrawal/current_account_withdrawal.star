@@ -110,4 +110,4 @@ def execute_withdrawal():
     return result
 
 # Execute the saga
-execute_withdrawal()
+output = execute_withdrawal()

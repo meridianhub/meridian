@@ -13,7 +13,7 @@
         "provides": {
             "instruments": [],
             "account_types": [],
-            "sagas": ["stripe_payment"],
+            "sagas": ["stripe_payment", "stripe_payment_ledger_post"],
             "valuation_rules": [],
             "triggers": [
                 "api:/v1/payment-orders/{payment_order_id}/stripe",

@@ -111,4 +111,4 @@ def execute_deposit():
     return result
 
 # Execute the saga
-execute_deposit()
+output = execute_deposit()
