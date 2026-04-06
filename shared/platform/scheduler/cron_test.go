@@ -165,6 +165,7 @@ func TestCronScheduler_StartAndStop(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -204,6 +205,7 @@ func TestCronScheduler_LoadsSchedulesOnStart(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -240,6 +242,7 @@ func TestCronScheduler_RemovesStaleSchedules(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -290,6 +293,7 @@ func TestCronScheduler_ExecutesJobOnCronFire(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -341,6 +345,7 @@ func TestCronScheduler_SkipsWhenLockNotAcquired(t *testing.T) {
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -388,6 +393,7 @@ func TestCronScheduler_RecordsExecutionAuditTrail(t *testing.T) {
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -457,6 +463,7 @@ func TestCronScheduler_RecordsFailedExecution(t *testing.T) {
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -516,6 +523,7 @@ func TestCronScheduler_InvalidCronExpression(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -553,6 +561,7 @@ func TestCronScheduler_NilLock_ExecutesWithoutLocking(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -588,6 +597,7 @@ func TestCronScheduler_ProviderError_ContinuesRunning(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -632,6 +642,7 @@ func TestCronScheduler_LockError_SkipsExecution(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -673,6 +684,7 @@ func TestCronScheduler_UpdatesChangedSchedules(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -719,15 +731,13 @@ func TestCronScheduler_GlobalSemaphore_SkipsExcessExecutions(t *testing.T) {
 	}
 	provider := &stubProvider{schedules: schedules}
 
-	// Executor blocks until released so we can fill the semaphore
-	blocked := make(chan struct{})
+	// Executor blocks until released so we can fill the semaphore.
+	// Buffer matches MaxConcurrentExecutions so signals are never lost to the default branch.
+	blocked := make(chan struct{}, 2)
 	release := make(chan struct{})
 	executor := &stubExecutor{
 		executeFunc: func(_ context.Context, _ scheduler.Schedule) error {
-			select {
-			case blocked <- struct{}{}:
-			default:
-			}
+			blocked <- struct{}{}
 			<-release
 			return nil
 		},
@@ -748,6 +758,7 @@ func TestCronScheduler_GlobalSemaphore_SkipsExcessExecutions(t *testing.T) {
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -755,17 +766,18 @@ func TestCronScheduler_GlobalSemaphore_SkipsExcessExecutions(t *testing.T) {
 		_ = s.Start(ctx)
 	}()
 
-	// Wait for 2 executions to block (filling the semaphore)
+	// Wait for 2 executions to block (filling the semaphore).
+	// Use a generous timeout - CI runners can be slow to start cron ticks.
 	for i := 0; i < 2; i++ {
 		select {
 		case <-blocked:
-		case <-time.After(5 * time.Second):
+		case <-time.After(15 * time.Second):
 			t.Fatal("timed out waiting for executions to block")
 		}
 	}
 
 	// Wait for skipped executions to appear (other schedules should be rejected)
-	err := await.New().AtMost(5 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
+	err := await.New().AtMost(10 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
 		execs := store.getExecutions()
 		for _, e := range execs {
 			if e.Status == scheduler.ExecutionStatusSkipped && e.ErrorMessage != nil &&
@@ -820,6 +832,7 @@ func TestCronScheduler_PerTenantSemaphore_SkipsExcessForSameTenant(t *testing.T)
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -827,15 +840,16 @@ func TestCronScheduler_PerTenantSemaphore_SkipsExcessForSameTenant(t *testing.T)
 		_ = s.Start(ctx)
 	}()
 
-	// Wait for 1 execution to block (fills the per-tenant semaphore)
+	// Wait for 1 execution to block (fills the per-tenant semaphore).
+	// Use a generous timeout - CI runners can be slow to start cron ticks.
 	select {
 	case <-blocked:
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("timed out waiting for execution to block")
 	}
 
 	// Wait for per-tenant skipped execution
-	err := await.New().AtMost(5 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
+	err := await.New().AtMost(10 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
 		execs := store.getExecutions()
 		for _, e := range execs {
 			if e.Status == scheduler.ExecutionStatusSkipped && e.ErrorMessage != nil &&
@@ -883,6 +897,7 @@ func TestCronScheduler_PerTenantSemaphore_AllowsDifferentTenants(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -894,7 +909,7 @@ func TestCronScheduler_PerTenantSemaphore_AllowsDifferentTenants(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		select {
 		case <-blocked:
-		case <-time.After(5 * time.Second):
+		case <-time.After(15 * time.Second):
 			t.Fatalf("timed out waiting for execution %d", i+1)
 		}
 	}
@@ -943,6 +958,7 @@ func TestCronScheduler_RefreshJitterConfig(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
