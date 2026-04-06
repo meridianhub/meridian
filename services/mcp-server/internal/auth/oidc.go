@@ -1,3 +1,5 @@
+//meridian:large-file -- OIDC handler + state store + helpers form a cohesive auth flow unit.
+
 // Package auth provides OIDC integration for the MCP server's OAuth 2.1 flow.
 //
 // The MCP server acts as an OAuth 2.1 authorization server for MCP clients
