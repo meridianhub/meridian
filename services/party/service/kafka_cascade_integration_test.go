@@ -157,17 +157,28 @@ func setupKafkaCascadeTest(t *testing.T) *kafkaCascadeTestEnv {
 		event_payload BYTEA NOT NULL,
 		correlation_id VARCHAR(100),
 		causation_id VARCHAR(100),
-		status VARCHAR(20) NOT NULL DEFAULT 'pending',
+		status VARCHAR(20) NOT NULL,
 		topic VARCHAR(200) NOT NULL,
 		partition_key VARCHAR(200),
-		created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		processed_at TIMESTAMP WITH TIME ZONE,
+		created_at TIMESTAMPTZ NOT NULL,
+		processed_at TIMESTAMPTZ,
 		retry_count INTEGER NOT NULL DEFAULT 0,
 		last_error TEXT,
-		service_name VARCHAR(100) NOT NULL
+		service_name VARCHAR(100) NOT NULL,
+		tenant_id VARCHAR(100) NOT NULL
 	)`, pq.QuoteIdentifier(schemaName))).Error)
 
-	require.NoError(t, db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error)
+	// Set search_path at the database level so all pool connections (including the outbox
+	// worker's) resolve unqualified table names to the tenant schema. A session-level
+	// SET search_path only affects a single pool connection; the load test needs all
+	// connections to share the same schema routing.
+	require.NoError(t, db.Exec(fmt.Sprintf("ALTER DATABASE test_db SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error)
+	// Close idle connections so they reconnect and pick up the new database default.
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxIdleConns(0) // closes idle connections immediately
+	// Also set it on the current session for any in-flight use of this connection.
+	require.NoError(t, db.Exec(fmt.Sprintf("SET search_path TO %s, public", pq.QuoteIdentifier(schemaName))).Error)
 
 	ctx := tenant.WithTenant(bgCtx, tid)
 
