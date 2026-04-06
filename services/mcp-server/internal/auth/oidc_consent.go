@@ -2,12 +2,15 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
+
+var errConsentBaseNotConfigured = errors.New("consent redirect base is not configured")
 
 // ConsentEntry holds the state stored alongside a consent code. This mirrors
 // the ConsentCodeEntry from api-gateway but avoids a direct import dependency
@@ -248,14 +251,20 @@ func (h *OIDCHandler) buildConsentRedirect(challenge, clientID, redirectURI, mcp
 		return "", fmt.Errorf("store state: %w", err)
 	}
 
-	consentURL := h.buildConsentPageURL(tenantSlug, stateKey, clientID)
+	consentURL, err := h.buildConsentPageURL(tenantSlug, stateKey, clientID)
+	if err != nil {
+		return "", fmt.Errorf("build consent URL: %w", err)
+	}
 	return consentURL, nil
 }
 
 // buildConsentPageURL constructs the UI consent page URL with tenant subdomain.
-func (h *OIDCHandler) buildConsentPageURL(tenantSlug, stateKey, clientID string) string {
+func (h *OIDCHandler) buildConsentPageURL(tenantSlug, stateKey, clientID string) (string, error) {
 	base := h.baseURL
 	if base == "" {
+		if h.baseDomain == "" {
+			return "", errConsentBaseNotConfigured
+		}
 		base = "https://" + h.baseDomain
 	}
 
@@ -279,5 +288,5 @@ func (h *OIDCHandler) buildConsentPageURL(tenantSlug, stateKey, clientID string)
 		"mcp_state": {stateKey},
 		"client_id": {clientID},
 	}
-	return base + "/auth/mcp-consent?" + params.Encode()
+	return base + "/auth/mcp-consent?" + params.Encode(), nil
 }

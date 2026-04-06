@@ -511,8 +511,8 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	h.handleDexCallback(w, r, stateKey, code)
 }
 
-// handleDexCallback processes the legacy Dex token-exchange callback path.
-// resolveTenantSlug extracts the tenant slug from the request host subdomain, falling back to the default.
+// resolveTenantSlug extracts the tenant slug from the request host subdomain,
+// falling back to the default.
 func (h *OIDCHandler) resolveTenantSlug(host string) (string, error) {
 	tenantSlug := extractSubdomain(host, h.baseDomain)
 	if tenantSlug == "" && h.defaultTenantSlug != "" {
