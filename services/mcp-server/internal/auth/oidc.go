@@ -204,21 +204,35 @@ func (s *OIDCStateStore) Delete(key string) {
 	delete(s.entries, key)
 }
 
+// PeekInfoResult holds the fields returned by PeekInfo.
+type PeekInfoResult struct {
+	ClientID    string
+	RedirectURI string
+	Scopes      []string
+	MCPState    string // Original MCP client state (not the internal key).
+	TenantSlug  string
+}
+
 // PeekInfo returns selected fields from an OIDC flow state entry without
 // consuming it. Expired entries are cleaned up and reported as not found.
-func (s *OIDCStateStore) PeekInfo(key string) (clientID, redirectURI string, scopes []string, ok bool) {
+func (s *OIDCStateStore) PeekInfo(key string) (PeekInfoResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, exists := s.entries[key]
 	if !exists {
-		return "", "", nil, false
+		return PeekInfoResult{}, false
 	}
 	if time.Since(entry.IssuedAt) > oidcStateTTL {
 		delete(s.entries, key)
-		return "", "", nil, false
+		return PeekInfoResult{}, false
 	}
-	scopes = append([]string(nil), entry.RequestedScopes...)
-	return entry.MCPClientID, entry.MCPRedirectURI, scopes, true
+	return PeekInfoResult{
+		ClientID:    entry.MCPClientID,
+		RedirectURI: entry.MCPRedirectURI,
+		Scopes:      append([]string(nil), entry.RequestedScopes...),
+		MCPState:    entry.MCPState,
+		TenantSlug:  entry.TenantSlug,
+	}, true
 }
 
 // TenantSlugResolver resolves a tenant slug (e.g., "acme") to its canonical

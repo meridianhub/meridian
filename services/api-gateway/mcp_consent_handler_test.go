@@ -22,33 +22,27 @@ import (
 // mockOIDCStatePeeker implements OIDCStatePeeker for tests.
 type mockOIDCStatePeeker struct {
 	mu      sync.Mutex
-	entries map[string]mockOIDCEntry
-}
-
-type mockOIDCEntry struct {
-	clientID    string
-	redirectURI string
-	scopes      []string
+	entries map[string]OIDCStatePeekResult
 }
 
 func newMockOIDCStatePeeker() *mockOIDCStatePeeker {
-	return &mockOIDCStatePeeker{entries: make(map[string]mockOIDCEntry)}
+	return &mockOIDCStatePeeker{entries: make(map[string]OIDCStatePeekResult)}
 }
 
-func (m *mockOIDCStatePeeker) addEntry(key, clientID, redirectURI string, scopes []string) {
+func (m *mockOIDCStatePeeker) addEntry(key string, result OIDCStatePeekResult) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.entries[key] = mockOIDCEntry{clientID: clientID, redirectURI: redirectURI, scopes: scopes}
+	m.entries[key] = result
 }
 
-func (m *mockOIDCStatePeeker) PeekInfo(key string) (string, string, []string, bool) {
+func (m *mockOIDCStatePeeker) PeekInfo(key string) (OIDCStatePeekResult, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.entries[key]
 	if !ok {
-		return "", "", nil, false
+		return OIDCStatePeekResult{}, false
 	}
-	return e.clientID, e.redirectURI, append([]string(nil), e.scopes...), true
+	return e, true
 }
 
 func (m *mockOIDCStatePeeker) Delete(key string) {
@@ -110,7 +104,10 @@ func TestMCPConsentHandler_Approve(t *testing.T) {
 	handler, _, oidcStore := newTestMCPConsentHandler(t)
 
 	stateKey := "test-state-key"
-	oidcStore.addEntry(stateKey, "test-client", "https://example.com/callback", []string{"mcp:default"})
+	oidcStore.addEntry(stateKey, OIDCStatePeekResult{
+		ClientID: "test-client", RedirectURI: "https://example.com/callback",
+		Scopes: []string{"mcp:default"}, MCPState: "client-original-state", TenantSlug: "acme",
+	})
 	ctx := withAuthContext(context.Background(), "alice@example.com", "tenant-uuid-1", "acme")
 
 	rr := doConsentRequest(t, handler, ctx, mcpConsentRequest{
@@ -135,7 +132,10 @@ func TestMCPConsentHandler_Deny(t *testing.T) {
 	handler, _, oidcStore := newTestMCPConsentHandler(t)
 
 	stateKey := "test-state-deny"
-	oidcStore.addEntry(stateKey, "test-client", "https://example.com/callback", nil)
+	oidcStore.addEntry(stateKey, OIDCStatePeekResult{
+		ClientID: "test-client", RedirectURI: "https://example.com/callback",
+		MCPState: "client-original-state", TenantSlug: "acme",
+	})
 	ctx := withAuthContext(context.Background(), "alice@example.com", "tenant-uuid-1", "acme")
 
 	rr := doConsentRequest(t, handler, ctx, mcpConsentRequest{
@@ -149,7 +149,7 @@ func TestMCPConsentHandler_Deny(t *testing.T) {
 	var resp mcpConsentResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Contains(t, resp.RedirectURL, "error=access_denied")
-	assert.Contains(t, resp.RedirectURL, "state="+stateKey)
+	assert.Contains(t, resp.RedirectURL, "state=client-original-state")
 
 	// OIDC state should be deleted on deny.
 	assert.False(t, oidcStore.hasEntry(stateKey), "OIDC state should be deleted on deny")
@@ -159,7 +159,10 @@ func TestMCPConsentHandler_InvalidAction(t *testing.T) {
 	handler, _, oidcStore := newTestMCPConsentHandler(t)
 
 	stateKey := "test-state-action"
-	oidcStore.addEntry(stateKey, "test-client", "https://example.com/callback", nil)
+	oidcStore.addEntry(stateKey, OIDCStatePeekResult{
+		ClientID: "test-client", RedirectURI: "https://example.com/callback",
+		MCPState: "client-original-state", TenantSlug: "acme",
+	})
 	ctx := withAuthContext(context.Background(), "alice@example.com", "tenant-uuid-1", "acme")
 
 	for _, action := range []string{"", "maybe", "APPROVE"} {
@@ -210,7 +213,10 @@ func TestMCPConsentHandler_ClientMismatch(t *testing.T) {
 	handler, _, oidcStore := newTestMCPConsentHandler(t)
 
 	stateKey := "test-state-mismatch"
-	oidcStore.addEntry(stateKey, "real-client", "https://example.com/callback", nil)
+	oidcStore.addEntry(stateKey, OIDCStatePeekResult{
+		ClientID: "real-client", RedirectURI: "https://example.com/callback",
+		TenantSlug: "acme",
+	})
 	ctx := withAuthContext(context.Background(), "alice@example.com", "tenant-uuid-1", "acme")
 
 	rr := doConsentRequest(t, handler, ctx, mcpConsentRequest{
@@ -224,6 +230,30 @@ func TestMCPConsentHandler_ClientMismatch(t *testing.T) {
 	var resp mcpConsentErrorResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "client_mismatch", resp.Error)
+}
+
+func TestMCPConsentHandler_TenantMismatch(t *testing.T) {
+	handler, _, oidcStore := newTestMCPConsentHandler(t)
+
+	stateKey := "test-state-tenant"
+	oidcStore.addEntry(stateKey, OIDCStatePeekResult{
+		ClientID: "test-client", RedirectURI: "https://example.com/callback",
+		TenantSlug: "other-tenant",
+	})
+	// JWT tenant slug is "acme" but state has "other-tenant"
+	ctx := withAuthContext(context.Background(), "alice@example.com", "tenant-uuid-1", "acme")
+
+	rr := doConsentRequest(t, handler, ctx, mcpConsentRequest{
+		MCPState: stateKey,
+		ClientID: "test-client",
+		Action:   "approve",
+	})
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+
+	var resp mcpConsentErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Equal(t, "tenant_mismatch", resp.Error)
 }
 
 func TestMCPConsentHandler_InvalidJSON(t *testing.T) {

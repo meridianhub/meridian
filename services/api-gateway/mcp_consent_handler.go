@@ -10,13 +10,22 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
+// OIDCStatePeekResult holds the fields returned by OIDCStatePeeker.PeekInfo.
+type OIDCStatePeekResult struct {
+	ClientID    string
+	RedirectURI string
+	Scopes      []string
+	MCPState    string // Original MCP client state (not the internal lookup key).
+	TenantSlug  string
+}
+
 // OIDCStatePeeker provides read-only access to OIDC flow state and the ability
 // to delete entries. This interface decouples the consent handler from the
 // mcp-server's internal OIDCStateStore, allowing the stores to be shared at
 // wiring time.
 type OIDCStatePeeker interface {
 	// PeekInfo returns selected fields without consuming the entry.
-	PeekInfo(key string) (clientID, redirectURI string, scopes []string, ok bool)
+	PeekInfo(key string) (OIDCStatePeekResult, bool)
 	// Delete removes an entry by key. Used for cleanup on deny.
 	Delete(key string)
 }
@@ -107,16 +116,24 @@ func (h *MCPConsentHandler) HandleConsent(w http.ResponseWriter, r *http.Request
 	}
 
 	// Peek OIDCStateStore to verify mcp_state exists and client_id matches.
-	storedClientID, redirectURI, scopes, stateOk := h.oidcStateStore.PeekInfo(req.MCPState)
+	stateInfo, stateOk := h.oidcStateStore.PeekInfo(req.MCPState)
 	if !stateOk {
 		writeJSON(w, http.StatusBadRequest, mcpConsentErrorResponse{Error: "invalid_state"})
 		return
 	}
 
-	if storedClientID != req.ClientID {
+	if stateInfo.ClientID != req.ClientID {
 		h.logger.Warn("mcp-consent: client_id mismatch",
-			"expected", storedClientID, "got", req.ClientID)
+			"expected", stateInfo.ClientID, "got", req.ClientID)
 		writeJSON(w, http.StatusBadRequest, mcpConsentErrorResponse{Error: "client_mismatch"})
+		return
+	}
+
+	// Verify tenant slug matches the OIDC flow's originating tenant.
+	if stateInfo.TenantSlug != "" && tenantSlug != "" && stateInfo.TenantSlug != tenantSlug {
+		h.logger.Warn("mcp-consent: tenant mismatch",
+			"expected", stateInfo.TenantSlug, "got", tenantSlug)
+		writeJSON(w, http.StatusForbidden, mcpConsentErrorResponse{Error: "tenant_mismatch"})
 		return
 	}
 
@@ -124,7 +141,7 @@ func (h *MCPConsentHandler) HandleConsent(w http.ResponseWriter, r *http.Request
 		// Delete the state entry (cleanup) and build error redirect.
 		h.oidcStateStore.Delete(req.MCPState)
 
-		target, err := url.Parse(redirectURI)
+		target, err := url.Parse(stateInfo.RedirectURI)
 		if err != nil {
 			h.logger.Error("mcp-consent: failed to parse redirect URI", "error", err)
 			writeJSON(w, http.StatusInternalServerError, mcpConsentErrorResponse{Error: "internal_error"})
@@ -132,7 +149,9 @@ func (h *MCPConsentHandler) HandleConsent(w http.ResponseWriter, r *http.Request
 		}
 		params := target.Query()
 		params.Set("error", "access_denied")
-		params.Set("state", req.MCPState)
+		if stateInfo.MCPState != "" {
+			params.Set("state", stateInfo.MCPState)
+		}
 		target.RawQuery = params.Encode()
 
 		writeJSON(w, http.StatusOK, mcpConsentResponse{RedirectURL: target.String()})
@@ -146,7 +165,7 @@ func (h *MCPConsentHandler) HandleConsent(w http.ResponseWriter, r *http.Request
 		TenantSlug:     tenantSlug,
 		MCPState:       req.MCPState,
 		ClientID:       req.ClientID,
-		ApprovedScopes: scopes,
+		ApprovedScopes: stateInfo.Scopes,
 	})
 	if err != nil {
 		h.logger.Error("mcp-consent: failed to store consent code", "error", err)
