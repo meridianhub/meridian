@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -400,13 +401,22 @@ func seedDemoOperator(ctx context.Context) error {
 
 	fmt.Println("\n--- Seed Demo Operator ---")
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
+	baseDSN := os.Getenv("DATABASE_URL")
+	if baseDSN == "" {
 		return ErrDatabaseURLRequired
 	}
 
+	// DATABASE_URL points to the platform database (meridian_platform).
+	// The identity repo needs meridian_identity. Derive the DSN by
+	// replacing the database component, matching how the main binary
+	// routes per-service connections via ServiceDatabases.
+	identityDSN, err := replaceDatabase(baseDSN, "meridian_identity")
+	if err != nil {
+		return fmt.Errorf("derive identity DSN: %w", err)
+	}
+
 	db, err := bootstrap.NewDatabase(ctx, bootstrap.DatabaseConfig{
-		DSN:          dsn,
+		DSN:          identityDSN,
 		MaxOpenConns: 2,
 		MaxIdleConns: 1,
 	})
@@ -425,4 +435,14 @@ func seedDemoOperator(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// replaceDatabase swaps the database name in a PostgreSQL DSN URL.
+func replaceDatabase(baseDSN, database string) (string, error) {
+	parsed, err := url.Parse(baseDSN)
+	if err != nil {
+		return "", fmt.Errorf("parse DSN: %w", err)
+	}
+	parsed.Path = "/" + database
+	return parsed.String(), nil
 }
