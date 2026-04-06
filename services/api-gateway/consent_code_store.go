@@ -85,6 +85,7 @@ func (s *ConsentCodeStore) evictExpired() {
 // Returns errConsentCodeStoreFull if the store has reached its capacity limit.
 func (s *ConsentCodeStore) Store(entry ConsentCodeEntry) (string, error) {
 	entry.CreatedAt = time.Now()
+	entry.ApprovedScopes = append([]string(nil), entry.ApprovedScopes...)
 
 	code, err := generateConsentCode()
 	if err != nil {
