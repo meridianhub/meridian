@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { render } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { AuthProvider } from '@/contexts/auth-context'
@@ -18,7 +18,13 @@ const MOCK_CONSENT_INFO = {
   client_name: 'My MCP App',
   redirect_uri: 'http://localhost:3000/callback',
   scopes: ['read', 'write'],
-  is_dynamic_client: false,
+  is_dynamic: false,
+}
+
+/** Captures the full location (pathname + search) for the rendered /login route */
+function LoginCapture() {
+  const location = useLocation()
+  return <div data-testid="login-page" data-location={location.pathname + location.search}>Login Page</div>
 }
 
 function TestWrapper({
@@ -37,7 +43,7 @@ function TestWrapper({
         <TenantProvider>
           <MemoryRouter initialEntries={[initialPath]}>
             <Routes>
-              <Route path="/login" element={<div data-testid="login-page">Login Page</div>} />
+              <Route path="/login" element={<LoginCapture />} />
               <Route path="/auth/mcp-consent" element={children} />
             </Routes>
           </MemoryRouter>
@@ -55,7 +61,12 @@ describe('OAuthConsentPage', () => {
       </TestWrapper>,
     )
 
-    expect(screen.getByTestId('login-page')).toBeInTheDocument()
+    const loginPage = screen.getByTestId('login-page')
+    expect(loginPage).toBeInTheDocument()
+    const location = loginPage.getAttribute('data-location') ?? ''
+    const decoded = decodeURIComponent(location)
+    expect(decoded).toContain('return_url')
+    expect(decoded).toContain('/auth/mcp-consent')
     expect(screen.queryByText('Authorize Access')).not.toBeInTheDocument()
   })
 

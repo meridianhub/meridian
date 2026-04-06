@@ -1,8 +1,8 @@
-interface ConsentInfo {
+export interface ConsentInfo {
   client_name: string
   redirect_uri: string
   scopes: string[]
-  is_dynamic_client: boolean
+  is_dynamic: boolean
 }
 
 interface ConsentCardProps {
@@ -27,7 +27,7 @@ export function ConsentCard({ consentInfo, onApprove, onDeny, loading }: Consent
           <span className="font-medium">Application</span>
           <p className="text-muted-foreground mt-0.5">
             {consentInfo.client_name}
-            {consentInfo.is_dynamic_client && (
+            {consentInfo.is_dynamic && (
               <span className="ml-2 inline-flex items-center rounded-full bg-warning/20 px-2 py-0.5 text-xs font-medium text-warning-foreground">
                 Dynamic client
               </span>

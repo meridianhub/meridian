@@ -1,14 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/auth-context'
-import { ConsentCard } from '@/components/consent-card'
-
-interface ConsentInfo {
-  client_name: string
-  redirect_uri: string
-  scopes: string[]
-  is_dynamic_client: boolean
-}
+import { ConsentCard, type ConsentInfo } from '@/components/consent-card'
 
 interface ConsentResponse {
   redirect_url: string
@@ -34,9 +27,9 @@ export function OAuthConsentPage() {
     }
   }, [isAuthenticated, navigate, mcpState, clientId])
 
-  // Fetch consent info once authenticated
+  // Fetch consent info once authenticated, with both params present
   useEffect(() => {
-    if (!isAuthenticated || !clientId) return
+    if (!isAuthenticated || !clientId || !mcpState) return
 
     const params = new URLSearchParams({ client_id: clientId, mcp_state: mcpState })
     fetch(`/mcp/consent-info?${params.toString()}`)
@@ -55,6 +48,8 @@ export function OAuthConsentPage() {
   }, [isAuthenticated, clientId, mcpState])
 
   const handleConsent = async (action: 'approve' | 'deny') => {
+    if (!accessToken || !mcpState || !clientId) return
+
     setLoading(true)
     try {
       const res = await fetch('/api/auth/mcp-consent', {
@@ -83,6 +78,18 @@ export function OAuthConsentPage() {
 
   if (!isAuthenticated) {
     return null
+  }
+
+  if (!mcpState || !clientId) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="w-full max-w-md space-y-4 px-4">
+          <p role="alert" className="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            Missing required authorization parameters.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   if (fetchError) {
