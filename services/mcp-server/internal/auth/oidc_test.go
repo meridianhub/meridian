@@ -1254,14 +1254,14 @@ func TestOIDCStateStore_PeekInfo(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	clientID, redirectURI, scopes, ok := s.PeekInfo(key)
+	result, ok := s.PeekInfo(key)
 	assert.True(t, ok)
-	assert.Equal(t, "client-1", clientID)
-	assert.Equal(t, "https://example.com/callback", redirectURI)
-	assert.Equal(t, []string{"mcp:default", "mcp:admin"}, scopes)
+	assert.Equal(t, "client-1", result.ClientID)
+	assert.Equal(t, "https://example.com/callback", result.RedirectURI)
+	assert.Equal(t, []string{"mcp:default", "mcp:admin"}, result.Scopes)
 
 	// PeekInfo is non-consuming - a second call should also succeed.
-	_, _, _, ok = s.PeekInfo(key)
+	_, ok = s.PeekInfo(key)
 	assert.True(t, ok, "PeekInfo should not consume the entry")
 
 	// Consume should still work after PeekInfo.
@@ -1280,11 +1280,11 @@ func TestOIDCStateStore_PeekInfo_Expired(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	clientID, redirectURI, scopes, ok := s.PeekInfo(key)
+	result, ok := s.PeekInfo(key)
 	assert.False(t, ok)
-	assert.Empty(t, clientID)
-	assert.Empty(t, redirectURI)
-	assert.Nil(t, scopes)
+	assert.Empty(t, result.ClientID)
+	assert.Empty(t, result.RedirectURI)
+	assert.Nil(t, result.Scopes)
 
 	// Expired entry should have been cleaned up by PeekInfo.
 	_, ok = s.Consume(key)
@@ -1294,9 +1294,9 @@ func TestOIDCStateStore_PeekInfo_Expired(t *testing.T) {
 func TestOIDCStateStore_PeekInfo_NotFound(t *testing.T) {
 	s := newTestOIDCStateStore(t)
 
-	clientID, redirectURI, scopes, ok := s.PeekInfo("missing-key")
+	result, ok := s.PeekInfo("missing-key")
 	assert.False(t, ok)
-	assert.Empty(t, clientID)
-	assert.Empty(t, redirectURI)
-	assert.Nil(t, scopes)
+	assert.Empty(t, result.ClientID)
+	assert.Empty(t, result.RedirectURI)
+	assert.Nil(t, result.Scopes)
 }

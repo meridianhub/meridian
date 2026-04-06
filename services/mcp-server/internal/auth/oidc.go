@@ -1,3 +1,5 @@
+//meridian:large-file -- OIDC handler + state store + helpers form a cohesive auth flow unit.
+
 // Package auth provides OIDC integration for the MCP server's OAuth 2.1 flow.
 //
 // The MCP server acts as an OAuth 2.1 authorization server for MCP clients
@@ -194,21 +196,43 @@ func (s *OIDCStateStore) Consume(key string) (OIDCFlowState, bool) {
 	return entry, true
 }
 
+// Delete removes an OIDC flow state entry by key without returning it.
+// This is used by the consent handler to clean up state on deny.
+func (s *OIDCStateStore) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.entries, key)
+}
+
+// PeekInfoResult holds the fields returned by PeekInfo.
+type PeekInfoResult struct {
+	ClientID    string
+	RedirectURI string
+	Scopes      []string
+	MCPState    string // Original MCP client state (not the internal key).
+	TenantSlug  string
+}
+
 // PeekInfo returns selected fields from an OIDC flow state entry without
 // consuming it. Expired entries are cleaned up and reported as not found.
-func (s *OIDCStateStore) PeekInfo(key string) (clientID, redirectURI string, scopes []string, ok bool) {
+func (s *OIDCStateStore) PeekInfo(key string) (PeekInfoResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, exists := s.entries[key]
 	if !exists {
-		return "", "", nil, false
+		return PeekInfoResult{}, false
 	}
 	if time.Since(entry.IssuedAt) > oidcStateTTL {
 		delete(s.entries, key)
-		return "", "", nil, false
+		return PeekInfoResult{}, false
 	}
-	scopes = append([]string(nil), entry.RequestedScopes...)
-	return entry.MCPClientID, entry.MCPRedirectURI, scopes, true
+	return PeekInfoResult{
+		ClientID:    entry.MCPClientID,
+		RedirectURI: entry.MCPRedirectURI,
+		Scopes:      append([]string(nil), entry.RequestedScopes...),
+		MCPState:    entry.MCPState,
+		TenantSlug:  entry.TenantSlug,
+	}, true
 }
 
 // TenantSlugResolver resolves a tenant slug (e.g., "acme") to its canonical

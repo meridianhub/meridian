@@ -44,6 +44,7 @@ type Server struct {
 	tenantInfoHandler     *TenantInfoHandler
 	resendWebhookHandler  *ResendWebhookHandler
 	adminHandler          *AdminHandler
+	mcpConsentHandler     *MCPConsentHandler
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -249,6 +250,12 @@ func (s *Server) registerRoutes() {
 	// Resend delivery status webhook - NO middleware (Svix signature IS the auth).
 	if s.resendWebhookHandler != nil {
 		s.mux.Handle("POST /api/v1/webhooks/resend", s.resendWebhookHandler)
+	}
+
+	// MCP consent endpoint - full auth middleware chain (JWT + tenant).
+	if s.mcpConsentHandler != nil {
+		consentH := s.wrapWithAuthChain(http.HandlerFunc(s.mcpConsentHandler.HandleConsent))
+		s.mux.Handle("POST /api/auth/mcp-consent", consentH)
 	}
 
 	// Admin identity management endpoints - full auth middleware chain.
