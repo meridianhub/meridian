@@ -211,6 +211,33 @@ func (s *OIDCStateStore) PeekInfo(key string) (clientID, redirectURI string, sco
 	return entry.MCPClientID, entry.MCPRedirectURI, scopes, true
 }
 
+// ConsentEntry holds the state stored alongside a consent code. This mirrors
+// the ConsentCodeEntry from api-gateway but avoids a direct import dependency
+// on that package (which pulls in otel transitive dependencies).
+type ConsentEntry struct {
+	Email          string
+	TenantID       string
+	TenantSlug     string
+	MCPState       string
+	ClientID       string
+	ApprovedScopes []string
+}
+
+// ConsentCodeConsumer can consume a consent code exactly once. The canonical
+// implementation is gateway.ConsentCodeStore.
+type ConsentCodeConsumer interface {
+	// Consume atomically retrieves and deletes a consent code.
+	// Returns (entry, true) if the code exists and has not expired.
+	Consume(code string) (ConsentEntry, bool)
+}
+
+// ConsentCodeConsumerFunc is an adapter to use ordinary functions as
+// ConsentCodeConsumer implementations (see also: http.HandlerFunc pattern).
+type ConsentCodeConsumerFunc func(code string) (ConsentEntry, bool)
+
+// Consume calls f(code).
+func (f ConsentCodeConsumerFunc) Consume(code string) (ConsentEntry, bool) { return f(code) }
+
 // TenantSlugResolver resolves a tenant slug (e.g., "acme") to its canonical
 // UUID. This ensures the x-tenant-id JWT claim contains a UUID consistent
 // with BFF-issued tokens, not the raw slug string.
@@ -224,12 +251,14 @@ type OIDCHandler struct {
 	oauthCfg          OAuthConfig
 	stateStore        *OIDCStateStore
 	codeStore         *CodeStore
+	consentStore      ConsentCodeConsumer
 	registry          *ClientRegistry
 	signer            *platformauth.JWTSigner
 	tenantResolver    TenantSlugResolver
 	tokenTTL          time.Duration
 	defaultTenantSlug string
 	baseDomain        string
+	baseURL           string
 	dexAuthBaseURL    string // External Dex base URL for browser redirects (derived from BaseURL + DexIssuerURL path).
 	httpClient        *http.Client
 	logger            *slog.Logger
@@ -243,6 +272,11 @@ type OIDCHandlerConfig struct {
 	CodeStore  *CodeStore
 	Registry   *ClientRegistry
 	Signer     *platformauth.JWTSigner
+	// ConsentStore is the shared consent code store used by both the BFF
+	// (which issues consent codes after user approval) and the OIDC handler
+	// (which consumes them in HandleCallback). When nil, HandleCallback
+	// falls back to Dex token exchange (legacy flow).
+	ConsentStore ConsentCodeConsumer
 	// TenantResolver resolves tenant slugs to UUIDs for JWT claims.
 	// When nil, the raw slug is used as-is (dev/test fallback).
 	TenantResolver TenantSlugResolver
@@ -317,12 +351,14 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 		oauthCfg:          cfg.OAuth,
 		stateStore:        cfg.StateStore,
 		codeStore:         cfg.CodeStore,
+		consentStore:      cfg.ConsentStore,
 		registry:          cfg.Registry,
 		signer:            cfg.Signer,
 		tenantResolver:    cfg.TenantResolver,
 		tokenTTL:          ttl,
 		defaultTenantSlug: cfg.DefaultTenantSlug,
 		baseDomain:        cfg.BaseDomain,
+		baseURL:           cfg.BaseURL,
 		dexAuthBaseURL:    dexAuthBaseURL,
 		httpClient:        httpClient,
 		logger:            cfg.Logger,
@@ -397,6 +433,68 @@ func (h *OIDCHandler) writeDexRedirectError(w http.ResponseWriter, err error) {
 	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
+// ConsentInfoResponse is the JSON response returned by HandleConsentInfo.
+type ConsentInfoResponse struct {
+	ClientID    string   `json:"client_id"`
+	ClientName  string   `json:"client_name"`
+	RedirectURI string   `json:"redirect_uri"`
+	Scopes      []string `json:"scopes"`
+	IsDynamic   bool     `json:"is_dynamic"`
+}
+
+// HandleConsentInfo handles GET /oauth/consent-info. It returns metadata about
+// the MCP client that initiated the authorization flow so the UI consent page
+// can display it to the user before they approve or deny.
+func (h *OIDCHandler) HandleConsentInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+	clientID := q.Get("client_id")
+	mcpState := q.Get("mcp_state")
+	if clientID == "" || mcpState == "" {
+		http.Error(w, "client_id and mcp_state are required", http.StatusBadRequest)
+		return
+	}
+
+	stateClientID, redirectURI, scopes, ok := h.stateStore.PeekInfo(mcpState)
+	if !ok {
+		http.Error(w, "invalid or expired state", http.StatusBadRequest)
+		return
+	}
+
+	if stateClientID != clientID {
+		http.Error(w, "client_id mismatch", http.StatusBadRequest)
+		return
+	}
+
+	resp := ConsentInfoResponse{
+		ClientID:    clientID,
+		RedirectURI: redirectURI,
+		Scopes:      scopes,
+	}
+
+	// Resolve client name: static client gets a fixed name, dynamic clients
+	// use their registered client_name.
+	if clientID == h.oauthCfg.ClientID {
+		resp.ClientName = "Meridian CLI"
+		resp.IsDynamic = false
+	} else if h.registry != nil {
+		if client, found := h.registry.Lookup(clientID); found {
+			resp.IsDynamic = true
+			resp.ClientName = client.ClientName
+			if resp.ClientName == "" {
+				resp.ClientName = "Unknown Application"
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // HandleAuthorize handles GET /oauth/authorize from the MCP client.
 // It stores the MCP client's PKCE state and redirects to Dex for authentication.
 func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
@@ -447,8 +545,27 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	// Capture requested OAuth scopes from the MCP client (space-delimited per RFC 6749).
 	requestedScopes := strings.Fields(strings.TrimSpace(q.Get("scope")))
+	if len(requestedScopes) == 0 {
+		requestedScopes = []string{"mcp:default"}
+	}
 
-	// Store OIDC flow state and redirect to Dex for authentication.
+	// When the consent store is configured, redirect to the UI consent page
+	// instead of Dex. The consent page handles authentication + authorization
+	// approval in one step.
+	if h.consentStore != nil {
+		redirectURL, err := h.buildConsentRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug, requestedScopes)
+		if err != nil {
+			h.writeDexRedirectError(w, err)
+			return
+		}
+		h.logger.Info("oidc: redirecting to consent page",
+			"tenant", tenantSlug,
+			"client_id", clientID)
+		http.Redirect(w, r, redirectURL, http.StatusFound)
+		return
+	}
+
+	// Legacy path: redirect to Dex for authentication.
 	redirectURL, err := h.buildDexRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug, requestedScopes)
 	if err != nil {
 		h.writeDexRedirectError(w, err)
@@ -462,19 +579,79 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
-// HandleCallback handles GET /oauth/callback from Dex.
-// It exchanges the Dex authorization code for an ID token, extracts the email,
-// signs a Meridian JWT, and redirects back to the MCP client's redirect_uri.
+// HandleCallback handles GET /oauth/callback.
+// When the consent store is configured, it consumes a consent code issued by
+// the BFF after user approval. Otherwise it falls back to Dex token exchange.
+// In both cases it signs a Meridian JWT and redirects to the MCP client.
 func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	q := r.URL.Query()
+	stateKey := q.Get("state")
+	code := q.Get("code")
+
+	if h.consentStore != nil {
+		h.handleConsentCallback(w, r, stateKey, code)
+		return
+	}
+	h.handleDexCallback(w, r, stateKey, code)
+}
+
+// handleConsentCallback processes the consent-code callback path. The BFF
+// issues a consent code after user approval; this method consumes it,
+// cross-validates bindings, and issues the MCP authorization code.
+func (h *OIDCHandler) handleConsentCallback(w http.ResponseWriter, r *http.Request, stateKey, code string) {
+	if stateKey == "" || code == "" {
+		http.Error(w, "missing state or code parameter", http.StatusBadRequest)
+		return
+	}
+
+	consentEntry, ok := h.consentStore.Consume(code)
+	if !ok {
+		http.Error(w, "invalid or expired consent code", http.StatusBadRequest)
+		return
+	}
+
+	flowState, ok := h.stateStore.Consume(stateKey)
+	if !ok {
+		http.Error(w, "invalid or expired state parameter", http.StatusBadRequest)
+		return
+	}
+
+	if consentEntry.MCPState != stateKey || consentEntry.ClientID != flowState.MCPClientID {
+		http.Error(w, "consent code binding mismatch", http.StatusBadRequest)
+		return
+	}
+
+	if consentEntry.TenantSlug != flowState.TenantSlug {
+		http.Error(w, "tenant mismatch", http.StatusBadRequest)
+		return
+	}
+
+	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
+		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
+		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
+		return
+	}
+
+	redirectURL, err := h.issueCodeAndRedirect(
+		consentEntry.Email, consentEntry.TenantID, consentEntry.ApprovedScopes, flowState)
+	if err != nil {
+		h.logger.Error("oidc: failed to issue auth code", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// handleDexCallback processes the legacy Dex token-exchange callback path.
+func (h *OIDCHandler) handleDexCallback(w http.ResponseWriter, r *http.Request, stateKey, code string) {
 	ctx := r.Context()
 	q := r.URL.Query()
 
-	// Check for Dex error.
 	if errParam := q.Get("error"); errParam != "" {
 		desc := q.Get("error_description")
 		h.logger.Warn("oidc: Dex returned error",
@@ -483,21 +660,17 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stateKey := q.Get("state")
-	code := q.Get("code")
 	if stateKey == "" || code == "" {
 		http.Error(w, "missing state or code parameter", http.StatusBadRequest)
 		return
 	}
 
-	// Retrieve and consume state (one-time use).
 	flowState, ok := h.stateStore.Consume(stateKey)
 	if !ok {
 		http.Error(w, "invalid or expired state parameter", http.StatusBadRequest)
 		return
 	}
 
-	// Exchange Dex authorization code for tokens.
 	idToken, err := h.exchangeDexCode(ctx, code, flowState.DexCodeVerifier)
 	if err != nil {
 		h.logger.Error("oidc: Dex token exchange failed",
@@ -506,7 +679,6 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract email from Dex ID token (trusted server-to-server response).
 	email, err := extractEmailFromJWT(idToken)
 	if err != nil {
 		h.logger.Error("oidc: failed to extract email from ID token",
@@ -515,23 +687,19 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve tenant slug to UUID for JWT consistency with BFF-issued tokens.
 	tenantID, err := h.resolveTenantID(ctx, flowState.TenantSlug)
 	if err != nil {
 		http.Error(w, errTenantResolutionFailed.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Defense-in-depth: validate redirect URI scheme before signing tokens.
-	// The URI was validated at authorize-time, but re-check before redirect.
 	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
 		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
 		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
 		return
 	}
 
-	// Issue MCP authorization code backed by a Meridian JWT.
-	redirectURL, err := h.issueCodeAndRedirect(email, tenantID, flowState)
+	redirectURL, err := h.issueCodeAndRedirect(email, tenantID, flowState.RequestedScopes, flowState)
 	if err != nil {
 		h.logger.Error("oidc: failed to issue auth code", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -589,6 +757,58 @@ func (h *OIDCHandler) buildDexRedirect(challenge, clientID, redirectURI, mcpStat
 	return dexAuthURL + "?" + params.Encode(), nil
 }
 
+// buildConsentRedirect stores OIDC flow state and returns the URL of the UI
+// consent page. The consent page authenticates the user (via the existing BFF
+// session) and asks them to approve the requested scopes before redirecting
+// back to /oauth/callback with a consent code.
+func (h *OIDCHandler) buildConsentRedirect(challenge, clientID, redirectURI, mcpState, tenantSlug string, requestedScopes []string) (string, error) {
+	stateKey, err := h.stateStore.Store(OIDCFlowState{
+		MCPCodeChallenge: challenge,
+		MCPClientID:      clientID,
+		MCPRedirectURI:   redirectURI,
+		MCPState:         mcpState,
+		TenantSlug:       tenantSlug,
+		RequestedScopes:  requestedScopes,
+		IssuedAt:         time.Now(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("store state: %w", err)
+	}
+
+	consentURL := h.buildConsentPageURL(tenantSlug, stateKey, clientID)
+	return consentURL, nil
+}
+
+// buildConsentPageURL constructs the UI consent page URL with tenant subdomain.
+func (h *OIDCHandler) buildConsentPageURL(tenantSlug, stateKey, clientID string) string {
+	base := h.baseURL
+	if base == "" {
+		base = "https://" + h.baseDomain
+	}
+
+	// Insert tenant subdomain if base domain is configured.
+	if h.baseDomain != "" && tenantSlug != "" {
+		parsed, err := url.Parse(base)
+		if err == nil {
+			host := parsed.Hostname()
+			port := parsed.Port()
+			if host == h.baseDomain || strings.HasSuffix(host, "."+h.baseDomain) {
+				parsed.Host = tenantSlug + "." + h.baseDomain
+				if port != "" {
+					parsed.Host = tenantSlug + "." + h.baseDomain + ":" + port
+				}
+				base = parsed.String()
+			}
+		}
+	}
+
+	params := url.Values{
+		"mcp_state": {stateKey},
+		"client_id": {clientID},
+	}
+	return base + "/auth/mcp-consent?" + params.Encode()
+}
+
 // resolveTenantID resolves a tenant slug to a tenant UUID via the tenant resolver.
 func (h *OIDCHandler) resolveTenantID(ctx context.Context, tenantSlug string) (string, error) {
 	tenantID := tenantSlug
@@ -605,11 +825,12 @@ func (h *OIDCHandler) resolveTenantID(ctx context.Context, tenantSlug string) (s
 }
 
 // issueCodeAndRedirect signs a Meridian JWT, generates an MCP authorization code, stores it, and returns the redirect URL.
-func (h *OIDCHandler) issueCodeAndRedirect(email, tenantID string, flowState OIDCFlowState) (string, error) {
+func (h *OIDCHandler) issueCodeAndRedirect(email, tenantID string, scopes []string, flowState OIDCFlowState) (string, error) {
 	claims := map[string]interface{}{
 		"sub":         email,
 		"email":       email,
 		"x-tenant-id": tenantID,
+		"scopes":      scopes,
 	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
 	if err != nil {
