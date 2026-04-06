@@ -232,6 +232,10 @@ All mandatory - no "recommended" tier. Everything listed here ships or the PRD i
     `ConsentCodeEntry`, `scopes` claim in MCP JWT. v1 value: `["mcp:default"]`.
 11. **Dynamic client flagging**: Consent screen shows "Unverified application" badge for
     dynamically registered clients.
+12. **return_url validation**: The `/login?return_url=...` redirect used when the user is
+    not authenticated must validate that `return_url` is a relative path starting with
+    `/` (existing BFF pattern). This prevents open-redirect attacks where a crafted
+    consent URL chains through login to redirect to an attacker-controlled site.
 
 ### Consent Code Specification
 
@@ -291,7 +295,7 @@ The "Unverified application" badge only appears for dynamically registered clien
 - Request: `{ mcp_state, client_id, action: "approve" | "deny" }`
 - 200 (approved): `{ redirect_url: "/oauth/callback?code=...&state=..." }`
 - 200 (denied): `{ redirect_url: "https://client/callback?error=access_denied&state=..." }`
-- 400: `{ error: "invalid_state" | "state_expired" | "client_mismatch" }`
+- 400: `{ error: "invalid_state" | "state_expired" | "client_mismatch" | "invalid_action" }`
 - 401: invalid/expired JWT
 
 ## Acceptance Criteria
