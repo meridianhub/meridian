@@ -84,6 +84,8 @@ func (s *ConsentCodeStore) evictExpired() {
 // Store saves a consent code entry and returns the generated code.
 // Returns errConsentCodeStoreFull if the store has reached its capacity limit.
 func (s *ConsentCodeStore) Store(entry ConsentCodeEntry) (string, error) {
+	entry.CreatedAt = time.Now()
+
 	code, err := generateConsentCode()
 	if err != nil {
 		return "", err

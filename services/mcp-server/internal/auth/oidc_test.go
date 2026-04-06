@@ -1273,13 +1273,22 @@ func TestOIDCStateStore_PeekInfo(t *testing.T) {
 func TestOIDCStateStore_PeekInfo_Expired(t *testing.T) {
 	s := newTestOIDCStateStore(t)
 
-	// Store a valid entry, then verify PeekInfo works for non-existent keys
-	// (expired entries are cleaned up internally by the store).
-	clientID, redirectURI, scopes, ok := s.PeekInfo("nonexistent-key")
+	key, err := s.Store(auth.OIDCFlowState{
+		MCPClientID:    "client-1",
+		MCPRedirectURI: "https://example.com/callback",
+		IssuedAt:       time.Now().Add(-11 * time.Minute), // older than 10m TTL
+	})
+	require.NoError(t, err)
+
+	clientID, redirectURI, scopes, ok := s.PeekInfo(key)
 	assert.False(t, ok)
 	assert.Empty(t, clientID)
 	assert.Empty(t, redirectURI)
 	assert.Nil(t, scopes)
+
+	// Expired entry should have been cleaned up by PeekInfo.
+	_, ok = s.Consume(key)
+	assert.False(t, ok)
 }
 
 func TestOIDCStateStore_PeekInfo_NotFound(t *testing.T) {

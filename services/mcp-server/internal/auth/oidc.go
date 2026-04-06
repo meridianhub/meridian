@@ -174,6 +174,7 @@ func (s *OIDCStateStore) Store(entry OIDCFlowState) (string, error) {
 	if len(s.entries) >= oidcStateMaxEntries {
 		return "", errOIDCStateFull
 	}
+	entry.RequestedScopes = append([]string(nil), entry.RequestedScopes...)
 	s.entries[key] = entry
 	return key, nil
 }
@@ -206,7 +207,8 @@ func (s *OIDCStateStore) PeekInfo(key string) (clientID, redirectURI string, sco
 		delete(s.entries, key)
 		return "", "", nil, false
 	}
-	return entry.MCPClientID, entry.MCPRedirectURI, entry.RequestedScopes, true
+	scopes = append([]string(nil), entry.RequestedScopes...)
+	return entry.MCPClientID, entry.MCPRedirectURI, scopes, true
 }
 
 // TenantSlugResolver resolves a tenant slug (e.g., "acme") to its canonical
@@ -443,8 +445,11 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture requested OAuth scopes from the MCP client (space-delimited per RFC 6749).
+	requestedScopes := strings.Fields(strings.TrimSpace(q.Get("scope")))
+
 	// Store OIDC flow state and redirect to Dex for authentication.
-	redirectURL, err := h.buildDexRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug)
+	redirectURL, err := h.buildDexRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug, requestedScopes)
 	if err != nil {
 		h.writeDexRedirectError(w, err)
 		return
@@ -550,7 +555,7 @@ func (h *OIDCHandler) resolveTenantSlug(host string) (string, error) {
 }
 
 // buildDexRedirect generates PKCE state, stores the OIDC flow state, and returns the Dex redirect URL.
-func (h *OIDCHandler) buildDexRedirect(challenge, clientID, redirectURI, mcpState, tenantSlug string) (string, error) {
+func (h *OIDCHandler) buildDexRedirect(challenge, clientID, redirectURI, mcpState, tenantSlug string, requestedScopes []string) (string, error) {
 	dexVerifier, err := generateRandomToken(oidcCodeVerifierBytes)
 	if err != nil {
 		return "", fmt.Errorf("generate code verifier: %w", err)
@@ -564,6 +569,7 @@ func (h *OIDCHandler) buildDexRedirect(challenge, clientID, redirectURI, mcpStat
 		MCPState:         mcpState,
 		DexCodeVerifier:  dexVerifier,
 		TenantSlug:       tenantSlug,
+		RequestedScopes:  requestedScopes,
 		IssuedAt:         time.Now(),
 	})
 	if err != nil {

@@ -26,7 +26,6 @@ func TestConsentCodeStore_StoreAndConsume(t *testing.T) {
 		MCPState:       "state-abc",
 		ClientID:       "client-1",
 		ApprovedScopes: []string{"mcp:default"},
-		CreatedAt:      time.Now(),
 	}
 
 	code, err := s.Store(entry)
@@ -51,19 +50,21 @@ func TestConsentCodeStore_StoreAndConsume(t *testing.T) {
 func TestConsentCodeStore_ConsumeExpired(t *testing.T) {
 	s := newTestConsentCodeStore(t)
 
-	entry := ConsentCodeEntry{
+	// Insert directly into the map with a past CreatedAt to test TTL enforcement,
+	// since Store now always sets CreatedAt to time.Now().
+	expiredCode := "expired-test-code"
+	s.mu.Lock()
+	s.entries[expiredCode] = ConsentCodeEntry{
 		Email:     "expired@example.com",
 		CreatedAt: time.Now().Add(-consentCodeTTL - time.Second),
 	}
+	s.mu.Unlock()
 
-	code, err := s.Store(entry)
-	require.NoError(t, err)
-
-	_, ok := s.Consume(code)
+	_, ok := s.Consume(expiredCode)
 	assert.False(t, ok, "expired entry should not be consumable")
 
 	// Entry should have been deleted despite being expired.
-	_, ok = s.Consume(code)
+	_, ok = s.Consume(expiredCode)
 	assert.False(t, ok, "expired entry should be cleaned up after first consume attempt")
 }
 
@@ -71,8 +72,7 @@ func TestConsentCodeStore_ConcurrentConsume(t *testing.T) {
 	s := newTestConsentCodeStore(t)
 
 	entry := ConsentCodeEntry{
-		Email:     "concurrent@example.com",
-		CreatedAt: time.Now(),
+		Email: "concurrent@example.com",
 	}
 
 	code, err := s.Store(entry)
@@ -108,16 +108,14 @@ func TestConsentCodeStore_CapacityLimit(t *testing.T) {
 	// Fill to capacity.
 	for i := 0; i < consentCodeMaxEntries; i++ {
 		_, err := s.Store(ConsentCodeEntry{
-			Email:     "fill@example.com",
-			CreatedAt: time.Now(),
+			Email: "fill@example.com",
 		})
 		require.NoError(t, err)
 	}
 
 	// Next store should fail.
 	_, err := s.Store(ConsentCodeEntry{
-		Email:     "overflow@example.com",
-		CreatedAt: time.Now(),
+		Email: "overflow@example.com",
 	})
 	assert.ErrorIs(t, err, errConsentCodeStoreFull)
 }
@@ -159,14 +157,28 @@ func TestConsentCodeStore_ConsumeNotFound(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestConsentCodeStore_StoreOwnsCreatedAt(t *testing.T) {
+	s := newTestConsentCodeStore(t)
+
+	before := time.Now()
+	code, err := s.Store(ConsentCodeEntry{Email: "test@example.com"})
+	require.NoError(t, err)
+	after := time.Now()
+
+	got, ok := s.Consume(code)
+	require.True(t, ok)
+	assert.False(t, got.CreatedAt.IsZero(), "Store should set CreatedAt")
+	assert.True(t, !got.CreatedAt.Before(before) && !got.CreatedAt.After(after),
+		"CreatedAt should be set to approximately time.Now() at store time")
+}
+
 func TestConsentCodeStore_UniqueCodeGeneration(t *testing.T) {
 	s := newTestConsentCodeStore(t)
 
 	codes := make(map[string]struct{})
 	for i := 0; i < 100; i++ {
 		code, err := s.Store(ConsentCodeEntry{
-			Email:     "unique@example.com",
-			CreatedAt: time.Now(),
+			Email: "unique@example.com",
 		})
 		require.NoError(t, err)
 		assert.NotContains(t, codes, code, "generated codes should be unique")
