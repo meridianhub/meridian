@@ -1,17 +1,17 @@
 //meridian:large-file -- OIDC handler + state store + helpers form a cohesive auth flow unit.
 
-// Package auth provides OIDC integration for the MCP server's OAuth 2.1 flow.
+// Package auth provides the consent-based OAuth 2.1 flow for the MCP server.
 //
 // The MCP server acts as an OAuth 2.1 authorization server for MCP clients
-// (e.g., Claude.ai). Authentication is delegated to Dex via standard OIDC:
+// (e.g., Claude.ai). Authentication and consent are handled by the BFF:
 //
 //  1. MCP client POSTs to /mcp → receives 401 with auth metadata
 //  2. MCP client opens browser → /oauth/authorize
-//  3. /oauth/authorize stores PKCE state, redirects to Dex
-//  4. User authenticates via Dex (Google, GitHub, password, etc.)
-//  5. Dex redirects to /oauth/callback with authorization code
-//  6. MCP server exchanges code for ID token, extracts email
-//  7. MCP server signs a Meridian JWT with tenant context
+//  3. /oauth/authorize stores PKCE state, redirects to UI consent page
+//  4. User authenticates via the BFF (existing session or fresh login)
+//  5. User approves MCP scopes; BFF issues a short-lived consent code
+//  6. BFF redirects to /oauth/callback with consent code + state
+//  7. MCP server consumes consent code, signs a Meridian JWT with tenant context
 //  8. MCP server redirects to MCP client's redirect_uri with auth code
 //  9. MCP client exchanges auth code for JWT at /oauth/token
 //
@@ -21,14 +21,10 @@
 package auth
 
 import (
-	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -40,21 +36,13 @@ import (
 )
 
 var (
-	errOIDCDexIssuerRequired  = errors.New("oidc handler: dex issuer URL is required")
-	errOIDCClientIDRequired   = errors.New("oidc handler: client ID is required")
-	errOIDCCallbackRequired   = errors.New("oidc handler: callback URL is required")
-	errOIDCStateStoreRequired = errors.New("oidc handler: state store is required")
-	errOIDCCodeStoreRequired  = errors.New("oidc handler: code store is required")
-	errOIDCSignerRequired     = errors.New("oidc handler: JWT signer is required")
-	errOIDCLoggerRequired     = errors.New("oidc handler: logger is required")
-	errDexTokenError          = errors.New("dex token error")
-	errDexBadStatus           = errors.New("dex token endpoint returned non-200 status")
-	errDexEmptyIDToken        = errors.New("dex returned empty id_token")
-	errOIDCStateFull          = errors.New("oidc state store is full")
-	errInvalidJWTFormat       = errors.New("invalid JWT format")
-	errEmailClaimMissing      = errors.New("email claim missing from ID token")
-	errTenantRequired         = errors.New("tenant identification required: use a tenant subdomain or configure MCP_DEFAULT_TENANT_SLUG")
-	errTenantResolutionFailed = errors.New("tenant slug resolution failed")
+	errOIDCConsentStoreRequired = errors.New("oidc handler: consent store is required")
+	errOIDCStateStoreRequired   = errors.New("oidc handler: state store is required")
+	errOIDCCodeStoreRequired    = errors.New("oidc handler: code store is required")
+	errOIDCSignerRequired       = errors.New("oidc handler: JWT signer is required")
+	errOIDCLoggerRequired       = errors.New("oidc handler: logger is required")
+	errOIDCStateFull            = errors.New("oidc state store is full")
+	errTenantRequired           = errors.New("tenant identification required: use a tenant subdomain or configure MCP_DEFAULT_TENANT_SLUG")
 )
 
 const (
@@ -62,12 +50,6 @@ const (
 	oidcStateTTL = 10 * time.Minute
 	// oidcStateBytes is the number of random bytes in a state token.
 	oidcStateBytes = 32
-	// oidcCodeVerifierBytes is the number of random bytes for PKCE code verifier.
-	oidcCodeVerifierBytes = 32
-	// oidcMaxTokenResponseBytes limits the Dex token response body size.
-	oidcMaxTokenResponseBytes = 64 * 1024
-	// oidcHTTPTimeout is the timeout for Dex token exchange.
-	oidcHTTPTimeout = 10 * time.Second
 	// oidcStateEvictInterval is how often expired state entries are swept.
 	oidcStateEvictInterval = 5 * time.Minute
 	// oidcStateMaxEntries caps the number of in-flight OIDC authorizations
@@ -86,19 +68,8 @@ const (
 	errMsgRedirectURIRequired = "redirect_uri is required for dynamic clients"
 )
 
-// OIDCConfig holds configuration for the Dex OIDC integration.
-type OIDCConfig struct {
-	// DexIssuerURL is the Dex issuer URL (e.g., "https://demo.meridianhub.cloud/dex").
-	DexIssuerURL string
-	// ClientID is the OAuth2 client ID registered with Dex.
-	ClientID string
-	// CallbackURL is the MCP server's OIDC callback URL
-	// (e.g., "https://demo.meridianhub.cloud/oauth/callback").
-	CallbackURL string
-}
-
 // OIDCFlowState holds the state for an in-progress OIDC authorization flow.
-// It bridges the MCP client's OAuth request with the Dex OIDC flow.
+// It bridges the MCP client's OAuth request with the consent flow.
 type OIDCFlowState struct {
 	// MCP client's PKCE code challenge (from the original /oauth/authorize request).
 	MCPCodeChallenge string
@@ -108,8 +79,6 @@ type OIDCFlowState struct {
 	MCPRedirectURI string
 	// MCP client's state parameter (forwarded back after authentication).
 	MCPState string
-	// PKCE code verifier for the Dex authorization code exchange.
-	DexCodeVerifier string
 	// TenantSlug extracted from the request subdomain.
 	TenantSlug string
 	// RequestedScopes are the OAuth scopes requested by the MCP client.
@@ -235,35 +204,23 @@ func (s *OIDCStateStore) PeekInfo(key string) (PeekInfoResult, bool) {
 	}, true
 }
 
-// TenantSlugResolver resolves a tenant slug (e.g., "acme") to its canonical
-// UUID. This ensures the x-tenant-id JWT claim contains a UUID consistent
-// with BFF-issued tokens, not the raw slug string.
-type TenantSlugResolver interface {
-	ResolveSlug(ctx context.Context, slug string) (string, error)
-}
-
-// OIDCHandler manages the OIDC authorization flow with Dex.
+// OIDCHandler manages the consent-based OAuth 2.1 flow.
 type OIDCHandler struct {
-	cfg               OIDCConfig
 	oauthCfg          OAuthConfig
 	stateStore        *OIDCStateStore
 	codeStore         *CodeStore
 	consentStore      ConsentCodeConsumer
 	registry          *ClientRegistry
 	signer            *platformauth.JWTSigner
-	tenantResolver    TenantSlugResolver
 	tokenTTL          time.Duration
 	defaultTenantSlug string
 	baseDomain        string
 	baseURL           string
-	dexAuthBaseURL    string // External Dex base URL for browser redirects (derived from BaseURL + DexIssuerURL path).
-	httpClient        *http.Client
 	logger            *slog.Logger
 }
 
 // OIDCHandlerConfig holds configuration for creating an OIDCHandler.
 type OIDCHandlerConfig struct {
-	OIDC       OIDCConfig
 	OAuth      OAuthConfig
 	StateStore *OIDCStateStore
 	CodeStore  *CodeStore
@@ -271,54 +228,32 @@ type OIDCHandlerConfig struct {
 	Signer     *platformauth.JWTSigner
 	// ConsentStore is the shared consent code store used by both the BFF
 	// (which issues consent codes after user approval) and the OIDC handler
-	// (which consumes them in HandleCallback). When nil, HandleCallback
-	// falls back to Dex token exchange (legacy flow).
+	// (which consumes them in HandleCallback).
 	ConsentStore ConsentCodeConsumer
-	// TenantResolver resolves tenant slugs to UUIDs for JWT claims.
-	// When nil, the raw slug is used as-is (dev/test fallback).
-	TenantResolver TenantSlugResolver
-	TokenTTL       time.Duration
+	TokenTTL     time.Duration
 	// DefaultTenantSlug is used when no tenant subdomain is present in the
 	// request. In single-tenant deployments (e.g., demo), set this to the
 	// tenant's slug so bare-domain requests work. When empty in multi-tenant
 	// mode, bare-domain requests fail closed with HTTP 400.
 	DefaultTenantSlug string
 	// BaseURL is the public-facing base URL of the MCP server
-	// (e.g., "https://demo.meridianhub.cloud"). Used to construct browser-facing
-	// Dex redirect URLs when DexIssuerURL is an internal Docker hostname.
+	// (e.g., "https://demo.meridianhub.cloud"). Used to construct the consent
+	// page redirect URL.
 	BaseURL    string
 	BaseDomain string
-	HTTPClient *http.Client
 	Logger     *slog.Logger
 }
 
-// NewOIDCHandler creates a handler for the OIDC-backed OAuth 2.1 flow.
+// NewOIDCHandler creates a handler for the consent-based OAuth 2.1 flow.
 func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
-	if cfg.OIDC.DexIssuerURL == "" {
-		return nil, errOIDCDexIssuerRequired
-	}
-	// Parse and validate the Dex issuer URL scheme. HTTPS is required because
-	// the OIDC callback trusts the Dex token response without signature
-	// verification (server-to-server over TLS). HTTP is allowed for local
-	// development (e.g., http://dex:5556/dex) but logged as a warning.
-	issuerURL, err := url.Parse(cfg.OIDC.DexIssuerURL)
-	if err != nil {
-		return nil, fmt.Errorf("oidc handler: invalid dex issuer URL: %w", err)
-	}
-	if issuerURL.Scheme != schemeHTTPS && issuerURL.Scheme != schemeHTTP {
-		return nil, fmt.Errorf("oidc handler: dex issuer URL must use http or https: %w", errOIDCDexIssuerRequired)
-	}
-	if cfg.OIDC.ClientID == "" {
-		return nil, errOIDCClientIDRequired
-	}
-	if cfg.OIDC.CallbackURL == "" {
-		return nil, errOIDCCallbackRequired
-	}
 	if cfg.StateStore == nil {
 		return nil, errOIDCStateStoreRequired
 	}
 	if cfg.CodeStore == nil {
 		return nil, errOIDCCodeStoreRequired
+	}
+	if cfg.ConsentStore == nil {
+		return nil, errOIDCConsentStoreRequired
 	}
 	if cfg.Signer == nil {
 		return nil, errOIDCSignerRequired
@@ -327,61 +262,24 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 		return nil, errOIDCLoggerRequired
 	}
 
-	if issuerURL.Scheme == schemeHTTP {
-		cfg.Logger.Warn("oidc: Dex issuer URL uses HTTP — ID token integrity depends on network trust; use HTTPS in production",
-			"issuer_url", cfg.OIDC.DexIssuerURL)
-	}
-
-	dexAuthBaseURL := resolveDexAuthBaseURL(cfg.BaseURL, issuerURL, cfg.OIDC.DexIssuerURL, cfg.Logger)
-
 	ttl := cfg.TokenTTL
 	if ttl == 0 {
 		ttl = defaultTokenTTL
 	}
-	httpClient := cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: oidcHTTPTimeout}
-	}
 
 	return &OIDCHandler{
-		cfg:               cfg.OIDC,
 		oauthCfg:          cfg.OAuth,
 		stateStore:        cfg.StateStore,
 		codeStore:         cfg.CodeStore,
 		consentStore:      cfg.ConsentStore,
 		registry:          cfg.Registry,
 		signer:            cfg.Signer,
-		tenantResolver:    cfg.TenantResolver,
 		tokenTTL:          ttl,
 		defaultTenantSlug: cfg.DefaultTenantSlug,
 		baseDomain:        cfg.BaseDomain,
 		baseURL:           cfg.BaseURL,
-		dexAuthBaseURL:    dexAuthBaseURL,
-		httpClient:        httpClient,
 		logger:            cfg.Logger,
 	}, nil
-}
-
-// resolveDexAuthBaseURL computes the browser-facing Dex base URL. When
-// DexIssuerURL is an internal hostname (e.g., http://dex:5556/dex), browsers
-// can't reach it. If publicBaseURL is set, we combine its scheme+host with
-// the path from the internal issuer URL so the browser is redirected to the
-// external reverse proxy instead.
-func resolveDexAuthBaseURL(publicBaseURL string, issuerURL *url.URL, dexIssuerURL string, logger *slog.Logger) string {
-	if publicBaseURL == "" {
-		return dexIssuerURL
-	}
-	parsed, err := url.Parse(publicBaseURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return dexIssuerURL
-	}
-	external := *parsed
-	external.Path = issuerURL.Path
-	result := external.String()
-	logger.Info("oidc: using external Dex URL for browser redirects",
-		"dex_auth_base_url", result,
-		"dex_internal_url", dexIssuerURL)
-	return result
 }
 
 // validateAuthorizeClient validates the client_id and redirect_uri parameters
@@ -416,22 +314,22 @@ func (h *OIDCHandler) validateAuthorizeClient(clientID, redirectURI string) (str
 	return registered, ""
 }
 
-// writeDexRedirectError writes the appropriate HTTP error for a buildDexRedirect failure.
+// writeRedirectError writes the appropriate HTTP error for a redirect build failure.
 // errOIDCStateFull is transient backpressure and returns 503 with Retry-After: 30;
 // all other errors return 500.
-func (h *OIDCHandler) writeDexRedirectError(w http.ResponseWriter, err error) {
+func (h *OIDCHandler) writeRedirectError(w http.ResponseWriter, err error) {
 	if errors.Is(err, errOIDCStateFull) {
 		h.logger.Warn("oidc: state store at capacity, rejecting new authorization request")
 		w.Header().Set("Retry-After", "30")
 		http.Error(w, "service temporarily unavailable, retry later", http.StatusServiceUnavailable)
 		return
 	}
-	h.logger.Error("oidc: failed to build Dex redirect", "error", err)
+	h.logger.Error("oidc: failed to build consent redirect", "error", err)
 	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
 // HandleAuthorize handles GET /oauth/authorize from the MCP client.
-// It stores the MCP client's PKCE state and redirects to Dex for authentication.
+// It stores the MCP client's PKCE state and redirects to the UI consent page.
 func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -485,40 +383,20 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		requestedScopes = []string{"mcp:default"}
 	}
 
-	// When the consent store is configured, redirect to the UI consent page
-	// instead of Dex. The consent page handles authentication + authorization
-	// approval in one step.
-	if h.consentStore != nil {
-		redirectURL, err := h.buildConsentRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug, requestedScopes)
-		if err != nil {
-			h.writeDexRedirectError(w, err)
-			return
-		}
-		h.logger.Info("oidc: redirecting to consent page",
-			"tenant", tenantSlug,
-			"client_id", clientID)
-		http.Redirect(w, r, redirectURL, http.StatusFound)
-		return
-	}
-
-	// Legacy path: redirect to Dex for authentication.
-	redirectURL, err := h.buildDexRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug, requestedScopes)
+	redirectURL, err := h.buildConsentRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug, requestedScopes)
 	if err != nil {
-		h.writeDexRedirectError(w, err)
+		h.writeRedirectError(w, err)
 		return
 	}
-
-	h.logger.Info("oidc: initiating Dex authorization",
+	h.logger.Info("oidc: redirecting to consent page",
 		"tenant", tenantSlug,
 		"client_id", clientID)
-
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
 // HandleCallback handles GET /oauth/callback.
-// When the consent store is configured, it consumes a consent code issued by
-// the BFF after user approval. Otherwise it falls back to Dex token exchange.
-// In both cases it signs a Meridian JWT and redirects to the MCP client.
+// It consumes the consent code issued by the BFF after user approval,
+// signs a Meridian JWT, and redirects to the MCP client.
 func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -526,14 +404,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	stateKey := q.Get("state")
-	code := q.Get("code")
-
-	if h.consentStore != nil {
-		h.handleConsentCallback(w, r, stateKey, code)
-		return
-	}
-	h.handleDexCallback(w, r, stateKey, code)
+	h.handleConsentCallback(w, r, q.Get("state"), q.Get("code"))
 }
 
 // resolveTenantSlug extracts the tenant slug from the request host subdomain,
@@ -549,56 +420,6 @@ func (h *OIDCHandler) resolveTenantSlug(host string) (string, error) {
 		return "", errTenantRequired
 	}
 	return tenantSlug, nil
-}
-
-// buildDexRedirect generates PKCE state, stores the OIDC flow state, and returns the Dex redirect URL.
-func (h *OIDCHandler) buildDexRedirect(challenge, clientID, redirectURI, mcpState, tenantSlug string, requestedScopes []string) (string, error) {
-	dexVerifier, err := generateRandomToken(oidcCodeVerifierBytes)
-	if err != nil {
-		return "", fmt.Errorf("generate code verifier: %w", err)
-	}
-	dexChallenge := computeS256Challenge(dexVerifier)
-
-	stateKey, err := h.stateStore.Store(OIDCFlowState{
-		MCPCodeChallenge: challenge,
-		MCPClientID:      clientID,
-		MCPRedirectURI:   redirectURI,
-		MCPState:         mcpState,
-		DexCodeVerifier:  dexVerifier,
-		TenantSlug:       tenantSlug,
-		RequestedScopes:  requestedScopes,
-		IssuedAt:         time.Now(),
-	})
-	if err != nil {
-		return "", fmt.Errorf("store state: %w", err)
-	}
-
-	dexAuthURL := BuildTenantScopedDexURL(h.dexAuthBaseURL, tenantSlug, h.baseDomain) + "/auth"
-	params := url.Values{
-		"client_id":             {h.cfg.ClientID},
-		"redirect_uri":          {h.cfg.CallbackURL},
-		"response_type":         {"code"},
-		"scope":                 {"openid email profile"},
-		"state":                 {stateKey},
-		"code_challenge":        {dexChallenge},
-		"code_challenge_method": {"S256"},
-	}
-	return dexAuthURL + "?" + params.Encode(), nil
-}
-
-// resolveTenantID resolves a tenant slug to a tenant UUID via the tenant resolver.
-func (h *OIDCHandler) resolveTenantID(ctx context.Context, tenantSlug string) (string, error) {
-	tenantID := tenantSlug
-	if h.tenantResolver != nil && tenantID != "" {
-		resolved, resolveErr := h.tenantResolver.ResolveSlug(ctx, tenantID)
-		if resolveErr != nil {
-			h.logger.Error("oidc: tenant slug resolution failed",
-				"tenant_slug", tenantID, "error", resolveErr)
-			return "", resolveErr
-		}
-		tenantID = resolved
-	}
-	return tenantID, nil
 }
 
 // issueCodeAndRedirect signs a Meridian JWT, generates an MCP authorization code, stores it, and returns the redirect URL.
@@ -647,85 +468,6 @@ func buildAuthRedirect(redirectURI, code, state string) (string, error) {
 	return target.String(), nil
 }
 
-// exchangeDexCode exchanges a Dex authorization code for an ID token.
-func (h *OIDCHandler) exchangeDexCode(ctx context.Context, code, codeVerifier string) (string, error) {
-	tokenURL := h.cfg.DexIssuerURL + "/token"
-	data := url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {h.cfg.ClientID},
-		"code":          {code},
-		"redirect_uri":  {h.cfg.CallbackURL},
-		"code_verifier": {codeVerifier},
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return "", fmt.Errorf("build token request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("token endpoint request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, oidcMaxTokenResponseBytes))
-	if err != nil {
-		return "", fmt.Errorf("read token response: %w", err)
-	}
-
-	var tokenResp struct {
-		IDToken string `json:"id_token"`
-		Error   string `json:"error,omitempty"`
-		ErrDesc string `json:"error_description,omitempty"`
-	}
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return "", fmt.Errorf("parse token response: %w", err)
-	}
-
-	if tokenResp.Error != "" {
-		return "", fmt.Errorf("%w: %s: %s", errDexTokenError, tokenResp.Error, tokenResp.ErrDesc)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%w: status %d", errDexBadStatus, resp.StatusCode)
-	}
-
-	if tokenResp.IDToken == "" {
-		return "", errDexEmptyIDToken
-	}
-
-	return tokenResp.IDToken, nil
-}
-
-// extractEmailFromJWT extracts the email claim from a JWT payload without
-// signature verification (trusted server-to-server response from Dex).
-func extractEmailFromJWT(token string) (string, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return "", errInvalidJWTFormat
-	}
-
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("decode JWT payload: %w", err)
-	}
-
-	var claims struct {
-		Email string `json:"email"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", fmt.Errorf("parse JWT claims: %w", err)
-	}
-
-	if claims.Email == "" {
-		return "", errEmailClaimMissing
-	}
-
-	return claims.Email, nil
-}
-
 // generateRandomToken generates a cryptographically random URL-safe token.
 func generateRandomToken(n int) (string, error) {
 	b := make([]byte, n)
@@ -733,38 +475,6 @@ func generateRandomToken(n int) (string, error) {
 		return "", fmt.Errorf("generate random token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-// computeS256Challenge computes the S256 PKCE code challenge from a verifier.
-func computeS256Challenge(verifier string) string {
-	h := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(h[:])
-}
-
-// BuildTenantScopedDexURL inserts the tenant subdomain into the Dex base URL.
-// Given "https://demo.meridianhub.cloud/dex" and tenant "acme" with baseDomain
-// "demo.meridianhub.cloud", it returns "https://acme.demo.meridianhub.cloud/dex".
-// When baseDomain is empty or the URL can't be parsed, the original URL is returned.
-func BuildTenantScopedDexURL(dexBaseURL, tenantSlug, baseDomain string) string {
-	if baseDomain == "" || tenantSlug == "" {
-		return dexBaseURL
-	}
-	parsed, err := url.Parse(dexBaseURL)
-	if err != nil {
-		return dexBaseURL
-	}
-	// Only scope if the host matches or ends with the base domain.
-	host := parsed.Hostname()
-	if host != baseDomain && !strings.HasSuffix(host, "."+baseDomain) {
-		return dexBaseURL
-	}
-	// Replace the host with tenant-scoped subdomain, preserving any port.
-	port := parsed.Port()
-	parsed.Host = tenantSlug + "." + baseDomain
-	if port != "" {
-		parsed.Host = tenantSlug + "." + baseDomain + ":" + port
-	}
-	return parsed.String()
 }
 
 // isAllowedRedirectURI validates that a redirect URI is safe to redirect to.
