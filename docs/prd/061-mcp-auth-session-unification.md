@@ -2,6 +2,11 @@
 
 ## Problem Statement
 
+**Supersedes PRD-044 MCP auth approach.** PRD-044 proposed tenant-scoped Dex redirects
+(Option A). This PRD bypasses Dex entirely for MCP - a cleaner solution. PRD-044's BFF SSO
+tenant context fix and `HandlerOptionalTenant` middleware for Dex endpoints remain needed
+independently and are out of scope here.
+
 The MCP (Model Context Protocol) OAuth flow bypasses the Meridian UI entirely and redirects
 users to the embedded Dex OIDC login page directly. This creates three problems:
 
@@ -50,7 +55,7 @@ remove the old Dex-direct flow entirely - no feature flags, no fallback.
    -> MCP validates client_id, PKCE, redirect_uri (unchanged)
    -> MCP stores OIDCFlowState {PKCE challenge, client_id, redirect_uri,
       state, tenant, scopes}
-   -> MCP 302 -> https://{tenant}.{baseDomain}/oauth/consent?mcp_state=
+   -> MCP 302 -> https://{tenant}.{baseDomain}/auth/mcp-consent?mcp_state=
       {key}&client_id={id}
    [CHANGED: was Dex redirect, now UI redirect]
 
@@ -58,7 +63,7 @@ remove the old Dex-direct flow entirely - no feature flags, no fallback.
    -> SPA checks sessionStorage for JWT
    -> If no JWT: redirect to /login with return_url
    -> After login (or if already logged in):
-      SPA fetches GET /oauth/consent-info?client_id=...&mcp_state=...
+      SPA fetches GET /mcp/consent-info?client_id=...&mcp_state=...
    -> MCP server validates state exists, returns trusted client metadata
    -> SPA renders consent card with client name, redirect URI, scopes,
       tenant, approve/deny
@@ -118,7 +123,7 @@ remove the old Dex-direct flow entirely - no feature flags, no fallback.
 that redirects to the UI consent page URL with `mcp_state` and `client_id` query params.
 Store `requested_scopes` from the authorize request in `OIDCFlowState`.
 
-**New endpoint `GET /oauth/consent-info`**: Returns trusted client metadata (client_name,
+**New endpoint `GET /mcp/consent-info`**: Returns trusted client metadata (client_name,
 redirect_uri, scopes) after validating the `mcp_state` exists in the state store.
 Unauthenticated endpoint - returns display data only. Cross-checks `client_id` in URL
 matches client_id in state. For dynamically registered clients, include `is_dynamic: true`
@@ -152,10 +157,13 @@ consumption, 2-minute TTL, capped at 10,000 entries, background eviction.
 
 ### 3. Frontend (`frontend/src/`)
 
-**New route**: `/oauth/consent` in `App.tsx`.
+**New route**: `/auth/mcp-consent` in `App.tsx`. This path avoids the Caddy
+`@mcp_transport` matcher which intercepts all `/oauth/*` paths and routes them to
+the MCP server. Using `/auth/mcp-consent` ensures the request falls through to the
+SPA catch-all.
 
 **New page component**: `OAuthConsentPage` - checks auth state, fetches client metadata
-from `/oauth/consent-info`, renders consent card, handles approve/deny.
+from `/mcp/consent-info`, renders consent card, handles approve/deny.
 
 **New display component**: `ConsentCard` - shows application name, tenant context, scope
 description, redirect URI, approve/deny buttons. For dynamically registered clients (where
@@ -166,9 +174,20 @@ login page.
 
 ### 4. Wiring (`cmd/meridian/`)
 
+The unified binary (`cmd/meridian`) runs both the BFF (api-gateway) and MCP server in
+the same Go process. This enables shared in-memory stores between them.
+
 Shared `ConsentCodeStore` created once and passed to both BFF's `MCPConsentHandler` and
 MCP's `OIDCHandler`. Shared `OIDCStateStore` also passed to BFF handler (needed for deny
 flow and redirect_uri lookup).
+
+**Deployment note**: The demo docker-compose runs a separate `mcp-server` container
+alongside the unified `meridian` container. The consent flow requires both BFF and MCP
+to share in-memory stores, so the consent flow runs within the unified binary only.
+The separate `mcp-server` container's OAuth endpoints are not used for the consent
+flow - Caddy routes `/mcp/*` to the MCP handler within the unified binary. If the
+MCP server is ever deployed as a fully separate service, the in-memory stores must
+be replaced with HTTP-based inter-service calls (BFF calls MCP to exchange codes).
 
 ### 5. Cleanup
 
@@ -258,7 +277,7 @@ The "Unverified application" badge only appears for dynamically registered clien
 
 ### API Contracts (Frontend View)
 
-**GET `/oauth/consent-info?client_id=...&mcp_state=...`** (MCP server, unauthenticated)
+**GET `/mcp/consent-info?client_id=...&mcp_state=...`** (MCP server, unauthenticated)
 
 - 200: `{ client_id, client_name, redirect_uri, scopes, is_dynamic }`
 - 400: invalid/expired state or client_id mismatch
@@ -276,7 +295,7 @@ The "Unverified application" badge only appears for dynamically registered clien
 ### Backend
 
 1. MCP `/oauth/authorize` redirects to UI consent page (not Dex)
-2. MCP `/oauth/consent-info` returns trusted client metadata including `redirect_uri`,
+2. MCP `/mcp/consent-info` returns trusted client metadata including `redirect_uri`,
    `scopes`, and `is_dynamic` after validating state
 3. BFF `POST /api/auth/mcp-consent` requires valid JWT, issues one-time consent code
 4. MCP `/oauth/callback` accepts consent codes and cross-validates against flow state
