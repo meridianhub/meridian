@@ -907,12 +907,14 @@ func TestCronScheduler_PerTenantSemaphore_AllowsDifferentTenants(t *testing.T) {
 // --- TenantStatusChecker stub ---
 
 type stubTenantStatusChecker struct {
-	mu     sync.Mutex
-	active bool
-	err    error
+	mu        sync.Mutex
+	active    bool
+	err       error
+	callCount atomic.Int32
 }
 
 func (c *stubTenantStatusChecker) IsActive(_ context.Context, _ string) (bool, error) {
+	c.callCount.Add(1)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.active, c.err
@@ -1124,6 +1126,7 @@ func TestCronScheduler_TenantStatusChecker_NoTenantID_StatusCheckSkipped(t *test
 	}
 
 	assert.GreaterOrEqual(t, executor.callCount.Load(), int32(1))
+	assert.Equal(t, int32(0), checker.callCount.Load(), "checker should not be called for empty TenantID")
 
 	cancel()
 	s.Stop()

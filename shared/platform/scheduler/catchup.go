@@ -141,6 +141,11 @@ func (s *CronScheduler) catchUpSchedule(ctx context.Context, sched Schedule, now
 // lifecycle already knows work is in progress. Context cancellation (from Stop)
 // is checked between iterations in catchUpSchedule.
 func (s *CronScheduler) executeCatchUpWindow(ctx context.Context, sched Schedule, scheduledAt time.Time) {
+	// Check tenant status before executing (mirrors normal executeJob behavior).
+	if !s.tenantIsEligible(ctx, sched) {
+		return
+	}
+
 	// Acquire per-schedule lock (consistent with normal executeJob).
 	if s.lock != nil {
 		lockKey := s.lockKey(sched.ID)
