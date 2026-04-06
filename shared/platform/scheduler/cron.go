@@ -46,7 +46,7 @@ type CronSchedulerConfig struct {
 	// RefreshInterval is how often to reload schedules from the provider.
 	RefreshInterval time.Duration
 	// RefreshJitterMax is the maximum random jitter added after each refresh tick
-	// to prevent thundering herd across replicas. Default: 10s.
+	// to prevent thundering herd across replicas. Default: 0 (disabled).
 	RefreshJitterMax time.Duration
 	// ShutdownTimeout is the maximum time to wait for in-flight jobs during shutdown.
 	ShutdownTimeout time.Duration
@@ -220,7 +220,11 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 			case <-refreshTicker.C:
 				if s.config.RefreshJitterMax > 0 {
 					jitter := time.Duration(rand.Int64N(int64(s.config.RefreshJitterMax)))
-					time.Sleep(jitter)
+					select {
+					case <-workCtx.Done():
+						continue
+					case <-time.After(jitter):
+					}
 				}
 				if err := s.refreshSchedules(workCtx); err != nil {
 					s.logger.Error("failed to refresh schedules", "error", err)
@@ -358,19 +362,19 @@ func (s *CronScheduler) executeJob(schedule Schedule) {
 		ctx, cancel := context.WithTimeout(context.Background(), s.config.ExecutionTimeout)
 		defer cancel()
 
+		// Propagate tenant context first so all audit records are properly scoped
+		if schedule.TenantID != "" {
+			if tid, err := tenant.NewTenantID(schedule.TenantID); err == nil {
+				ctx = tenant.WithTenant(ctx, tid)
+			}
+		}
+
 		// Acquire global concurrency semaphore
 		releaseGlobal, ok := s.acquireGlobalSemaphore(ctx, schedule)
 		if !ok {
 			return
 		}
 		defer releaseGlobal()
-
-		// Propagate tenant context so ExecutionStore can scope to the correct schema
-		if schedule.TenantID != "" {
-			if tid, err := tenant.NewTenantID(schedule.TenantID); err == nil {
-				ctx = tenant.WithTenant(ctx, tid)
-			}
-		}
 
 		// Acquire per-tenant concurrency semaphore
 		releaseTenant, ok := s.acquireTenantSemaphore(ctx, schedule)
