@@ -29,18 +29,10 @@ type LiveState struct {
 	// Outer key is ResourceType, inner key is the resource code/name.
 	// Resources in this set are excluded from diff planning by filterTenantOwned.
 	SystemCodes map[ResourceType]map[string]bool
-
-	// PlatformRefs tracks resources that are tenant overrides of platform defaults
-	// (is_system=false with a non-nil platform_ref in the service layer).
-	// These are tenant-owned resources and must be included in diff planning.
-	// Outer key is ResourceType, inner key is the resource code/name.
-	PlatformRefs map[ResourceType]map[string]bool
 }
 
 // filterTenantOwned returns a copy of live with platform default resources removed.
 // Resources present in SystemCodes (is_system=true) are excluded from all resource slices.
-// Resources present in PlatformRefs (is_system=false with platform_ref) are tenant overrides
-// and are naturally retained - they are not in SystemCodes and pass through unchanged.
 // This function must be called before DiffAgainstLiveState to ensure system resources
 // do not appear as CREATE or UPDATE actions.
 func filterTenantOwned(live *LiveState) *LiveState {
@@ -48,8 +40,7 @@ func filterTenantOwned(live *LiveState) *LiveState {
 		return nil
 	}
 	return &LiveState{
-		SystemCodes:  live.SystemCodes,
-		PlatformRefs: live.PlatformRefs,
+		SystemCodes: live.SystemCodes,
 		Instruments: filterBySystemCodes(live.Instruments, live.SystemCodes, ResourceInstrument,
 			func(r *controlplanev1.InstrumentDefinition) string { return r.GetCode() }),
 		AccountTypes: filterBySystemCodes(live.AccountTypes, live.SystemCodes, ResourceAccountType,

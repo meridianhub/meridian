@@ -88,37 +88,6 @@ func TestFilterTenantOwned_Sagas_SystemFiltered(t *testing.T) {
 	assert.Equal(t, "tenant_custom_saga", result.Sagas[0].GetName())
 }
 
-// TestFilterTenantOwned_SagaOverride_Retained verifies that a tenant override saga
-// (is_system=false with platform_ref) is retained after filtering.
-// Tenant overrides are not in SystemCodes (they are not platform defaults), so they
-// pass through filterTenantOwned and must be included in diff planning.
-func TestFilterTenantOwned_SagaOverride_Retained(t *testing.T) {
-	live := &LiveState{
-		Sagas: []*controlplanev1.SagaDefinition{
-			// Platform default: is_system=true, filtered out.
-			{Name: "platform_saga"},
-			// Tenant override: is_system=false, has platform_ref (tracked in PlatformRefs).
-			{Name: "override_saga"},
-			// Regular tenant saga: no platform_ref.
-			{Name: "custom_saga"},
-		},
-		SystemCodes: map[ResourceType]map[string]bool{
-			ResourceSaga: {"platform_saga": true},
-		},
-		// PlatformRefs documents which sagas are tenant overrides of platform defaults.
-		PlatformRefs: map[ResourceType]map[string]bool{
-			ResourceSaga: {"override_saga": true},
-		},
-	}
-	result := filterTenantOwned(live)
-	require.NotNil(t, result)
-	require.Len(t, result.Sagas, 2, "both override_saga and custom_saga should be retained")
-	names := sagaNames(result.Sagas)
-	assert.Contains(t, names, "override_saga")
-	assert.Contains(t, names, "custom_saga")
-	assert.NotContains(t, names, "platform_saga")
-}
-
 func TestFilterTenantOwned_MultipleTypes(t *testing.T) {
 	live := &LiveState{
 		Instruments: []*controlplanev1.InstrumentDefinition{
@@ -226,20 +195,15 @@ func TestFilterTenantOwned_AllResourceTypesFiltered(t *testing.T) {
 	assert.Equal(t, "tenant-route", result.InstructionRoutes[0].GetInstructionType())
 }
 
-func TestFilterTenantOwned_PreservesSystemAndPlatformRefMaps(t *testing.T) {
+func TestFilterTenantOwned_PreservesSystemCodesMap(t *testing.T) {
 	systemCodes := map[ResourceType]map[string]bool{
 		ResourceInstrument: {"SYS_GBP": true},
 	}
-	platformRefs := map[ResourceType]map[string]bool{
-		ResourceSaga: {"override_saga": true},
-	}
 	live := &LiveState{
-		SystemCodes:  systemCodes,
-		PlatformRefs: platformRefs,
+		SystemCodes: systemCodes,
 	}
 	result := filterTenantOwned(live)
 	assert.Equal(t, systemCodes, result.SystemCodes)
-	assert.Equal(t, platformRefs, result.PlatformRefs)
 }
 
 // --- helpers ---
@@ -250,12 +214,4 @@ func instrumentCodes(instruments []*controlplanev1.InstrumentDefinition) []strin
 		codes[i] = inst.GetCode()
 	}
 	return codes
-}
-
-func sagaNames(sagas []*controlplanev1.SagaDefinition) []string {
-	names := make([]string, len(sagas))
-	for i, s := range sagas {
-		names[i] = s.GetName()
-	}
-	return names
 }

@@ -1,15 +1,15 @@
 // Package saga provides the CreateTenantOverride API for replacing platform
-// references with custom tenant scripts.
+// default sagas with custom tenant scripts.
 //
-// When a tenant is provisioned, saga_definition rows are created with platform_ref
-// pointing to public.platform_saga_definition (no script copy). This API allows
-// tenants to replace these references with custom scripts when they need different
+// When a tenant is provisioned, saga_definition rows are created as system sagas
+// with scripts copied directly from the platform defaults. This API allows tenants
+// to replace these system defaults with custom scripts when they need different
 // saga behavior.
 //
 // Validation rules:
 //   - The override script must be meaningfully different from the platform default
 //     (similarity check via Levenshtein distance)
-//   - The saga must currently use a platform reference (platform_ref IS NOT NULL)
+//   - The saga must be a system default (either via platform_ref or is_system=true)
 //   - A saga that already has a custom script cannot be overridden again through this API
 //   - The override creates a new version of the saga (is_system=false) and
 //     records audit metadata (override_reason, platform_version_at_override)
@@ -167,19 +167,30 @@ func (s *OverrideService) CreateTenantOverride(ctx context.Context, req Override
 	}, nil
 }
 
-// validateOverrideEligibility checks that the saga is platform-referenced, not already overridden,
-// and that the override script is sufficiently different from the platform default.
+// validateOverrideEligibility checks that the saga is a platform default (either via platform_ref
+// or as a system saga with a copied script), not already overridden, and that the override script
+// is sufficiently different from the platform default.
 func (s *OverrideService) validateOverrideEligibility(ctx context.Context, existingDef *Definition, req OverrideRequest) (*PlatformSagaDefinition, *SimilarityResult, error) {
-	if existingDef.PlatformRef == nil {
-		return nil, nil, fmt.Errorf("%w: saga %q (id=%s)", ErrNotPlatformReferenced, req.SagaName, existingDef.ID)
-	}
 	if !existingDef.IsSystem && existingDef.Script != "" {
 		return nil, nil, fmt.Errorf("%w: saga %q already has custom script", ErrAlreadyOverridden, req.SagaName)
 	}
 
-	platformDef, err := s.registry.GetPlatformSagaByID(ctx, *existingDef.PlatformRef)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load platform saga for comparison: %w", err)
+	// Look up the platform saga: by ID if platform_ref is set, otherwise by name
+	// for system sagas that were seeded with scripts copied directly.
+	var platformDef *PlatformSagaDefinition
+	var err error
+	if existingDef.PlatformRef != nil {
+		platformDef, err = s.registry.GetPlatformSagaByID(ctx, *existingDef.PlatformRef)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load platform saga for comparison: %w", err)
+		}
+	} else if existingDef.IsSystem {
+		platformDef, err = s.registry.GetPlatformSagaByName(ctx, req.SagaName)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load platform saga by name for comparison: %w", err)
+		}
+	} else {
+		return nil, nil, fmt.Errorf("%w: saga %q (id=%s)", ErrNotPlatformReferenced, req.SagaName, existingDef.ID)
 	}
 
 	threshold := req.SimilarityThreshold

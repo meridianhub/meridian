@@ -252,7 +252,10 @@ func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 			handler_call_count integer NULL,
 			validated_at timestamptz NULL,
 			PRIMARY KEY (id),
-			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version)
+			CONSTRAINT uq_saga_definition_name_version UNIQUE (name, version),
+			CONSTRAINT chk_saga_definition_script_source CHECK (
+				NOT (platform_ref IS NOT NULL AND script IS NOT NULL AND script != '')
+			)
 		)`, quoted)
 	_, err = pool.Exec(ctx, createTableSQL)
 	require.NoError(t, err)
