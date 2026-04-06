@@ -341,9 +341,7 @@ function DevTenantAutoSelector() {
   return null
 }
 
-/**
- * Inner app that has access to auth and tenant contexts for ApiClientProvider.
- */
+/** Inner app that has access to auth and tenant contexts for ApiClientProvider. */
 function AuthenticatedApp() {
   return (
     <TenantProvider>
