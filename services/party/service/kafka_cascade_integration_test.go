@@ -101,11 +101,11 @@ func setupKafkaCascadeTest(t *testing.T) *kafkaCascadeTestEnv {
 	// Create the party.controlled.v1 topic
 	createKafkaTopic(t, broker, topics.PartyControlledV1)
 
-	// Setup CockroachDB with party + event_outbox tables
+	// Setup CockroachDB with party and audit tables in the public schema.
+	// event_outbox is created explicitly in the tenant schema below.
 	db, dbCleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.PartyEntity{},
 		&audit.AuditOutbox{},
-		&events.EventOutbox{},
 	})
 
 	tid := tenant.TenantID(testTenantID)
