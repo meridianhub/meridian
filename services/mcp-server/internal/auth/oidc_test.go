@@ -1242,3 +1242,52 @@ func TestHandleCallback_NoResolver_FallsBackToSlug(t *testing.T) {
 
 	assert.Equal(t, "acme", claims.TenantID, "without resolver, JWT should contain raw slug")
 }
+
+func TestOIDCStateStore_PeekInfo(t *testing.T) {
+	s := newTestOIDCStateStore(t)
+
+	key, err := s.Store(auth.OIDCFlowState{
+		MCPClientID:     "client-1",
+		MCPRedirectURI:  "https://example.com/callback",
+		RequestedScopes: []string{"mcp:default", "mcp:admin"},
+		IssuedAt:        time.Now(),
+	})
+	require.NoError(t, err)
+
+	clientID, redirectURI, scopes, ok := s.PeekInfo(key)
+	assert.True(t, ok)
+	assert.Equal(t, "client-1", clientID)
+	assert.Equal(t, "https://example.com/callback", redirectURI)
+	assert.Equal(t, []string{"mcp:default", "mcp:admin"}, scopes)
+
+	// PeekInfo is non-consuming - a second call should also succeed.
+	_, _, _, ok = s.PeekInfo(key)
+	assert.True(t, ok, "PeekInfo should not consume the entry")
+
+	// Consume should still work after PeekInfo.
+	entry, ok := s.Consume(key)
+	assert.True(t, ok)
+	assert.Equal(t, "client-1", entry.MCPClientID)
+}
+
+func TestOIDCStateStore_PeekInfo_Expired(t *testing.T) {
+	s := newTestOIDCStateStore(t)
+
+	// Store a valid entry, then verify PeekInfo works for non-existent keys
+	// (expired entries are cleaned up internally by the store).
+	clientID, redirectURI, scopes, ok := s.PeekInfo("nonexistent-key")
+	assert.False(t, ok)
+	assert.Empty(t, clientID)
+	assert.Empty(t, redirectURI)
+	assert.Nil(t, scopes)
+}
+
+func TestOIDCStateStore_PeekInfo_NotFound(t *testing.T) {
+	s := newTestOIDCStateStore(t)
+
+	clientID, redirectURI, scopes, ok := s.PeekInfo("missing-key")
+	assert.False(t, ok)
+	assert.Empty(t, clientID)
+	assert.Empty(t, redirectURI)
+	assert.Nil(t, scopes)
+}

@@ -110,6 +110,8 @@ type OIDCFlowState struct {
 	DexCodeVerifier string
 	// TenantSlug extracted from the request subdomain.
 	TenantSlug string
+	// RequestedScopes are the OAuth scopes requested by the MCP client.
+	RequestedScopes []string
 	// IssuedAt is when this state was created.
 	IssuedAt time.Time
 }
@@ -189,6 +191,22 @@ func (s *OIDCStateStore) Consume(key string) (OIDCFlowState, bool) {
 		return OIDCFlowState{}, false
 	}
 	return entry, true
+}
+
+// PeekInfo returns selected fields from an OIDC flow state entry without
+// consuming it. Expired entries are cleaned up and reported as not found.
+func (s *OIDCStateStore) PeekInfo(key string) (clientID, redirectURI string, scopes []string, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, exists := s.entries[key]
+	if !exists {
+		return "", "", nil, false
+	}
+	if time.Since(entry.IssuedAt) > oidcStateTTL {
+		delete(s.entries, key)
+		return "", "", nil, false
+	}
+	return entry.MCPClientID, entry.MCPRedirectURI, entry.RequestedScopes, true
 }
 
 // TenantSlugResolver resolves a tenant slug (e.g., "acme") to its canonical
