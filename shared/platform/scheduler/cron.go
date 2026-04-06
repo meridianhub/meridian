@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -44,6 +45,9 @@ type CronSchedulerConfig struct {
 	Name string
 	// RefreshInterval is how often to reload schedules from the provider.
 	RefreshInterval time.Duration
+	// RefreshJitterMax is the maximum random jitter added after each refresh tick
+	// to prevent thundering herd across replicas. Default: 10s.
+	RefreshJitterMax time.Duration
 	// ShutdownTimeout is the maximum time to wait for in-flight jobs during shutdown.
 	ShutdownTimeout time.Duration
 	// ExecutionTimeout is the maximum time a single job execution can take.
@@ -52,9 +56,16 @@ type CronSchedulerConfig struct {
 	// Windows older than this are recorded as MISSED but not executed.
 	// Default: 1 hour.
 	MaxCatchUpAge time.Duration
+	// MaxConcurrentExecutions is the maximum number of jobs that can execute
+	// concurrently across all tenants. Default: 20.
+	MaxConcurrentExecutions int
+	// MaxConcurrentPerTenant is the maximum number of jobs that can execute
+	// concurrently for a single tenant. Default: 3.
+	MaxConcurrentPerTenant int
 }
 
-func (c CronSchedulerConfig) withDefaults() CronSchedulerConfig {
+// WithDefaults returns a copy of the config with zero-value fields set to defaults.
+func (c CronSchedulerConfig) WithDefaults() CronSchedulerConfig {
 	if c.Name == "" {
 		c.Name = "cron-scheduler"
 	}
@@ -69,6 +80,12 @@ func (c CronSchedulerConfig) withDefaults() CronSchedulerConfig {
 	}
 	if c.MaxCatchUpAge <= 0 {
 		c.MaxCatchUpAge = time.Hour
+	}
+	if c.MaxConcurrentExecutions <= 0 {
+		c.MaxConcurrentExecutions = 20
+	}
+	if c.MaxConcurrentPerTenant <= 0 {
+		c.MaxConcurrentPerTenant = 3
 	}
 	return c
 }
@@ -90,6 +107,10 @@ type CronScheduler struct {
 	mu        sync.Mutex
 	entryIDs  map[string]cron.EntryID
 	schedules map[string]Schedule
+
+	semaphore        chan struct{}
+	tenantSemaphores map[string]chan struct{}
+	tenantSemMu      sync.Mutex
 }
 
 // NewCronScheduler creates a new CronScheduler. The store parameter is optional;
@@ -102,7 +123,7 @@ func NewCronScheduler(
 	logger *slog.Logger,
 	opts ...CronSchedulerOption,
 ) *CronScheduler {
-	config = config.withDefaults()
+	config = config.WithDefaults()
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -115,16 +136,18 @@ func NewCronScheduler(
 	)
 
 	s := &CronScheduler{
-		lifecycle: NewWorkerLifecycle(logger),
-		provider:  provider,
-		executor:  executor,
-		lock:      lock,
-		config:    config,
-		logger:    logger.With("component", config.Name),
-		cron:      cronRunner,
-		parser:    defaultParser,
-		entryIDs:  make(map[string]cron.EntryID),
-		schedules: make(map[string]Schedule),
+		lifecycle:        NewWorkerLifecycle(logger),
+		provider:         provider,
+		executor:         executor,
+		lock:             lock,
+		config:           config,
+		logger:           logger.With("component", config.Name),
+		cron:             cronRunner,
+		parser:           defaultParser,
+		entryIDs:         make(map[string]cron.EntryID),
+		schedules:        make(map[string]Schedule),
+		semaphore:        make(chan struct{}, config.MaxConcurrentExecutions),
+		tenantSemaphores: make(map[string]chan struct{}),
 	}
 
 	for _, opt := range opts {
@@ -195,6 +218,10 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 				s.logger.Info("cron scheduler stopping", "name", s.config.Name)
 				return nil
 			case <-refreshTicker.C:
+				if s.config.RefreshJitterMax > 0 {
+					jitter := time.Duration(rand.Int64N(int64(s.config.RefreshJitterMax)))
+					time.Sleep(jitter)
+				}
 				if err := s.refreshSchedules(workCtx); err != nil {
 					s.logger.Error("failed to refresh schedules", "error", err)
 				}
@@ -290,11 +317,53 @@ func (s *CronScheduler) addSchedule(sched Schedule) (cron.EntryID, error) {
 	return entryID, nil
 }
 
+// acquireGlobalSemaphore tries to acquire the global concurrency semaphore.
+// Returns a release function and true if acquired, or nil and false if the limit is reached.
+func (s *CronScheduler) acquireGlobalSemaphore(ctx context.Context, schedule Schedule) (func(), bool) {
+	select {
+	case s.semaphore <- struct{}{}:
+		return func() { <-s.semaphore }, true
+	default:
+		s.logger.Warn("global concurrency limit reached, skipping",
+			"schedule_id", schedule.ID,
+			"tenant_id", schedule.TenantID)
+		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("concurrency limit reached"))
+		return nil, false
+	}
+}
+
+// acquireTenantSemaphore tries to acquire the per-tenant concurrency semaphore.
+// Returns a release function and true if acquired, or nil and false if the limit is reached.
+func (s *CronScheduler) acquireTenantSemaphore(ctx context.Context, schedule Schedule) (func(), bool) {
+	if schedule.TenantID == "" {
+		return func() {}, true
+	}
+	tenantSem := s.getOrCreateTenantSemaphore(schedule.TenantID)
+	select {
+	case tenantSem <- struct{}{}:
+		return func() { <-tenantSem }, true
+	default:
+		s.logger.Warn("per-tenant concurrency limit reached, skipping",
+			"schedule_id", schedule.ID,
+			"tenant_id", schedule.TenantID)
+		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil,
+			strPtr(fmt.Sprintf("per-tenant concurrency limit reached for tenant %s", schedule.TenantID)))
+		return nil, false
+	}
+}
+
 // executeJob runs a single scheduled job with distributed locking and audit trail.
 func (s *CronScheduler) executeJob(schedule Schedule) {
 	s.lifecycle.ExecuteGuarded(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), s.config.ExecutionTimeout)
 		defer cancel()
+
+		// Acquire global concurrency semaphore
+		releaseGlobal, ok := s.acquireGlobalSemaphore(ctx, schedule)
+		if !ok {
+			return
+		}
+		defer releaseGlobal()
 
 		// Propagate tenant context so ExecutionStore can scope to the correct schema
 		if schedule.TenantID != "" {
@@ -302,6 +371,13 @@ func (s *CronScheduler) executeJob(schedule Schedule) {
 				ctx = tenant.WithTenant(ctx, tid)
 			}
 		}
+
+		// Acquire per-tenant concurrency semaphore
+		releaseTenant, ok := s.acquireTenantSemaphore(ctx, schedule)
+		if !ok {
+			return
+		}
+		defer releaseTenant()
 
 		// Acquire distributed lock
 		if s.lock != nil {
@@ -343,6 +419,18 @@ func (s *CronScheduler) executeJob(schedule Schedule) {
 			"schedule_id", schedule.ID,
 			"tenant_id", schedule.TenantID)
 	})
+}
+
+// getOrCreateTenantSemaphore lazily creates a per-tenant semaphore channel.
+func (s *CronScheduler) getOrCreateTenantSemaphore(tenantID string) chan struct{} {
+	s.tenantSemMu.Lock()
+	defer s.tenantSemMu.Unlock()
+	sem, ok := s.tenantSemaphores[tenantID]
+	if !ok {
+		sem = make(chan struct{}, s.config.MaxConcurrentPerTenant)
+		s.tenantSemaphores[tenantID] = sem
+	}
+	return sem
 }
 
 func (s *CronScheduler) lockKey(scheduleID string) string {

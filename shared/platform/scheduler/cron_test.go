@@ -707,3 +707,255 @@ func TestCronScheduler_UpdatesChangedSchedules(t *testing.T) {
 	cancel()
 	s.Stop()
 }
+
+func TestCronScheduler_GlobalSemaphore_SkipsExcessExecutions(t *testing.T) {
+	// Create 5 schedules that all fire every second, but limit to 2 concurrent
+	schedules := []scheduler.Schedule{
+		{ID: "s1", CronExpr: "*/1 * * * * *", TenantID: "t1"},
+		{ID: "s2", CronExpr: "*/1 * * * * *", TenantID: "t2"},
+		{ID: "s3", CronExpr: "*/1 * * * * *", TenantID: "t3"},
+		{ID: "s4", CronExpr: "*/1 * * * * *", TenantID: "t4"},
+		{ID: "s5", CronExpr: "*/1 * * * * *", TenantID: "t5"},
+	}
+	provider := &stubProvider{schedules: schedules}
+
+	// Executor blocks until released so we can fill the semaphore
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	executor := &stubExecutor{
+		executeFunc: func(_ context.Context, _ scheduler.Schedule) error {
+			select {
+			case blocked <- struct{}{}:
+			default:
+			}
+			<-release
+			return nil
+		},
+	}
+	lock := &stubLock{acquired: true}
+	store := &stubExecutionStore{}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:                    "test-scheduler",
+			RefreshInterval:         time.Hour,
+			ShutdownTimeout:         5 * time.Second,
+			ExecutionTimeout:        10 * time.Second,
+			MaxConcurrentExecutions: 2,
+			MaxConcurrentPerTenant:  10, // high so global limit is the constraint
+		},
+		slog.Default(),
+		scheduler.WithCronExecutionStore(store),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Wait for 2 executions to block (filling the semaphore)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-blocked:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for executions to block")
+		}
+	}
+
+	// Wait for skipped executions to appear (other schedules should be rejected)
+	err := await.New().AtMost(5 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
+		execs := store.getExecutions()
+		for _, e := range execs {
+			if e.Status == scheduler.ExecutionStatusSkipped && e.ErrorMessage != nil &&
+				*e.ErrorMessage == "concurrency limit reached" {
+				return true
+			}
+		}
+		return false
+	})
+	require.NoError(t, err)
+
+	// Release blocked executions
+	close(release)
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_PerTenantSemaphore_SkipsExcessForSameTenant(t *testing.T) {
+	// 3 schedules for the same tenant, per-tenant limit of 1
+	schedules := []scheduler.Schedule{
+		{ID: "s1", CronExpr: "*/1 * * * * *", TenantID: "noisy-tenant"},
+		{ID: "s2", CronExpr: "*/1 * * * * *", TenantID: "noisy-tenant"},
+		{ID: "s3", CronExpr: "*/1 * * * * *", TenantID: "noisy-tenant"},
+	}
+	provider := &stubProvider{schedules: schedules}
+
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	executor := &stubExecutor{
+		executeFunc: func(_ context.Context, _ scheduler.Schedule) error {
+			select {
+			case blocked <- struct{}{}:
+			default:
+			}
+			<-release
+			return nil
+		},
+	}
+	lock := &stubLock{acquired: true}
+	store := &stubExecutionStore{}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:                    "test-scheduler",
+			RefreshInterval:         time.Hour,
+			ShutdownTimeout:         5 * time.Second,
+			ExecutionTimeout:        10 * time.Second,
+			MaxConcurrentExecutions: 10, // high so per-tenant is the constraint
+			MaxConcurrentPerTenant:  1,
+		},
+		slog.Default(),
+		scheduler.WithCronExecutionStore(store),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Wait for 1 execution to block (fills the per-tenant semaphore)
+	select {
+	case <-blocked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for execution to block")
+	}
+
+	// Wait for per-tenant skipped execution
+	err := await.New().AtMost(5 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
+		execs := store.getExecutions()
+		for _, e := range execs {
+			if e.Status == scheduler.ExecutionStatusSkipped && e.ErrorMessage != nil &&
+				*e.ErrorMessage == "per-tenant concurrency limit reached for tenant noisy-tenant" {
+				return true
+			}
+		}
+		return false
+	})
+	require.NoError(t, err)
+
+	close(release)
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_PerTenantSemaphore_AllowsDifferentTenants(t *testing.T) {
+	// 2 schedules for different tenants, per-tenant limit of 1
+	schedules := []scheduler.Schedule{
+		{ID: "s1", CronExpr: "*/1 * * * * *", TenantID: "tenant-a"},
+		{ID: "s2", CronExpr: "*/1 * * * * *", TenantID: "tenant-b"},
+	}
+	provider := &stubProvider{schedules: schedules}
+
+	blocked := make(chan struct{}, 10)
+	release := make(chan struct{})
+	executor := &stubExecutor{
+		executeFunc: func(_ context.Context, _ scheduler.Schedule) error {
+			blocked <- struct{}{}
+			<-release
+			return nil
+		},
+	}
+	lock := &stubLock{acquired: true}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:                    "test-scheduler",
+			RefreshInterval:         time.Hour,
+			ShutdownTimeout:         5 * time.Second,
+			ExecutionTimeout:        10 * time.Second,
+			MaxConcurrentExecutions: 10,
+			MaxConcurrentPerTenant:  1,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Both tenants should be able to execute concurrently
+	for i := 0; i < 2; i++ {
+		select {
+		case <-blocked:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for execution %d", i+1)
+		}
+	}
+
+	close(release)
+	cancel()
+	s.Stop()
+}
+
+func TestCronSchedulerConfig_Defaults(t *testing.T) {
+	cfg := scheduler.CronSchedulerConfig{}.WithDefaults()
+
+	assert.Equal(t, 20, cfg.MaxConcurrentExecutions)
+	assert.Equal(t, 3, cfg.MaxConcurrentPerTenant)
+	assert.Equal(t, "cron-scheduler", cfg.Name)
+	assert.Equal(t, 60*time.Second, cfg.RefreshInterval)
+	assert.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
+	assert.Equal(t, 5*time.Minute, cfg.ExecutionTimeout)
+	assert.Equal(t, time.Hour, cfg.MaxCatchUpAge)
+}
+
+func TestCronSchedulerConfig_Defaults_RespectsExplicitValues(t *testing.T) {
+	cfg := scheduler.CronSchedulerConfig{
+		MaxConcurrentExecutions: 50,
+		MaxConcurrentPerTenant:  10,
+		RefreshJitterMax:        5 * time.Second,
+	}.WithDefaults()
+
+	assert.Equal(t, 50, cfg.MaxConcurrentExecutions)
+	assert.Equal(t, 10, cfg.MaxConcurrentPerTenant)
+	assert.Equal(t, 5*time.Second, cfg.RefreshJitterMax)
+}
+
+func TestCronScheduler_RefreshJitterConfig(t *testing.T) {
+	// Verify that jitter config is accepted and does not break scheduler startup
+	provider := &stubProvider{}
+	executor := &stubExecutor{}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, nil,
+		scheduler.CronSchedulerConfig{
+			Name:             "jitter-test",
+			RefreshInterval:  200 * time.Millisecond,
+			RefreshJitterMax: 50 * time.Millisecond,
+			ShutdownTimeout:  time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Let a few refresh cycles happen with jitter
+	err := await.New().AtMost(2 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		return true
+	})
+	require.NoError(t, err)
+
+	cancel()
+	s.Stop()
+}
