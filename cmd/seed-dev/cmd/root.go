@@ -413,6 +413,11 @@ func seedDemoOperator(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect to identity database: %w", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("get underlying sql.DB for cleanup: %w", err)
+	}
+	defer sqlDB.Close()
 
 	repo := identitypersistence.NewRepository(db)
 	if err := identitybootstrap.SeedDemoUsers(ctx, repo); err != nil {
