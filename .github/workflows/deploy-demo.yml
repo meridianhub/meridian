@@ -267,12 +267,46 @@ jobs:
           username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            # If any tenant has stale "active" status but missing schemas (e.g. after
-            # new databases were created), reset to "pending" so the provisioner
-            # re-creates schemas. Must run AFTER migrations so the provisioner has
-            # up-to-date DDL. Safe when schemas already exist (CREATE SCHEMA IF NOT EXISTS).
-            docker exec meridian-postgres-1 psql -U meridian -d meridian_platform -c \
-              "UPDATE tenant_provisioning SET state = 'pending' WHERE state IN ('active', 'failed')"
+            cd /opt/meridian
+            # Stop the app before resetting state. The provisioning worker
+            # polls tenant.status every 10s - if still running when we flip
+            # tenants to provisioning_pending it races with the schema drops
+            # below. Stopping first eliminates the race.
+            docker compose stop meridian
+
+            # Drop tenant schemas across all service databases so migrations
+            # run against completely empty schemas. Ghost state from previous
+            # broken runs (renamed tables, partial objects) causes migrations
+            # to fail with "relation does not exist". Matches the E2E path.
+            SERVICE_DBS="meridian_party meridian_current_account meridian_position_keeping meridian_financial_accounting meridian_payment_order meridian_market_information meridian_reference_data meridian_internal_account meridian_reconciliation meridian_identity meridian_control_plane"
+            for DB in $SERVICE_DBS; do
+              docker exec meridian-postgres-1 psql -U meridian -d $DB -tA -c "
+                SELECT format('DROP SCHEMA IF EXISTS %I CASCADE', nspname)
+                FROM pg_namespace WHERE nspname LIKE 'org\_%' ESCAPE '\\'
+              " | while read stmt; do
+                [ -z "$stmt" ] && continue
+                docker exec meridian-postgres-1 psql -U meridian -d $DB -c "$stmt"
+              done
+            done
+
+            # Reset both tables in tandem:
+            #   - tenant.status: the provisioning worker polls this via
+            #     ListByStatus(StatusProvisioningPending). Without resetting,
+            #     the worker never claims the tenant for re-provisioning.
+            #   - tenant_provisioning.service_schemas: the provisioner checks
+            #     this per-service and short-circuits via "service already
+            #     provisioned, skipping" if marked 'migrated'. Clearing to
+            #     '[]' forces a full re-run.
+            # Must run AFTER migrations so the provisioner uses up-to-date DDL.
+            docker exec meridian-postgres-1 psql -U meridian -d meridian_platform -c "
+              UPDATE tenant SET status = 'provisioning_pending', updated_at = NOW() WHERE status != 'deprovisioned';
+              UPDATE tenant_provisioning SET state = 'pending', service_schemas = '[]'::jsonb, error_message = '' WHERE state != 'deprovisioned';
+            "
+
+            # Start the app back up with reset state in place. The worker
+            # will claim pending tenants on its first poll and re-run all
+            # migrations against the newly empty schemas.
+            docker compose start meridian
 
       - name: Bootstrap master tenant
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
