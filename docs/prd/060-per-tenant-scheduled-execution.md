@@ -38,15 +38,15 @@ Meridian's scheduler infrastructure has three gaps that compound as the platform
    unauthenticated code path. This fails SOC 2 CC6.1 (logical access
    controls) and ISO 27001 A.5.16 (identity management).
 
-2. **Manifest contract is broken.** The manifest proto declares
-   `scheduled:` triggers (`manifest.proto:289-298`) but has no cron
+2. **Manifest schedule gap.** The manifest proto declares
+   `scheduled:` triggers (`manifest.proto:289-298`) and validates
+   them (uniqueness checks, prefix parsing), but has no cron
    expression field and no bridge to the `CronScheduler`
-   infrastructure. A tenant writes
-   `trigger: "scheduled:monthly_billing"`, the manifest validates,
-   and nothing happens. The MCP server documentation
-   (`reference.go:212`) contradicts the manifest examples -
-   documenting `scheduled:<cron-expression>` while manifests use
-   `scheduled:<name>`.
+   infrastructure. Validation passes but no schedule is registered
+   - the trigger is syntactically accepted but operationally inert.
+   The MCP server documentation (`reference.go:212`) contradicts
+   the manifest examples - documenting `scheduled:<cron-expression>`
+   while manifests use `scheduled:<name>`.
 
 3. **Missing scaling guardrails.** `executeJob()` spawns unbounded
    goroutines via `lifecycle.ExecuteGuarded()` with no concurrency
@@ -257,7 +257,10 @@ CREATE TABLE tenant_schedule (
 );
 ```
 
-`manifest_version_id` provides traceability: which manifest version created this schedule.
+`manifest_version_id` provides traceability: which manifest version
+created this schedule. This references control-plane manifest versions
+(cross-schema, no FK constraint) - a soft reference for audit/debugging
+purposes, not a hard database relationship.
 
 #### B.2: Manifest Application Pipeline
 

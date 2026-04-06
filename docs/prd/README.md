@@ -66,7 +66,6 @@ stateDiagram-v2
 | PRD | Task Master Tag | Tasks |
 |-----|-----------------|-------|
 | [Test Coverage to 80%](048-test-coverage-80.md) | `test-coverage-80` | 0/13 done |
-| [Per-Tenant Scheduled Execution](060-per-tenant-scheduled-execution.md) | `remove-platform-ref` (Deliverable A) | Draft |
 
 #### Not Started
 
