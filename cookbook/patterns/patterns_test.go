@@ -388,6 +388,14 @@ var allEconomyPatterns = []string{
 	"phantom-cost-basis",
 	"tote-betting",
 	"payg-energy",
+	"default-deposit",
+	"default-withdrawal",
+	"default-payment-execution",
+	"default-stripe-payment",
+	"default-dividend-distribution",
+	"default-dunning-escalation",
+	"default-dunning-unfreeze",
+	"default-reconciliation-adjustment",
 }
 
 func TestEconomyPatterns_PatternJSONValidatesAgainstSchema(t *testing.T) {

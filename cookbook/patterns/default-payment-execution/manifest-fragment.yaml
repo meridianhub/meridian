@@ -1,0 +1,12 @@
+# Payment execution uses the existing payment order and lien infrastructure.
+# No new instruments or account types are introduced — the saga orchestrates
+# reserve -> send -> confirm via the gateway integration already configured
+# in the tenant manifest.
+#
+# Steps 3 (post_ledger_entries) and 4 (execute_lien) are conditional, invoked
+# asynchronously by webhook callbacks after gateway confirmation. The trigger
+# below covers the initial API invocation; webhook steps are handled internally
+# by the saga runtime.
+sagas:
+  - name: payment_execution
+    trigger: "api:/v1/payment-orders/{payment_order_id}/execute"

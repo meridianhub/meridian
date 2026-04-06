@@ -1,0 +1,43 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "default-stripe-payment",
+    "type": "registry:pattern",
+    "title": "Stripe Payment via Financial Gateway",
+    "description": "End-to-end Stripe payment saga via the Financial Gateway. Resolves the party's default payment method, reserves funds with a lien, dispatches to Stripe through the typed financial_gateway.dispatch_payment API, posts double-entry ledger entries on webhook confirmation, and executes the lien to finalize the debit.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["payments", "stripe", "financial-gateway"],
+    "meta": {
+        "complexity": 8,
+        "design_pattern": "financial-gateway",
+        "industries": ["payments", "fintech", "saas"],
+        "provides": {
+            "instruments": [],
+            "account_types": [],
+            "sagas": ["stripe_payment"],
+            "valuation_rules": [],
+            "triggers": [
+                "api:/v1/payment-orders/{payment_order_id}/stripe",
+                "event:financial-gateway.payment-captured.v1"
+            ]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["payment-gateway-stripe", "default-dunning-escalation"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/default-stripe-payment/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/default-stripe-payment/stripe_payment.star",
+            "type": "registry:file",
+            "target": "~/sagas/stripe_payment.star"
+        }
+    ]
+}

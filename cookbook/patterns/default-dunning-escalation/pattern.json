@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "default-dunning-escalation",
+    "type": "registry:pattern",
+    "title": "Dunning Escalation",
+    "description": "Progressive dunning escalation saga for handling payment failures. Escalates through three levels: first notice (level 1), second notice with retry scheduling (level 2), and final warning with account freeze and freeze notification (level 3). Each level sends a templated email via correspondence service.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["dunning", "billing", "correspondence"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "escalation-state-machine",
+        "industries": ["billing", "fintech", "saas"],
+        "provides": {
+            "instruments": [],
+            "account_types": [],
+            "sagas": ["dunning_escalation"],
+            "valuation_rules": [],
+            "triggers": ["event:payment-order.failed.v1"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["default-dunning-unfreeze"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/default-dunning-escalation/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/default-dunning-escalation/dunning_escalation.star",
+            "type": "registry:file",
+            "target": "~/sagas/dunning_escalation.star"
+        }
+    ]
+}
