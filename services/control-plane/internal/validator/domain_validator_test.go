@@ -419,6 +419,23 @@ func TestValidateScheduledTriggers_ValidCronExpression(t *testing.T) {
 	assert.Empty(t, result.Warnings)
 }
 
+func TestValidateScheduledTriggers_EmptyCronSuffix_Errors(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	// scheduled:<name>: with trailing colon but empty cron is invalid
+	manifest := &controlplanev1.Manifest{
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "billing", Trigger: "scheduled:billing:"},
+		},
+	}
+
+	result := &ValidationResult{Valid: true}
+	v.validateScheduledTriggers(manifest, result)
+	require.Len(t, result.Errors, 1)
+	assert.Equal(t, "INVALID_CRON_EXPRESSION", result.Errors[0].Code)
+}
+
 func TestValidateScheduledTriggers_NoCronExpression_Valid(t *testing.T) {
 	v, err := New()
 	require.NoError(t, err)

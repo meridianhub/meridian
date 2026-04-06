@@ -396,7 +396,7 @@ func (v *ManifestValidator) validateScheduledTriggers(
 		scheduledCount++
 
 		remainder := strings.TrimPrefix(trigger, "scheduled:")
-		name, cronExpr := parsScheduledTrigger(remainder)
+		name, cronExpr, hasCron := parseScheduledTrigger(remainder)
 
 		if firstIdx, exists := seen[name]; exists {
 			addError(result, ValidationError{
@@ -409,8 +409,19 @@ func (v *ManifestValidator) validateScheduledTriggers(
 			seen[name] = i
 		}
 
-		if cronExpr != "" {
-			v.validateCronExpression(cronExpr, fmt.Sprintf("sagas[%d].trigger", i), saga.GetName(), result)
+		if hasCron {
+			if cronExpr == "" {
+				addError(result, ValidationError{
+					Severity:     SeverityError,
+					Path:         fmt.Sprintf("sagas[%d].trigger", i),
+					Code:         "INVALID_CRON_EXPRESSION",
+					Message:      "cron expression cannot be empty; omit the trailing colon or provide a valid expression",
+					ResourceType: "saga",
+					ResourceID:   saga.GetName(),
+				})
+			} else {
+				v.validateCronExpression(cronExpr, fmt.Sprintf("sagas[%d].trigger", i), saga.GetName(), result)
+			}
 		}
 	}
 
@@ -424,14 +435,15 @@ func (v *ManifestValidator) validateScheduledTriggers(
 	}
 }
 
-// parsScheduledTrigger splits "name" or "name:cron expr" into (name, cronExpr).
+// parseScheduledTrigger splits "name" or "name:cron expr" into (name, cronExpr, hasCron).
+// hasCron is true when a colon separator was present, even if the expression is empty.
 // The cron expression may contain spaces, so only the first colon is used as separator.
-func parsScheduledTrigger(remainder string) (name, cronExpr string) {
+func parseScheduledTrigger(remainder string) (name, cronExpr string, hasCron bool) {
 	idx := strings.Index(remainder, ":")
 	if idx < 0 {
-		return remainder, ""
+		return remainder, "", false
 	}
-	return remainder[:idx], remainder[idx+1:]
+	return remainder[:idx], remainder[idx+1:], true
 }
 
 // validateCronExpression parses a cron expression and checks interval constraints.
@@ -449,11 +461,20 @@ func (v *ManifestValidator) validateCronExpression(expr, path, sagaName string, 
 		return
 	}
 
-	// Compute next two occurrences to determine the interval.
-	now := time.Now()
-	t1 := schedule.Next(now)
-	t2 := schedule.Next(t1)
-	interval := t2.Sub(t1)
+	// Sample 10 consecutive occurrences from a fixed anchor to find the minimum interval.
+	// A fixed anchor avoids results that vary with the current time (e.g. daylight saving transitions).
+	anchor := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+	const sampleSize = 10
+	prev := schedule.Next(anchor)
+	minInterval := time.Duration(1<<63 - 1) // max duration
+	for range sampleSize - 1 {
+		next := schedule.Next(prev)
+		if gap := next.Sub(prev); gap < minInterval {
+			minInterval = gap
+		}
+		prev = next
+	}
+	interval := minInterval
 
 	if interval < minCronInterval {
 		addError(result, ValidationError{
