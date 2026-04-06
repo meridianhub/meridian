@@ -194,6 +194,14 @@ func (s *OIDCStateStore) Consume(key string) (OIDCFlowState, bool) {
 	return entry, true
 }
 
+// Delete removes an OIDC flow state entry by key without returning it.
+// This is used by the consent handler to clean up state on deny.
+func (s *OIDCStateStore) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.entries, key)
+}
+
 // PeekInfo returns selected fields from an OIDC flow state entry without
 // consuming it. Expired entries are cleaned up and reported as not found.
 func (s *OIDCStateStore) PeekInfo(key string) (clientID, redirectURI string, scopes []string, ok bool) {
