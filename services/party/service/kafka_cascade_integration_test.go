@@ -148,8 +148,8 @@ func setupKafkaCascadeTest(t *testing.T) *kafkaCascadeTestEnv {
 		user_agent TEXT
 	)`, pq.QuoteIdentifier(schemaName))).Error)
 
-	// Create event_outbox in the public schema (the outbox publisher uses unqualified table name)
-	require.NoError(t, db.Exec(`CREATE TABLE IF NOT EXISTS event_outbox (
+	// Create event_outbox in the tenant schema (search_path is tenant-only, no public fallback)
+	require.NoError(t, db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.event_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		event_type VARCHAR(200) NOT NULL,
 		aggregate_id VARCHAR(100) NOT NULL,
@@ -165,7 +165,7 @@ func setupKafkaCascadeTest(t *testing.T) *kafkaCascadeTestEnv {
 		retry_count INTEGER NOT NULL DEFAULT 0,
 		last_error TEXT,
 		service_name VARCHAR(100) NOT NULL
-	)`).Error)
+	)`, pq.QuoteIdentifier(schemaName))).Error)
 
 	require.NoError(t, db.Exec(fmt.Sprintf("SET search_path TO %s", pq.QuoteIdentifier(schemaName))).Error)
 

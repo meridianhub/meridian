@@ -97,11 +97,10 @@ func registerServices(
 		logger.Warn("identity bootstrap failed, service startup continues", "error", err)
 	}
 
-	// Seed demo users (operator, etc.) from environment variables.
-	// No-op if env vars are not set. Idempotent on every boot.
-	if err := identitybootstrap.SeedDemoUsers(ctx, identityRepo); err != nil {
-		logger.Warn("demo user seeding failed, service startup continues", "error", err)
-	}
+	// Demo user seeding (operator identity with known password) is handled
+	// by seed-dev, not the server. seed-dev runs after provisioning completes
+	// and connects directly to the identity DB. This avoids a timing race
+	// where the startup seeder fires before tenant schemas are provisioned.
 
 	// Tier 1: Depend on Tier 0 via loopback
 	for _, wire := range []struct {
