@@ -146,11 +146,12 @@ and related helpers. The MCP server no longer talks to Dex.
 ### 2. BFF / API Gateway (`services/api-gateway/`)
 
 **New endpoint `POST /api/auth/mcp-consent`**: Behind full auth middleware chain (JWT
-validated, tenant resolved). Accepts `{mcp_state, client_id, denied?}`. On approve:
-generates one-time consent code, stores identity in `ConsentCodeStore`, returns
-`{redirect_url}` pointing to MCP callback. On deny: consumes MCP state, returns
-`{redirect_url}` pointing to client's redirect_uri with `error=access_denied` and the
-client's original state.
+validated, tenant resolved). Accepts `{mcp_state, client_id, action}` where `action`
+is an explicit enum: `"approve"` or `"deny"` (no boolean default - a missing or
+unrecognized action is rejected). On approve: generates one-time consent code, stores
+identity in `ConsentCodeStore`, returns `{redirect_url}` pointing to MCP callback.
+On deny: consumes MCP state, returns `{redirect_url}` pointing to client's
+redirect_uri with `error=access_denied` and the client's original state.
 
 **New `ConsentCodeStore`**: In-memory store, same pattern as MCP's `CodeStore`. One-time
 consumption, 2-minute TTL, capped at 10,000 entries, background eviction.
@@ -211,8 +212,11 @@ All mandatory - no "recommended" tier. Everything listed here ships or the PRD i
    opaque one-time codes travel in redirects.
 2. **One-time code consumption**: `Consume()` must be atomic - concurrent calls for the
    same code return success for exactly one caller.
-3. **Tenant binding chain**: `MCP state.tenantSlug == BFF JWT.x-tenant-id ==
-   consent code.tenantID` must hold end-to-end. Break at any link means rejection.
+3. **Tenant binding chain**: The tenant must be consistent across the entire flow.
+   MCP state stores `tenantSlug` (from subdomain). BFF JWT contains `x-tenant-id`
+   (UUID). The consent code stores both `tenantSlug` and `tenantID`. At each
+   boundary, resolve slug to UUID (or vice versa) and verify they refer to the
+   same tenant. A mismatch at any link means rejection.
 4. **PKCE integrity**: The outer PKCE chain (client-to-MCP) must be preserved unmodified
    by the consent flow.
 5. **Explicit consent**: BFF consent endpoint only callable via POST with Bearer auth.
@@ -284,7 +288,7 @@ The "Unverified application" badge only appears for dynamically registered clien
 
 **POST `/api/auth/mcp-consent`** (BFF, requires Bearer JWT)
 
-- Request: `{ mcp_state, client_id, denied?: boolean }`
+- Request: `{ mcp_state, client_id, action: "approve" | "deny" }`
 - 200 (approved): `{ redirect_url: "/oauth/callback?code=...&state=..." }`
 - 200 (denied): `{ redirect_url: "https://client/callback?error=access_denied&state=..." }`
 - 400: `{ error: "invalid_state" | "state_expired" | "client_mismatch" }`
