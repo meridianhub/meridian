@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-var errConsentBaseNotConfigured = errors.New("consent redirect base is not configured")
+var (
+	errConsentBaseNotConfigured = errors.New("consent redirect base is not configured")
+	errConsentBaseURLInvalid    = errors.New("invalid consent redirect base URL: missing scheme or host")
+)
 
 // ConsentEntry holds the state stored alongside a consent code. This mirrors
 // the ConsentCodeEntry from api-gateway but avoids a direct import dependency
@@ -268,18 +271,19 @@ func (h *OIDCHandler) buildConsentPageURL(tenantSlug, stateKey, clientID string)
 		base = "https://" + h.baseDomain
 	}
 
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errConsentBaseURLInvalid
+	}
+
 	// Insert tenant subdomain if base domain is configured.
 	if h.baseDomain != "" && tenantSlug != "" {
-		parsed, err := url.Parse(base)
-		if err == nil {
-			host := parsed.Hostname()
-			port := parsed.Port()
-			if host == h.baseDomain || strings.HasSuffix(host, "."+h.baseDomain) {
-				parsed.Host = tenantSlug + "." + h.baseDomain
-				if port != "" {
-					parsed.Host = tenantSlug + "." + h.baseDomain + ":" + port
-				}
-				base = parsed.String()
+		host := parsed.Hostname()
+		port := parsed.Port()
+		if host == h.baseDomain || strings.HasSuffix(host, "."+h.baseDomain) {
+			parsed.Host = tenantSlug + "." + h.baseDomain
+			if port != "" {
+				parsed.Host = tenantSlug + "." + h.baseDomain + ":" + port
 			}
 		}
 	}
@@ -288,5 +292,7 @@ func (h *OIDCHandler) buildConsentPageURL(tenantSlug, stateKey, clientID string)
 		"mcp_state": {stateKey},
 		"client_id": {clientID},
 	}
-	return base + "/auth/mcp-consent?" + params.Encode(), nil
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/auth/mcp-consent"
+	parsed.RawQuery = params.Encode()
+	return parsed.String(), nil
 }

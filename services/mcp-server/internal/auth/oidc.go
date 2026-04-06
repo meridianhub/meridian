@@ -455,7 +455,8 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Capture requested OAuth scopes from the MCP client (space-delimited per RFC 6749).
-	requestedScopes := strings.Fields(strings.TrimSpace(q.Get("scope")))
+	// Only allow scopes with the "mcp:" prefix to prevent arbitrary scope injection.
+	requestedScopes := filterAllowedScopes(strings.Fields(strings.TrimSpace(q.Get("scope"))))
 	if len(requestedScopes) == 0 {
 		requestedScopes = []string{"mcp:default"}
 	}
@@ -764,4 +765,16 @@ func isAllowedRedirectURI(uri string) bool {
 		return host == "localhost" || host == "127.0.0.1" || host == "::1"
 	}
 	return false
+}
+
+// filterAllowedScopes returns only scopes with the "mcp:" prefix,
+// preventing clients from injecting arbitrary scope strings into signed JWTs.
+func filterAllowedScopes(scopes []string) []string {
+	var allowed []string
+	for _, s := range scopes {
+		if strings.HasPrefix(s, "mcp:") {
+			allowed = append(allowed, s)
+		}
+	}
+	return allowed
 }
