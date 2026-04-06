@@ -129,6 +129,16 @@ func (h *OIDCHandler) handleConsentCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Defense-in-depth: approved scopes must be a subset of the originally
+	// requested scopes. Reject if the consent issuer returns broader access.
+	if !scopesSubset(consentEntry.ApprovedScopes, flowState.RequestedScopes) {
+		h.logger.Error("oidc: approved scopes exceed requested scopes",
+			"approved", consentEntry.ApprovedScopes,
+			"requested", flowState.RequestedScopes)
+		http.Error(w, "approved scopes exceed requested scopes", http.StatusBadRequest)
+		return
+	}
+
 	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
 		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
 		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
@@ -204,6 +214,20 @@ func (h *OIDCHandler) handleDexCallback(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+// scopesSubset returns true if every element of approved is contained in requested.
+func scopesSubset(approved, requested []string) bool {
+	allowed := make(map[string]struct{}, len(requested))
+	for _, s := range requested {
+		allowed[s] = struct{}{}
+	}
+	for _, s := range approved {
+		if _, ok := allowed[s]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // buildConsentRedirect stores OIDC flow state and returns the URL of the UI

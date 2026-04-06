@@ -1620,6 +1620,40 @@ func TestOIDCHandler_HandleCallback_TenantMismatch(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "tenant mismatch")
 }
 
+func TestOIDCHandler_HandleCallback_ScopeEscalation(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:     "meridian-mcp",
+		MCPRedirectURI:  "https://claude.ai/callback",
+		TenantSlug:      "acme",
+		RequestedScopes: []string{"mcp:default"},
+		IssuedAt:        time.Now(),
+	})
+	require.NoError(t, err)
+
+	// Consent code has broader scopes than originally requested
+	consentStore.Store("escalated-code", auth.ConsentEntry{
+		Email:          "admin@acme.com",
+		TenantID:       "tid",
+		TenantSlug:     "acme",
+		MCPState:       stateKey,
+		ClientID:       "meridian-mcp",
+		ApprovedScopes: []string{"mcp:default", "mcp:admin"}, // admin was not requested
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"escalated-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "approved scopes exceed requested scopes")
+}
+
 func TestOIDCHandler_HandleCallback_ScopesInJWT(t *testing.T) {
 	consentStore := newFakeConsentStore()
 	handler, stateStore, codeStore := newConsentOIDCHandler(t, consentStore)
