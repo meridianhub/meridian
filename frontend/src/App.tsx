@@ -15,6 +15,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from 'sonner'
 import { CallbackPage } from '@/pages/callback'
 import { LoginPage } from '@/pages/login'
+import { OAuthConsentPage } from '@/pages/oauth-consent'
 import { RegisterPage } from '@/features/registration/pages/register-page'
 import { DashboardPage } from '@/features/dashboard'
 import { AccountDetailPage } from '@/features/accounts/pages/[accountId]'
@@ -355,6 +356,7 @@ function AuthenticatedApp() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/callback" element={<CallbackPage />} />
+              <Route path="/auth/mcp-consent" element={<OAuthConsentPage />} />
               <Route
                 path="/*"
                 element={
