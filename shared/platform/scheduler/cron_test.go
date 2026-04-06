@@ -904,6 +904,231 @@ func TestCronScheduler_PerTenantSemaphore_AllowsDifferentTenants(t *testing.T) {
 	s.Stop()
 }
 
+// --- TenantStatusChecker stub ---
+
+type stubTenantStatusChecker struct {
+	mu     sync.Mutex
+	active bool
+	err    error
+}
+
+func (c *stubTenantStatusChecker) IsActive(_ context.Context, _ string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.active, c.err
+}
+
+func TestCronScheduler_TenantStatusChecker_ActiveTenant_ExecutionProceeds(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
+		},
+	}
+	executeCh := make(chan struct{}, 10)
+	executor := &stubExecutor{executeCh: executeCh}
+	lock := &stubLock{acquired: true}
+	checker := &stubTenantStatusChecker{active: true}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithTenantStatusChecker(checker),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	select {
+	case <-executeCh:
+		// Job executed
+	case <-time.After(5 * time.Second):
+		t.Fatal("cron job did not fire within timeout")
+	}
+
+	assert.GreaterOrEqual(t, executor.callCount.Load(), int32(1))
+
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_TenantStatusChecker_InactiveTenant_ExecutionSkipped(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: "*/1 * * * * *", TenantID: "inactive-tenant"},
+		},
+	}
+	executor := &stubExecutor{executeCh: make(chan struct{}, 10)}
+	lock := &stubLock{acquired: true}
+	store := &stubExecutionStore{}
+	checker := &stubTenantStatusChecker{active: false}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithCronExecutionStore(store),
+		scheduler.WithTenantStatusChecker(checker),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Wait for a skipped execution with the expected reason
+	err := await.New().AtMost(5 * time.Second).PollInterval(100 * time.Millisecond).Until(func() bool {
+		for _, e := range store.getExecutions() {
+			if e.Status == scheduler.ExecutionStatusSkipped && e.ErrorMessage != nil &&
+				*e.ErrorMessage == "tenant not active" {
+				return true
+			}
+		}
+		return false
+	})
+	require.NoError(t, err)
+
+	// Executor must not have been called
+	assert.Equal(t, int32(0), executor.callCount.Load())
+
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_TenantStatusChecker_CheckError_ExecutionProceeds(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
+		},
+	}
+	executeCh := make(chan struct{}, 10)
+	executor := &stubExecutor{executeCh: executeCh}
+	lock := &stubLock{acquired: true}
+	checker := &stubTenantStatusChecker{err: errors.New("status service unavailable")}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithTenantStatusChecker(checker),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Execution proceeds despite status check error (fail open)
+	select {
+	case <-executeCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cron job did not fire within timeout")
+	}
+
+	assert.GreaterOrEqual(t, executor.callCount.Load(), int32(1))
+
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_TenantStatusChecker_NoCheckerConfigured_ExecutionProceeds(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
+		},
+	}
+	executeCh := make(chan struct{}, 10)
+	executor := &stubExecutor{executeCh: executeCh}
+	lock := &stubLock{acquired: true}
+
+	// No WithTenantStatusChecker option
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	select {
+	case <-executeCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cron job did not fire within timeout")
+	}
+
+	assert.GreaterOrEqual(t, executor.callCount.Load(), int32(1))
+
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_TenantStatusChecker_NoTenantID_StatusCheckSkipped(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: "*/1 * * * * *", TenantID: ""},
+		},
+	}
+	executeCh := make(chan struct{}, 10)
+	executor := &stubExecutor{executeCh: executeCh}
+	lock := &stubLock{acquired: true}
+	// Checker returns inactive - but should never be called since TenantID is empty
+	checker := &stubTenantStatusChecker{active: false}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+		scheduler.WithTenantStatusChecker(checker),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Execution proceeds because tenant ID is empty (status check skipped)
+	select {
+	case <-executeCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cron job did not fire within timeout")
+	}
+
+	assert.GreaterOrEqual(t, executor.callCount.Load(), int32(1))
+
+	cancel()
+	s.Stop()
+}
+
 func TestCronSchedulerConfig_Defaults(t *testing.T) {
 	cfg := scheduler.CronSchedulerConfig{}.WithDefaults()
 
