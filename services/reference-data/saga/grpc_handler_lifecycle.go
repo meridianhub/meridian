@@ -176,12 +176,7 @@ func (h *RegistryHandler) ActivateSaga(
 			return nil, h.mapDomainError(err, "ActivateSaga", id.String())
 		}
 
-		// Use ResolvedScript for platform-ref sagas (Script is empty, script comes from platform)
-		script := saga.Script
-		if script == "" {
-			script = saga.ResolvedScript
-		}
-		result, err := h.validator.ValidateActivation(ctx, id, script)
+		result, err := h.validator.ValidateActivation(ctx, id, saga.Script)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "validation error: %v", err)
 		}

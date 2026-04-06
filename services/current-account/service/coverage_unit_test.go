@@ -2026,12 +2026,12 @@ func TestResolveWithdrawalScript_SagaNotFound(t *testing.T) {
 	_ = script
 }
 
-func TestResolveDepositScript_ResolvedScriptEmpty(t *testing.T) {
-	// Test path where resolver returns a definition but with empty ResolvedScript
+func TestResolveDepositScript_ScriptEmpty(t *testing.T) {
+	// Test path where resolver returns a definition but with empty Script
 	mockRegistry := &stubSagaRegistry{
 		getActiveResult: &refsaga.Definition{
-			Name:           "deposit",
-			ResolvedScript: "", // Empty - should fall back
+			Name:   "deposit",
+			Script: "", // Empty - should fall back
 		},
 	}
 
@@ -2061,11 +2061,11 @@ func TestResolveDepositScript_ResolvedScriptEmpty(t *testing.T) {
 	assert.Equal(t, "default_deposit()", script)
 }
 
-func TestResolveDepositScript_ResolvedScriptPresent(t *testing.T) {
+func TestResolveDepositScript_ScriptPresent(t *testing.T) {
 	mockRegistry := &stubSagaRegistry{
 		getActiveResult: &refsaga.Definition{
-			Name:           "deposit",
-			ResolvedScript: "custom_deposit()",
+			Name:   "deposit",
+			Script: "custom_deposit()",
 		},
 	}
 
@@ -2095,11 +2095,11 @@ func TestResolveDepositScript_ResolvedScriptPresent(t *testing.T) {
 	assert.Equal(t, "custom_deposit()", script)
 }
 
-func TestResolveWithdrawalScript_ResolvedScriptEmpty(t *testing.T) {
+func TestResolveWithdrawalScript_ScriptEmpty(t *testing.T) {
 	mockRegistry := &stubSagaRegistry{
 		getActiveResult: &refsaga.Definition{
-			Name:           "withdrawal",
-			ResolvedScript: "",
+			Name:   "withdrawal",
+			Script: "",
 		},
 	}
 	accountTypeCache := cache.NewLocalAccountTypeCache(
@@ -2128,11 +2128,11 @@ func TestResolveWithdrawalScript_ResolvedScriptEmpty(t *testing.T) {
 	assert.Equal(t, "default_withdrawal()", script)
 }
 
-func TestResolveWithdrawalScript_ResolvedScriptPresent(t *testing.T) {
+func TestResolveWithdrawalScript_ScriptPresent(t *testing.T) {
 	mockRegistry := &stubSagaRegistry{
 		getActiveResult: &refsaga.Definition{
-			Name:           "withdrawal",
-			ResolvedScript: "custom_withdrawal()",
+			Name:   "withdrawal",
+			Script: "custom_withdrawal()",
 		},
 	}
 	accountTypeCache := cache.NewLocalAccountTypeCache(

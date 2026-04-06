@@ -49,9 +49,9 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 		return ErrSystemSagaReadOnly
 	}
 
-	// Require at least one script source
-	if def.Script == "" && def.PlatformRef == nil {
-		return ErrNoScriptSource
+	// Script is required
+	if def.Script == "" {
+		return ErrScriptRequired
 	}
 
 	return r.withWriteTransaction(ctx, func(tx pgx.Tx) error {
@@ -73,24 +73,14 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 			INSERT INTO saga_definition (
 				id, name, version, script, status, is_system,
 				preconditions_expression, display_name, description,
-				platform_ref, override_reason, platform_version_at_override,
 				created_at, updated_at,
 				validation_status, complexity_score, handler_call_count, validated_at
 			) VALUES (
 				$1, $2, $3, $4, $5, $6,
 				$7, $8, $9,
-				$10, $11, $12,
-				$13, $14,
-				$15, $16, $17, $18
+				$10, $11,
+				$12, $13, $14, $15
 			)`
-
-		// Handle script: if platform_ref is set and no script, pass NULL
-		var scriptValue interface{}
-		if def.Script == "" && def.PlatformRef != nil {
-			scriptValue = nil
-		} else {
-			scriptValue = def.Script
-		}
 
 		// Default validation_status to UNVALIDATED if not set
 		validationStatus := def.ValidationStatus
@@ -99,9 +89,8 @@ func (r *PostgresRegistry) CreateDraft(ctx context.Context, def *Definition) err
 		}
 
 		_, err := tx.Exec(ctx, query,
-			def.ID, def.Name, def.Version, scriptValue, string(def.Status), def.IsSystem,
+			def.ID, def.Name, def.Version, def.Script, string(def.Status), def.IsSystem,
 			nullString(def.PreconditionsExpression), nullString(def.DisplayName), nullString(def.Description),
-			def.PlatformRef, nullString(def.OverrideReason), nullString(def.PlatformVersionAtOverride),
 			def.CreatedAt, def.UpdatedAt,
 			validationStatus, def.ComplexityScore, def.HandlerCallCount, def.ValidatedAt,
 		)
@@ -193,9 +182,9 @@ func (r *PostgresRegistry) ActivateSaga(ctx context.Context, id uuid.UUID) error
 		return ErrNotDraft
 	}
 
-	// Reject activation if no script source is resolvable
-	if saga.ResolvedScript == "" {
-		return ErrNoScriptSource
+	// Reject activation if no script is set
+	if saga.Script == "" {
+		return ErrScriptRequired
 	}
 
 	// Validate the saga if a validator is configured

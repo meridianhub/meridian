@@ -106,7 +106,7 @@ func TestSeeder_SeedTenant(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 8, count, "expected 8 system sagas")
 
-		// Verify each saga has script content (not platform_ref)
+		// Verify each saga has script content
 		rows, err := pool.Query(ctx, fmt.Sprintf(`
 			SELECT name, version, status, is_system, script, display_name, activated_at
 			FROM %s.saga_definition
@@ -227,13 +227,12 @@ func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 	require.NoError(t, err)
 
 	// Create saga_definition table matching the full migrated schema
-	// Note: no FK reference to public.platform_saga_definition (tenant isolation)
 	createTableSQL := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s.saga_definition (
 			id uuid NOT NULL DEFAULT gen_random_uuid(),
 			name varchar(64) NOT NULL,
 			version integer NOT NULL DEFAULT 1,
-			script text NULL,
+			script text NOT NULL,
 			status varchar(16) NOT NULL DEFAULT 'DRAFT',
 			is_system boolean NOT NULL DEFAULT FALSE,
 			preconditions_expression text NULL,
@@ -244,9 +243,6 @@ func setupTenantSchemaForSeeder(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 			activated_at timestamptz NULL,
 			deprecated_at timestamptz NULL,
 			successor_id uuid NULL,
-			platform_ref uuid NULL,
-			override_reason text NULL,
-			platform_version_at_override varchar(16) NULL,
 			validation_status text NOT NULL DEFAULT 'UNVALIDATED',
 			complexity_score integer NULL,
 			handler_call_count integer NULL,

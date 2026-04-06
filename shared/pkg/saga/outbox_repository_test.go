@@ -26,7 +26,6 @@ func setupTestGormDB(t *testing.T) *gorm.DB {
 			saga_definition_id TEXT NOT NULL,
 			saga_name TEXT,
 			saga_version INTEGER,
-			platform_saga_version_id TEXT,
 			script_hash_at_start TEXT,
 			input_snapshot TEXT,
 			status TEXT NOT NULL DEFAULT 'PENDING',

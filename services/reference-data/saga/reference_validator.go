@@ -368,13 +368,8 @@ func (v *ReferenceValidator) ValidateRuntime(_ context.Context, def *Definition)
 }
 
 // Validate implements the Validator interface for use with PostgresRegistry.
-// For platform-ref sagas (Script is empty), validates the ResolvedScript instead.
 func (v *ReferenceValidator) Validate(ctx context.Context, def *Definition) error {
-	script := def.Script
-	if script == "" {
-		script = def.ResolvedScript
-	}
-	result, err := v.ValidateActivation(ctx, def.ID, script)
+	result, err := v.ValidateActivation(ctx, def.ID, def.Script)
 	if err != nil {
 		return err
 	}
