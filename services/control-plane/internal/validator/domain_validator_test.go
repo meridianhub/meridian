@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"fmt"
 	"testing"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
@@ -398,4 +399,126 @@ func TestValidateMappingIdempotency_ValidContentHash(t *testing.T) {
 	result := &ValidationResult{Valid: true}
 	v.validateMappingIdempotency(mp, "mappings[0]", result)
 	assert.Empty(t, result.Errors)
+}
+
+// ─── Scheduled Trigger Cron Validation ───────────────────────────────────────
+
+func TestValidateScheduledTriggers_ValidCronExpression(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := &controlplanev1.Manifest{
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "hourly_billing", Trigger: "scheduled:hourly_billing:0 * * * *"},
+		},
+	}
+
+	result := &ValidationResult{Valid: true}
+	v.validateScheduledTriggers(manifest, result)
+	assert.Empty(t, result.Errors)
+	assert.Empty(t, result.Warnings)
+}
+
+func TestValidateScheduledTriggers_NoCronExpression_Valid(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	// scheduled:<name> with no cron is valid (cron comes from DB)
+	manifest := &controlplanev1.Manifest{
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "billing", Trigger: "scheduled:billing"},
+		},
+	}
+
+	result := &ValidationResult{Valid: true}
+	v.validateScheduledTriggers(manifest, result)
+	assert.Empty(t, result.Errors)
+	assert.Empty(t, result.Warnings)
+}
+
+func TestValidateScheduledTriggers_InvalidCronSyntax(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	manifest := &controlplanev1.Manifest{
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "billing", Trigger: "scheduled:billing:not-a-cron"},
+		},
+	}
+
+	result := &ValidationResult{Valid: true}
+	v.validateScheduledTriggers(manifest, result)
+	require.Len(t, result.Errors, 1)
+	assert.Equal(t, "INVALID_CRON_EXPRESSION", result.Errors[0].Code)
+	assert.Equal(t, "sagas[0].trigger", result.Errors[0].Path)
+}
+
+func TestValidateScheduledTriggers_IntervalTooShort(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	// Every minute - interval is 1 min, below 15 min minimum
+	manifest := &controlplanev1.Manifest{
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "too_frequent", Trigger: "scheduled:too_frequent:* * * * *"},
+		},
+	}
+
+	result := &ValidationResult{Valid: true}
+	v.validateScheduledTriggers(manifest, result)
+	require.Len(t, result.Errors, 1)
+	assert.Equal(t, "CRON_INTERVAL_TOO_SHORT", result.Errors[0].Code)
+}
+
+func TestValidateScheduledTriggers_IntervalExactly15Minutes_Valid(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	// Every 15 minutes - exactly at minimum
+	manifest := &controlplanev1.Manifest{
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "quarter_hourly", Trigger: "scheduled:quarter_hourly:0,15,30,45 * * * *"},
+		},
+	}
+
+	result := &ValidationResult{Valid: true}
+	v.validateScheduledTriggers(manifest, result)
+	assert.Empty(t, result.Errors)
+}
+
+func TestValidateScheduledTriggers_TooManySchedules(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	sagas := make([]*controlplanev1.SagaDefinition, maxScheduledTriggersPerTenant+1)
+	for i := range sagas {
+		sagas[i] = &controlplanev1.SagaDefinition{
+			Name:    fmt.Sprintf("saga_%d", i),
+			Trigger: fmt.Sprintf("scheduled:schedule_%d", i),
+		}
+	}
+
+	manifest := &controlplanev1.Manifest{Sagas: sagas}
+	result := &ValidationResult{Valid: true}
+	v.validateScheduledTriggers(manifest, result)
+	require.Len(t, result.Errors, 1)
+	assert.Equal(t, "TOO_MANY_SCHEDULED_TRIGGERS", result.Errors[0].Code)
+}
+
+func TestValidateScheduledTriggers_InfrequentScheduleWarns(t *testing.T) {
+	v, err := New()
+	require.NoError(t, err)
+
+	// Every year on Jan 1 at midnight
+	manifest := &controlplanev1.Manifest{
+		Sagas: []*controlplanev1.SagaDefinition{
+			{Name: "annual", Trigger: "scheduled:annual:0 0 1 1 *"},
+		},
+	}
+
+	result := &ValidationResult{Valid: true}
+	v.validateScheduledTriggers(manifest, result)
+	assert.Empty(t, result.Errors)
+	require.Len(t, result.Warnings, 1)
+	assert.Equal(t, "CRON_VERY_INFREQUENT", result.Warnings[0].Code)
 }
