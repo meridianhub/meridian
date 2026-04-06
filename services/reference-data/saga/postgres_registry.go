@@ -102,31 +102,22 @@ func (r *PostgresRegistry) withWriteTransaction(ctx context.Context, fn func(tx 
 	return nil
 }
 
-// scanDefinitionWithFallback scans a single row from a query that includes platform fallback columns.
-// The query must select: resolved_script, sd.script, ...standard columns...,
-// platform_ref, override_reason, platform_version_at_override, used_platform_fallback
+// scanDefinitionWithFallback scans a single row into a Definition.
 func (r *PostgresRegistry) scanDefinitionWithFallback(row pgx.Row) (*Definition, error) {
 	var def Definition
 	var status string
-	var resolvedScript string
-	var rawScript sql.NullString
+	var script sql.NullString
 	var preconditionsExpr, displayName, description sql.NullString
 	var successorID *uuid.UUID
-	var platformRef *uuid.UUID
-	var overrideReason, platformVersionAtOverride sql.NullString
-	var usedPlatformFallback sql.NullBool
 	var validationStatus sql.NullString
 	var complexityScore, handlerCallCount sql.NullInt64
 
 	err := row.Scan(
 		&def.ID, &def.Name, &def.Version,
-		&resolvedScript,
-		&rawScript,
+		&script,
 		&status, &def.IsSystem,
 		&preconditionsExpr, &displayName, &description,
 		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt, &successorID,
-		&platformRef, &overrideReason, &platformVersionAtOverride,
-		&usedPlatformFallback,
 		&validationStatus, &complexityScore, &handlerCallCount, &def.ValidatedAt,
 	)
 	if err != nil {
@@ -135,15 +126,10 @@ func (r *PostgresRegistry) scanDefinitionWithFallback(row pgx.Row) (*Definition,
 
 	def.Status = Status(status)
 	def.SuccessorID = successorID
-	def.PlatformRef = platformRef
-	def.ResolvedScript = resolvedScript
-	def.UsedPlatformFallback = usedPlatformFallback.Valid && usedPlatformFallback.Bool
 
-	// Script stores the tenant's own script (may be empty for platform-ref sagas)
-	if rawScript.Valid {
-		def.Script = rawScript.String
+	if script.Valid {
+		def.Script = script.String
 	}
-
 	if preconditionsExpr.Valid {
 		def.PreconditionsExpression = preconditionsExpr.String
 	}
@@ -152,12 +138,6 @@ func (r *PostgresRegistry) scanDefinitionWithFallback(row pgx.Row) (*Definition,
 	}
 	if description.Valid {
 		def.Description = description.String
-	}
-	if overrideReason.Valid {
-		def.OverrideReason = overrideReason.String
-	}
-	if platformVersionAtOverride.Valid {
-		def.PlatformVersionAtOverride = platformVersionAtOverride.String
 	}
 	if validationStatus.Valid {
 		def.ValidationStatus = validationStatus.String
@@ -174,29 +154,22 @@ func (r *PostgresRegistry) scanDefinitionWithFallback(row pgx.Row) (*Definition,
 	return &def, nil
 }
 
-// scanDefinitionWithFallbackFromRows scans from pgx.Rows with platform fallback columns.
+// scanDefinitionWithFallbackFromRows scans from pgx.Rows into a Definition.
 func (r *PostgresRegistry) scanDefinitionWithFallbackFromRows(rows pgx.Rows) (*Definition, error) {
 	var def Definition
 	var status string
-	var resolvedScript string
-	var rawScript sql.NullString
+	var script sql.NullString
 	var preconditionsExpr, displayName, description sql.NullString
 	var successorID *uuid.UUID
-	var platformRef *uuid.UUID
-	var overrideReason, platformVersionAtOverride sql.NullString
-	var usedPlatformFallback sql.NullBool
 	var validationStatus sql.NullString
 	var complexityScore, handlerCallCount sql.NullInt64
 
 	err := rows.Scan(
 		&def.ID, &def.Name, &def.Version,
-		&resolvedScript,
-		&rawScript,
+		&script,
 		&status, &def.IsSystem,
 		&preconditionsExpr, &displayName, &description,
 		&def.CreatedAt, &def.UpdatedAt, &def.ActivatedAt, &def.DeprecatedAt, &successorID,
-		&platformRef, &overrideReason, &platformVersionAtOverride,
-		&usedPlatformFallback,
 		&validationStatus, &complexityScore, &handlerCallCount, &def.ValidatedAt,
 	)
 	if err != nil {
@@ -205,14 +178,10 @@ func (r *PostgresRegistry) scanDefinitionWithFallbackFromRows(rows pgx.Rows) (*D
 
 	def.Status = Status(status)
 	def.SuccessorID = successorID
-	def.PlatformRef = platformRef
-	def.ResolvedScript = resolvedScript
-	def.UsedPlatformFallback = usedPlatformFallback.Valid && usedPlatformFallback.Bool
 
-	if rawScript.Valid {
-		def.Script = rawScript.String
+	if script.Valid {
+		def.Script = script.String
 	}
-
 	if preconditionsExpr.Valid {
 		def.PreconditionsExpression = preconditionsExpr.String
 	}
@@ -221,12 +190,6 @@ func (r *PostgresRegistry) scanDefinitionWithFallbackFromRows(rows pgx.Rows) (*D
 	}
 	if description.Valid {
 		def.Description = description.String
-	}
-	if overrideReason.Valid {
-		def.OverrideReason = overrideReason.String
-	}
-	if platformVersionAtOverride.Valid {
-		def.PlatformVersionAtOverride = platformVersionAtOverride.String
 	}
 	if validationStatus.Valid {
 		def.ValidationStatus = validationStatus.String

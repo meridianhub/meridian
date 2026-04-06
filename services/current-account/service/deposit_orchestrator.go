@@ -323,7 +323,7 @@ func (o *DepositOrchestrator) resolveClearingAccountID(ctx context.Context, curr
 // Resolution order:
 //  1. If SagaResolver is configured and the account has a ProductTypeCode, resolve the
 //     saga definition from the registry using ProductTypeSagaResolver. The definition's
-//     ResolvedScript is used. If the resolver returns ErrSagaNotFound, the error is
+//     Script is used. If the resolver returns ErrSagaNotFound, the error is
 //     propagated (fail-fast: a prefixed product type must have a corresponding saga).
 //  2. Otherwise, fall back to the static default DepositScript.
 func (o *DepositOrchestrator) resolveDepositScript(ctx context.Context, account domain.CurrentAccount) (string, error) {
@@ -333,25 +333,25 @@ func (o *DepositOrchestrator) resolveDepositScript(ctx context.Context, account 
 
 	tenantID, ok := tenant.FromContext(ctx)
 	if !ok {
-		// No tenant context — fall back to static script
+		// No tenant context - fall back to static script
 		return o.depositScript, nil
 	}
 
 	def, err := o.sagaResolver.ResolveForProductType(ctx, tenantID, account.ProductTypeCode(), "deposit")
 	if err != nil {
 		if errors.Is(err, refsaga.ErrSagaNotFound) {
-			// Prefix is defined but no saga found — fail fast per PRD convention
+			// Prefix is defined but no saga found - fail fast per PRD convention
 			return "", err
 		}
-		// ErrNotFound (product type or generic saga missing) — fall back to static script
+		// ErrNotFound (product type or generic saga missing) - fall back to static script
 		o.logger.Warn("saga resolution fell through to default deposit script",
 			"product_type_code", account.ProductTypeCode(),
 			"error", err)
 		return o.depositScript, nil
 	}
 
-	if def.ResolvedScript == "" {
-		// Definition has no resolved script — fall back to static script
+	if def.Script == "" {
+		// Definition has no script - fall back to static script
 		o.logger.Warn("resolved saga definition has no script, using default",
 			"saga_name", def.Name,
 			"product_type_code", account.ProductTypeCode())
@@ -361,5 +361,5 @@ func (o *DepositOrchestrator) resolveDepositScript(ctx context.Context, account 
 	o.logger.Debug("using product-type-specific deposit saga",
 		"saga_name", def.Name,
 		"product_type_code", account.ProductTypeCode())
-	return def.ResolvedScript, nil
+	return def.Script, nil
 }

@@ -10,16 +10,12 @@ import (
 )
 
 // sagaSelectColumns is the standard column list for saga definition queries.
-// Scripts are stored directly in the tenant schema (no cross-schema fallback).
 const sagaSelectColumns = `
 	sd.id, sd.name, sd.version,
-	COALESCE(sd.script, '') AS resolved_script,
 	sd.script,
 	sd.status, sd.is_system,
 	sd.preconditions_expression, sd.display_name, sd.description,
 	sd.created_at, sd.updated_at, sd.activated_at, sd.deprecated_at, sd.successor_id,
-	sd.platform_ref, sd.override_reason, sd.platform_version_at_override,
-	false AS used_platform_fallback,
 	sd.validation_status, sd.complexity_score, sd.handler_call_count, sd.validated_at`
 
 // GetByID retrieves a specific saga by its UUID.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,20 @@ var defaultSagas embed.FS
 
 // ErrEmbeddedScriptMissing is returned when a saga's embedded script file is not found.
 var ErrEmbeddedScriptMissing = errors.New("embedded script not found for saga")
+
+// versionFilenameRegex matches version filenames like "v1.0.0.star".
+var versionFilenameRegex = regexp.MustCompile(`^v(\d+\.\d+\.\d+)\.star$`)
+
+// humanizeName converts a saga name like "current_account_withdrawal" to "Current Account Withdrawal".
+func humanizeName(name string) string {
+	words := strings.Split(name, "_")
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}
 
 // Metadata defines metadata for a platform default saga.
 type Metadata struct {

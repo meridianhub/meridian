@@ -124,6 +124,11 @@ func (h *RegistryHandler) UpdateSagaDefinition(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid saga id: %v", err)
 	}
 
+	// Reject explicit empty-script updates (script is required)
+	if req.Script != nil && *req.Script == "" {
+		return nil, status.Error(codes.InvalidArgument, "script cannot be empty")
+	}
+
 	// Only update fields that are explicitly provided (proto3 optional fields)
 	updates := &Definition{}
 	if req.Script != nil {
@@ -176,12 +181,7 @@ func (h *RegistryHandler) ActivateSaga(
 			return nil, h.mapDomainError(err, "ActivateSaga", id.String())
 		}
 
-		// Use ResolvedScript for platform-ref sagas (Script is empty, script comes from platform)
-		script := saga.Script
-		if script == "" {
-			script = saga.ResolvedScript
-		}
-		result, err := h.validator.ValidateActivation(ctx, id, script)
+		result, err := h.validator.ValidateActivation(ctx, id, saga.Script)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "validation error: %v", err)
 		}

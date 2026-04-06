@@ -4,11 +4,21 @@ package saga
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ComputeScriptHash computes a SHA-256 hash of the given script content.
+// This is used for bi-temporal pinning: the hash is recorded when a saga instance
+// starts and verified during replay to detect script corruption or drift.
+func ComputeScriptHash(script string) string {
+	hash := sha256.Sum256([]byte(script))
+	return hex.EncodeToString(hash[:])
+}
 
 // Status represents the lifecycle status of a saga definition.
 type Status string
@@ -61,25 +71,13 @@ var (
 	// ErrValidationFailed is returned when the saga script fails validation.
 	ErrValidationFailed = errors.New("saga validation failed")
 
-	// ErrPlatformDefinitionNotFound is returned when a saga references a platform definition
-	// via platform_ref but the platform definition no longer exists.
-	ErrPlatformDefinitionNotFound = errors.New("referenced platform saga definition not found")
-
-	// ErrNoScriptSource is returned when a saga has neither a custom script nor a platform_ref.
-	ErrNoScriptSource = errors.New("saga has no script source: neither custom script nor platform reference")
-
 	// ErrSagaNotFound is returned when no saga is found for a given product type prefix and operation.
 	// This is distinct from ErrNotFound: ErrSagaNotFound is used when prefix-based resolution
 	// fails with no fallback (a product type has a DefaultSagaPrefix but no matching saga exists).
 	ErrSagaNotFound = errors.New("saga not found for product type operation")
 
-	// ErrScriptHashMismatch is returned during replay when the pinned script hash
-	// does not match the current script, indicating potential corruption.
-	ErrScriptHashMismatch = errors.New("script hash mismatch: pinned version differs from current")
-
-	// ErrPinnedVersionNotFound is returned when attempting to replay a saga
-	// whose pinned platform version no longer exists.
-	ErrPinnedVersionNotFound = errors.New("pinned platform saga version not found")
+	// ErrScriptRequired is returned when a saga has no script set.
+	ErrScriptRequired = errors.New("script is required")
 )
 
 // Definition represents a Starlark saga workflow definition
@@ -134,29 +132,6 @@ type Definition struct {
 	// Only set when Status is DEPRECATED. Nil if no successor designated.
 	SuccessorID *uuid.UUID
 
-	// PlatformRef is an optional FK to public.platform_saga_definition.
-	// When set, this saga inherits its script from the platform template.
-	// Mutually exclusive with Script: either PlatformRef OR Script is set, never both.
-	PlatformRef *uuid.UUID
-
-	// OverrideReason is an audit trail explaining why the tenant deviated from the platform default.
-	OverrideReason string
-
-	// PlatformVersionAtOverride tracks which platform saga version was active
-	// when this override was created. Useful for migration impact analysis.
-	PlatformVersionAtOverride string
-
-	// ResolvedScript is the effective script after fallback resolution.
-	// When Script is set, this equals Script (tenant override).
-	// When PlatformRef is set and Script is empty, this is populated from the platform definition.
-	// This field is populated by GetActive/GetByID queries, not stored in the database.
-	ResolvedScript string
-
-	// UsedPlatformFallback indicates whether the resolved script came from
-	// the platform definition (true) or the tenant's own script (false).
-	// This is populated during query resolution, not stored in the database.
-	UsedPlatformFallback bool
-
 	// ValidationStatus records the result of dry-run validation at draft creation.
 	// Values: "PASSED", "FAILED", "UNVALIDATED" (legacy rows or validator not configured).
 	ValidationStatus string
@@ -191,9 +166,9 @@ type Validator interface {
 // Tenant Resolution (GetActive):
 // When resolving the active saga for a name, the registry checks in order:
 //  1. Tenant's custom saga (is_system=FALSE, status=ACTIVE, highest version)
-//  2. Platform default saga (is_system=TRUE, status=ACTIVE, highest version)
+//  2. System default saga (is_system=TRUE, status=ACTIVE, highest version)
 //
-// This allows tenants to override platform defaults with custom sagas.
+// This allows tenants to override system defaults with custom sagas.
 type Registry interface {
 	// GetByID retrieves a specific saga by its UUID.
 	// Returns ErrNotFound if the saga doesn't exist.
