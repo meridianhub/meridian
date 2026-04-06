@@ -220,6 +220,22 @@ jobs:
             docker pull ghcr.io/meridianhub/meridian@${IMAGE_DIGEST}
             docker tag ghcr.io/meridianhub/meridian@${IMAGE_DIGEST} ghcr.io/meridianhub/meridian:develop
             docker compose -f docker-compose.develop.yml up -d --remove-orphans
+
+            # Verify all services came up (see deploy-demo.yml for rationale)
+            sleep 5
+            failed=$(docker compose -f docker-compose.develop.yml ps --status exited --format '{{.Service}}')
+            if [ -n "$failed" ]; then
+              echo "Services failed to start: $failed - retrying"
+              docker compose -f docker-compose.develop.yml up -d $failed
+              sleep 3
+              still_failed=$(docker compose -f docker-compose.develop.yml ps --status exited --format '{{.Service}}')
+              if [ -n "$still_failed" ]; then
+                echo "Services still down after retry: $still_failed"
+                exit 1
+              fi
+            fi
+            echo "All services running"
+
             # Reload Caddy from the demo stack (Caddy runs there, serves both environments)
             docker compose -f /opt/meridian/docker-compose.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile
             docker image prune -f

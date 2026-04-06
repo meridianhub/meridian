@@ -209,6 +209,25 @@ jobs:
             docker pull ghcr.io/meridianhub/meridian@${IMAGE_DIGEST}
             docker tag ghcr.io/meridianhub/meridian@${IMAGE_DIGEST} ghcr.io/meridianhub/meridian:demo
             docker compose up -d --remove-orphans
+
+            # Verify all services came up. Docker compose can lose containers
+            # during recreate due to depends_on race conditions (the MCP server
+            # receives SIGTERM, exits cleanly, and isn't restarted because Docker
+            # marks it as "manually stopped").
+            sleep 5
+            failed=$(docker compose ps --status exited --format '{{.Service}}')
+            if [ -n "$failed" ]; then
+              echo "Services failed to start: $failed - retrying"
+              docker compose up -d $failed
+              sleep 3
+              still_failed=$(docker compose ps --status exited --format '{{.Service}}')
+              if [ -n "$still_failed" ]; then
+                echo "Services still down after retry: $still_failed"
+                exit 1
+              fi
+            fi
+            echo "All services running"
+
             docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
             docker image prune -f
 
