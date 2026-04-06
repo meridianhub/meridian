@@ -165,7 +165,6 @@ func TestCronScheduler_StartAndStop(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -205,7 +204,6 @@ func TestCronScheduler_LoadsSchedulesOnStart(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -242,7 +240,6 @@ func TestCronScheduler_RemovesStaleSchedules(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -293,7 +290,6 @@ func TestCronScheduler_ExecutesJobOnCronFire(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -345,7 +341,6 @@ func TestCronScheduler_SkipsWhenLockNotAcquired(t *testing.T) {
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -393,7 +388,6 @@ func TestCronScheduler_RecordsExecutionAuditTrail(t *testing.T) {
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -463,7 +457,6 @@ func TestCronScheduler_RecordsFailedExecution(t *testing.T) {
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -523,7 +516,6 @@ func TestCronScheduler_InvalidCronExpression(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -561,7 +553,6 @@ func TestCronScheduler_NilLock_ExecutesWithoutLocking(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -597,7 +588,6 @@ func TestCronScheduler_ProviderError_ContinuesRunning(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -642,7 +632,6 @@ func TestCronScheduler_LockError_SkipsExecution(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -684,7 +673,6 @@ func TestCronScheduler_UpdatesChangedSchedules(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -758,7 +746,6 @@ func TestCronScheduler_GlobalSemaphore_SkipsExcessExecutions(t *testing.T) {
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -832,7 +819,6 @@ func TestCronScheduler_PerTenantSemaphore_SkipsExcessForSameTenant(t *testing.T)
 		slog.Default(),
 		scheduler.WithCronExecutionStore(store),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -897,7 +883,6 @@ func TestCronScheduler_PerTenantSemaphore_AllowsDifferentTenants(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -958,7 +943,6 @@ func TestCronScheduler_RefreshJitterConfig(t *testing.T) {
 		},
 		slog.Default(),
 		scheduler.WithCronRunner(secondsCron()),
-		scheduler.WithCronParser(secondsParser),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
