@@ -66,11 +66,14 @@ stateDiagram-v2
 | PRD | Task Master Tag | Tasks |
 |-----|-----------------|-------|
 | [Test Coverage to 80%](048-test-coverage-80.md) | `test-coverage-80` | 0/13 done |
+| [Per-Tenant Scheduled Execution](060-per-tenant-scheduled-execution.md) | `remove-platform-ref` (Deliverable A) | Draft |
 
 #### Not Started
 
 | PRD | Description |
 |-----|-------------|
+| [Economy Visualization Completeness](046-economy-visualization-completeness.md) | Complete operations console economy visualization |
+| [Security Audit](047-security-audit.md) | Security findings and remediation from Six Hats audit |
 | [Codebase Consistency & AI Navigability](049-codebase-consistency.md) | Standardize naming, patterns, and documentation across services |
 | [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account fields for non-fiat asset classes |
 | [Identity and Access Management](031-identity-access-management.md) | Bridge Party service identity to authentication with dynamic user management and RBAC |
@@ -93,11 +96,17 @@ stateDiagram-v2
 | [MCP Manifest Tenant Isolation](043-mcp-manifest-tenant-isolation.md) | Fix tenant leakage in MCP manifest validation |
 | [Auth Flow Architecture](044-auth-flow-architecture.md) | Authentication entry points and tenant context flow |
 | [Manifest as Sole Source of Truth](045-manifest-as-sole-source-of-truth.md) | Control plane owns all economy declarations |
+| [Party Navigation](051-party-navigation.md) | Party navigation and service boundary cleanup |
 | [Demo Sandbox](050-demo-sandbox.md) | Self-service AI economy creation on ephemeral demo environment |
 | [Email Infrastructure MVP](052-email-platform.md) | Outbox, worker, Resend integration, invoice/dunning email delivery |
 | [Auth Email Flows](053-auth-email-flows.md) | Email verification, password reset, user invitations (depends on 052) |
 | [Billing UI](054-billing-ui.md) | Billing dashboard, invoice detail, email delivery status (depends on 052) |
 | [Tenant Branding](055-tenant-branding.md) | Display name propagation to login page, header, and document title |
+| [Correspondence Service](056-correspondence-service.md) | BIAN-aligned correspondence service for notifications and documents |
+| [Convergent Manifest Apply](057-convergent-manifest-apply.md) | Rework ApplyManifest to diff against live state (kubectl apply semantics) |
+| [Full Economy Visibility](058-full-economy-visibility.md) | Surface platform defaults and economy capabilities in UI |
+| [Asset-Agnostic Posting Layer](059-asset-agnostic-posting-layer.md) | Replace hardcoded ISO 4217 currency validation for non-fiat assets |
+| [Per-Tenant Scheduled Execution](060-per-tenant-scheduled-execution.md) | Phased scheduling identity: attribution, manifest bridge, deferred JWT auth |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -224,6 +233,8 @@ material.
 - [Product Directory](023-product-directory.md) - BIAN-aligned AccountTypeRegistry for runtime-configurable product catalog
 - [Multi-Asset Purity](037-multi-asset-purity.md) -
   Remove hardcoded asset references, enforce instrument resolution via Reference Data
+- [Asset-Agnostic Posting Layer](059-asset-agnostic-posting-layer.md) -
+  Replace hardcoded ISO 4217 currency validation for non-fiat assets
 
 ### Execution Engine
 
@@ -289,6 +300,14 @@ material.
   Billing dashboard, invoice detail pages, email delivery status visibility
 - [Tenant Branding](055-tenant-branding.md) -
   Display name propagation to login page, header, and document title
+- [Correspondence Service](056-correspondence-service.md) -
+  BIAN-aligned correspondence service for notifications and documents
+- [Convergent Manifest Apply](057-convergent-manifest-apply.md) -
+  Rework ApplyManifest to diff against live state (kubectl apply semantics)
+- [Full Economy Visibility](058-full-economy-visibility.md) -
+  Surface platform defaults and economy capabilities in UI
+- [Per-Tenant Scheduled Execution](060-per-tenant-scheduled-execution.md) -
+  Phased scheduling identity, manifest bridge, and deferred JWT auth
 
 ### Identity & Access Control
 

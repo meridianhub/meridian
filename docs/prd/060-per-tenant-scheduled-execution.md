@@ -1,3 +1,27 @@
+---
+name: prd-per-tenant-scheduled-execution
+description: >
+  Phased architecture for per-tenant scheduling identity: Actor struct
+  for audit attribution, manifest-driven scheduling via tenant_schedule
+  DB table, and deferred authenticated system identity with JWT.
+triggers:
+  - Working on scheduler, CronScheduler, or ScheduleProvider
+  - Adding scheduled triggers to manifests
+  - Implementing system user or service account identity
+  - Working on audit attribution for background jobs
+  - Investigating changed_by = "system" in audit trails
+  - Adding concurrency limits or tenant status checks to schedulers
+instructions: |
+  Key design decisions:
+  - SystemActorContextKey MUST be separate from UserIDContextKey
+    (verified auth bypass risk in identity service endpoints)
+  - Actor struct with Authenticated boolean prevents trust escalation
+  - changed_by format: system:scheduler:{service} (no tenant ID)
+  - Database-backed tenant_schedule table, not ManifestScheduleProvider
+  - Deliverable A (attribution) ships standalone for existing schedulers
+  - Deliverable C (JWT auth) deferred until cross-service calls needed
+---
+
 # PRD-060: Per-Tenant Scheduled Execution Architecture
 
 ## Status: Draft
