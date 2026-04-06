@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "default-dividend-distribution",
+    "type": "registry:pattern",
+    "title": "Dividend Distribution",
+    "description": "Org-scoped syndicate dividend distribution saga. Lists all active participants, retrieves each participant's allocation share via structuring data, resolves their org-scoped account via composite account references, and credits each participant's position proportionally.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["distribution", "syndicate", "org-scoped"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "org-scoped-distribution",
+        "industries": ["banking", "fintech", "betting"],
+        "provides": {
+            "instruments": [],
+            "account_types": [],
+            "sagas": ["dividend_distribution"],
+            "valuation_rules": [],
+            "triggers": ["api:/v1/syndicates/{org_id}/distribute"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["entity-distribution"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/default-dividend-distribution/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/default-dividend-distribution/dividend_distribution.star",
+            "type": "registry:file",
+            "target": "~/sagas/dividend_distribution.star"
+        }
+    ]
+}

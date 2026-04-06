@@ -1,0 +1,8 @@
+# Reconciliation adjustment saga for correcting ledger imbalances.
+# Triggered when a reconciliation dispute is resolved. Posts adjustment
+# DEBIT and CREDIT entries to correct the variance, following the
+# immutable ledger pattern (reversals, not rollbacks).
+# No new instruments or account types.
+sagas:
+  - name: reconciliation_adjustment
+    trigger: "event:reconciliation.dispute-resolved.v1"

@@ -1,0 +1,9 @@
+# Dunning unfreeze and payment retry saga.
+# Triggered when a party updates their payment method on a frozen account.
+# Unfreezes the account, resolves the updated payment method, retries the
+# gateway payment with a new lien, and sends a resolution confirmation.
+# If the retry fails, compensation re-freezes the account.
+# No new instruments or account types.
+sagas:
+  - name: dunning_unfreeze
+    trigger: "api:/v1/accounts/{account_id}/unfreeze-and-retry"

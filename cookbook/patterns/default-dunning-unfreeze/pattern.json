@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "default-dunning-unfreeze",
+    "type": "registry:pattern",
+    "title": "Dunning Unfreeze",
+    "description": "Account unfreeze and payment retry saga triggered when a party updates their payment method on a frozen account. Unfreezes the account, resolves the updated payment method, reserves funds with a new lien, retries the gateway payment, and sends a resolution confirmation. Compensation re-freezes the account if the retry fails.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["dunning", "recovery", "payments"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "compensating-recovery",
+        "industries": ["billing", "fintech", "saas"],
+        "provides": {
+            "instruments": [],
+            "account_types": [],
+            "sagas": ["dunning_unfreeze"],
+            "valuation_rules": [],
+            "triggers": ["api:/v1/accounts/{account_id}/unfreeze-and-retry"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["default-dunning-escalation"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/default-dunning-unfreeze/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/default-dunning-unfreeze/dunning_unfreeze.star",
+            "type": "registry:file",
+            "target": "~/sagas/dunning_unfreeze.star"
+        }
+    ]
+}
