@@ -14,11 +14,15 @@ const (
 )
 
 // GetUserFromContext extracts the user identifier from the request context.
-// Returns the user ID from JWT claims if available, otherwise returns DefaultAuditUser.
+// Checks in order: Actor (scheduler/worker identity), UserID (JWT claims), DefaultAuditUser.
 // This function is safe to call with any context and will never return an empty string.
 func GetUserFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return DefaultAuditUser
+	}
+
+	if actor, ok := auth.ActorFromContext(ctx); ok && actor.ID != "" {
+		return actor.ID
 	}
 
 	userID, ok := auth.GetUserIDFromContext(ctx)
