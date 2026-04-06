@@ -2,6 +2,7 @@ package scheduler_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"testing"
@@ -13,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var errStatusUnavailable = errors.New("status service unavailable")
 
 // secondsParser is a cron.Parser matching the seconds-level cron runner used in tests.
 var secondsParser = cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
@@ -407,6 +410,223 @@ func TestCatchUp_MultipleSchedules_IndependentCatchUp(t *testing.T) {
 		"sched-1 should have caught up independently")
 	assert.GreaterOrEqual(t, calls2, expected2,
 		"sched-2 should have caught up independently")
+
+	cancel()
+	s.Stop()
+}
+
+func TestCatchUp_TenantStatusChecker_ActiveTenant_CatchUpExecutes(t *testing.T) {
+	cronExpr := "0 */10 * * * *"
+	now := time.Now().UTC()
+	lastExecTime := now.Add(-30 * time.Minute)
+
+	store := &stubExecutionStore{}
+	_ = store.RecordExecution(context.Background(), scheduler.Execution{
+		SchedulerName: "test-scheduler",
+		ScheduleID:    "sched-1",
+		ScheduledAt:   lastExecTime,
+		Status:        scheduler.ExecutionStatusCompleted,
+	})
+
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: cronExpr, TenantID: "tenant1"},
+		},
+	}
+	executor := &stubExecutor{executeCh: make(chan struct{}, 100)}
+	lock := &stubLock{acquired: true}
+	checker := &stubTenantStatusChecker{active: true}
+
+	expected := expectedWindowCount(t, cronExpr, lastExecTime, now)
+	require.Greater(t, expected, 0)
+
+	s := newTestScheduler(provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: 2 * time.Second,
+			MaxCatchUpAge:   time.Hour,
+		},
+		scheduler.WithCronExecutionStore(store),
+		scheduler.WithTenantStatusChecker(checker),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	err := await.New().AtMost(5 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		return executor.callCount.Load() >= int32(expected)
+	})
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, int(executor.callCount.Load()), expected)
+
+	cancel()
+	s.Stop()
+}
+
+func TestCatchUp_TenantStatusChecker_InactiveTenant_CatchUpSkipped(t *testing.T) {
+	cronExpr := "0 */10 * * * *"
+	now := time.Now().UTC()
+	lastExecTime := now.Add(-30 * time.Minute)
+
+	store := &stubExecutionStore{}
+	_ = store.RecordExecution(context.Background(), scheduler.Execution{
+		SchedulerName: "test-scheduler",
+		ScheduleID:    "sched-1",
+		ScheduledAt:   lastExecTime,
+		Status:        scheduler.ExecutionStatusCompleted,
+	})
+
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: cronExpr, TenantID: "inactive-tenant"},
+		},
+	}
+	executor := &stubExecutor{}
+	lock := &stubLock{acquired: true}
+	checker := &stubTenantStatusChecker{active: false}
+
+	expected := expectedWindowCount(t, cronExpr, lastExecTime, now)
+	require.Greater(t, expected, 0)
+
+	s := newTestScheduler(provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: 2 * time.Second,
+			MaxCatchUpAge:   time.Hour,
+		},
+		scheduler.WithCronExecutionStore(store),
+		scheduler.WithTenantStatusChecker(checker),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Wait until all catch-up windows are recorded as SKIPPED (one per window)
+	err := await.New().AtMost(5 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		count := 0
+		for _, e := range store.getExecutions() {
+			if e.Status == scheduler.ExecutionStatusSkipped &&
+				e.ErrorMessage != nil && *e.ErrorMessage == "tenant not active" {
+				count++
+			}
+		}
+		return count >= expected
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(0), executor.callCount.Load(),
+		"executor must not be called for inactive tenant during catch-up")
+
+	cancel()
+	s.Stop()
+}
+
+func TestCatchUp_TenantStatusChecker_CheckError_CatchUpProceeds(t *testing.T) {
+	cronExpr := "0 */10 * * * *"
+	now := time.Now().UTC()
+	lastExecTime := now.Add(-30 * time.Minute)
+
+	store := &stubExecutionStore{}
+	_ = store.RecordExecution(context.Background(), scheduler.Execution{
+		SchedulerName: "test-scheduler",
+		ScheduleID:    "sched-1",
+		ScheduledAt:   lastExecTime,
+		Status:        scheduler.ExecutionStatusCompleted,
+	})
+
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: cronExpr, TenantID: "tenant1"},
+		},
+	}
+	executor := &stubExecutor{executeCh: make(chan struct{}, 100)}
+	lock := &stubLock{acquired: true}
+	checker := &stubTenantStatusChecker{err: errStatusUnavailable}
+
+	expected := expectedWindowCount(t, cronExpr, lastExecTime, now)
+	require.Greater(t, expected, 0)
+
+	s := newTestScheduler(provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: 2 * time.Second,
+			MaxCatchUpAge:   time.Hour,
+		},
+		scheduler.WithCronExecutionStore(store),
+		scheduler.WithTenantStatusChecker(checker),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Fail open: catch-up proceeds despite status check error
+	err := await.New().AtMost(5 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		return executor.callCount.Load() >= int32(expected)
+	})
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, int(executor.callCount.Load()), expected)
+
+	cancel()
+	s.Stop()
+}
+
+func TestCatchUp_TenantStatusChecker_NoChecker_CatchUpProceeds(t *testing.T) {
+	cronExpr := "0 */10 * * * *"
+	now := time.Now().UTC()
+	lastExecTime := now.Add(-30 * time.Minute)
+
+	store := &stubExecutionStore{}
+	_ = store.RecordExecution(context.Background(), scheduler.Execution{
+		SchedulerName: "test-scheduler",
+		ScheduleID:    "sched-1",
+		ScheduledAt:   lastExecTime,
+		Status:        scheduler.ExecutionStatusCompleted,
+	})
+
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "sched-1", CronExpr: cronExpr, TenantID: "tenant1"},
+		},
+	}
+	executor := &stubExecutor{executeCh: make(chan struct{}, 100)}
+	lock := &stubLock{acquired: true}
+
+	expected := expectedWindowCount(t, cronExpr, lastExecTime, now)
+	require.Greater(t, expected, 0)
+
+	// No WithTenantStatusChecker option
+	s := newTestScheduler(provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: 2 * time.Second,
+			MaxCatchUpAge:   time.Hour,
+		},
+		scheduler.WithCronExecutionStore(store),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	err := await.New().AtMost(5 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		return executor.callCount.Load() >= int32(expected)
+	})
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, int(executor.callCount.Load()), expected)
 
 	cancel()
 	s.Stop()
