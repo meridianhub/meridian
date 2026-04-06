@@ -18,24 +18,29 @@ const (
 
 // Actor identifies who is performing an operation and how that identity was established.
 //
-// The Authenticated field is set to true only by the gRPC auth interceptor. Scheduler
-// and worker code sets it to false, creating a clear security boundary: callers cannot
-// escalate trust by constructing an Actor themselves.
+// Security model: Authenticated must only be set to true by the gRPC auth interceptor,
+// which is the sole authority that can verify a JWT and confirm the actor identity.
+// All other code paths (schedulers, workers, migrations, and any constructor that builds
+// an Actor from external/untrusted input) must leave Authenticated as false. Never copy
+// an incoming Authenticated value from external data (e.g., proto messages, HTTP headers,
+// or request bodies) - always default to false and let the interceptor set it.
 type Actor struct {
 	// ID is the actor's identifier, e.g. a user UUID or "system:scheduler:billing".
 	ID string
 	// Type classifies the actor.
 	Type ActorType
-	// Authenticated is true only when the Actor was set by the auth interceptor.
-	// Scheduler, worker, and migration actors must leave this false.
+	// Authenticated is true only when set by the gRPC auth interceptor after JWT
+	// verification. All other callers must leave this false.
 	Authenticated bool
 	// Source describes the mechanism that placed this Actor in context,
 	// e.g. "grpc-interceptor", "cron-scheduler", "catch-up".
 	Source string
 }
 
-// actorContextKey is a separate unexported type so it cannot collide with
-// contextKey (used for UserIDContextKey etc.) even though both are string-typed.
+// actorContextKey is an unexported struct type. Using a distinct unexported type
+// (rather than a string alias) guarantees no collision with other context key types
+// such as contextKey (used for UserIDContextKey), even if they were to hold the
+// same underlying value.
 type actorContextKey struct{}
 
 // WithActor returns a new context carrying the given Actor.
