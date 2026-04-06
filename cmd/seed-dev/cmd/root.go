@@ -12,7 +12,10 @@ import (
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	tenantv1 "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
+	identitypersistence "github.com/meridianhub/meridian/services/identity/adapters/persistence"
+	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/await"
+	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -33,6 +36,9 @@ var ErrTenantNotActive = errors.New("tenant not active")
 
 // ErrProvisioningFailed is returned when tenant provisioning reaches a terminal failure state.
 var ErrProvisioningFailed = errors.New("tenant provisioning failed")
+
+// ErrDatabaseURLRequired is returned when DATABASE_URL is needed but not set.
+var ErrDatabaseURLRequired = errors.New("DATABASE_URL required for demo user seeding")
 
 var (
 	gatewayURL       string
@@ -188,6 +194,14 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		if fixtureErr != nil {
 			return fmt.Errorf("seed fixtures: %w", fixtureErr)
 		}
+	}
+
+	// Seed demo operator user from DEMO_OPERATOR_* env vars.
+	// This runs unconditionally (not gated by --with-fixtures) because
+	// the operator user is needed for Dex login on every deploy. The
+	// seeder is a no-op when env vars are not set (production).
+	if err := seedDemoOperator(ctx); err != nil {
+		return fmt.Errorf("seed demo operator: %w", err)
 	}
 
 	fmt.Println("Seed complete.")
@@ -368,4 +382,42 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// seedDemoOperator seeds demo operator identities from DEMO_OPERATOR_* env
+// vars. This uses a direct database connection (not gRPC) because the identity
+// service's SetPassword RPC requires an invitation token, not a plaintext
+// password - there is no admin "create user with password" API by design.
+//
+// No-op when DEMO_OPERATOR_EMAIL or DEMO_OPERATOR_PASSWORD are not set, making
+// this safe to call in any environment including production.
+func seedDemoOperator(ctx context.Context) error {
+	email := os.Getenv("DEMO_OPERATOR_EMAIL")
+	password := os.Getenv("DEMO_OPERATOR_PASSWORD")
+	if email == "" || password == "" {
+		return nil // not configured, skip silently
+	}
+
+	fmt.Println("\n--- Seed Demo Operator ---")
+
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		return ErrDatabaseURLRequired
+	}
+
+	db, err := bootstrap.NewDatabase(ctx, bootstrap.DatabaseConfig{
+		DSN:          dsn,
+		MaxOpenConns: 2,
+		MaxIdleConns: 1,
+	})
+	if err != nil {
+		return fmt.Errorf("connect to identity database: %w", err)
+	}
+
+	repo := identitypersistence.NewRepository(db)
+	if err := identitybootstrap.SeedDemoUsers(ctx, repo); err != nil {
+		return fmt.Errorf("seed demo users: %w", err)
+	}
+
+	return nil
 }
