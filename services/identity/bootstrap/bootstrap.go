@@ -18,6 +18,7 @@ import (
 	"github.com/meridianhub/meridian/services/identity/domain"
 	"github.com/meridianhub/meridian/shared/pkg/credentials"
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -213,6 +214,16 @@ func SeedDemoUsers(ctx context.Context, repo domain.Repository) error {
 
 	for _, u := range users {
 		if err := seedDemoUser(ctx, repo, u); err != nil {
+			// Skip tenants whose schemas have not been provisioned.
+			// DEMO_OPERATOR_TENANT may list multiple tenants but not all
+			// of them exist in every environment (e.g. payg_energy is
+			// configured but only volterra_energy is provisioned on demo).
+			if errors.Is(err, db.ErrTenantSchemaNotProvisioned) {
+				slog.WarnContext(ctx, "demo user seeding skipped: tenant schema not provisioned",
+					"email", u.Email,
+					"tenant", u.TenantID)
+				continue
+			}
 			return fmt.Errorf("seeding demo user %s: %w", u.Email, err)
 		}
 	}
