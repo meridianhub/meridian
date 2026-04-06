@@ -241,6 +241,11 @@ func scopesSubset(approved, requested []string) bool {
 // session) and asks them to approve the requested scopes before redirecting
 // back to /oauth/callback with a consent code.
 func (h *OIDCHandler) buildConsentRedirect(challenge, clientID, redirectURI, mcpState, tenantSlug string, requestedScopes []string) (string, error) {
+	// Validate consent URL configuration before storing state to avoid orphaned entries.
+	if err := h.validateConsentBase(); err != nil {
+		return "", err
+	}
+
 	stateKey, err := h.stateStore.Store(OIDCFlowState{
 		MCPCodeChallenge: challenge,
 		MCPClientID:      clientID,
@@ -259,6 +264,23 @@ func (h *OIDCHandler) buildConsentRedirect(challenge, clientID, redirectURI, mcp
 		return "", fmt.Errorf("build consent URL: %w", err)
 	}
 	return consentURL, nil
+}
+
+// validateConsentBase checks that the handler has a valid base URL or domain
+// for constructing consent page redirects.
+func (h *OIDCHandler) validateConsentBase() error {
+	base := h.baseURL
+	if base == "" {
+		if h.baseDomain == "" {
+			return errConsentBaseNotConfigured
+		}
+		return nil // baseDomain will be used to construct a valid URL
+	}
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return errConsentBaseURLInvalid
+	}
+	return nil
 }
 
 // buildConsentPageURL constructs the UI consent page URL with tenant subdomain.
