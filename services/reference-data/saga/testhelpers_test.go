@@ -51,7 +51,10 @@ func setupPlatformTestDB(t *testing.T) (*pgxpool.Pool, func()) {
 	require.NoError(t, err)
 	t.Cleanup(func() { pool.Close() })
 
-	// Apply migrations in order
+	// Apply public-schema migrations in order.
+	// Note: 20260406000001_remove_platform_ref.sql is NOT included here because it
+	// targets tenant-level saga_definition tables, not the public.platform_saga_definition
+	// table created by these migrations. Tenant tables are created by setupTenantSchemaForSeeder.
 	migrations := []string{
 		"20260125000001_platform_saga_definition.sql",
 		"20260127000001_fix_platform_saga_unique_constraint.sql",
