@@ -248,12 +248,14 @@ type OIDCHandler struct {
 	oauthCfg          OAuthConfig
 	stateStore        *OIDCStateStore
 	codeStore         *CodeStore
+	consentStore      ConsentCodeConsumer
 	registry          *ClientRegistry
 	signer            *platformauth.JWTSigner
 	tenantResolver    TenantSlugResolver
 	tokenTTL          time.Duration
 	defaultTenantSlug string
 	baseDomain        string
+	baseURL           string
 	dexAuthBaseURL    string // External Dex base URL for browser redirects (derived from BaseURL + DexIssuerURL path).
 	httpClient        *http.Client
 	logger            *slog.Logger
@@ -267,6 +269,11 @@ type OIDCHandlerConfig struct {
 	CodeStore  *CodeStore
 	Registry   *ClientRegistry
 	Signer     *platformauth.JWTSigner
+	// ConsentStore is the shared consent code store used by both the BFF
+	// (which issues consent codes after user approval) and the OIDC handler
+	// (which consumes them in HandleCallback). When nil, HandleCallback
+	// falls back to Dex token exchange (legacy flow).
+	ConsentStore ConsentCodeConsumer
 	// TenantResolver resolves tenant slugs to UUIDs for JWT claims.
 	// When nil, the raw slug is used as-is (dev/test fallback).
 	TenantResolver TenantSlugResolver
@@ -341,12 +348,14 @@ func NewOIDCHandler(cfg OIDCHandlerConfig) (*OIDCHandler, error) {
 		oauthCfg:          cfg.OAuth,
 		stateStore:        cfg.StateStore,
 		codeStore:         cfg.CodeStore,
+		consentStore:      cfg.ConsentStore,
 		registry:          cfg.Registry,
 		signer:            cfg.Signer,
 		tenantResolver:    cfg.TenantResolver,
 		tokenTTL:          ttl,
 		defaultTenantSlug: cfg.DefaultTenantSlug,
 		baseDomain:        cfg.BaseDomain,
+		baseURL:           cfg.BaseURL,
 		dexAuthBaseURL:    dexAuthBaseURL,
 		httpClient:        httpClient,
 		logger:            cfg.Logger,
@@ -470,9 +479,29 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Capture requested OAuth scopes from the MCP client (space-delimited per RFC 6749).
-	requestedScopes := strings.Fields(strings.TrimSpace(q.Get("scope")))
+	// Only allow scopes with the "mcp:" prefix to prevent arbitrary scope injection.
+	requestedScopes := filterAllowedScopes(strings.Fields(strings.TrimSpace(q.Get("scope"))))
+	if len(requestedScopes) == 0 {
+		requestedScopes = []string{"mcp:default"}
+	}
 
-	// Store OIDC flow state and redirect to Dex for authentication.
+	// When the consent store is configured, redirect to the UI consent page
+	// instead of Dex. The consent page handles authentication + authorization
+	// approval in one step.
+	if h.consentStore != nil {
+		redirectURL, err := h.buildConsentRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug, requestedScopes)
+		if err != nil {
+			h.writeDexRedirectError(w, err)
+			return
+		}
+		h.logger.Info("oidc: redirecting to consent page",
+			"tenant", tenantSlug,
+			"client_id", clientID)
+		http.Redirect(w, r, redirectURL, http.StatusFound)
+		return
+	}
+
+	// Legacy path: redirect to Dex for authentication.
 	redirectURL, err := h.buildDexRedirect(challenge, clientID, redirectURI, q.Get("state"), tenantSlug, requestedScopes)
 	if err != nil {
 		h.writeDexRedirectError(w, err)
@@ -486,85 +515,29 @@ func (h *OIDCHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
-// HandleCallback handles GET /oauth/callback from Dex.
-// It exchanges the Dex authorization code for an ID token, extracts the email,
-// signs a Meridian JWT, and redirects back to the MCP client's redirect_uri.
+// HandleCallback handles GET /oauth/callback.
+// When the consent store is configured, it consumes a consent code issued by
+// the BFF after user approval. Otherwise it falls back to Dex token exchange.
+// In both cases it signs a Meridian JWT and redirects to the MCP client.
 func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	ctx := r.Context()
 	q := r.URL.Query()
-
-	// Check for Dex error.
-	if errParam := q.Get("error"); errParam != "" {
-		desc := q.Get("error_description")
-		h.logger.Warn("oidc: Dex returned error",
-			"error", errParam, "description", desc)
-		http.Error(w, "authentication failed: "+errParam, http.StatusBadRequest)
-		return
-	}
-
 	stateKey := q.Get("state")
 	code := q.Get("code")
-	if stateKey == "" || code == "" {
-		http.Error(w, "missing state or code parameter", http.StatusBadRequest)
-		return
-	}
 
-	// Retrieve and consume state (one-time use).
-	flowState, ok := h.stateStore.Consume(stateKey)
-	if !ok {
-		http.Error(w, "invalid or expired state parameter", http.StatusBadRequest)
+	if h.consentStore != nil {
+		h.handleConsentCallback(w, r, stateKey, code)
 		return
 	}
-
-	// Exchange Dex authorization code for tokens.
-	idToken, err := h.exchangeDexCode(ctx, code, flowState.DexCodeVerifier)
-	if err != nil {
-		h.logger.Error("oidc: Dex token exchange failed",
-			"tenant", flowState.TenantSlug, "error", err)
-		http.Error(w, "authentication token exchange failed", http.StatusBadGateway)
-		return
-	}
-
-	// Extract email from Dex ID token (trusted server-to-server response).
-	email, err := extractEmailFromJWT(idToken)
-	if err != nil {
-		h.logger.Error("oidc: failed to extract email from ID token",
-			"tenant", flowState.TenantSlug, "error", err)
-		http.Error(w, "failed to process identity", http.StatusBadGateway)
-		return
-	}
-
-	// Resolve tenant slug to UUID for JWT consistency with BFF-issued tokens.
-	tenantID, err := h.resolveTenantID(ctx, flowState.TenantSlug)
-	if err != nil {
-		http.Error(w, errTenantResolutionFailed.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Defense-in-depth: validate redirect URI scheme before signing tokens.
-	// The URI was validated at authorize-time, but re-check before redirect.
-	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
-		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
-		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
-		return
-	}
-
-	// Issue MCP authorization code backed by a Meridian JWT.
-	redirectURL, err := h.issueCodeAndRedirect(email, tenantID, flowState)
-	if err != nil {
-		h.logger.Error("oidc: failed to issue auth code", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, redirectURL, http.StatusFound)
+	h.handleDexCallback(w, r, stateKey, code)
 }
 
-// resolveTenantSlug extracts the tenant slug from the request host subdomain, falling back to the default.
+// resolveTenantSlug extracts the tenant slug from the request host subdomain,
+// falling back to the default.
 func (h *OIDCHandler) resolveTenantSlug(host string) (string, error) {
 	tenantSlug := extractSubdomain(host, h.baseDomain)
 	if tenantSlug == "" && h.defaultTenantSlug != "" {
@@ -629,11 +602,12 @@ func (h *OIDCHandler) resolveTenantID(ctx context.Context, tenantSlug string) (s
 }
 
 // issueCodeAndRedirect signs a Meridian JWT, generates an MCP authorization code, stores it, and returns the redirect URL.
-func (h *OIDCHandler) issueCodeAndRedirect(email, tenantID string, flowState OIDCFlowState) (string, error) {
+func (h *OIDCHandler) issueCodeAndRedirect(email, tenantID string, scopes []string, flowState OIDCFlowState) (string, error) {
 	claims := map[string]interface{}{
 		"sub":         email,
 		"email":       email,
 		"x-tenant-id": tenantID,
+		"scopes":      scopes,
 	}
 	tokenStr, err := h.signer.SignClaims(claims, h.tokenTTL)
 	if err != nil {
@@ -815,4 +789,16 @@ func isAllowedRedirectURI(uri string) bool {
 		return host == "localhost" || host == "127.0.0.1" || host == "::1"
 	}
 	return false
+}
+
+// filterAllowedScopes returns only scopes with the "mcp:" prefix,
+// preventing clients from injecting arbitrary scope strings into signed JWTs.
+func filterAllowedScopes(scopes []string) []string {
+	var allowed []string
+	for _, s := range scopes {
+		if strings.HasPrefix(s, "mcp:") {
+			allowed = append(allowed, s)
+		}
+	}
+	return allowed
 }

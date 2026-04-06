@@ -1300,3 +1300,547 @@ func TestOIDCStateStore_PeekInfo_NotFound(t *testing.T) {
 	assert.Empty(t, result.RedirectURI)
 	assert.Nil(t, result.Scopes)
 }
+
+// -----------------------------------------------------------------------
+// fakeConsentStore - test double for ConsentCodeConsumer
+// -----------------------------------------------------------------------
+
+type fakeConsentStore struct {
+	entries map[string]auth.ConsentEntry
+}
+
+func newFakeConsentStore() *fakeConsentStore {
+	return &fakeConsentStore{entries: make(map[string]auth.ConsentEntry)}
+}
+
+func (s *fakeConsentStore) Store(code string, entry auth.ConsentEntry) {
+	s.entries[code] = entry
+}
+
+func (s *fakeConsentStore) Consume(code string) (auth.ConsentEntry, bool) {
+	entry, ok := s.entries[code]
+	if !ok {
+		return auth.ConsentEntry{}, false
+	}
+	delete(s.entries, code)
+	return entry, true
+}
+
+// newConsentOIDCHandler creates an OIDCHandler with consent store wired for testing.
+func newConsentOIDCHandler(t *testing.T, consentStore auth.ConsentCodeConsumer) (*auth.OIDCHandler, *auth.OIDCStateStore, *auth.CodeStore) {
+	t.Helper()
+	dexSrv := fakeDexServer(t, "unused@test.com")
+	signer := newTestSigner(t)
+	codeStore := newTestStore(t)
+	stateStore := newTestOIDCStateStore(t)
+
+	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
+		OIDC: auth.OIDCConfig{
+			DexIssuerURL: dexSrv.URL + "/dex",
+			ClientID:     "meridian-service",
+			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
+		},
+		OAuth: auth.OAuthConfig{
+			ClientID:    "meridian-mcp",
+			RedirectURI: "https://claude.ai/callback",
+		},
+		ConsentStore:      consentStore,
+		StateStore:        stateStore,
+		CodeStore:         codeStore,
+		Signer:            signer,
+		BaseURL:           "https://demo.meridianhub.cloud",
+		BaseDomain:        "demo.meridianhub.cloud",
+		DefaultTenantSlug: "acme",
+		Logger:            slog.Default(),
+	})
+	require.NoError(t, err)
+	return handler, stateStore, codeStore
+}
+
+// -----------------------------------------------------------------------
+// Task 3: HandleConsentInfo
+// -----------------------------------------------------------------------
+
+func TestOIDCHandler_HandleConsentInfo_Success(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:     "meridian-mcp",
+		MCPRedirectURI:  "https://claude.ai/callback",
+		RequestedScopes: []string{"mcp:default", "mcp:admin"},
+		IssuedAt:        time.Now(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/oauth/consent-info?client_id=meridian-mcp&mcp_state="+stateKey, nil)
+	w := httptest.NewRecorder()
+	handler.HandleConsentInfo(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp auth.ConsentInfoResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	assert.Equal(t, "meridian-mcp", resp.ClientID)
+	assert.Equal(t, "Meridian CLI", resp.ClientName)
+	assert.Equal(t, "https://claude.ai/callback", resp.RedirectURI)
+	assert.Equal(t, []string{"mcp:default", "mcp:admin"}, resp.Scopes)
+	assert.False(t, resp.IsDynamic)
+}
+
+func TestOIDCHandler_HandleConsentInfo_InvalidState(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, _, _ := newConsentOIDCHandler(t, consentStore)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/oauth/consent-info?client_id=meridian-mcp&mcp_state=expired-key", nil)
+	w := httptest.NewRecorder()
+	handler.HandleConsentInfo(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid or expired state")
+}
+
+func TestOIDCHandler_HandleConsentInfo_ClientMismatch(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    "meridian-mcp",
+		MCPRedirectURI: "https://claude.ai/callback",
+		IssuedAt:       time.Now(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/oauth/consent-info?client_id=wrong-client&mcp_state="+stateKey, nil)
+	w := httptest.NewRecorder()
+	handler.HandleConsentInfo(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "client_id mismatch")
+}
+
+func TestOIDCHandler_HandleConsentInfo_DynamicClient(t *testing.T) {
+	registry := newTestRegistry(t)
+	dexSrv := fakeDexServer(t, "unused@test.com")
+
+	client, err := registry.Register(auth.RegisteredClient{
+		ClientName:   "My Cool App",
+		RedirectURIs: []string{"https://myapp.com/callback"},
+	})
+	require.NoError(t, err)
+
+	consentStore := newFakeConsentStore()
+	stateStore := newTestOIDCStateStore(t)
+
+	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
+		OIDC: auth.OIDCConfig{
+			DexIssuerURL: dexSrv.URL + "/dex",
+			ClientID:     "meridian-service",
+			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
+		},
+		OAuth: auth.OAuthConfig{
+			ClientID:    "meridian-mcp",
+			RedirectURI: "https://claude.ai/callback",
+		},
+		ConsentStore: consentStore,
+		Registry:     registry,
+		StateStore:   stateStore,
+		CodeStore:    newTestStore(t),
+		Signer:       newTestSigner(t),
+		BaseURL:      "https://demo.meridianhub.cloud",
+		BaseDomain:   "demo.meridianhub.cloud",
+		Logger:       slog.Default(),
+	})
+	require.NoError(t, err)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    client.ClientID,
+		MCPRedirectURI: "https://myapp.com/callback",
+		IssuedAt:       time.Now(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/oauth/consent-info?client_id="+client.ClientID+"&mcp_state="+stateKey, nil)
+	w := httptest.NewRecorder()
+	handler.HandleConsentInfo(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp auth.ConsentInfoResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	assert.Equal(t, "My Cool App", resp.ClientName)
+	assert.True(t, resp.IsDynamic)
+}
+
+// -----------------------------------------------------------------------
+// Task 3: HandleCallback with consent code
+// -----------------------------------------------------------------------
+
+func TestOIDCHandler_HandleCallback_ConsentCode(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, codeStore := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPCodeChallenge: challenge,
+		MCPClientID:      "meridian-mcp",
+		MCPRedirectURI:   "https://claude.ai/callback",
+		MCPState:         "client-state-789",
+		TenantSlug:       "acme",
+		RequestedScopes:  []string{"mcp:default"},
+		IssuedAt:         time.Now(),
+	})
+	require.NoError(t, err)
+
+	consentStore.Store("consent-code-123", auth.ConsentEntry{
+		Email:          "admin@acme.com",
+		TenantID:       "550e8400-e29b-41d4-a716-446655440000",
+		TenantSlug:     "acme",
+		MCPState:       stateKey,
+		ClientID:       "meridian-mcp",
+		ApprovedScopes: []string{"mcp:default"},
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"consent-code-123"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+
+	location := resp.Header.Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	assert.Equal(t, "claude.ai", redirectURL.Host)
+	assert.NotEmpty(t, redirectURL.Query().Get("code"))
+	assert.Equal(t, "client-state-789", redirectURL.Query().Get("state"))
+
+	// Verify the MCP code is in the code store with correct JWT
+	mcpCode := redirectURL.Query().Get("code")
+	entry, ok := codeStore.Consume(mcpCode)
+	require.True(t, ok)
+	assert.NotEmpty(t, entry.Token)
+}
+
+func TestOIDCHandler_HandleCallback_ExpiredConsentCode(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    "meridian-mcp",
+		MCPRedirectURI: "https://claude.ai/callback",
+		TenantSlug:     "acme",
+		IssuedAt:       time.Now(),
+	})
+	require.NoError(t, err)
+
+	// Don't store a consent code - it should fail as "not found"
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"nonexistent-consent-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid or expired consent code")
+}
+
+func TestOIDCHandler_HandleCallback_ConsentCodeMismatch(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    "meridian-mcp",
+		MCPRedirectURI: "https://claude.ai/callback",
+		TenantSlug:     "acme",
+		IssuedAt:       time.Now(),
+	})
+	require.NoError(t, err)
+
+	// Consent code has a different mcp_state
+	consentStore.Store("mismatched-code", auth.ConsentEntry{
+		Email:      "admin@acme.com",
+		TenantID:   "tid",
+		TenantSlug: "acme",
+		MCPState:   "different-state-key",
+		ClientID:   "meridian-mcp",
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"mismatched-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "consent code binding mismatch")
+}
+
+func TestOIDCHandler_HandleCallback_TenantMismatch(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    "meridian-mcp",
+		MCPRedirectURI: "https://claude.ai/callback",
+		TenantSlug:     "acme",
+		IssuedAt:       time.Now(),
+	})
+	require.NoError(t, err)
+
+	consentStore.Store("tenant-mismatch-code", auth.ConsentEntry{
+		Email:      "admin@evil.com",
+		TenantID:   "evil-tid",
+		TenantSlug: "evil-corp", // Does not match flowState.TenantSlug
+		MCPState:   stateKey,
+		ClientID:   "meridian-mcp",
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"tenant-mismatch-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "tenant mismatch")
+}
+
+func TestOIDCHandler_HandleCallback_ScopeEscalation(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:     "meridian-mcp",
+		MCPRedirectURI:  "https://claude.ai/callback",
+		TenantSlug:      "acme",
+		RequestedScopes: []string{"mcp:default"},
+		IssuedAt:        time.Now(),
+	})
+	require.NoError(t, err)
+
+	// Consent code has broader scopes than originally requested
+	consentStore.Store("escalated-code", auth.ConsentEntry{
+		Email:          "admin@acme.com",
+		TenantID:       "tid",
+		TenantSlug:     "acme",
+		MCPState:       stateKey,
+		ClientID:       "meridian-mcp",
+		ApprovedScopes: []string{"mcp:default", "mcp:admin"}, // admin was not requested
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"escalated-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "approved scopes exceed requested scopes")
+}
+
+func TestOIDCHandler_HandleCallback_ScopesInJWT(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, codeStore := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPCodeChallenge: challenge,
+		MCPClientID:      "meridian-mcp",
+		MCPRedirectURI:   "https://claude.ai/callback",
+		TenantSlug:       "acme",
+		RequestedScopes:  []string{"mcp:default", "mcp:admin"},
+		IssuedAt:         time.Now(),
+	})
+	require.NoError(t, err)
+
+	consentStore.Store("scoped-consent-code", auth.ConsentEntry{
+		Email:          "admin@acme.com",
+		TenantID:       "acme",
+		TenantSlug:     "acme",
+		MCPState:       stateKey,
+		ClientID:       "meridian-mcp",
+		ApprovedScopes: []string{"mcp:default", "mcp:admin"},
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"scoped-consent-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+
+	location := w.Header().Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	mcpCode := redirectURL.Query().Get("code")
+	entry, ok := codeStore.Consume(mcpCode)
+	require.True(t, ok)
+
+	// Parse JWT and verify scopes claim
+	signer := newTestSigner(t)
+	_ = signer // We need the signer that was used to create the handler
+	// Instead, decode the JWT payload directly (like extractEmailFromJWT)
+	parts := strings.Split(entry.Token, ".")
+	require.Len(t, parts, 3)
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+
+	var claims map[string]interface{}
+	require.NoError(t, json.Unmarshal(payload, &claims))
+
+	scopesClaim, ok := claims["scopes"].([]interface{})
+	require.True(t, ok, "scopes claim must be an array")
+	assert.Len(t, scopesClaim, 2)
+	assert.Equal(t, "mcp:default", scopesClaim[0])
+	assert.Equal(t, "mcp:admin", scopesClaim[1])
+}
+
+// -----------------------------------------------------------------------
+// Task 4: HandleAuthorize redirects to consent page
+// -----------------------------------------------------------------------
+
+func TestOIDCHandler_HandleAuthorize_RedirectsToConsent(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, _, _ := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"state":                 {"client-state-abc"},
+	}.Encode(), nil)
+	req.Host = "acme.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+
+	location := resp.Header.Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	// Should redirect to consent page, NOT Dex
+	assert.Equal(t, "/auth/mcp-consent", redirectURL.Path)
+	assert.NotEmpty(t, redirectURL.Query().Get("mcp_state"))
+	assert.Equal(t, "meridian-mcp", redirectURL.Query().Get("client_id"))
+	// Should use tenant subdomain
+	assert.Equal(t, "acme.demo.meridianhub.cloud", redirectURL.Host)
+	assert.Equal(t, "https", redirectURL.Scheme)
+}
+
+func TestOIDCHandler_HandleAuthorize_StoresScopes(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"scope":                 {"mcp:read mcp:write"},
+	}.Encode(), nil)
+	req.Host = "acme.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+
+	location := w.Header().Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	mcpState := redirectURL.Query().Get("mcp_state")
+	require.NotEmpty(t, mcpState)
+
+	// PeekInfo to verify stored scopes
+	_, _, scopes, ok := stateStore.PeekInfo(mcpState)
+	require.True(t, ok)
+	assert.Equal(t, []string{"mcp:read", "mcp:write"}, scopes)
+}
+
+func TestOIDCHandler_HandleAuthorize_DefaultScopes(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	// No scope parameter - should default to ["mcp:default"]
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	req.Host = "acme.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+
+	location := w.Header().Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	mcpState := redirectURL.Query().Get("mcp_state")
+	require.NotEmpty(t, mcpState)
+
+	_, _, scopes, ok := stateStore.PeekInfo(mcpState)
+	require.True(t, ok)
+	assert.Equal(t, []string{"mcp:default"}, scopes)
+}
+
+func TestOIDCHandler_HandleAuthorize_TenantScopedURL(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, _, _ := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	req.Host = "volterra.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+
+	location := w.Header().Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	assert.Equal(t, "volterra.demo.meridianhub.cloud", redirectURL.Host)
+	assert.Equal(t, "/auth/mcp-consent", redirectURL.Path)
+}
