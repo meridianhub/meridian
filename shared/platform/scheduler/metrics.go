@@ -92,7 +92,7 @@ var (
 		Name:      "cron_execution_duration_seconds",
 		Help:      "Duration of cron schedule executions in seconds",
 		Buckets:   prometheus.ExponentialBuckets(0.1, 2, 13), // 0.1s to ~409s, covers 5-minute default timeout
-	}, []string{"scheduler", "tenant_id", "schedule_id", "status"})
+	}, []string{"scheduler", "tenant_id", "status"}) // schedule_id omitted: histograms create N series per label combo
 
 	cronExecutionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "meridian",
@@ -133,7 +133,7 @@ var (
 // RecordCronExecution records metrics for a completed or failed schedule execution.
 func RecordCronExecution(schedulerName, tenantID, scheduleID string, status ExecutionStatus, duration time.Duration) {
 	statusStr := string(status)
-	cronExecutionDurationSeconds.WithLabelValues(schedulerName, tenantID, scheduleID, statusStr).Observe(duration.Seconds())
+	cronExecutionDurationSeconds.WithLabelValues(schedulerName, tenantID, statusStr).Observe(duration.Seconds())
 	cronExecutionsTotal.WithLabelValues(schedulerName, tenantID, statusStr).Inc()
 	cronLastExecutionTimestamp.WithLabelValues(schedulerName, scheduleID).SetToCurrentTime()
 }
@@ -157,8 +157,8 @@ func UpdateCronActiveSchedules(schedulerName string, count float64) {
 // DeleteCronScheduleMetrics removes per-schedule Prometheus series for a schedule that
 // has been deregistered. This prevents stale series from persisting after schedules are
 // removed from the provider.
-func DeleteCronScheduleMetrics(schedulerName, tenantID, scheduleID string) {
-	cronExecutionDurationSeconds.DeleteLabelValues(schedulerName, tenantID, scheduleID, string(ExecutionStatusCompleted))
-	cronExecutionDurationSeconds.DeleteLabelValues(schedulerName, tenantID, scheduleID, string(ExecutionStatusFailed))
+func DeleteCronScheduleMetrics(schedulerName, scheduleID string) {
+	// The histogram is labeled by tenant_id only (not schedule_id), so no per-schedule
+	// cleanup is needed there. Only the last-execution timestamp gauge is per-schedule.
 	cronLastExecutionTimestamp.DeleteLabelValues(schedulerName, scheduleID)
 }

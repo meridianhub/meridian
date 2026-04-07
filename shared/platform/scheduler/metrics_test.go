@@ -121,12 +121,13 @@ func TestRecordCronExecution_completed(t *testing.T) {
 	tid := "tenant-A"
 	sid := "sched-A"
 
-	beforeHistogram := getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "COMPLETED")
+	// Histogram is labeled by scheduler/tenant_id/status only (schedule_id omitted for cardinality)
+	beforeHistogram := getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, "COMPLETED")
 	beforeCounter := getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "COMPLETED")
 
 	RecordCronExecution(sched, tid, sid, ExecutionStatusCompleted, 500*time.Millisecond)
 
-	assert.Equal(t, beforeHistogram+1, getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "COMPLETED"))
+	assert.Equal(t, beforeHistogram+1, getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, "COMPLETED"))
 	assert.Equal(t, beforeCounter+1, getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "COMPLETED"))
 	assert.Greater(t, getGaugeValueMulti(t, cronLastExecutionTimestamp, sched, sid), 0.0)
 }
@@ -136,12 +137,12 @@ func TestRecordCronExecution_failed(t *testing.T) {
 	tid := "tenant-B"
 	sid := "sched-B"
 
-	beforeHistogram := getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "FAILED")
+	beforeHistogram := getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, "FAILED")
 	beforeCounter := getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "FAILED")
 
 	RecordCronExecution(sched, tid, sid, ExecutionStatusFailed, 100*time.Millisecond)
 
-	assert.Equal(t, beforeHistogram+1, getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "FAILED"))
+	assert.Equal(t, beforeHistogram+1, getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, "FAILED"))
 	assert.Equal(t, beforeCounter+1, getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "FAILED"))
 }
 
@@ -152,7 +153,7 @@ func TestRecordCronExecution_duration_is_observed(t *testing.T) {
 
 	RecordCronExecution(sched, tid, sid, ExecutionStatusCompleted, 2*time.Second)
 
-	assert.GreaterOrEqual(t, getHistogramSum(t, cronExecutionDurationSeconds, sched, tid, sid, "COMPLETED"), 2.0)
+	assert.GreaterOrEqual(t, getHistogramSum(t, cronExecutionDurationSeconds, sched, tid, "COMPLETED"), 2.0)
 }
 
 func TestRecordCronLockContention(t *testing.T) {
@@ -194,17 +195,16 @@ func TestDeleteCronScheduleMetrics_removes_series(t *testing.T) {
 	tid := "tenant-del"
 	sid := "sched-del"
 
-	// Record executions so series exist
+	// Record an execution so the last-execution timestamp series exists
 	RecordCronExecution(sched, tid, sid, ExecutionStatusCompleted, 100*time.Millisecond)
-	RecordCronExecution(sched, tid, sid, ExecutionStatusFailed, 50*time.Millisecond)
+	assert.Greater(t, getGaugeValueMulti(t, cronLastExecutionTimestamp, sched, sid), 0.0)
 
-	// Delete should not panic and removes the series
+	// Delete should not panic and removes the per-schedule timestamp series
 	assert.NotPanics(t, func() {
-		DeleteCronScheduleMetrics(sched, tid, sid)
+		DeleteCronScheduleMetrics(sched, sid)
 	})
 
-	// After deletion, series reset to zero (re-created fresh)
-	assert.Equal(t, uint64(0), getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "COMPLETED"))
+	// After deletion, the timestamp series resets to zero (re-created fresh)
 	assert.Equal(t, 0.0, getGaugeValueMulti(t, cronLastExecutionTimestamp, sched, sid))
 }
 
