@@ -91,7 +91,7 @@ var (
 		Subsystem: "scheduler",
 		Name:      "cron_execution_duration_seconds",
 		Help:      "Duration of cron schedule executions in seconds",
-		Buckets:   prometheus.ExponentialBuckets(0.1, 2, 10),
+		Buckets:   prometheus.ExponentialBuckets(0.1, 2, 13), // 0.1s to ~409s, covers 5-minute default timeout
 	}, []string{"scheduler", "tenant_id", "schedule_id", "status"})
 
 	cronExecutionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -152,4 +152,13 @@ func RecordCronConcurrencyRejection(schedulerName, limitType string) {
 // UpdateCronActiveSchedules sets the gauge for the number of active schedules registered.
 func UpdateCronActiveSchedules(schedulerName string, count float64) {
 	cronActiveSchedules.WithLabelValues(schedulerName).Set(count)
+}
+
+// DeleteCronScheduleMetrics removes per-schedule Prometheus series for a schedule that
+// has been deregistered. This prevents stale series from persisting after schedules are
+// removed from the provider.
+func DeleteCronScheduleMetrics(schedulerName, tenantID, scheduleID string) {
+	cronExecutionDurationSeconds.DeleteLabelValues(schedulerName, tenantID, scheduleID, string(ExecutionStatusCompleted))
+	cronExecutionDurationSeconds.DeleteLabelValues(schedulerName, tenantID, scheduleID, string(ExecutionStatusFailed))
+	cronLastExecutionTimestamp.DeleteLabelValues(schedulerName, scheduleID)
 }

@@ -136,10 +136,13 @@ func TestRecordCronExecution_failed(t *testing.T) {
 	tid := "tenant-B"
 	sid := "sched-B"
 
+	beforeHistogram := getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "FAILED")
+	beforeCounter := getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "FAILED")
+
 	RecordCronExecution(sched, tid, sid, ExecutionStatusFailed, 100*time.Millisecond)
 
-	assert.Equal(t, uint64(1), getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "FAILED"))
-	assert.Equal(t, 1.0, getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "FAILED"))
+	assert.Equal(t, beforeHistogram+1, getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "FAILED"))
+	assert.Equal(t, beforeCounter+1, getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "FAILED"))
 }
 
 func TestRecordCronExecution_duration_is_observed(t *testing.T) {
@@ -184,6 +187,25 @@ func TestUpdateCronActiveSchedules(t *testing.T) {
 
 	UpdateCronActiveSchedules(sched, 0)
 	assert.Equal(t, 0.0, getGaugeValueMulti(t, cronActiveSchedules, sched))
+}
+
+func TestDeleteCronScheduleMetrics_removes_series(t *testing.T) {
+	sched := "test-cron-delete"
+	tid := "tenant-del"
+	sid := "sched-del"
+
+	// Record executions so series exist
+	RecordCronExecution(sched, tid, sid, ExecutionStatusCompleted, 100*time.Millisecond)
+	RecordCronExecution(sched, tid, sid, ExecutionStatusFailed, 50*time.Millisecond)
+
+	// Delete should not panic and removes the series
+	assert.NotPanics(t, func() {
+		DeleteCronScheduleMetrics(sched, tid, sid)
+	})
+
+	// After deletion, series reset to zero (re-created fresh)
+	assert.Equal(t, uint64(0), getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "COMPLETED"))
+	assert.Equal(t, 0.0, getGaugeValueMulti(t, cronLastExecutionTimestamp, sched, sid))
 }
 
 func TestCronMetrics_independent_schedulers(t *testing.T) {

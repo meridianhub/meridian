@@ -283,9 +283,11 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 	// Remove schedules that no longer exist
 	for id, entryID := range s.entryIDs {
 		if _, exists := currentSchedules[id]; !exists {
+			removed := s.schedules[id]
 			s.cron.Remove(entryID)
 			delete(s.entryIDs, id)
 			delete(s.schedules, id)
+			DeleteCronScheduleMetrics(s.config.Name, removed.TenantID, id)
 			s.logger.Info("removed schedule", "schedule_id", id)
 		}
 	}
