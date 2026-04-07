@@ -7,11 +7,27 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	mappingv1 "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
+	"github.com/robfig/cron/v3"
 	"github.com/shopspring/decimal"
 )
+
+const (
+	// maxScheduledTriggersPerTenant is the maximum number of scheduled sagas per manifest.
+	maxScheduledTriggersPerTenant = 20
+
+	// minCronInterval is the minimum allowed interval between cron occurrences.
+	minCronInterval = 15 * time.Minute
+
+	// warnCronInterval is the threshold above which a schedule is considered very infrequent.
+	warnCronInterval = 365 * 24 * time.Hour
+)
+
+// cronParser matches the scheduler's parser: standard 5-field cron (no seconds).
+var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 // accountIDPattern matches valid Stripe Connect account IDs (acct_ followed by 16+ alphanumeric chars).
 var accountIDPattern = regexp.MustCompile(`^acct_[A-Za-z0-9]{16,}$`)
@@ -362,21 +378,26 @@ func (v *ManifestValidator) validateWebhookTriggers(
 	}
 }
 
-// validateScheduledTriggers enforces that scheduled trigger names are unique across all sagas.
+// validateScheduledTriggers enforces uniqueness, cron syntax, minimum interval,
+// maximum schedule count, and warns on very infrequent schedules.
 func (v *ManifestValidator) validateScheduledTriggers(
 	manifest *controlplanev1.Manifest,
 	result *ValidationResult,
 ) {
 	// Track seen schedule names → first saga index.
 	seen := make(map[string]int)
+	scheduledCount := 0
 
 	for i, saga := range manifest.GetSagas() {
 		trigger := saga.GetTrigger()
 		if !strings.HasPrefix(trigger, "scheduled:") {
 			continue
 		}
+		scheduledCount++
 
-		name := strings.TrimPrefix(trigger, "scheduled:")
+		remainder := strings.TrimPrefix(trigger, "scheduled:")
+		name, cronExpr, hasCron := parseScheduledTrigger(remainder)
+
 		if firstIdx, exists := seen[name]; exists {
 			addError(result, ValidationError{
 				Severity: SeverityError,
@@ -387,6 +408,95 @@ func (v *ManifestValidator) validateScheduledTriggers(
 		} else {
 			seen[name] = i
 		}
+
+		if hasCron {
+			if cronExpr == "" {
+				addError(result, ValidationError{
+					Severity:     SeverityError,
+					Path:         fmt.Sprintf("sagas[%d].trigger", i),
+					Code:         "INVALID_CRON_EXPRESSION",
+					Message:      "cron expression cannot be empty; omit the trailing colon or provide a valid expression",
+					ResourceType: "saga",
+					ResourceID:   saga.GetName(),
+				})
+			} else {
+				v.validateCronExpression(cronExpr, fmt.Sprintf("sagas[%d].trigger", i), saga.GetName(), result)
+			}
+		}
+	}
+
+	if scheduledCount > maxScheduledTriggersPerTenant {
+		addError(result, ValidationError{
+			Severity: SeverityError,
+			Path:     "sagas",
+			Code:     "TOO_MANY_SCHEDULED_TRIGGERS",
+			Message:  fmt.Sprintf("manifest has %d scheduled triggers, maximum is %d", scheduledCount, maxScheduledTriggersPerTenant),
+		})
+	}
+}
+
+// parseScheduledTrigger splits "name" or "name:cron expr" into (name, cronExpr, hasCron).
+// hasCron is true when a colon separator was present, even if the expression is empty.
+// The cron expression may contain spaces, so only the first colon is used as separator.
+func parseScheduledTrigger(remainder string) (name, cronExpr string, hasCron bool) {
+	idx := strings.Index(remainder, ":")
+	if idx < 0 {
+		return remainder, "", false
+	}
+	return remainder[:idx], remainder[idx+1:], true
+}
+
+// validateCronExpression parses a cron expression and checks interval constraints.
+func (v *ManifestValidator) validateCronExpression(expr, path, sagaName string, result *ValidationResult) {
+	schedule, err := cronParser.Parse(expr)
+	if err != nil {
+		addError(result, ValidationError{
+			Severity:     SeverityError,
+			Path:         path,
+			Code:         "INVALID_CRON_EXPRESSION",
+			Message:      fmt.Sprintf("invalid cron expression %q: %s", expr, err.Error()),
+			ResourceType: "saga",
+			ResourceID:   sagaName,
+		})
+		return
+	}
+
+	// Sample 10 consecutive occurrences from a fixed anchor to find the minimum interval.
+	// A fixed anchor avoids results that vary with the current time (e.g. daylight saving transitions).
+	anchor := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+	const sampleSize = 10
+	prev := schedule.Next(anchor)
+	minInterval := time.Duration(1<<63 - 1) // max duration
+	for range sampleSize - 1 {
+		next := schedule.Next(prev)
+		if gap := next.Sub(prev); gap < minInterval {
+			minInterval = gap
+		}
+		prev = next
+	}
+	interval := minInterval
+
+	if interval < minCronInterval {
+		addError(result, ValidationError{
+			Severity:     SeverityError,
+			Path:         path,
+			Code:         "CRON_INTERVAL_TOO_SHORT",
+			Message:      fmt.Sprintf("cron expression %q fires every %s, minimum interval is %s", expr, interval.Round(time.Second), minCronInterval),
+			ResourceType: "saga",
+			ResourceID:   sagaName,
+		})
+		return
+	}
+
+	if interval >= warnCronInterval {
+		addError(result, ValidationError{
+			Severity:     SeverityWarning,
+			Path:         path,
+			Code:         "CRON_VERY_INFREQUENT",
+			Message:      fmt.Sprintf("cron expression %q fires every %s, which is more than 365 days", expr, interval.Round(time.Hour)),
+			ResourceType: "saga",
+			ResourceID:   sagaName,
+		})
 	}
 }
 

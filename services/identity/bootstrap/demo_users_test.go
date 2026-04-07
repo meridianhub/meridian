@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/identity/domain"
+	"github.com/meridianhub/meridian/shared/platform/db"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,6 +20,9 @@ type fakeRepo struct {
 	roles      map[uuid.UUID][]*domain.RoleAssignment // keyed by identity ID
 
 	saveWithRolesCalled bool
+	// schemaNotProvisioned makes FindByEmail return ErrTenantSchemaNotProvisioned
+	// for any email lookup, simulating a missing tenant schema.
+	schemaNotProvisioned bool
 }
 
 func newFakeRepo() *fakeRepo {
@@ -43,6 +47,9 @@ func (f *fakeRepo) FindByID(_ context.Context, id uuid.UUID) (*domain.Identity, 
 }
 
 func (f *fakeRepo) FindByEmail(_ context.Context, email string) (*domain.Identity, error) {
+	if f.schemaNotProvisioned {
+		return nil, db.ErrTenantSchemaNotProvisioned
+	}
 	if ident, ok := f.identities[email]; ok {
 		return ident, nil
 	}
@@ -239,4 +246,17 @@ func TestSeedDemoUsers_ReconcilesRole_ExistingUserMissingRole(t *testing.T) {
 	roles := repo.roles[identity.ID()]
 	require.Len(t, roles, 1)
 	assert.Equal(t, domain.RoleOperator, roles[0].Role())
+}
+
+func TestSeedDemoUsers_SkipsMissingTenantSchema(t *testing.T) {
+	t.Setenv("DEMO_OPERATOR_EMAIL", "operator@volterra.energy")
+	t.Setenv("DEMO_OPERATOR_PASSWORD", "demo2026")
+	t.Setenv("DEMO_OPERATOR_TENANT", "missing_tenant")
+
+	repo := newFakeRepo()
+	repo.schemaNotProvisioned = true
+
+	err := SeedDemoUsers(context.Background(), repo)
+	require.NoError(t, err, "should skip tenants with missing schemas instead of failing")
+	assert.False(t, repo.saveWithRolesCalled, "should not have attempted to save identity")
 }

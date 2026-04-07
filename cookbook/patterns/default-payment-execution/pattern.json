@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "default-payment-execution",
+    "type": "registry:pattern",
+    "title": "Payment Order Execution",
+    "description": "Orchestrates the complete payment order flow: reserves funds via a bucket-aware lien, sends the payment to an external gateway, posts double-entry ledger entries on webhook confirmation, and executes the lien to finalize the debit. Steps 3 and 4 are conditionally invoked via webhook callbacks.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["payments", "gateway", "ledger"],
+    "meta": {
+        "complexity": 5,
+        "design_pattern": "reserve-send-confirm",
+        "industries": ["payments", "fintech", "banking"],
+        "provides": {
+            "instruments": [],
+            "account_types": [],
+            "sagas": ["payment_execution"],
+            "valuation_rules": [],
+            "triggers": ["api:/v1/payment-orders/{payment_order_id}/execute"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["default-stripe-payment", "payment-gateway-stripe"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/default-payment-execution/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/default-payment-execution/payment_execution.star",
+            "type": "registry:file",
+            "target": "~/sagas/payment_execution.star"
+        }
+    ]
+}

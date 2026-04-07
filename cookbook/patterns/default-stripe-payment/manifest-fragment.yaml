@@ -1,0 +1,12 @@
+# Stripe payment via the Financial Gateway. No new instruments or account
+# types — the saga relies on party payment method resolution and the
+# financial_gateway.dispatch_payment typed API (v3.0.0).
+#
+# Steps 4 (post_ledger) and 5 (execute_lien) are conditional, triggered
+# asynchronously when the financial-gateway.payment-captured.v1 event is
+# received after Stripe confirms the payment intent.
+sagas:
+  - name: stripe_payment
+    trigger: "api:/v1/payment-orders/{payment_order_id}/stripe"
+  - name: stripe_payment_ledger_post
+    trigger: "event:financial-gateway.payment-captured.v1"

@@ -1,0 +1,8 @@
+# Dividend distribution across org-scoped syndicate participants.
+# Uses party.list_participants and party.get_structuring_data to enumerate
+# members and their allocation shares, then resolves each participant's
+# org-scoped account via build_org_account_ref + resolve_account.
+# No new instruments or account types — operates on existing positions.
+sagas:
+  - name: dividend_distribution
+    trigger: "api:/v1/syndicates/{org_id}/distribute"

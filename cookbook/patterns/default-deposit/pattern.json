@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "default-deposit",
+    "type": "registry:pattern",
+    "title": "Current Account Deposit",
+    "description": "Multi-step saga for depositing funds into a current account with double-entry ledger posting. Logs a CREDIT position in position keeping, initiates a booking log, posts DEBIT to clearing and CREDIT to customer account, then finalizes the booking to POSTED state.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["banking", "ledger", "double-entry"],
+    "meta": {
+        "complexity": 3,
+        "design_pattern": "current-account-operation",
+        "industries": ["banking", "fintech"],
+        "provides": {
+            "instruments": [],
+            "account_types": ["CURRENT", "CLEARING"],
+            "sagas": ["current_account_deposit"],
+            "valuation_rules": [],
+            "triggers": ["api:/v1/accounts/{account_id}/deposit"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["default-withdrawal"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/default-deposit/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/default-deposit/current_account_deposit.star",
+            "type": "registry:file",
+            "target": "~/sagas/current_account_deposit.star"
+        }
+    ]
+}

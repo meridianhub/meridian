@@ -1,0 +1,40 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "default-reconciliation-adjustment",
+    "type": "registry:pattern",
+    "title": "Reconciliation Adjustment",
+    "description": "Ledger correction saga triggered when a reconciliation variance is resolved. Initiates a booking log for the adjustment, posts DEBIT and CREDIT entries to correct the ledger imbalance, and finalizes the booking to POSTED. Follows the immutable ledger pattern - compensation creates reversal entries rather than rolling back state.",
+    "registryDependencies": ["base-fiat-gbp"],
+    "categories": ["reconciliation", "adjustment", "ledger"],
+    "meta": {
+        "complexity": 3,
+        "design_pattern": "immutable-ledger-correction",
+        "industries": ["banking", "fintech", "energy"],
+        "provides": {
+            "instruments": [],
+            "account_types": [],
+            "sagas": ["reconciliation_adjustment"],
+            "valuation_rules": [],
+            "triggers": ["event:reconciliation.dispute-resolved.v1"]
+        },
+        "requires": {
+            "instruments": ["GBP"],
+            "market_data": []
+        },
+        "composes_with": ["energy-settlement"],
+        "conflicts_with": [],
+        "extends": ["base-fiat-gbp"]
+    },
+    "files": [
+        {
+            "path": "patterns/default-reconciliation-adjustment/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/default-reconciliation-adjustment/reconciliation_adjustment.star",
+            "type": "registry:file",
+            "target": "~/sagas/reconciliation_adjustment.star"
+        }
+    ]
+}

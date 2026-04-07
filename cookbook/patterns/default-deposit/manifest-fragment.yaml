@@ -1,0 +1,19 @@
+accountTypes:
+  - code: CURRENT
+    name: Current Account
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+  - code: CLEARING
+    name: Clearing Account
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: ""
+      bucketing: ""
+
+sagas:
+  - name: current_account_deposit
+    trigger: "api:/v1/accounts/{account_id}/deposit"

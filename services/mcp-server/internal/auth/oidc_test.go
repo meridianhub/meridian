@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -36,66 +35,6 @@ func newTestOIDCStateStore(t *testing.T) *auth.OIDCStateStore {
 	return s
 }
 
-// fakeDexServer creates a test HTTP server that simulates Dex's token endpoint.
-// It returns a server that responds with a fake ID token containing the given email.
-func fakeDexServer(t *testing.T, email string) *httptest.Server {
-	t.Helper()
-	mux := http.NewServeMux()
-
-	// Simulate Dex authorization endpoint — redirect immediately with a code
-	mux.HandleFunc("/dex/auth", func(w http.ResponseWriter, r *http.Request) {
-		redirectURI := r.URL.Query().Get("redirect_uri")
-		state := r.URL.Query().Get("state")
-		target, _ := url.Parse(redirectURI)
-		q := target.Query()
-		q.Set("code", "fake-dex-code")
-		q.Set("state", state)
-		target.RawQuery = q.Encode()
-		http.Redirect(w, r, target.String(), http.StatusFound)
-	})
-
-	// Simulate Dex token endpoint — return a fake ID token.
-	// Asserts required PKCE exchange fields to catch regressions in exchangeDexCode.
-	mux.HandleFunc("/dex/token", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form", http.StatusBadRequest)
-			return
-		}
-		// Assert required token exchange parameters.
-		for _, field := range []string{"grant_type", "code", "redirect_uri", "code_verifier", "client_id"} {
-			if r.PostForm.Get(field) == "" {
-				http.Error(w, "missing required field: "+field, http.StatusBadRequest)
-				return
-			}
-		}
-		if r.PostForm.Get("grant_type") != "authorization_code" {
-			http.Error(w, "wrong grant_type", http.StatusBadRequest)
-			return
-		}
-
-		// Build a fake JWT with just the email claim (no signature validation needed).
-		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email":"` + email + `","sub":"fake-sub"}`))
-		fakeJWT := header + "." + payload + ".fake-signature"
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id_token":     fakeJWT,
-			"access_token": "fake-access-token",
-			"token_type":   "Bearer",
-			"expires_in":   3600,
-		})
-	})
-
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
-}
-
 // -----------------------------------------------------------------------
 // OIDCStateStore
 // -----------------------------------------------------------------------
@@ -108,7 +47,6 @@ func TestOIDCStateStore_StoreAndConsume(t *testing.T) {
 		MCPClientID:      "meridian-mcp",
 		MCPRedirectURI:   "https://claude.ai/callback",
 		MCPState:         "client-state",
-		DexCodeVerifier:  "dex-verifier",
 		TenantSlug:       "acme",
 		IssuedAt:         time.Now(),
 	}
@@ -155,83 +93,18 @@ func TestOIDCStateStore_UnknownKey(t *testing.T) {
 // OIDCHandler — HandleAuthorize
 // -----------------------------------------------------------------------
 
-func TestOIDCHandler_Authorize_RedirectsToDex(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@example.com")
-	signer := newTestSigner(t)
-	codeStore := newTestStore(t)
-	stateStore := newTestOIDCStateStore(t)
-
-	oauthCfg := auth.OAuthConfig{
-		ClientID:         "meridian-mcp",
-		RedirectURI:      "https://claude.ai/callback",
-		AuthorizationURL: "https://demo.meridianhub.cloud/oauth/authorize",
-		TokenURL:         "https://demo.meridianhub.cloud/oauth/token",
-	}
-
-	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth:      oauthCfg,
-		StateStore: stateStore,
-		CodeStore:  codeStore,
-		Signer:     signer,
-		BaseDomain: "demo.meridianhub.cloud",
-		Logger:     slog.Default(),
-	})
-	require.NoError(t, err)
-
-	_, challenge := generatePKCEPair(t)
-
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
-		"response_type":         {"code"},
-		"client_id":             {"meridian-mcp"},
-		"redirect_uri":          {"https://claude.ai/callback"},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {"client-state-123"},
-	}.Encode(), nil)
-	req.Host = "acme.demo.meridianhub.cloud"
-	w := httptest.NewRecorder()
-	handler.HandleAuthorize(w, req)
-
-	resp := w.Result()
-	assert.Equal(t, http.StatusFound, resp.StatusCode)
-
-	location := resp.Header.Get("Location")
-	require.NotEmpty(t, location)
-
-	redirectURL, err := url.Parse(location)
-	require.NoError(t, err)
-
-	// Should redirect to Dex auth endpoint
-	assert.Contains(t, redirectURL.Path, "/dex/auth")
-	assert.Equal(t, "meridian-service", redirectURL.Query().Get("client_id"))
-	assert.Equal(t, "code", redirectURL.Query().Get("response_type"))
-	assert.Equal(t, "S256", redirectURL.Query().Get("code_challenge_method"))
-	assert.NotEmpty(t, redirectURL.Query().Get("state"))
-	assert.NotEmpty(t, redirectURL.Query().Get("code_challenge"))
-}
-
 func TestOIDCHandler_Authorize_InvalidClientID(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@example.com")
 	signer := newTestSigner(t)
 
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
 			ClientID: "meridian-mcp",
 		},
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		Logger:     slog.Default(),
+		ConsentStore: newFakeConsentStore(),
+		StateStore:   newTestOIDCStateStore(t),
+		CodeStore:    newTestStore(t),
+		Signer:       signer,
+		Logger:       slog.Default(),
 	})
 	require.NoError(t, err)
 
@@ -251,23 +124,18 @@ func TestOIDCHandler_Authorize_InvalidClientID(t *testing.T) {
 }
 
 func TestOIDCHandler_Authorize_MissingPKCE(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@example.com")
 	signer := newTestSigner(t)
 
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
 			ClientID:    "meridian-mcp",
 			RedirectURI: "https://claude.ai/callback",
 		},
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		Logger:     slog.Default(),
+		ConsentStore: newFakeConsentStore(),
+		StateStore:   newTestOIDCStateStore(t),
+		CodeStore:    newTestStore(t),
+		Signer:       signer,
+		Logger:       slog.Default(),
 	})
 	require.NoError(t, err)
 
@@ -286,17 +154,13 @@ func TestOIDCHandler_Authorize_RejectsHTTPRedirect(t *testing.T) {
 	registry := newTestRegistry(t)
 	signer := newTestSigner(t)
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: "https://dex.example.com/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth:      auth.OAuthConfig{ClientID: "meridian-mcp"},
-		Registry:   registry,
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		Logger:     slog.Default(),
+		OAuth:        auth.OAuthConfig{ClientID: "meridian-mcp"},
+		ConsentStore: newFakeConsentStore(),
+		Registry:     registry,
+		StateStore:   newTestOIDCStateStore(t),
+		CodeStore:    newTestStore(t),
+		Signer:       signer,
+		Logger:       slog.Default(),
 	})
 	require.NoError(t, err)
 
@@ -321,19 +185,16 @@ func TestOIDCHandler_Authorize_RejectsHTTPRedirect(t *testing.T) {
 }
 
 func TestOIDCHandler_Authorize_AllowsLocalhostHTTP(t *testing.T) {
-	dexSrv := fakeDexServer(t, "admin@acme.com")
 	signer := newTestSigner(t)
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
 			ClientID:    "meridian-mcp",
 			RedirectURI: "http://localhost:3000/callback",
 		},
+		ConsentStore:      newFakeConsentStore(),
 		DefaultTenantSlug: "acme",
+		BaseURL:           "https://demo.meridianhub.cloud",
+		BaseDomain:        "demo.meridianhub.cloud",
 		StateStore:        newTestOIDCStateStore(t),
 		CodeStore:         newTestStore(t),
 		Signer:            signer,
@@ -351,7 +212,7 @@ func TestOIDCHandler_Authorize_AllowsLocalhostHTTP(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.HandleAuthorize(w, req)
 
-	// Should redirect to Dex (302), not reject
+	// Should redirect to consent page (302), not reject
 	assert.Equal(t, http.StatusFound, w.Code)
 }
 
@@ -359,244 +220,29 @@ func TestOIDCHandler_Authorize_AllowsLocalhostHTTP(t *testing.T) {
 // OIDCHandler — HandleCallback
 // -----------------------------------------------------------------------
 
-func TestOIDCHandler_Callback_ExchangesAndRedirects(t *testing.T) {
-	dexSrv := fakeDexServer(t, "admin@acme.com")
-	signer := newTestSigner(t)
-	codeStore := newTestStore(t)
-	stateStore := newTestOIDCStateStore(t)
-
-	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth: auth.OAuthConfig{
-			ClientID: "meridian-mcp",
-		},
-		StateStore: stateStore,
-		CodeStore:  codeStore,
-		Signer:     signer,
-		BaseDomain: "demo.meridianhub.cloud",
-		Logger:     slog.Default(),
-	})
-	require.NoError(t, err)
-
-	_, challenge := generatePKCEPair(t)
-
-	// Pre-store OIDC flow state (simulates what HandleAuthorize would do)
-	stateKey, err := stateStore.Store(auth.OIDCFlowState{
-		MCPCodeChallenge: challenge,
-		MCPClientID:      "meridian-mcp",
-		MCPRedirectURI:   "https://claude.ai/callback",
-		MCPState:         "client-state-456",
-		DexCodeVerifier:  "test-verifier",
-		TenantSlug:       "acme",
-		IssuedAt:         time.Now(),
-	})
-	require.NoError(t, err)
-
-	// Simulate Dex callback
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
-		"code":  {"fake-dex-code"},
-		"state": {stateKey},
-	}.Encode(), nil)
-	w := httptest.NewRecorder()
-	handler.HandleCallback(w, req)
-
-	resp := w.Result()
-	require.Equal(t, http.StatusFound, resp.StatusCode)
-
-	location := resp.Header.Get("Location")
-	require.NotEmpty(t, location)
-
-	redirectURL, err := url.Parse(location)
-	require.NoError(t, err)
-
-	// Should redirect to Claude's callback with auth code
-	assert.Equal(t, "claude.ai", redirectURL.Host)
-	assert.Equal(t, "/callback", redirectURL.Path)
-	assert.NotEmpty(t, redirectURL.Query().Get("code"), "must include authorization code")
-	assert.Equal(t, "client-state-456", redirectURL.Query().Get("state"))
-
-	// The auth code should be consumable from the code store
-	mcpCode := redirectURL.Query().Get("code")
-	entry, ok := codeStore.Consume(mcpCode)
-	require.True(t, ok)
-	assert.Equal(t, challenge, entry.CodeChallenge)
-	assert.Equal(t, "meridian-mcp", entry.ClientID)
-	assert.NotEmpty(t, entry.Token, "must have pre-signed JWT")
-
-	// Validate the JWT
-	validator, err := platformauth.NewJWTValidator(signer.PublicKey())
-	require.NoError(t, err)
-	claims, err := validator.ValidateToken(entry.Token)
-	require.NoError(t, err)
-	assert.Equal(t, "admin@acme.com", claims.Email)
-	assert.Equal(t, "acme", claims.TenantID)
-}
-
 func TestOIDCHandler_Callback_InvalidState(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@example.com")
 	signer := newTestSigner(t)
 
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
 			ClientID: "meridian-mcp",
 		},
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		Logger:     slog.Default(),
+		ConsentStore: newFakeConsentStore(),
+		StateStore:   newTestOIDCStateStore(t),
+		CodeStore:    newTestStore(t),
+		Signer:       signer,
+		Logger:       slog.Default(),
 	})
 	require.NoError(t, err)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
-		"code":  {"fake-dex-code"},
+		"code":  {"some-consent-code"},
 		"state": {"invalid-state-key"},
 	}.Encode(), nil)
 	w := httptest.NewRecorder()
 	handler.HandleCallback(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestOIDCHandler_Callback_DexError(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@example.com")
-	signer := newTestSigner(t)
-
-	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth: auth.OAuthConfig{
-			ClientID: "meridian-mcp",
-		},
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		Logger:     slog.Default(),
-	})
-	require.NoError(t, err)
-
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
-		"error":             {"access_denied"},
-		"error_description": {"user cancelled"},
-	}.Encode(), nil)
-	w := httptest.NewRecorder()
-	handler.HandleCallback(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// -----------------------------------------------------------------------
-// End-to-end: Authorize → Callback → Token Exchange
-// -----------------------------------------------------------------------
-
-func TestOIDCFlow_EndToEnd(t *testing.T) {
-	dexSrv := fakeDexServer(t, "operator@acme.com")
-	signer := newTestSigner(t)
-	codeStore := newTestStore(t)
-	stateStore := newTestOIDCStateStore(t)
-
-	oauthCfg := auth.OAuthConfig{
-		ClientID:         "meridian-mcp",
-		RedirectURI:      "https://claude.ai/callback",
-		AuthorizationURL: "https://demo.meridianhub.cloud/oauth/authorize",
-		TokenURL:         "https://demo.meridianhub.cloud/oauth/token",
-	}
-
-	oidcHandler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth:      oauthCfg,
-		StateStore: stateStore,
-		CodeStore:  codeStore,
-		Signer:     signer,
-		BaseDomain: "demo.meridianhub.cloud",
-		Logger:     slog.Default(),
-	})
-	require.NoError(t, err)
-
-	tokenHandler := auth.NewTokenHandler(oauthCfg, codeStore, &fakeTokenIssuer{token: "fallback"})
-
-	verifier, challenge := generatePKCEPair(t)
-
-	// Step 1: Authorize — get redirect to Dex
-	authReq := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
-		"response_type":         {"code"},
-		"client_id":             {"meridian-mcp"},
-		"redirect_uri":          {"https://claude.ai/callback"},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {"e2e-state"},
-	}.Encode(), nil)
-	authReq.Host = "acme.demo.meridianhub.cloud"
-	authW := httptest.NewRecorder()
-	oidcHandler.HandleAuthorize(authW, authReq)
-	require.Equal(t, http.StatusFound, authW.Code)
-
-	// Extract state from Dex redirect
-	dexRedirect, err := url.Parse(authW.Header().Get("Location"))
-	require.NoError(t, err)
-	internalState := dexRedirect.Query().Get("state")
-	require.NotEmpty(t, internalState)
-
-	// Step 2: Callback — simulate Dex returning with code
-	cbReq := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
-		"code":  {"fake-dex-code"},
-		"state": {internalState},
-	}.Encode(), nil)
-	cbW := httptest.NewRecorder()
-	oidcHandler.HandleCallback(cbW, cbReq)
-	require.Equal(t, http.StatusFound, cbW.Code)
-
-	// Extract auth code from redirect to Claude
-	claudeRedirect, err := url.Parse(cbW.Header().Get("Location"))
-	require.NoError(t, err)
-	mcpCode := claudeRedirect.Query().Get("code")
-	require.NotEmpty(t, mcpCode)
-	assert.Equal(t, "e2e-state", claudeRedirect.Query().Get("state"))
-
-	// Step 3: Token exchange — exchange code for JWT
-	form := url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {mcpCode},
-		"client_id":     {"meridian-mcp"},
-		"code_verifier": {verifier},
-	}
-	tokenReq := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/oauth/token",
-		strings.NewReader(form.Encode()))
-	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	tokenW := httptest.NewRecorder()
-	tokenHandler.ServeHTTP(tokenW, tokenReq)
-	require.Equal(t, http.StatusOK, tokenW.Code)
-
-	var tokenResp map[string]any
-	require.NoError(t, json.Unmarshal(tokenW.Body.Bytes(), &tokenResp))
-	assert.Equal(t, "Bearer", tokenResp["token_type"])
-
-	accessToken, ok := tokenResp["access_token"].(string)
-	require.True(t, ok)
-	assert.NotEqual(t, "fallback", accessToken, "must use pre-signed JWT, not fallback issuer")
-
-	// Validate the JWT
-	validator, err := platformauth.NewJWTValidator(signer.PublicKey())
-	require.NoError(t, err)
-	claims, err := validator.ValidateToken(accessToken)
-	require.NoError(t, err)
-	assert.Equal(t, "operator@acme.com", claims.Email)
-	assert.Equal(t, "acme", claims.TenantID)
 }
 
 // -----------------------------------------------------------------------
@@ -691,48 +337,30 @@ func TestNewOIDCHandler_MissingConfig(t *testing.T) {
 		cfg  auth.OIDCHandlerConfig
 	}{
 		{
-			name: "missing dex issuer",
-			cfg: auth.OIDCHandlerConfig{
-				OIDC:       auth.OIDCConfig{ClientID: "c", CallbackURL: "https://x/cb"},
-				CodeStore:  newTestStore(t),
-				StateStore: newTestOIDCStateStore(t),
-				Signer:     signer,
-				Logger:     slog.Default(),
-			},
-		},
-		{
-			name: "missing client ID",
-			cfg: auth.OIDCHandlerConfig{
-				OIDC:       auth.OIDCConfig{DexIssuerURL: "https://dex", CallbackURL: "https://x/cb"},
-				CodeStore:  newTestStore(t),
-				StateStore: newTestOIDCStateStore(t),
-				Signer:     signer,
-				Logger:     slog.Default(),
-			},
-		},
-		{
-			name: "missing callback URL",
-			cfg: auth.OIDCHandlerConfig{
-				OIDC:       auth.OIDCConfig{DexIssuerURL: "https://dex", ClientID: "c"},
-				CodeStore:  newTestStore(t),
-				StateStore: newTestOIDCStateStore(t),
-				Signer:     signer,
-				Logger:     slog.Default(),
-			},
-		},
-		{
 			name: "missing state store",
 			cfg: auth.OIDCHandlerConfig{
-				OIDC:      auth.OIDCConfig{DexIssuerURL: "https://dex", ClientID: "c", CallbackURL: "https://x/cb"},
-				CodeStore: newTestStore(t),
-				Signer:    signer,
-				Logger:    slog.Default(),
+				OAuth:        auth.OAuthConfig{ClientID: "c"},
+				ConsentStore: newFakeConsentStore(),
+				CodeStore:    newTestStore(t),
+				Signer:       signer,
+				Logger:       slog.Default(),
 			},
 		},
 		{
 			name: "missing code store",
 			cfg: auth.OIDCHandlerConfig{
-				OIDC:       auth.OIDCConfig{DexIssuerURL: "https://dex", ClientID: "c", CallbackURL: "https://x/cb"},
+				OAuth:        auth.OAuthConfig{ClientID: "c"},
+				ConsentStore: newFakeConsentStore(),
+				StateStore:   newTestOIDCStateStore(t),
+				Signer:       signer,
+				Logger:       slog.Default(),
+			},
+		},
+		{
+			name: "missing consent store",
+			cfg: auth.OIDCHandlerConfig{
+				OAuth:      auth.OAuthConfig{ClientID: "c"},
+				CodeStore:  newTestStore(t),
 				StateStore: newTestOIDCStateStore(t),
 				Signer:     signer,
 				Logger:     slog.Default(),
@@ -741,19 +369,21 @@ func TestNewOIDCHandler_MissingConfig(t *testing.T) {
 		{
 			name: "missing signer",
 			cfg: auth.OIDCHandlerConfig{
-				OIDC:       auth.OIDCConfig{DexIssuerURL: "https://dex", ClientID: "c", CallbackURL: "https://x/cb"},
-				CodeStore:  newTestStore(t),
-				StateStore: newTestOIDCStateStore(t),
-				Logger:     slog.Default(),
+				OAuth:        auth.OAuthConfig{ClientID: "c"},
+				ConsentStore: newFakeConsentStore(),
+				CodeStore:    newTestStore(t),
+				StateStore:   newTestOIDCStateStore(t),
+				Logger:       slog.Default(),
 			},
 		},
 		{
 			name: "missing logger",
 			cfg: auth.OIDCHandlerConfig{
-				OIDC:       auth.OIDCConfig{DexIssuerURL: "https://dex", ClientID: "c", CallbackURL: "https://x/cb"},
-				CodeStore:  newTestStore(t),
-				StateStore: newTestOIDCStateStore(t),
-				Signer:     signer,
+				OAuth:        auth.OAuthConfig{ClientID: "c"},
+				ConsentStore: newFakeConsentStore(),
+				CodeStore:    newTestStore(t),
+				StateStore:   newTestOIDCStateStore(t),
+				Signer:       signer,
 			},
 		},
 	}
@@ -766,76 +396,19 @@ func TestNewOIDCHandler_MissingConfig(t *testing.T) {
 	}
 }
 
-func TestOIDCHandler_Authorize_UsesExternalDexURL(t *testing.T) {
-	// When BaseURL is set and DexIssuerURL points to an internal Docker hostname,
-	// the browser redirect should use the external URL, not the internal one.
-	dexSrv := fakeDexServer(t, "user@example.com")
-	signer := newTestSigner(t)
-
-	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex", // Internal: http://127.0.0.1:PORT/dex
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth: auth.OAuthConfig{
-			ClientID:    "meridian-mcp",
-			RedirectURI: "https://claude.ai/callback",
-		},
-		BaseURL:    "https://demo.meridianhub.cloud",
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		BaseDomain: "demo.meridianhub.cloud",
-		Logger:     slog.Default(),
-	})
-	require.NoError(t, err)
-
-	_, challenge := generatePKCEPair(t)
-
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
-		"response_type":         {"code"},
-		"client_id":             {"meridian-mcp"},
-		"redirect_uri":          {"https://claude.ai/callback"},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {"client-state-123"},
-	}.Encode(), nil)
-	req.Host = "acme.demo.meridianhub.cloud"
-	w := httptest.NewRecorder()
-	handler.HandleAuthorize(w, req)
-
-	resp := w.Result()
-	require.Equal(t, http.StatusFound, resp.StatusCode)
-
-	location := resp.Header.Get("Location")
-	redirectURL, err := url.Parse(location)
-	require.NoError(t, err)
-
-	// The redirect should go to the external host with tenant subdomain, not the internal test server.
-	assert.Equal(t, "acme.demo.meridianhub.cloud", redirectURL.Host)
-	assert.Equal(t, "https", redirectURL.Scheme)
-	assert.Equal(t, "/dex/auth", redirectURL.Path)
-}
-
 func TestOIDCHandler_Authorize_RejectsStaticClientEvilRedirect(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@example.com")
 	signer := newTestSigner(t)
 
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
 			ClientID:    "meridian-mcp",
 			RedirectURI: "https://claude.ai/callback",
 		},
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		Logger:     slog.Default(),
+		ConsentStore: newFakeConsentStore(),
+		StateStore:   newTestOIDCStateStore(t),
+		CodeStore:    newTestStore(t),
+		Signer:       signer,
+		Logger:       slog.Default(),
 	})
 	require.NoError(t, err)
 
@@ -855,74 +428,15 @@ func TestOIDCHandler_Authorize_RejectsStaticClientEvilRedirect(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "redirect_uri does not match registered value")
 }
 
-// -----------------------------------------------------------------------
-// Task 3: Tenant-scoped Dex redirect in HandleAuthorize
-// -----------------------------------------------------------------------
-
-func TestHandleAuthorize_WithTenantSubdomain(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@acme.com")
-	signer := newTestSigner(t)
-
-	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth: auth.OAuthConfig{
-			ClientID:    "meridian-mcp",
-			RedirectURI: "https://claude.ai/callback",
-		},
-		BaseURL:    "https://demo.meridianhub.cloud",
-		BaseDomain: "demo.meridianhub.cloud",
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		Logger:     slog.Default(),
-	})
-	require.NoError(t, err)
-
-	_, challenge := generatePKCEPair(t)
-
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
-		"response_type":         {"code"},
-		"client_id":             {"meridian-mcp"},
-		"redirect_uri":          {"https://claude.ai/callback"},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {"test-state"},
-	}.Encode(), nil)
-	req.Host = "acme.demo.meridianhub.cloud"
-	w := httptest.NewRecorder()
-	handler.HandleAuthorize(w, req)
-
-	resp := w.Result()
-	require.Equal(t, http.StatusFound, resp.StatusCode)
-
-	location := resp.Header.Get("Location")
-	redirectURL, err := url.Parse(location)
-	require.NoError(t, err)
-
-	// Dex redirect should use tenant-scoped URL
-	assert.Equal(t, "acme.demo.meridianhub.cloud", redirectURL.Host)
-	assert.Equal(t, "https", redirectURL.Scheme)
-	assert.Equal(t, "/dex/auth", redirectURL.Path)
-}
-
 func TestHandleAuthorize_WithDefaultTenant(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@acme.com")
 	signer := newTestSigner(t)
 
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
 			ClientID:    "meridian-mcp",
 			RedirectURI: "https://claude.ai/callback",
 		},
+		ConsentStore:      newFakeConsentStore(),
 		DefaultTenantSlug: "volterra",
 		BaseDomain:        "demo.meridianhub.cloud",
 		StateStore:        newTestOIDCStateStore(t),
@@ -952,25 +466,20 @@ func TestHandleAuthorize_WithDefaultTenant(t *testing.T) {
 }
 
 func TestHandleAuthorize_MultiTenantNoSubdomain_FailsClosed(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@acme.com")
 	signer := newTestSigner(t)
 
 	// No DefaultTenantSlug — multi-tenant mode
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
 			ClientID:    "meridian-mcp",
 			RedirectURI: "https://claude.ai/callback",
 		},
-		BaseDomain: "demo.meridianhub.cloud",
-		StateStore: newTestOIDCStateStore(t),
-		CodeStore:  newTestStore(t),
-		Signer:     signer,
-		Logger:     slog.Default(),
+		ConsentStore: newFakeConsentStore(),
+		BaseDomain:   "demo.meridianhub.cloud",
+		StateStore:   newTestOIDCStateStore(t),
+		CodeStore:    newTestStore(t),
+		Signer:       signer,
+		Logger:       slog.Default(),
 	})
 	require.NoError(t, err)
 
@@ -992,107 +501,236 @@ func TestHandleAuthorize_MultiTenantNoSubdomain_FailsClosed(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "tenant identification required")
 }
 
-func TestBuildTenantScopedDexURL(t *testing.T) {
-	tests := []struct {
-		name       string
-		dexBaseURL string
-		tenant     string
-		baseDomain string
-		want       string
-	}{
-		{
-			name:       "scopes URL with tenant subdomain",
-			dexBaseURL: "https://demo.meridianhub.cloud/dex",
-			tenant:     "acme",
-			baseDomain: "demo.meridianhub.cloud",
-			want:       "https://acme.demo.meridianhub.cloud/dex",
-		},
-		{
-			name:       "empty base domain returns original",
-			dexBaseURL: "https://demo.meridianhub.cloud/dex",
-			tenant:     "acme",
-			baseDomain: "",
-			want:       "https://demo.meridianhub.cloud/dex",
-		},
-		{
-			name:       "empty tenant returns original",
-			dexBaseURL: "https://demo.meridianhub.cloud/dex",
-			tenant:     "",
-			baseDomain: "demo.meridianhub.cloud",
-			want:       "https://demo.meridianhub.cloud/dex",
-		},
-		{
-			name:       "preserves port in URL",
-			dexBaseURL: "https://demo.meridianhub.cloud:8443/dex",
-			tenant:     "acme",
-			baseDomain: "demo.meridianhub.cloud",
-			want:       "https://acme.demo.meridianhub.cloud:8443/dex",
-		},
-		{
-			name:       "non-matching host returns original",
-			dexBaseURL: "http://dex:5556/dex",
-			tenant:     "acme",
-			baseDomain: "demo.meridianhub.cloud",
-			want:       "http://dex:5556/dex",
-		},
-	}
+func TestOIDCStateStore_PeekInfo(t *testing.T) {
+	s := newTestOIDCStateStore(t)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := auth.BuildTenantScopedDexURL(tt.dexBaseURL, tt.tenant, tt.baseDomain)
-			assert.Equal(t, tt.want, got)
-		})
-	}
+	key, err := s.Store(auth.OIDCFlowState{
+		MCPClientID:     "client-1",
+		MCPRedirectURI:  "https://example.com/callback",
+		RequestedScopes: []string{"mcp:default", "mcp:admin"},
+		IssuedAt:        time.Now(),
+	})
+	require.NoError(t, err)
+
+	result, ok := s.PeekInfo(key)
+	assert.True(t, ok)
+	assert.Equal(t, "client-1", result.ClientID)
+	assert.Equal(t, "https://example.com/callback", result.RedirectURI)
+	assert.Equal(t, []string{"mcp:default", "mcp:admin"}, result.Scopes)
+
+	// PeekInfo is non-consuming - a second call should also succeed.
+	_, ok = s.PeekInfo(key)
+	assert.True(t, ok, "PeekInfo should not consume the entry")
+
+	// Consume should still work after PeekInfo.
+	entry, ok := s.Consume(key)
+	assert.True(t, ok)
+	assert.Equal(t, "client-1", entry.MCPClientID)
+}
+
+func TestOIDCStateStore_PeekInfo_Expired(t *testing.T) {
+	s := newTestOIDCStateStore(t)
+
+	key, err := s.Store(auth.OIDCFlowState{
+		MCPClientID:    "client-1",
+		MCPRedirectURI: "https://example.com/callback",
+		IssuedAt:       time.Now().Add(-11 * time.Minute), // older than 10m TTL
+	})
+	require.NoError(t, err)
+
+	result, ok := s.PeekInfo(key)
+	assert.False(t, ok)
+	assert.Empty(t, result.ClientID)
+	assert.Empty(t, result.RedirectURI)
+	assert.Nil(t, result.Scopes)
+
+	// Expired entry should have been cleaned up by PeekInfo.
+	_, ok = s.Consume(key)
+	assert.False(t, ok)
+}
+
+func TestOIDCStateStore_PeekInfo_NotFound(t *testing.T) {
+	s := newTestOIDCStateStore(t)
+
+	result, ok := s.PeekInfo("missing-key")
+	assert.False(t, ok)
+	assert.Empty(t, result.ClientID)
+	assert.Empty(t, result.RedirectURI)
+	assert.Nil(t, result.Scopes)
 }
 
 // -----------------------------------------------------------------------
-// Task 5: Tenant slug to UUID resolution in HandleCallback
+// fakeConsentStore - test double for ConsentCodeConsumer
 // -----------------------------------------------------------------------
 
-// mockTenantResolver is a test double for TenantSlugResolver.
-type mockTenantResolver struct {
-	mapping map[string]string
-	err     error
+type fakeConsentStore struct {
+	entries map[string]auth.ConsentEntry
 }
 
-func (m *mockTenantResolver) ResolveSlug(_ context.Context, slug string) (string, error) {
-	if m.err != nil {
-		return "", m.err
-	}
-	uuid, ok := m.mapping[slug]
+func newFakeConsentStore() *fakeConsentStore {
+	return &fakeConsentStore{entries: make(map[string]auth.ConsentEntry)}
+}
+
+func (s *fakeConsentStore) Store(code string, entry auth.ConsentEntry) {
+	s.entries[code] = entry
+}
+
+func (s *fakeConsentStore) Consume(code string) (auth.ConsentEntry, bool) {
+	entry, ok := s.entries[code]
 	if !ok {
-		return "", fmt.Errorf("tenant not found: %s", slug)
+		return auth.ConsentEntry{}, false
 	}
-	return uuid, nil
+	delete(s.entries, code)
+	return entry, true
 }
 
-func TestHandleCallback_ResolvesSlugToUUID(t *testing.T) {
-	dexSrv := fakeDexServer(t, "admin@acme.com")
+// newConsentOIDCHandler creates an OIDCHandler with consent store wired for testing.
+func newConsentOIDCHandler(t *testing.T, consentStore auth.ConsentCodeConsumer) (*auth.OIDCHandler, *auth.OIDCStateStore, *auth.CodeStore) {
+	t.Helper()
 	signer := newTestSigner(t)
 	codeStore := newTestStore(t)
 	stateStore := newTestOIDCStateStore(t)
 
-	resolver := &mockTenantResolver{
-		mapping: map[string]string{"acme": "550e8400-e29b-41d4-a716-446655440000"},
-	}
-
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
-			ClientID: "meridian-mcp",
+			ClientID:    "meridian-mcp",
+			RedirectURI: "https://claude.ai/callback",
 		},
-		TenantResolver: resolver,
-		StateStore:     stateStore,
-		CodeStore:      codeStore,
-		Signer:         signer,
-		BaseDomain:     "demo.meridianhub.cloud",
-		Logger:         slog.Default(),
+		ConsentStore:      consentStore,
+		StateStore:        stateStore,
+		CodeStore:         codeStore,
+		Signer:            signer,
+		BaseURL:           "https://demo.meridianhub.cloud",
+		BaseDomain:        "demo.meridianhub.cloud",
+		DefaultTenantSlug: "acme",
+		Logger:            slog.Default(),
 	})
 	require.NoError(t, err)
+	return handler, stateStore, codeStore
+}
+
+// -----------------------------------------------------------------------
+// Task 3: HandleConsentInfo
+// -----------------------------------------------------------------------
+
+func TestOIDCHandler_HandleConsentInfo_Success(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:     "meridian-mcp",
+		MCPRedirectURI:  "https://claude.ai/callback",
+		RequestedScopes: []string{"mcp:default", "mcp:admin"},
+		IssuedAt:        time.Now(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/oauth/consent-info?client_id=meridian-mcp&mcp_state="+stateKey, nil)
+	w := httptest.NewRecorder()
+	handler.HandleConsentInfo(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp auth.ConsentInfoResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	assert.Equal(t, "meridian-mcp", resp.ClientID)
+	assert.Equal(t, "Meridian CLI", resp.ClientName)
+	assert.Equal(t, "https://claude.ai/callback", resp.RedirectURI)
+	assert.Equal(t, []string{"mcp:default", "mcp:admin"}, resp.Scopes)
+	assert.False(t, resp.IsDynamic)
+}
+
+func TestOIDCHandler_HandleConsentInfo_InvalidState(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, _, _ := newConsentOIDCHandler(t, consentStore)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/oauth/consent-info?client_id=meridian-mcp&mcp_state=expired-key", nil)
+	w := httptest.NewRecorder()
+	handler.HandleConsentInfo(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid or expired state")
+}
+
+func TestOIDCHandler_HandleConsentInfo_ClientMismatch(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    "meridian-mcp",
+		MCPRedirectURI: "https://claude.ai/callback",
+		IssuedAt:       time.Now(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/oauth/consent-info?client_id=wrong-client&mcp_state="+stateKey, nil)
+	w := httptest.NewRecorder()
+	handler.HandleConsentInfo(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "client_id mismatch")
+}
+
+func TestOIDCHandler_HandleConsentInfo_DynamicClient(t *testing.T) {
+	registry := newTestRegistry(t)
+
+	client, err := registry.Register(auth.RegisteredClient{
+		ClientName:   "My Cool App",
+		RedirectURIs: []string{"https://myapp.com/callback"},
+	})
+	require.NoError(t, err)
+
+	consentStore := newFakeConsentStore()
+	stateStore := newTestOIDCStateStore(t)
+
+	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
+		OAuth: auth.OAuthConfig{
+			ClientID:    "meridian-mcp",
+			RedirectURI: "https://claude.ai/callback",
+		},
+		ConsentStore: consentStore,
+		Registry:     registry,
+		StateStore:   stateStore,
+		CodeStore:    newTestStore(t),
+		Signer:       newTestSigner(t),
+		BaseURL:      "https://demo.meridianhub.cloud",
+		BaseDomain:   "demo.meridianhub.cloud",
+		Logger:       slog.Default(),
+	})
+	require.NoError(t, err)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    client.ClientID,
+		MCPRedirectURI: "https://myapp.com/callback",
+		IssuedAt:       time.Now(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/oauth/consent-info?client_id="+client.ClientID+"&mcp_state="+stateKey, nil)
+	w := httptest.NewRecorder()
+	handler.HandleConsentInfo(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp auth.ConsentInfoResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	assert.Equal(t, "My Cool App", resp.ClientName)
+	assert.True(t, resp.IsDynamic)
+}
+
+// -----------------------------------------------------------------------
+// Task 3: HandleCallback with consent code
+// -----------------------------------------------------------------------
+
+func TestOIDCHandler_HandleCallback_ConsentCode(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, codeStore := newConsentOIDCHandler(t, consentStore)
 
 	_, challenge := generatePKCEPair(t)
 
@@ -1100,14 +738,24 @@ func TestHandleCallback_ResolvesSlugToUUID(t *testing.T) {
 		MCPCodeChallenge: challenge,
 		MCPClientID:      "meridian-mcp",
 		MCPRedirectURI:   "https://claude.ai/callback",
-		DexCodeVerifier:  "test-verifier",
+		MCPState:         "client-state-789",
 		TenantSlug:       "acme",
+		RequestedScopes:  []string{"mcp:default"},
 		IssuedAt:         time.Now(),
 	})
 	require.NoError(t, err)
 
+	consentStore.Store("consent-code-123", auth.ConsentEntry{
+		Email:          "admin@acme.com",
+		TenantID:       "550e8400-e29b-41d4-a716-446655440000",
+		TenantSlug:     "acme",
+		MCPState:       stateKey,
+		ClientID:       "meridian-mcp",
+		ApprovedScopes: []string{"mcp:default"},
+	})
+
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
-		"code":  {"fake-dex-code"},
+		"code":  {"consent-code-123"},
 		"state": {stateKey},
 	}.Encode(), nil)
 	w := httptest.NewRecorder()
@@ -1116,94 +764,145 @@ func TestHandleCallback_ResolvesSlugToUUID(t *testing.T) {
 	resp := w.Result()
 	require.Equal(t, http.StatusFound, resp.StatusCode)
 
-	// Extract the MCP code and verify the JWT has UUID, not slug
 	location := resp.Header.Get("Location")
 	redirectURL, err := url.Parse(location)
 	require.NoError(t, err)
 
+	assert.Equal(t, "claude.ai", redirectURL.Host)
+	assert.NotEmpty(t, redirectURL.Query().Get("code"))
+	assert.Equal(t, "client-state-789", redirectURL.Query().Get("state"))
+
+	// Verify the MCP code is in the code store with correct JWT
 	mcpCode := redirectURL.Query().Get("code")
 	entry, ok := codeStore.Consume(mcpCode)
 	require.True(t, ok)
-
-	validator, err := platformauth.NewJWTValidator(signer.PublicKey())
-	require.NoError(t, err)
-	claims, err := validator.ValidateToken(entry.Token)
-	require.NoError(t, err)
-
-	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", claims.TenantID, "JWT must contain UUID, not slug")
-	assert.Equal(t, "admin@acme.com", claims.Email)
+	assert.NotEmpty(t, entry.Token)
 }
 
-func TestHandleCallback_ResolverFailure_ReturnsError(t *testing.T) {
-	dexSrv := fakeDexServer(t, "admin@acme.com")
-	signer := newTestSigner(t)
-	stateStore := newTestOIDCStateStore(t)
-
-	resolver := &mockTenantResolver{
-		err: fmt.Errorf("database connection failed"),
-	}
-
-	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth: auth.OAuthConfig{
-			ClientID: "meridian-mcp",
-		},
-		TenantResolver: resolver,
-		StateStore:     stateStore,
-		CodeStore:      newTestStore(t),
-		Signer:         signer,
-		Logger:         slog.Default(),
-	})
-	require.NoError(t, err)
+func TestOIDCHandler_HandleCallback_ExpiredConsentCode(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
 
 	stateKey, err := stateStore.Store(auth.OIDCFlowState{
-		MCPCodeChallenge: "test-challenge",
-		MCPClientID:      "meridian-mcp",
-		MCPRedirectURI:   "https://claude.ai/callback",
-		DexCodeVerifier:  "test-verifier",
-		TenantSlug:       "acme",
-		IssuedAt:         time.Now(),
+		MCPClientID:    "meridian-mcp",
+		MCPRedirectURI: "https://claude.ai/callback",
+		TenantSlug:     "acme",
+		IssuedAt:       time.Now(),
 	})
 	require.NoError(t, err)
 
+	// Don't store a consent code - it should fail as "not found"
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
-		"code":  {"fake-dex-code"},
+		"code":  {"nonexistent-consent-code"},
 		"state": {stateKey},
 	}.Encode(), nil)
 	w := httptest.NewRecorder()
 	handler.HandleCallback(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "tenant slug resolution failed")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid or expired consent code")
 }
 
-func TestHandleCallback_NoResolver_FallsBackToSlug(t *testing.T) {
-	dexSrv := fakeDexServer(t, "admin@acme.com")
-	signer := newTestSigner(t)
-	codeStore := newTestStore(t)
-	stateStore := newTestOIDCStateStore(t)
+func TestOIDCHandler_HandleCallback_ConsentCodeMismatch(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
 
-	// No TenantResolver set — slug should be used as-is
-	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
-		OAuth: auth.OAuthConfig{
-			ClientID: "meridian-mcp",
-		},
-		StateStore: stateStore,
-		CodeStore:  codeStore,
-		Signer:     signer,
-		BaseDomain: "demo.meridianhub.cloud",
-		Logger:     slog.Default(),
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    "meridian-mcp",
+		MCPRedirectURI: "https://claude.ai/callback",
+		TenantSlug:     "acme",
+		IssuedAt:       time.Now(),
 	})
 	require.NoError(t, err)
+
+	// Consent code has a different mcp_state
+	consentStore.Store("mismatched-code", auth.ConsentEntry{
+		Email:      "admin@acme.com",
+		TenantID:   "tid",
+		TenantSlug: "acme",
+		MCPState:   "different-state-key",
+		ClientID:   "meridian-mcp",
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"mismatched-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "consent code binding mismatch")
+}
+
+func TestOIDCHandler_HandleCallback_TenantMismatch(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:    "meridian-mcp",
+		MCPRedirectURI: "https://claude.ai/callback",
+		TenantSlug:     "acme",
+		IssuedAt:       time.Now(),
+	})
+	require.NoError(t, err)
+
+	consentStore.Store("tenant-mismatch-code", auth.ConsentEntry{
+		Email:      "admin@evil.com",
+		TenantID:   "evil-tid",
+		TenantSlug: "evil-corp", // Does not match flowState.TenantSlug
+		MCPState:   stateKey,
+		ClientID:   "meridian-mcp",
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"tenant-mismatch-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "tenant mismatch")
+}
+
+func TestOIDCHandler_HandleCallback_ScopeEscalation(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	stateKey, err := stateStore.Store(auth.OIDCFlowState{
+		MCPClientID:     "meridian-mcp",
+		MCPRedirectURI:  "https://claude.ai/callback",
+		TenantSlug:      "acme",
+		RequestedScopes: []string{"mcp:default"},
+		IssuedAt:        time.Now(),
+	})
+	require.NoError(t, err)
+
+	// Consent code has broader scopes than originally requested
+	consentStore.Store("escalated-code", auth.ConsentEntry{
+		Email:          "admin@acme.com",
+		TenantID:       "tid",
+		TenantSlug:     "acme",
+		MCPState:       stateKey,
+		ClientID:       "meridian-mcp",
+		ApprovedScopes: []string{"mcp:default", "mcp:admin"}, // admin was not requested
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
+		"code":  {"escalated-code"},
+		"state": {stateKey},
+	}.Encode(), nil)
+	w := httptest.NewRecorder()
+	handler.HandleCallback(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "approved scopes exceed requested scopes")
+}
+
+func TestOIDCHandler_HandleCallback_ScopesInJWT(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, codeStore := newConsentOIDCHandler(t, consentStore)
 
 	_, challenge := generatePKCEPair(t)
 
@@ -1211,18 +910,78 @@ func TestHandleCallback_NoResolver_FallsBackToSlug(t *testing.T) {
 		MCPCodeChallenge: challenge,
 		MCPClientID:      "meridian-mcp",
 		MCPRedirectURI:   "https://claude.ai/callback",
-		DexCodeVerifier:  "test-verifier",
 		TenantSlug:       "acme",
+		RequestedScopes:  []string{"mcp:default", "mcp:admin"},
 		IssuedAt:         time.Now(),
 	})
 	require.NoError(t, err)
 
+	consentStore.Store("scoped-consent-code", auth.ConsentEntry{
+		Email:          "admin@acme.com",
+		TenantID:       "acme",
+		TenantSlug:     "acme",
+		MCPState:       stateKey,
+		ClientID:       "meridian-mcp",
+		ApprovedScopes: []string{"mcp:default", "mcp:admin"},
+	})
+
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/callback?"+url.Values{
-		"code":  {"fake-dex-code"},
+		"code":  {"scoped-consent-code"},
 		"state": {stateKey},
 	}.Encode(), nil)
 	w := httptest.NewRecorder()
 	handler.HandleCallback(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+
+	location := w.Header().Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	mcpCode := redirectURL.Query().Get("code")
+	entry, ok := codeStore.Consume(mcpCode)
+	require.True(t, ok)
+
+	// Parse JWT and verify scopes claim
+	signer := newTestSigner(t)
+	_ = signer // We need the signer that was used to create the handler
+	// Instead, decode the JWT payload directly (like extractEmailFromJWT)
+	parts := strings.Split(entry.Token, ".")
+	require.Len(t, parts, 3)
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+
+	var claims map[string]interface{}
+	require.NoError(t, json.Unmarshal(payload, &claims))
+
+	scopesClaim, ok := claims["scopes"].([]interface{})
+	require.True(t, ok, "scopes claim must be an array")
+	assert.Len(t, scopesClaim, 2)
+	assert.Equal(t, "mcp:default", scopesClaim[0])
+	assert.Equal(t, "mcp:admin", scopesClaim[1])
+}
+
+// -----------------------------------------------------------------------
+// Task 4: HandleAuthorize redirects to consent page
+// -----------------------------------------------------------------------
+
+func TestOIDCHandler_HandleAuthorize_RedirectsToConsent(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, _, _ := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"state":                 {"client-state-abc"},
+	}.Encode(), nil)
+	req.Host = "acme.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
 
 	resp := w.Result()
 	require.Equal(t, http.StatusFound, resp.StatusCode)
@@ -1231,14 +990,103 @@ func TestHandleCallback_NoResolver_FallsBackToSlug(t *testing.T) {
 	redirectURL, err := url.Parse(location)
 	require.NoError(t, err)
 
-	mcpCode := redirectURL.Query().Get("code")
-	entry, ok := codeStore.Consume(mcpCode)
+	// Should redirect to consent page, NOT Dex
+	assert.Equal(t, "/auth/mcp-consent", redirectURL.Path)
+	assert.NotEmpty(t, redirectURL.Query().Get("mcp_state"))
+	assert.Equal(t, "meridian-mcp", redirectURL.Query().Get("client_id"))
+	// Should use tenant subdomain
+	assert.Equal(t, "acme.demo.meridianhub.cloud", redirectURL.Host)
+	assert.Equal(t, "https", redirectURL.Scheme)
+}
+
+func TestOIDCHandler_HandleAuthorize_StoresScopes(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"scope":                 {"mcp:read mcp:write"},
+	}.Encode(), nil)
+	req.Host = "acme.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+
+	location := w.Header().Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	mcpState := redirectURL.Query().Get("mcp_state")
+	require.NotEmpty(t, mcpState)
+
+	// PeekInfo to verify stored scopes
+	info, ok := stateStore.PeekInfo(mcpState)
 	require.True(t, ok)
+	assert.Equal(t, []string{"mcp:read", "mcp:write"}, info.Scopes)
+}
 
-	validator, err := platformauth.NewJWTValidator(signer.PublicKey())
-	require.NoError(t, err)
-	claims, err := validator.ValidateToken(entry.Token)
+func TestOIDCHandler_HandleAuthorize_DefaultScopes(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, stateStore, _ := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	// No scope parameter - should default to ["mcp:default"]
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	req.Host = "acme.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+
+	location := w.Header().Get("Location")
+	redirectURL, err := url.Parse(location)
 	require.NoError(t, err)
 
-	assert.Equal(t, "acme", claims.TenantID, "without resolver, JWT should contain raw slug")
+	mcpState := redirectURL.Query().Get("mcp_state")
+	require.NotEmpty(t, mcpState)
+
+	info, ok := stateStore.PeekInfo(mcpState)
+	require.True(t, ok)
+	assert.Equal(t, []string{"mcp:default"}, info.Scopes)
+}
+
+func TestOIDCHandler_HandleAuthorize_TenantScopedURL(t *testing.T) {
+	consentStore := newFakeConsentStore()
+	handler, _, _ := newConsentOIDCHandler(t, consentStore)
+
+	_, challenge := generatePKCEPair(t)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/oauth/authorize?"+url.Values{
+		"response_type":         {"code"},
+		"client_id":             {"meridian-mcp"},
+		"redirect_uri":          {"https://claude.ai/callback"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode(), nil)
+	req.Host = "volterra.demo.meridianhub.cloud"
+	w := httptest.NewRecorder()
+	handler.HandleAuthorize(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code)
+
+	location := w.Header().Get("Location")
+	redirectURL, err := url.Parse(location)
+	require.NoError(t, err)
+
+	assert.Equal(t, "volterra.demo.meridianhub.cloud", redirectURL.Host)
+	assert.Equal(t, "/auth/mcp-consent", redirectURL.Path)
 }

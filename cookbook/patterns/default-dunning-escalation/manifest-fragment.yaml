@@ -1,0 +1,9 @@
+# Dunning escalation triggered when a payment order fails.
+# Escalates through three levels via the correspondence service:
+#   Level 0->1: first notice email
+#   Level 1->2: second notice email
+#   Level 2->3: final warning email + account freeze + freeze notification
+# No new instruments or account types — operates on existing current accounts.
+sagas:
+  - name: dunning_escalation
+    trigger: "event:payment-order.failed.v1"
