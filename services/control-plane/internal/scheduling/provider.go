@@ -2,6 +2,7 @@ package scheduling
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -9,6 +10,9 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"gorm.io/gorm"
 )
+
+// ErrAllSchemaQueriesFailed is returned when every tenant schema query fails.
+var ErrAllSchemaQueriesFailed = errors.New("all tenant schema queries failed")
 
 // TenantScheduleRepository queries enabled schedules from tenant schemas.
 type TenantScheduleRepository interface {
@@ -104,6 +108,7 @@ func (r *GormTenantScheduleRepository) ListEnabledSchedules(ctx context.Context)
 	}
 
 	var allSchedules []TenantSchedule
+	var failedSchemas int
 	for _, schema := range schemas {
 		tenantID := schemaToTenantID(schema)
 
@@ -115,6 +120,7 @@ func (r *GormTenantScheduleRepository) ListEnabledSchedules(ctx context.Context)
 		if err != nil {
 			r.logger.Error("failed to query tenant schedules",
 				"schema", schema, "error", err)
+			failedSchemas++
 			continue
 		}
 
@@ -127,6 +133,14 @@ func (r *GormTenantScheduleRepository) ListEnabledSchedules(ctx context.Context)
 				Metadata:     e.Metadata,
 			})
 		}
+	}
+
+	if failedSchemas > 0 && failedSchemas == len(schemas) {
+		return nil, fmt.Errorf("%w: %d schemas queried", ErrAllSchemaQueriesFailed, failedSchemas)
+	}
+	if failedSchemas > 0 {
+		r.logger.Warn("some tenant schema queries failed",
+			"failed", failedSchemas, "total", len(schemas))
 	}
 
 	return allSchedules, nil

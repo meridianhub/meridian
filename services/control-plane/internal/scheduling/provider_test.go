@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/meridianhub/meridian/shared/platform/testdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,10 +82,6 @@ func TestTenantScheduleProvider_ScheduleIDFormat(t *testing.T) {
 	assert.Equal(t, "my_tenant:my-schedule", schedules[0].ID)
 }
 
-func TestTenantScheduleProvider_ImplementsScheduleProvider(_ *testing.T) {
-	var _ scheduler.ScheduleProvider = (*TenantScheduleProvider)(nil)
-}
-
 func TestSchemaToTenantID(t *testing.T) {
 	assert.Equal(t, "acme", schemaToTenantID("org_acme"))
 	assert.Equal(t, "beta_corp", schemaToTenantID("org_beta_corp"))
@@ -105,7 +100,7 @@ const tenantScheduleDDL = `CREATE TABLE IF NOT EXISTS %s.tenant_schedule (
 	metadata JSONB,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-	CONSTRAINT uq_%s_tenant_schedule_name UNIQUE (schedule_name)
+	UNIQUE (schedule_name)
 )`
 
 func setupTestDB(t *testing.T) (*testdb.TenantTestContext, *testdb.TenantTestContext, func()) {
@@ -114,13 +109,13 @@ func setupTestDB(t *testing.T) (*testdb.TenantTestContext, *testdb.TenantTestCon
 	db, cleanup := testdb.SetupCockroachDB(t, nil)
 
 	tc1 := testdb.SetupTenantSchema(t, db, "alpha")
-	testdb.CreateTable(t, tc1.DB, tc1.Tenant, fmt.Sprintf(tenantScheduleDDL, "%s", "alpha"))
+	testdb.CreateTable(t, tc1.DB, tc1.Tenant, tenantScheduleDDL)
 
 	tc2 := testdb.SetupTenantSchema(t, db, "beta")
-	testdb.CreateTable(t, tc2.DB, tc2.Tenant, fmt.Sprintf(tenantScheduleDDL, "%s", "beta"))
+	testdb.CreateTable(t, tc2.DB, tc2.Tenant, tenantScheduleDDL)
 
 	// Reset search_path so cross-schema queries work
-	db.Exec("SET search_path TO public")
+	require.NoError(t, db.Exec("SET search_path TO public").Error)
 
 	return tc1, tc2, cleanup
 }
@@ -134,11 +129,11 @@ func TestGormTenantScheduleRepository_ListEnabledSchedules_MultiTenant(t *testin
 	defer cleanup()
 
 	// Insert enabled schedule in alpha
-	tc1.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('daily-billing', 'billing.run', '0 0 * * *', true)`, tc1.Tenant.SchemaName()))
+	require.NoError(t, tc1.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('daily-billing', 'billing.run', '0 0 * * *', true)`, tc1.Tenant.SchemaName())).Error)
 
 	// Insert enabled + disabled schedules in beta
-	tc2.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('hourly-sync', 'sync.run', '0 * * * *', true)`, tc2.Tenant.SchemaName()))
-	tc2.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('disabled-job', 'noop.run', '0 0 * * *', false)`, tc2.Tenant.SchemaName()))
+	require.NoError(t, tc2.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('hourly-sync', 'sync.run', '0 * * * *', true)`, tc2.Tenant.SchemaName())).Error)
+	require.NoError(t, tc2.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('disabled-job', 'noop.run', '0 0 * * *', false)`, tc2.Tenant.SchemaName())).Error)
 
 	repo := NewGormTenantScheduleRepository(tc1.DB, nil)
 	schedules, err := repo.ListEnabledSchedules(context.Background())
@@ -172,19 +167,23 @@ func TestGormTenantScheduleRepository_ListEnabledSchedules_OnlyEnabled(t *testin
 	defer cleanup()
 
 	// Insert one enabled and one disabled
-	tc1.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('enabled-job', 'job.run', '0 0 * * *', true)`, tc1.Tenant.SchemaName()))
-	tc1.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('disabled-job', 'noop.run', '0 0 * * *', false)`, tc1.Tenant.SchemaName()))
+	require.NoError(t, tc1.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('enabled-job', 'job.run', '0 0 * * *', true)`, tc1.Tenant.SchemaName())).Error)
+	require.NoError(t, tc1.DB.Exec(fmt.Sprintf(`INSERT INTO %q.tenant_schedule (schedule_name, saga_name, cron_expr, enabled) VALUES ('disabled-job', 'noop.run', '0 0 * * *', false)`, tc1.Tenant.SchemaName())).Error)
 
 	repo := NewGormTenantScheduleRepository(tc1.DB, nil)
 	schedules, err := repo.ListEnabledSchedules(context.Background())
 
 	require.NoError(t, err)
 
+	// Filter to alpha schedules and verify only enabled-job is returned
+	var alphaSchedules []TenantSchedule
 	for _, s := range schedules {
 		if s.TenantID == "alpha" {
-			assert.Equal(t, "enabled-job", s.ScheduleName, "only enabled schedules should be returned")
+			alphaSchedules = append(alphaSchedules, s)
 		}
 	}
+	require.Len(t, alphaSchedules, 1, "should return exactly one enabled schedule from alpha")
+	assert.Equal(t, "enabled-job", alphaSchedules[0].ScheduleName)
 }
 
 func TestGormTenantScheduleRepository_ListEnabledSchedules_EmptyTenants(t *testing.T) {
@@ -192,14 +191,11 @@ func TestGormTenantScheduleRepository_ListEnabledSchedules_EmptyTenants(t *testi
 		t.Skip("skipping integration test")
 	}
 
-	_, _, cleanup := setupTestDB(t)
+	tc1, _, cleanup := setupTestDB(t)
 	defer cleanup()
 
-	// No schedules inserted - both tenants have empty tables
-	db, dbCleanup := testdb.SetupCockroachDB(t, nil)
-	defer dbCleanup()
-
-	repo := NewGormTenantScheduleRepository(db, nil)
+	// No schedules inserted - tenant tables exist but are empty
+	repo := NewGormTenantScheduleRepository(tc1.DB, nil)
 	schedules, err := repo.ListEnabledSchedules(context.Background())
 
 	require.NoError(t, err)
