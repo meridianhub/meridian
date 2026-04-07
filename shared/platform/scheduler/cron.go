@@ -323,6 +323,8 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			"tenant_id", sched.TenantID)
 	}
 
+	UpdateCronActiveSchedules(s.config.Name, float64(len(s.entryIDs)))
+
 	return nil
 }
 
@@ -373,6 +375,7 @@ func (s *CronScheduler) acquireGlobalSemaphore(ctx context.Context, schedule Sch
 			"schedule_id", schedule.ID,
 			"tenant_id", schedule.TenantID)
 		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("concurrency limit reached"))
+		RecordCronConcurrencyRejection(s.config.Name, "global")
 		return nil, false
 	}
 }
@@ -393,6 +396,7 @@ func (s *CronScheduler) acquireTenantSemaphore(ctx context.Context, schedule Sch
 			"tenant_id", schedule.TenantID)
 		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil,
 			strPtr(fmt.Sprintf("per-tenant concurrency limit reached for tenant %s", schedule.TenantID)))
+		RecordCronConcurrencyRejection(s.config.Name, "per_tenant")
 		return nil, false
 	}
 }
@@ -458,6 +462,7 @@ func (s *CronScheduler) acquireLockAndExecute(ctx context.Context, schedule Sche
 			s.logger.Debug("lock not acquired, skipping",
 				"schedule_id", schedule.ID)
 			s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("lock not acquired"))
+			RecordCronLockContention(s.config.Name)
 			return
 		}
 		defer release()
@@ -467,7 +472,16 @@ func (s *CronScheduler) acquireLockAndExecute(ctx context.Context, schedule Sche
 	now := time.Now().UTC()
 	s.recordExecutionStart(ctx, execID, schedule, now)
 
+	execStart := time.Now()
 	err := s.executor.Execute(ctx, schedule)
+	execDuration := time.Since(execStart)
+
+	execStatus := ExecutionStatusCompleted
+	if err != nil {
+		execStatus = ExecutionStatusFailed
+	}
+	RecordCronExecution(s.config.Name, schedule.TenantID, schedule.ID, execStatus, execDuration)
+
 	s.recordExecutionResult(ctx, execID, schedule, err)
 
 	if err != nil {

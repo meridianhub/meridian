@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -80,4 +82,74 @@ func RecordInFlightWork(worker string, count float64) {
 // RecordPoll increments the poll cycle counter.
 func RecordPoll(worker string) {
 	workerPollTotal.WithLabelValues(worker).Inc()
+}
+
+// Prometheus metrics for cron schedule execution health.
+var (
+	cronExecutionDurationSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_execution_duration_seconds",
+		Help:      "Duration of cron schedule executions in seconds",
+		Buckets:   prometheus.ExponentialBuckets(0.1, 2, 10),
+	}, []string{"scheduler", "tenant_id", "schedule_id", "status"})
+
+	cronExecutionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_executions_total",
+		Help:      "Total number of cron schedule executions by status",
+	}, []string{"scheduler", "tenant_id", "status"})
+
+	cronLockContentionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_lock_contention_total",
+		Help:      "Number of times a schedule was skipped because the distributed lock was already held",
+	}, []string{"scheduler"})
+
+	cronConcurrencyRejectionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_concurrency_rejections_total",
+		Help:      "Number of executions skipped due to concurrency limits",
+	}, []string{"scheduler", "limit_type"})
+
+	cronLastExecutionTimestamp = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_last_execution_timestamp",
+		Help:      "Unix timestamp of the most recent completed or failed execution for each schedule",
+	}, []string{"scheduler", "schedule_id"})
+
+	cronActiveSchedules = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_active_schedules",
+		Help:      "Number of active schedules currently registered in the cron runner",
+	}, []string{"scheduler"})
+)
+
+// RecordCronExecution records metrics for a completed or failed schedule execution.
+func RecordCronExecution(schedulerName, tenantID, scheduleID string, status ExecutionStatus, duration time.Duration) {
+	statusStr := string(status)
+	cronExecutionDurationSeconds.WithLabelValues(schedulerName, tenantID, scheduleID, statusStr).Observe(duration.Seconds())
+	cronExecutionsTotal.WithLabelValues(schedulerName, tenantID, statusStr).Inc()
+	cronLastExecutionTimestamp.WithLabelValues(schedulerName, scheduleID).SetToCurrentTime()
+}
+
+// RecordCronLockContention increments the counter for schedules skipped due to distributed lock contention.
+func RecordCronLockContention(schedulerName string) {
+	cronLockContentionTotal.WithLabelValues(schedulerName).Inc()
+}
+
+// RecordCronConcurrencyRejection increments the counter for schedules skipped due to concurrency limits.
+// limitType should be "global" or "per_tenant".
+func RecordCronConcurrencyRejection(schedulerName, limitType string) {
+	cronConcurrencyRejectionsTotal.WithLabelValues(schedulerName, limitType).Inc()
+}
+
+// UpdateCronActiveSchedules sets the gauge for the number of active schedules registered.
+func UpdateCronActiveSchedules(schedulerName string, count float64) {
+	cronActiveSchedules.WithLabelValues(schedulerName).Set(count)
 }

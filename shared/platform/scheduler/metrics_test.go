@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	io_prometheus_client "github.com/prometheus/client_model/go"
@@ -23,6 +24,38 @@ func getGaugeValue(t *testing.T, vec *prometheus.GaugeVec, label string) float64
 	err := vec.WithLabelValues(label).(prometheus.Metric).Write(m)
 	require.NoError(t, err)
 	return m.GetGauge().GetValue()
+}
+
+func getCounterValueMulti(t *testing.T, vec *prometheus.CounterVec, labels ...string) float64 {
+	t.Helper()
+	m := &io_prometheus_client.Metric{}
+	err := vec.WithLabelValues(labels...).(prometheus.Metric).Write(m)
+	require.NoError(t, err)
+	return m.GetCounter().GetValue()
+}
+
+func getGaugeValueMulti(t *testing.T, vec *prometheus.GaugeVec, labels ...string) float64 {
+	t.Helper()
+	m := &io_prometheus_client.Metric{}
+	err := vec.WithLabelValues(labels...).(prometheus.Metric).Write(m)
+	require.NoError(t, err)
+	return m.GetGauge().GetValue()
+}
+
+func getHistogramCount(t *testing.T, vec *prometheus.HistogramVec, labels ...string) uint64 {
+	t.Helper()
+	m := &io_prometheus_client.Metric{}
+	err := vec.WithLabelValues(labels...).(prometheus.Metric).Write(m)
+	require.NoError(t, err)
+	return m.GetHistogram().GetSampleCount()
+}
+
+func getHistogramSum(t *testing.T, vec *prometheus.HistogramVec, labels ...string) float64 {
+	t.Helper()
+	m := &io_prometheus_client.Metric{}
+	err := vec.WithLabelValues(labels...).(prometheus.Metric).Write(m)
+	require.NoError(t, err)
+	return m.GetHistogram().GetSampleSum()
 }
 
 func TestRecordWorkerStart(t *testing.T) {
@@ -79,4 +112,86 @@ func TestMetrics_different_workers_are_independent(t *testing.T) {
 	bVal := getCounterValue(t, workerStartsTotal, "worker-b")
 
 	assert.Greater(t, aVal, bVal)
+}
+
+// --- Cron execution metrics ---
+
+func TestRecordCronExecution_completed(t *testing.T) {
+	sched := "test-cron-completed"
+	tid := "tenant-A"
+	sid := "sched-A"
+
+	beforeHistogram := getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "COMPLETED")
+	beforeCounter := getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "COMPLETED")
+
+	RecordCronExecution(sched, tid, sid, ExecutionStatusCompleted, 500*time.Millisecond)
+
+	assert.Equal(t, beforeHistogram+1, getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "COMPLETED"))
+	assert.Equal(t, beforeCounter+1, getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "COMPLETED"))
+	assert.Greater(t, getGaugeValueMulti(t, cronLastExecutionTimestamp, sched, sid), 0.0)
+}
+
+func TestRecordCronExecution_failed(t *testing.T) {
+	sched := "test-cron-failed"
+	tid := "tenant-B"
+	sid := "sched-B"
+
+	RecordCronExecution(sched, tid, sid, ExecutionStatusFailed, 100*time.Millisecond)
+
+	assert.Equal(t, uint64(1), getHistogramCount(t, cronExecutionDurationSeconds, sched, tid, sid, "FAILED"))
+	assert.Equal(t, 1.0, getCounterValueMulti(t, cronExecutionsTotal, sched, tid, "FAILED"))
+}
+
+func TestRecordCronExecution_duration_is_observed(t *testing.T) {
+	sched := "test-cron-duration"
+	tid := ""
+	sid := "sched-duration"
+
+	RecordCronExecution(sched, tid, sid, ExecutionStatusCompleted, 2*time.Second)
+
+	assert.GreaterOrEqual(t, getHistogramSum(t, cronExecutionDurationSeconds, sched, tid, sid, "COMPLETED"), 2.0)
+}
+
+func TestRecordCronLockContention(t *testing.T) {
+	sched := "test-cron-lock"
+
+	before := getCounterValueMulti(t, cronLockContentionTotal, sched)
+	RecordCronLockContention(sched)
+	assert.Equal(t, before+1, getCounterValueMulti(t, cronLockContentionTotal, sched))
+}
+
+func TestRecordCronConcurrencyRejection_global(t *testing.T) {
+	sched := "test-cron-conc-global"
+
+	before := getCounterValueMulti(t, cronConcurrencyRejectionsTotal, sched, "global")
+	RecordCronConcurrencyRejection(sched, "global")
+	assert.Equal(t, before+1, getCounterValueMulti(t, cronConcurrencyRejectionsTotal, sched, "global"))
+}
+
+func TestRecordCronConcurrencyRejection_per_tenant(t *testing.T) {
+	sched := "test-cron-conc-tenant"
+
+	before := getCounterValueMulti(t, cronConcurrencyRejectionsTotal, sched, "per_tenant")
+	RecordCronConcurrencyRejection(sched, "per_tenant")
+	assert.Equal(t, before+1, getCounterValueMulti(t, cronConcurrencyRejectionsTotal, sched, "per_tenant"))
+}
+
+func TestUpdateCronActiveSchedules(t *testing.T) {
+	sched := "test-cron-active"
+
+	UpdateCronActiveSchedules(sched, 5)
+	assert.Equal(t, 5.0, getGaugeValueMulti(t, cronActiveSchedules, sched))
+
+	UpdateCronActiveSchedules(sched, 0)
+	assert.Equal(t, 0.0, getGaugeValueMulti(t, cronActiveSchedules, sched))
+}
+
+func TestCronMetrics_independent_schedulers(t *testing.T) {
+	RecordCronLockContention("sched-x")
+	RecordCronLockContention("sched-x")
+	RecordCronLockContention("sched-y")
+
+	xVal := getCounterValueMulti(t, cronLockContentionTotal, "sched-x")
+	yVal := getCounterValueMulti(t, cronLockContentionTotal, "sched-y")
+	assert.Greater(t, xVal, yVal)
 }
