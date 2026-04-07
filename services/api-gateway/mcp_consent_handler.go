@@ -188,3 +188,25 @@ func WithMCPConsentHandler(handler *MCPConsentHandler) ServerOption {
 		s.mcpConsentHandler = handler
 	}
 }
+
+// MCPOAuthEndpoints bundles the HTTP handlers for MCP OAuth 2.1 endpoints
+// that are mounted on the gateway when running in unified binary mode.
+// This allows the gateway to serve both BFF consent and MCP OAuth endpoints
+// in the same process, sharing in-memory stores.
+type MCPOAuthEndpoints struct {
+	Authorize   http.Handler     // GET /oauth/authorize
+	Callback    http.Handler     // GET /oauth/callback
+	Token       http.Handler     // POST /oauth/token
+	ConsentInfo http.Handler     // GET /oauth/consent-info
+	Metadata    http.HandlerFunc // GET /.well-known/oauth-authorization-server
+	Register    http.Handler     // POST /oauth/register
+}
+
+// WithMCPOAuthEndpoints mounts MCP OAuth 2.1 endpoints on the gateway.
+// These endpoints do NOT go through the gateway auth middleware chain since
+// they implement their own OAuth flow authentication.
+func WithMCPOAuthEndpoints(endpoints *MCPOAuthEndpoints) ServerOption {
+	return func(s *Server) {
+		s.mcpOAuthEndpoints = endpoints
+	}
+}

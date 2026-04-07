@@ -329,6 +329,12 @@ func setupAndStartGateway(ctx context.Context, infra *unifiedInfra, grpcPort, ht
 	bffSigner, bffAuthOpts := wireBFFAuth(infra.conns.gormDB("identity"), logger)
 	extraGWOpts = append(extraGWOpts, bffAuthOpts...)
 
+	mcpOAuthOpts, mcpOAuthCleanup := wireMCPOAuth(bffSigner, logger)
+	extraGWOpts = append(extraGWOpts, mcpOAuthOpts...)
+	if mcpOAuthCleanup != nil {
+		defer mcpOAuthCleanup()
+	}
+
 	baseDomain := env.GetEnvOrDefault("BASE_DOMAIN", "localhost")
 	identityEmailOutboxRepo := email.NewPostgresOutboxRepository(infra.conns.gormDB("identity"))
 	if regOpt := wireRegistration(infra.conns.gormDB("identity"), infra.conns.gormDB("tenant"), infra.loopback.rawConn, baseDomain, identityEmailOutboxRepo, logger); regOpt != nil {
