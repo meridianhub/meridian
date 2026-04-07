@@ -357,7 +357,7 @@ func TestParty_SetExternalReference_NationalID(t *testing.T) {
 		},
 		{
 			name:      "minimum length",
-			reference: "AB123",
+			reference: "AB",
 			wantErr:   false,
 		},
 		{
@@ -367,7 +367,7 @@ func TestParty_SetExternalReference_NationalID(t *testing.T) {
 		},
 		{
 			name:      "too short",
-			reference: "AB12",
+			reference: "A",
 			wantErr:   true,
 		},
 		{
