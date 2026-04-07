@@ -115,8 +115,8 @@ func (s *CronScheduler) catchUpSchedule(ctx context.Context, sched Schedule, now
 			// Too old to execute: record as MISSED for audit trail.
 			s.recordMissedWindow(schedCtx, sched, nextTime)
 			missedCount++
-		} else {
-			// Within catch-up age: execute.
+		} else if s.catchUpWindowEligible(schedCtx, sched, nextTime) {
+			// Within catch-up age and tenant is active: execute.
 			s.executeCatchUpWindow(schedCtx, sched, nextTime)
 			executedCount++
 		}
@@ -140,6 +140,45 @@ func (s *CronScheduler) catchUpSchedule(ctx context.Context, sched Schedule, now
 // itself blocks until catch-up completes or the context is cancelled, so the
 // lifecycle already knows work is in progress. Context cancellation (from Stop)
 // is checked between iterations in catchUpSchedule.
+// catchUpWindowEligible checks tenant status before executing a catch-up window.
+// Unlike tenantIsEligible used in executeJob, this records the skipped execution
+// with the actual catch-up window timestamp rather than time.Now().
+func (s *CronScheduler) catchUpWindowEligible(ctx context.Context, sched Schedule, scheduledAt time.Time) bool {
+	if s.statusChecker == nil || sched.TenantID == "" {
+		return true
+	}
+	active, err := s.statusChecker.IsActive(ctx, sched.TenantID)
+	if err != nil {
+		s.logger.Error("failed to check tenant status for catch-up",
+			"schedule_id", sched.ID,
+			"error", err)
+		return true // fail open
+	}
+	if !active {
+		s.logger.Info("skipping catch-up window for inactive tenant",
+			"schedule_id", sched.ID,
+			"tenant_id", sched.TenantID,
+			"scheduled_at", scheduledAt)
+		if s.store != nil {
+			exec := Execution{
+				ID:            uuid.New(),
+				SchedulerName: s.config.Name,
+				ScheduleID:    sched.ID,
+				ScheduledAt:   scheduledAt,
+				Status:        ExecutionStatusSkipped,
+				ErrorMessage:  strPtr("tenant not active"),
+			}
+			if err := s.store.RecordExecution(ctx, exec); err != nil {
+				s.logger.Error("failed to record catch-up skipped execution",
+					"schedule_id", sched.ID,
+					"error", err)
+			}
+		}
+		return false
+	}
+	return true
+}
+
 func (s *CronScheduler) executeCatchUpWindow(ctx context.Context, sched Schedule, scheduledAt time.Time) {
 	// Acquire per-schedule lock (consistent with normal executeJob).
 	if s.lock != nil {
