@@ -15,15 +15,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcpauth "github.com/meridianhub/meridian/services/mcp-server/internal/auth"
-	platformauth "github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 )
 
-var (
-	errUnknownTransport     = errors.New("unknown transport")
-	errMissingJWTSigningKey = errors.New("JWT_SIGNING_KEY_FILE or JWT_SIGNING_KEY must be set when MCP_DEX_ISSUER_URL is configured")
-)
+var errUnknownTransport = errors.New("unknown transport")
 
 // Build information set via ldflags during compilation.
 var (
@@ -223,68 +219,14 @@ func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
 		mux.HandleFunc("/.well-known/oauth-authorization-server", mcpauth.NewMetadataHandler(baseURL))
 
 		baseDomain := env.GetEnvOrDefault("MCP_BASE_DOMAIN", "")
+		_ = baseDomain // used when consent-based OIDC is wired via OIDCHandler
 
-		// OIDC-backed authorization flow: /oauth/authorize → Dex → /oauth/callback.
-		dexIssuerURL := env.GetEnvOrDefault("MCP_DEX_ISSUER_URL", "")
-		dexClientID := env.GetEnvOrDefault("MCP_DEX_CLIENT_ID", "meridian-service")
-		dexCallbackURL := env.GetEnvOrDefault("MCP_DEX_CALLBACK_URL", baseURL+"/oauth/callback")
-
-		if dexIssuerURL != "" {
-			// Build JWT signer with the same key as BFF for session sharing.
-			// Fail closed: when OIDC is enabled, auto-generated keys break cross-service
-			// token interoperability and invalidate sessions after restart.
-			keyFile := env.GetEnvOrDefault("JWT_SIGNING_KEY_FILE", "")
-			keyPEM := env.GetEnvOrDefault("JWT_SIGNING_KEY", "")
-			if keyFile == "" && keyPEM == "" {
-				return errMissingJWTSigningKey
-			}
-			signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{
-				PrivateKeyFile: keyFile,
-				PrivateKeyPEM:  keyPEM,
-				KeyID:          env.GetEnvOrDefault("JWT_SIGNING_KEY_ID", "meridian-1"),
-				Issuer:         env.GetEnvOrDefault("JWT_SIGNING_ISSUER", "meridian"),
-			})
-			if err != nil {
-				return fmt.Errorf("jwt signer: %w", err)
-			}
-
-			oidcStateStore := mcpauth.NewOIDCStateStore()
-			defer oidcStateStore.Close()
-
-			defaultTenantSlug := env.GetEnvOrDefault("MCP_DEFAULT_TENANT_SLUG", "")
-
-			oidcHandler, err := mcpauth.NewOIDCHandler(mcpauth.OIDCHandlerConfig{
-				OIDC: mcpauth.OIDCConfig{
-					DexIssuerURL: dexIssuerURL,
-					ClientID:     dexClientID,
-					CallbackURL:  dexCallbackURL,
-				},
-				OAuth:             oauthCfg,
-				StateStore:        oidcStateStore,
-				CodeStore:         codeStore,
-				Registry:          clientRegistry,
-				Signer:            signer,
-				DefaultTenantSlug: defaultTenantSlug,
-				BaseURL:           baseURL,
-				BaseDomain:        baseDomain,
-				Logger:            logger,
-			})
-			if err != nil {
-				return fmt.Errorf("oidc handler: %w", err)
-			}
-
-			mux.HandleFunc("/oauth/authorize", oidcHandler.HandleAuthorize)
-			mux.HandleFunc("/oauth/callback", oidcHandler.HandleCallback)
-
-			logger.Info("OIDC-backed OAuth enabled",
-				"dex_issuer", dexIssuerURL,
-				"callback", dexCallbackURL)
-		} else {
-			// No Dex configured — use the direct authorization handler (dev/CI only).
-			logger.Warn("MCP_DEX_ISSUER_URL not set — /oauth/authorize issues codes without authentication")
-			authzHandler := mcpauth.NewAuthorizationHandler(oauthCfg, codeStore, clientRegistry)
-			mux.Handle("/oauth/authorize", authzHandler)
-		}
+		// Authorization flow: direct handler (dev/CI only).
+		// Production consent-based OIDC (OIDCHandler) requires a ConsentStore
+		// wired from the api-gateway — configured at the deployment layer.
+		logger.Warn("/oauth/authorize issues codes without authentication — wire OIDCHandler with ConsentStore for production")
+		authzHandler := mcpauth.NewAuthorizationHandler(oauthCfg, codeStore, clientRegistry)
+		mux.Handle("/oauth/authorize", authzHandler)
 
 		// Bearer token validation on the /mcp endpoint.
 		validator, validatorCleanup, err := buildBearerValidator(context.Background(), logger)

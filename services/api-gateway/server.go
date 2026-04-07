@@ -44,6 +44,8 @@ type Server struct {
 	tenantInfoHandler     *TenantInfoHandler
 	resendWebhookHandler  *ResendWebhookHandler
 	adminHandler          *AdminHandler
+	mcpConsentHandler     *MCPConsentHandler
+	mcpOAuthEndpoints     *MCPOAuthEndpoints
 }
 
 // ServerOption is a functional option for configuring the server.
@@ -162,6 +164,44 @@ func (s *Server) registerAdminRoutes() {
 	s.mux.Handle("POST /api/v1/admin/identities/{identity_id}/verify", adminVerifyH)
 }
 
+// registerMCPOAuthRoutes registers MCP OAuth 2.1 endpoints when configured.
+// These endpoints are public (no gateway auth middleware) since they implement
+// their own OAuth authentication flow. Tenant resolution is applied to
+// /oauth/authorize and /oauth/callback so the OIDC handler can extract the
+// tenant slug from the subdomain.
+func (s *Server) registerMCPOAuthRoutes() {
+	ep := s.mcpOAuthEndpoints
+	if ep == nil {
+		return
+	}
+
+	// /oauth/authorize and /oauth/callback need tenant resolution for subdomain extraction.
+	if ep.Authorize != nil {
+		h := ep.Authorize
+		if s.tenantResolver != nil {
+			h = s.tenantResolver.HandlerOptionalTenant(h)
+		}
+		s.mux.Handle("GET /oauth/authorize", h)
+	}
+	if ep.Callback != nil {
+		s.mux.Handle("GET /oauth/callback", ep.Callback)
+	}
+	if ep.Token != nil {
+		s.mux.Handle("POST /oauth/token", ep.Token)
+	}
+	if ep.ConsentInfo != nil {
+		s.mux.Handle("GET /oauth/consent-info", ep.ConsentInfo)
+	}
+	if ep.Metadata != nil {
+		s.mux.HandleFunc("GET /.well-known/oauth-authorization-server", ep.Metadata)
+	}
+	if ep.Register != nil {
+		s.mux.Handle("POST /oauth/register", ep.Register)
+	}
+
+	s.logger.Info("MCP OAuth 2.1 endpoints registered on gateway")
+}
+
 // registerTenantInfoRoute registers the public tenant info endpoint if configured.
 // Rate limiting wraps the entire chain so abusive traffic is rejected before
 // tenant resolution performs cache/DB lookups.
@@ -250,6 +290,15 @@ func (s *Server) registerRoutes() {
 	if s.resendWebhookHandler != nil {
 		s.mux.Handle("POST /api/v1/webhooks/resend", s.resendWebhookHandler)
 	}
+
+	// MCP consent endpoint - full auth middleware chain (JWT + tenant).
+	if s.mcpConsentHandler != nil {
+		consentH := s.wrapWithAuthChain(http.HandlerFunc(s.mcpConsentHandler.HandleConsent))
+		s.mux.Handle("POST /api/auth/mcp-consent", consentH)
+	}
+
+	// MCP OAuth 2.1 endpoints - NO gateway auth middleware (they manage their own OAuth flow).
+	s.registerMCPOAuthRoutes()
 
 	// Admin identity management endpoints - full auth middleware chain.
 	s.registerAdminRoutes()
@@ -520,6 +569,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 			"endpoint", r.URL.Path,
 			"remote_addr", r.RemoteAddr)
 	}
+}
+
+// Handler returns the server's HTTP handler for use in tests.
+// This allows integration tests to use httptest.NewServer(srv.Handler()).
+func (s *Server) Handler() http.Handler {
+	return s.mux
 }
 
 // Start starts the HTTP server and blocks until the server stops.
