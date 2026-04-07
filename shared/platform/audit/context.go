@@ -32,3 +32,9 @@ func GetUserFromContext(ctx context.Context) string {
 
 	return userID
 }
+
+// GetCorrelationID retrieves the correlation ID from the context.
+// Returns an empty string when no correlation ID has been set.
+func GetCorrelationID(ctx context.Context) string {
+	return getCorrelationIDFromContext(ctx)
+}

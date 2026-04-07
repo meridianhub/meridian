@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/meridianhub/meridian/shared/platform/scheduler"
 	"github.com/robfig/cron/v3"
@@ -1183,6 +1185,243 @@ func TestCronScheduler_RefreshJitterConfig(t *testing.T) {
 		return true
 	})
 	require.NoError(t, err)
+
+	cancel()
+	s.Stop()
+}
+
+// --- Actor injection tests ---
+
+// contextCapturingExecutor captures the context passed to Execute for assertion.
+type contextCapturingExecutor struct {
+	mu       sync.Mutex
+	contexts []context.Context
+	doneCh   chan struct{}
+}
+
+func newContextCapturingExecutor() *contextCapturingExecutor {
+	return &contextCapturingExecutor{doneCh: make(chan struct{}, 10)}
+}
+
+func (e *contextCapturingExecutor) Execute(ctx context.Context, _ scheduler.Schedule) error {
+	e.mu.Lock()
+	e.contexts = append(e.contexts, ctx)
+	e.mu.Unlock()
+	select {
+	case e.doneCh <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (e *contextCapturingExecutor) getContexts() []context.Context {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	result := make([]context.Context, len(e.contexts))
+	copy(result, e.contexts)
+	return result
+}
+
+func TestCronScheduler_ActorInjected_WithCorrectIDFormat(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "actor-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
+		},
+	}
+	executor := newContextCapturingExecutor()
+	lock := &stubLock{acquired: true}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "billing-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	select {
+	case <-executor.doneCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cron job did not fire within timeout")
+	}
+
+	contexts := executor.getContexts()
+	require.GreaterOrEqual(t, len(contexts), 1)
+
+	actor, ok := auth.ActorFromContext(contexts[0])
+	require.True(t, ok, "Actor must be present in context")
+	assert.Equal(t, "system:scheduler:billing-scheduler", actor.ID)
+	assert.Equal(t, auth.ActorTypeScheduler, actor.Type)
+	assert.False(t, actor.Authenticated)
+	assert.Equal(t, "cron-scheduler", actor.Source)
+
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_CorrelationID_SetAndNonEmpty(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "corr-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
+		},
+	}
+	executor := newContextCapturingExecutor()
+	lock := &stubLock{acquired: true}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	select {
+	case <-executor.doneCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cron job did not fire within timeout")
+	}
+
+	contexts := executor.getContexts()
+	require.GreaterOrEqual(t, len(contexts), 1)
+
+	corrID := audit.GetCorrelationID(contexts[0])
+	assert.NotEmpty(t, corrID, "correlation ID must be set")
+
+	// Verify it's a valid UUID
+	_, err := uuid.Parse(corrID)
+	assert.NoError(t, err, "correlation ID should be a valid UUID")
+
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_AuditUser_ShowsSchedulerActor(t *testing.T) {
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "audit-user-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
+		},
+	}
+	executor := newContextCapturingExecutor()
+	lock := &stubLock{acquired: true}
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "billing-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+		},
+		slog.Default(),
+		scheduler.WithCronRunner(secondsCron()),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	select {
+	case <-executor.doneCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cron job did not fire within timeout")
+	}
+
+	contexts := executor.getContexts()
+	require.GreaterOrEqual(t, len(contexts), 1)
+
+	// audit.GetUserFromContext should return the Actor ID, not "system"
+	user := audit.GetUserFromContext(contexts[0])
+	assert.Equal(t, "system:scheduler:billing-scheduler", user)
+
+	cancel()
+	s.Stop()
+}
+
+func TestCronScheduler_CatchUp_ActorSource_IsCatchUp(t *testing.T) {
+	// Set up a schedule that missed a window within catch-up age
+	store := &stubExecutionStore{}
+	executor := newContextCapturingExecutor()
+	lock := &stubLock{acquired: true}
+
+	// Schedule fires every second. Record a last execution 5 seconds ago so there are missed windows.
+	pastExec := scheduler.Execution{
+		ID:            uuid.New(),
+		SchedulerName: "test-scheduler",
+		ScheduleID:    "catchup-sched",
+		ScheduledAt:   time.Now().UTC().Add(-5 * time.Second),
+		Status:        scheduler.ExecutionStatusCompleted,
+	}
+	store.mu.Lock()
+	store.executions = append(store.executions, pastExec)
+	store.mu.Unlock()
+
+	provider := &stubProvider{
+		schedules: []scheduler.Schedule{
+			{ID: "catchup-sched", CronExpr: "*/1 * * * * *", TenantID: "tenant1"},
+		},
+	}
+
+	secondsParser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+
+	s := scheduler.NewCronScheduler(
+		provider, executor, lock,
+		scheduler.CronSchedulerConfig{
+			Name:            "test-scheduler",
+			RefreshInterval: time.Hour,
+			ShutdownTimeout: time.Second,
+			MaxCatchUpAge:   time.Minute,
+		},
+		slog.Default(),
+		scheduler.WithCronExecutionStore(store),
+		scheduler.WithCronRunner(cron.New(
+			cron.WithLocation(time.UTC),
+			cron.WithParser(secondsParser),
+		)),
+		scheduler.WithCronParser(secondsParser),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = s.Start(ctx)
+	}()
+
+	// Wait for catch-up execution(s)
+	err := await.New().AtMost(5 * time.Second).PollInterval(50 * time.Millisecond).Until(func() bool {
+		return len(executor.getContexts()) >= 1
+	})
+	require.NoError(t, err)
+
+	contexts := executor.getContexts()
+	require.GreaterOrEqual(t, len(contexts), 1)
+
+	// The first context should be from catch-up
+	actor, ok := auth.ActorFromContext(contexts[0])
+	require.True(t, ok, "Actor must be present in catch-up context")
+	assert.Equal(t, "system:scheduler:test-scheduler", actor.ID)
+	assert.Equal(t, auth.ActorTypeScheduler, actor.Type)
+	assert.False(t, actor.Authenticated)
+	assert.Equal(t, "catch-up", actor.Source)
+
+	// Correlation ID should also be set for catch-up
+	corrID := audit.GetCorrelationID(contexts[0])
+	assert.NotEmpty(t, corrID, "correlation ID must be set for catch-up")
 
 	cancel()
 	s.Stop()

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/robfig/cron/v3"
 )
@@ -407,6 +409,17 @@ func (s *CronScheduler) executeJob(schedule Schedule) {
 				ctx = tenant.WithTenant(ctx, tid)
 			}
 		}
+
+		// Inject Actor so downstream audit records attribute the operation correctly
+		ctx = auth.WithActor(ctx, auth.Actor{
+			ID:            fmt.Sprintf("system:scheduler:%s", s.config.Name),
+			Type:          auth.ActorTypeScheduler,
+			Authenticated: false,
+			Source:        "cron-scheduler",
+		})
+
+		// Inject correlation ID for distributed tracing
+		ctx = audit.WithCorrelationID(ctx, uuid.New().String())
 
 		// Check tenant status before consuming semaphore slots
 		if !s.tenantIsEligible(ctx, schedule) {

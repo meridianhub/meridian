@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
@@ -75,6 +77,14 @@ func (s *CronScheduler) catchUpSchedule(ctx context.Context, sched Schedule, now
 			schedCtx = tenant.WithTenant(ctx, tid)
 		}
 	}
+
+	// Inject Actor so downstream audit records attribute the operation correctly
+	schedCtx = auth.WithActor(schedCtx, auth.Actor{
+		ID:            fmt.Sprintf("system:scheduler:%s", s.config.Name),
+		Type:          auth.ActorTypeScheduler,
+		Authenticated: false,
+		Source:        "catch-up",
+	})
 
 	// Determine start point for walking cron windows.
 	// - If we have a last execution, start from there (to record MISSED for old windows).
@@ -180,6 +190,9 @@ func (s *CronScheduler) catchUpWindowEligible(ctx context.Context, sched Schedul
 }
 
 func (s *CronScheduler) executeCatchUpWindow(ctx context.Context, sched Schedule, scheduledAt time.Time) {
+	// Inject correlation ID for this catch-up window
+	ctx = audit.WithCorrelationID(ctx, uuid.New().String())
+
 	// Acquire per-schedule lock (consistent with normal executeJob).
 	if s.lock != nil {
 		lockKey := s.lockKey(sched.ID)
