@@ -167,8 +167,8 @@ jobs:
             exit 0
           fi
           gocovmerge "${cov_files[@]}" > coverage/coverage.out
-          echo "Filtering generated proto files from coverage..."
-          grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true
+          echo "Filtering excluded paths from coverage (aligned with codecov.yml)..."
+          grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go|/cmd/|/mocks/|/testhelpers/' coverage/coverage.out > coverage/coverage-filtered.out || true
 
       - name: Generate coverage report
         run: go tool cover -html=coverage/coverage.out -o coverage/coverage.html
@@ -193,7 +193,7 @@ jobs:
       - name: Check test coverage threshold
         run: |
           coverage=$(go tool cover -func=coverage/coverage-filtered.out | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Coverage (excluding generated proto files): ${coverage}%"
+          echo "Coverage (excluding cmd, proto, mocks, testhelpers): ${coverage}%"
           if (( $(echo "$coverage < 80.0" | bc -l) )); then
             echo "❌ Coverage ${coverage}% is below 80% threshold"
             exit 1

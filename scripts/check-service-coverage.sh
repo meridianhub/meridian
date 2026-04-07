@@ -4,6 +4,11 @@
 # Runs unit tests (with -short to skip integration tests) for each Go service
 # and fails if any service falls below the minimum coverage threshold.
 #
+# Excluded from coverage (aligned with codecov.yml ignore rules):
+#   - cmd/ packages (bootstrap/wiring code)
+#   - generated protobuf files (*.pb.go, *_grpc.pb.go, *.pb.validate.go)
+#   - mocks/ and testhelpers/ directories
+#
 # Usage:
 #   ./scripts/check-service-coverage.sh
 #
@@ -70,13 +75,29 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
         continue
     fi
 
-    if ! coverage="$(go tool cover -func="${coverage_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"; then
+    # Filter coverprofile to exclude paths that codecov.yml also ignores:
+    #   - cmd/ packages (bootstrap/wiring code, not meaningfully unit-testable)
+    #   - generated protobuf files (*.pb.go, *_grpc.pb.go, *.pb.validate.go)
+    #   - mocks/ and testhelpers/ directories
+    filtered_file="${TMPDIR}/meridian_coverage_${service}_filtered.out"
+    head -1 "${coverage_file}" > "${filtered_file}"
+    tail -n +2 "${coverage_file}" \
+        | grep -v '/cmd/' \
+        | grep -v '\.pb\.go:' \
+        | grep -v '\.pb\.validate\.go:' \
+        | grep -v '_grpc\.pb\.go:' \
+        | grep -v '/mocks/' \
+        | grep -v '/testhelpers/' \
+        >> "${filtered_file}" || true
+    rm -f "${coverage_file}"
+
+    if ! coverage="$(go tool cover -func="${filtered_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"; then
         echo "  SKIP ${service} (cover command failed)"
         SKIPPED=$((SKIPPED + 1))
-        rm -f "${coverage_file}"
+        rm -f "${filtered_file}"
         continue
     fi
-    rm -f "${coverage_file}"
+    rm -f "${filtered_file}"
 
     if [ -z "${coverage}" ]; then
         echo "  SKIP ${service} (could not parse coverage)"
