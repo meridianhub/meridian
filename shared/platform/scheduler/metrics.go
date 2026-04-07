@@ -92,14 +92,14 @@ var (
 		Name:      "cron_execution_duration_seconds",
 		Help:      "Duration of cron schedule executions in seconds",
 		Buckets:   prometheus.ExponentialBuckets(0.1, 2, 13), // 0.1s to ~409s, covers 5-minute default timeout
-	}, []string{"scheduler", "tenant_id", "status"}) // schedule_id omitted: histograms create N series per label combo
+	}, []string{"scheduler", "status"}) // tenant_id and schedule_id omitted: cardinality scales with tenants × schedules
 
 	cronExecutionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "meridian",
 		Subsystem: "scheduler",
 		Name:      "cron_executions_total",
 		Help:      "Total number of cron schedule executions by status",
-	}, []string{"scheduler", "tenant_id", "status"})
+	}, []string{"scheduler", "status"}) // tenant_id omitted: per-schedule detail is in the execution store
 
 	cronLockContentionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "meridian",
@@ -130,11 +130,19 @@ var (
 	}, []string{"scheduler"})
 )
 
-// RecordCronExecution records metrics for a completed or failed schedule execution.
-func RecordCronExecution(schedulerName, tenantID, scheduleID string, status ExecutionStatus, duration time.Duration) {
+// RecordCronExecution records duration and count metrics for a completed or failed
+// schedule execution. Uses only bounded labels (scheduler, status) to keep cardinality
+// predictable. Per-schedule/tenant detail is available in the execution store.
+func RecordCronExecution(schedulerName string, status ExecutionStatus, duration time.Duration) {
 	statusStr := string(status)
-	cronExecutionDurationSeconds.WithLabelValues(schedulerName, tenantID, statusStr).Observe(duration.Seconds())
-	cronExecutionsTotal.WithLabelValues(schedulerName, tenantID, statusStr).Inc()
+	cronExecutionDurationSeconds.WithLabelValues(schedulerName, statusStr).Observe(duration.Seconds())
+	cronExecutionsTotal.WithLabelValues(schedulerName, statusStr).Inc()
+}
+
+// RecordCronLastExecutionTimestamp updates the last-execution gauge for a schedule.
+// Callers should only invoke this when the schedule is confirmed to still be registered,
+// to avoid resurrecting Prometheus series for deregistered schedules.
+func RecordCronLastExecutionTimestamp(schedulerName, scheduleID string) {
 	cronLastExecutionTimestamp.WithLabelValues(schedulerName, scheduleID).SetToCurrentTime()
 }
 

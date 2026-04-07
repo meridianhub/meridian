@@ -301,6 +301,7 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			s.cron.Remove(s.entryIDs[sched.ID])
 			delete(s.entryIDs, sched.ID)
 			delete(s.schedules, sched.ID)
+			DeleteCronScheduleMetrics(s.config.Name, sched.ID)
 			s.logger.Info("schedule changed, re-registering",
 				"schedule_id", sched.ID,
 				"old_cron_expr", prev.CronExpr,
@@ -481,7 +482,17 @@ func (s *CronScheduler) acquireLockAndExecute(ctx context.Context, schedule Sche
 	if err != nil {
 		execStatus = ExecutionStatusFailed
 	}
-	RecordCronExecution(s.config.Name, schedule.TenantID, schedule.ID, execStatus, execDuration)
+	RecordCronExecution(s.config.Name, execStatus, execDuration)
+
+	// Only update the per-schedule timestamp gauge when the schedule is still registered.
+	// This prevents resurrecting Prometheus series for schedules that were removed
+	// while an execution was in flight.
+	s.mu.Lock()
+	_, stillRegistered := s.schedules[schedule.ID]
+	s.mu.Unlock()
+	if stillRegistered {
+		RecordCronLastExecutionTimestamp(s.config.Name, schedule.ID)
+	}
 
 	s.recordExecutionResult(ctx, execID, schedule, err)
 
