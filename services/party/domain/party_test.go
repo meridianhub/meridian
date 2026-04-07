@@ -518,6 +518,12 @@ func TestValidateExternalReference(t *testing.T) {
 			wantErr:   false,
 		},
 		{
+			name:      "valid short national ID",
+			reference: "DCC",
+			refType:   ExternalReferenceTypeNationalID,
+			wantErr:   false,
+		},
+		{
 			name:      "valid tax ID",
 			reference: "GB123456789",
 			refType:   ExternalReferenceTypeTaxID,

@@ -607,8 +607,8 @@ var (
 	// LEI: 20 alphanumeric characters
 	leiRegex = regexp.MustCompile(`^[A-Z0-9]{20}$`)
 
-	// National ID: varies by country, using a general alphanumeric pattern
-	nationalIDRegex = regexp.MustCompile(`^[A-Z0-9]{5,20}$`)
+	// National ID: varies by country, using a general alphanumeric pattern (min 2 for short codes like DCC)
+	nationalIDRegex = regexp.MustCompile(`^[A-Z0-9]{2,20}$`)
 
 	// Tax ID: varies by country, using a general alphanumeric pattern
 	taxIDRegex = regexp.MustCompile(`^[A-Z0-9]{5,20}$`)
