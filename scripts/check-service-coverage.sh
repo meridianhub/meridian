@@ -4,10 +4,9 @@
 # Runs unit tests (with -short to skip integration tests) for each Go service
 # and fails if any service falls below the minimum coverage threshold.
 #
-# Excluded from coverage (aligned with codecov.yml ignore rules):
-#   - cmd/ packages (bootstrap/wiring code)
-#   - generated protobuf files (*.pb.go, *_grpc.pb.go, *.pb.validate.go)
-#   - mocks/ and testhelpers/ directories
+# Exclusions are read from codecov.yml (single source of truth).
+# This script converts codecov glob patterns to grep filters applied to
+# Go coverprofiles, so both Codecov and this script enforce the same rules.
 #
 # Usage:
 #   ./scripts/check-service-coverage.sh
@@ -21,16 +20,32 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 THRESHOLD="${COVERAGE_THRESHOLD:-80}"
 TMPDIR="${TMPDIR:-/tmp}"
 
-# Validate THRESHOLD is a non-negative integer in range 0–100
+# Validate THRESHOLD is a non-negative integer in range 0-100
 if ! [[ "${THRESHOLD}" =~ ^[0-9]+$ ]] || [ "${THRESHOLD}" -gt 100 ]; then
     echo "ERROR: COVERAGE_THRESHOLD must be an integer between 0 and 100 (got: '${THRESHOLD}')" >&2
     exit 1
+fi
+
+# Build exclude pattern from codecov.yml (single source of truth for exclusions).
+# See scripts/codecov-exclude-pattern.sh for the glob-to-grep conversion logic.
+EXCLUDE_PATTERN=""
+exclude_script="${REPO_ROOT}/scripts/codecov-exclude-pattern.sh"
+if [ -x "${exclude_script}" ]; then
+    if exclude=$("${exclude_script}"); then
+        EXCLUDE_PATTERN="${exclude}"
+        echo "Exclude pattern (from codecov.yml): ${EXCLUDE_PATTERN}"
+    else
+        echo "WARNING: Failed to read exclusions from codecov.yml"
+    fi
+else
+    echo "WARNING: ${exclude_script} not found, running without exclusions"
 fi
 
 FAILED=0
 PASSED=0
 SKIPPED=0
 
+echo ""
 echo "Per-service Go coverage check (threshold: ${THRESHOLD}%)"
 echo "Using -short flag to skip integration tests"
 echo ""
@@ -75,29 +90,25 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
         continue
     fi
 
-    # Filter coverprofile to exclude paths that codecov.yml also ignores:
-    #   - cmd/ packages (bootstrap/wiring code, not meaningfully unit-testable)
-    #   - generated protobuf files (*.pb.go, *_grpc.pb.go, *.pb.validate.go)
-    #   - mocks/ and testhelpers/ directories
-    filtered_file="${TMPDIR}/meridian_coverage_${service}_filtered.out"
-    head -1 "${coverage_file}" > "${filtered_file}"
-    tail -n +2 "${coverage_file}" \
-        | grep -v '/cmd/' \
-        | grep -v '\.pb\.go:' \
-        | grep -v '\.pb\.validate\.go:' \
-        | grep -v '_grpc\.pb\.go:' \
-        | grep -v '/mocks/' \
-        | grep -v '/testhelpers/' \
-        >> "${filtered_file}" || true
-    rm -f "${coverage_file}"
+    # Filter coverprofile using exclusions derived from codecov.yml
+    target_file="${coverage_file}"
+    if [ -n "${EXCLUDE_PATTERN}" ]; then
+        filtered_file="${TMPDIR}/meridian_coverage_${service}_filtered.out"
+        head -1 "${coverage_file}" > "${filtered_file}"
+        tail -n +2 "${coverage_file}" \
+            | grep -v -E "${EXCLUDE_PATTERN}" \
+            >> "${filtered_file}" || true
+        rm -f "${coverage_file}"
+        target_file="${filtered_file}"
+    fi
 
-    if ! coverage="$(go tool cover -func="${filtered_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"; then
+    if ! coverage="$(go tool cover -func="${target_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"; then
         echo "  SKIP ${service} (cover command failed)"
         SKIPPED=$((SKIPPED + 1))
-        rm -f "${filtered_file}"
+        rm -f "${target_file}"
         continue
     fi
-    rm -f "${filtered_file}"
+    rm -f "${target_file}"
 
     if [ -z "${coverage}" ]; then
         echo "  SKIP ${service} (could not parse coverage)"

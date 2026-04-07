@@ -138,7 +138,8 @@ jobs:
       if: always()
       run: |
         if [ -f coverage/coverage.out ]; then
-          grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go|/cmd/|/mocks/|/testhelpers/' coverage/coverage.out > coverage/coverage-filtered.out || true
+          exclude_pattern=$(./scripts/codecov-exclude-pattern.sh)
+          grep -v -E "$exclude_pattern" coverage/coverage.out > coverage/coverage-filtered.out || true
         fi
 
     - name: Upload coverage to Codecov
