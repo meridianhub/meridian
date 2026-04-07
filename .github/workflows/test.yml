@@ -168,8 +168,12 @@ jobs:
           fi
           gocovmerge "${cov_files[@]}" > coverage/coverage.out
           echo "Filtering excluded paths from coverage (derived from codecov.yml)..."
-          exclude_pattern=$(./scripts/codecov-exclude-pattern.sh)
-          grep -v -E "$exclude_pattern" coverage/coverage.out > coverage/coverage-filtered.out || true
+          exclude_pattern=$(./scripts/codecov-exclude-pattern.sh) || exclude_pattern=""
+          if [ -n "$exclude_pattern" ]; then
+            grep -v -E "$exclude_pattern" coverage/coverage.out > coverage/coverage-filtered.out || true
+          else
+            cp coverage/coverage.out coverage/coverage-filtered.out
+          fi
 
       - name: Generate coverage report
         run: go tool cover -html=coverage/coverage.out -o coverage/coverage.html
