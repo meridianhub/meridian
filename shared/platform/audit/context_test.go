@@ -50,3 +50,54 @@ func TestGetUserFromContext_WithWrongType(t *testing.T) {
 
 	assert.Equal(t, DefaultAuditUser, result)
 }
+
+func TestGetUserFromContext_WithActor(t *testing.T) {
+	actor := auth.Actor{
+		ID:     "system:scheduler:billing",
+		Type:   auth.ActorTypeScheduler,
+		Source: "cron-scheduler",
+	}
+	ctx := auth.WithActor(context.Background(), actor)
+
+	result := GetUserFromContext(ctx)
+
+	assert.Equal(t, "system:scheduler:billing", result)
+}
+
+func TestGetUserFromContext_ActorTakesPriorityOverUserID(t *testing.T) {
+	actor := auth.Actor{
+		ID:   "system:scheduler:billing",
+		Type: auth.ActorTypeScheduler,
+	}
+	ctx := auth.WithActor(context.Background(), actor)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "user-12345")
+
+	result := GetUserFromContext(ctx)
+
+	assert.Equal(t, "system:scheduler:billing", result)
+}
+
+func TestGetUserFromContext_ActorWithEmptyID_FallsBackToUserID(t *testing.T) {
+	actor := auth.Actor{
+		ID:   "",
+		Type: auth.ActorTypeScheduler,
+	}
+	ctx := auth.WithActor(context.Background(), actor)
+	ctx = context.WithValue(ctx, auth.UserIDContextKey, "user-12345")
+
+	result := GetUserFromContext(ctx)
+
+	assert.Equal(t, "user-12345", result)
+}
+
+func TestGetUserFromContext_ActorWithEmptyID_FallsBackToDefault(t *testing.T) {
+	actor := auth.Actor{
+		ID:   "",
+		Type: auth.ActorTypeScheduler,
+	}
+	ctx := auth.WithActor(context.Background(), actor)
+
+	result := GetUserFromContext(ctx)
+
+	assert.Equal(t, DefaultAuditUser, result)
+}
