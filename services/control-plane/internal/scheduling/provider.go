@@ -118,6 +118,9 @@ func (r *GormTenantScheduleRepository) ListEnabledSchedules(ctx context.Context)
 			Where("enabled = ?", true).
 			Find(&entities).Error
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("query tenant schedules for schema %q: %w", schema, err)
+			}
 			r.logger.Error("failed to query tenant schedules",
 				"schema", schema, "error", err)
 			failedSchemas++
