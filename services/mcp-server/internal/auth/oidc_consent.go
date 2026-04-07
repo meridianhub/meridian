@@ -68,21 +68,21 @@ func (h *OIDCHandler) HandleConsentInfo(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	stateClientID, redirectURI, scopes, ok := h.stateStore.PeekInfo(mcpState)
+	info, ok := h.stateStore.PeekInfo(mcpState)
 	if !ok {
 		http.Error(w, "invalid or expired state", http.StatusBadRequest)
 		return
 	}
 
-	if stateClientID != clientID {
+	if info.ClientID != clientID {
 		http.Error(w, "client_id mismatch", http.StatusBadRequest)
 		return
 	}
 
 	resp := ConsentInfoResponse{
 		ClientID:    clientID,
-		RedirectURI: redirectURI,
-		Scopes:      scopes,
+		RedirectURI: info.RedirectURI,
+		Scopes:      info.Scopes,
 	}
 
 	// Resolve client name: static client gets a fixed name, dynamic clients
@@ -153,67 +153,6 @@ func (h *OIDCHandler) handleConsentCallback(w http.ResponseWriter, r *http.Reque
 
 	redirectURL, err := h.issueCodeAndRedirect(
 		consentEntry.Email, consentEntry.TenantID, consentEntry.ApprovedScopes, flowState)
-	if err != nil {
-		h.logger.Error("oidc: failed to issue auth code", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, redirectURL, http.StatusFound)
-}
-
-// handleDexCallback processes the legacy Dex token-exchange callback path.
-func (h *OIDCHandler) handleDexCallback(w http.ResponseWriter, r *http.Request, stateKey, code string) {
-	ctx := r.Context()
-	q := r.URL.Query()
-
-	if errParam := q.Get("error"); errParam != "" {
-		desc := q.Get("error_description")
-		h.logger.Warn("oidc: Dex returned error",
-			"error", errParam, "description", desc)
-		http.Error(w, "authentication failed: "+errParam, http.StatusBadRequest)
-		return
-	}
-
-	if stateKey == "" || code == "" {
-		http.Error(w, "missing state or code parameter", http.StatusBadRequest)
-		return
-	}
-
-	flowState, ok := h.stateStore.Consume(stateKey)
-	if !ok {
-		http.Error(w, "invalid or expired state parameter", http.StatusBadRequest)
-		return
-	}
-
-	idToken, err := h.exchangeDexCode(ctx, code, flowState.DexCodeVerifier)
-	if err != nil {
-		h.logger.Error("oidc: Dex token exchange failed",
-			"tenant", flowState.TenantSlug, "error", err)
-		http.Error(w, "authentication token exchange failed", http.StatusBadGateway)
-		return
-	}
-
-	email, err := extractEmailFromJWT(idToken)
-	if err != nil {
-		h.logger.Error("oidc: failed to extract email from ID token",
-			"tenant", flowState.TenantSlug, "error", err)
-		http.Error(w, "failed to process identity", http.StatusBadGateway)
-		return
-	}
-
-	tenantID, err := h.resolveTenantID(ctx, flowState.TenantSlug)
-	if err != nil {
-		http.Error(w, errTenantResolutionFailed.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if !isAllowedRedirectURI(flowState.MCPRedirectURI) {
-		h.logger.Error("oidc: unsafe redirect URI scheme", "uri", flowState.MCPRedirectURI)
-		http.Error(w, "invalid redirect_uri", http.StatusBadRequest)
-		return
-	}
-
-	redirectURL, err := h.issueCodeAndRedirect(email, tenantID, flowState.RequestedScopes, flowState)
 	if err != nil {
 		h.logger.Error("oidc: failed to issue auth code", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

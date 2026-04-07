@@ -22,7 +22,6 @@ import (
 // Backpressure from a full store is a transient condition — clients should
 // retry, not treat it as a permanent failure.
 func TestHandleAuthorize_StateStoreFull(t *testing.T) {
-	dexSrv := fakeDexServer(t, "user@example.com")
 	signer, err := platformauth.NewJWTSigner(platformauth.JWTSignerConfig{})
 	require.NoError(t, err)
 
@@ -30,16 +29,14 @@ func TestHandleAuthorize_StateStoreFull(t *testing.T) {
 	t.Cleanup(stateStore.Close)
 
 	handler, err := auth.NewOIDCHandler(auth.OIDCHandlerConfig{
-		OIDC: auth.OIDCConfig{
-			DexIssuerURL: dexSrv.URL + "/dex",
-			ClientID:     "meridian-service",
-			CallbackURL:  "https://demo.meridianhub.cloud/oauth/callback",
-		},
 		OAuth: auth.OAuthConfig{
 			ClientID:    "meridian-mcp",
 			RedirectURI: "https://claude.ai/callback",
 		},
+		ConsentStore:      newFakeConsentStore(),
 		DefaultTenantSlug: "acme",
+		BaseURL:           "https://demo.meridianhub.cloud",
+		BaseDomain:        "demo.meridianhub.cloud",
 		StateStore:        stateStore,
 		CodeStore:         newTestStore(t),
 		Signer:            signer,

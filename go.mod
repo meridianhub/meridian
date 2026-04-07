@@ -224,11 +224,12 @@ require (
 	gorm.io/driver/sqlserver v1.6.0 // indirect
 )
 
-// Force all OpenTelemetry packages to use v1.42.0 to avoid schema URL conflicts
+// Force all OpenTelemetry packages to use a consistent version to avoid schema URL conflicts.
+// Pin must match the otlptrace exporter version; attribute.EMPTY was added in v1.43.0.
 replace (
-	go.opentelemetry.io/otel => go.opentelemetry.io/otel v1.42.0
-	go.opentelemetry.io/otel/metric => go.opentelemetry.io/otel/metric v1.42.0
-	go.opentelemetry.io/otel/sdk => go.opentelemetry.io/otel/sdk v1.42.0
-	go.opentelemetry.io/otel/sdk/metric => go.opentelemetry.io/otel/sdk/metric v1.42.0
-	go.opentelemetry.io/otel/trace => go.opentelemetry.io/otel/trace v1.42.0
+	go.opentelemetry.io/otel => go.opentelemetry.io/otel v1.43.0
+	go.opentelemetry.io/otel/metric => go.opentelemetry.io/otel/metric v1.43.0
+	go.opentelemetry.io/otel/sdk => go.opentelemetry.io/otel/sdk v1.43.0
+	go.opentelemetry.io/otel/sdk/metric => go.opentelemetry.io/otel/sdk/metric v1.43.0
+	go.opentelemetry.io/otel/trace => go.opentelemetry.io/otel/trace v1.43.0
 )

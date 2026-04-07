@@ -201,6 +201,13 @@ linters:
           - funlen
           - cyclop
 
+      # Exclude complexity linters for API gateway MCP consent handler (multi-step OAuth consent flow)
+      - path: services/api-gateway/mcp_consent_handler\.go
+        linters:
+          - gocyclo
+          - funlen
+          - cyclop
+
       # Exclude all linters for integration tests (require external services)
       - path: test/integration/
         linters:
