@@ -72,7 +72,7 @@ jobs:
       - name: Check per-service coverage
         if: github.event_name == 'pull_request'
         run: |
-          chmod +x scripts/check-service-coverage.sh
+          chmod +x scripts/check-service-coverage.sh scripts/codecov-exclude-pattern.sh
           ./scripts/check-service-coverage.sh
 
       - name: Run tests

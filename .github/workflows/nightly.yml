@@ -134,11 +134,16 @@ jobs:
           --jsonfile test-results.json \
           -- -race -coverprofile=coverage/coverage.out -covermode=atomic -timeout 15m ./...
 
-    - name: Filter generated files from coverage
+    - name: Filter excluded paths from coverage
       if: always()
       run: |
         if [ -f coverage/coverage.out ]; then
-          grep -v -E '\.pb\.go|\.pb\.validate\.go|_grpc\.pb\.go' coverage/coverage.out > coverage/coverage-filtered.out || true
+          exclude_pattern=$(./scripts/codecov-exclude-pattern.sh) || exclude_pattern=""
+          if [ -n "$exclude_pattern" ]; then
+            grep -v -E "$exclude_pattern" coverage/coverage.out > coverage/coverage-filtered.out || true
+          else
+            cp coverage/coverage.out coverage/coverage-filtered.out
+          fi
         fi
 
     - name: Upload coverage to Codecov
