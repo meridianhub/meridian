@@ -286,6 +286,7 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			s.cron.Remove(entryID)
 			delete(s.entryIDs, id)
 			delete(s.schedules, id)
+			DeleteCronScheduleMetrics(s.config.Name, id)
 			s.logger.Info("removed schedule", "schedule_id", id)
 		}
 	}
@@ -300,6 +301,7 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			s.cron.Remove(s.entryIDs[sched.ID])
 			delete(s.entryIDs, sched.ID)
 			delete(s.schedules, sched.ID)
+			DeleteCronScheduleMetrics(s.config.Name, sched.ID)
 			s.logger.Info("schedule changed, re-registering",
 				"schedule_id", sched.ID,
 				"old_cron_expr", prev.CronExpr,
@@ -322,6 +324,8 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			"cron_expr", sched.CronExpr,
 			"tenant_id", sched.TenantID)
 	}
+
+	UpdateCronActiveSchedules(s.config.Name, float64(len(s.entryIDs)))
 
 	return nil
 }
@@ -373,6 +377,7 @@ func (s *CronScheduler) acquireGlobalSemaphore(ctx context.Context, schedule Sch
 			"schedule_id", schedule.ID,
 			"tenant_id", schedule.TenantID)
 		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("concurrency limit reached"))
+		RecordCronConcurrencyRejection(s.config.Name, "global")
 		return nil, false
 	}
 }
@@ -393,6 +398,7 @@ func (s *CronScheduler) acquireTenantSemaphore(ctx context.Context, schedule Sch
 			"tenant_id", schedule.TenantID)
 		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil,
 			strPtr(fmt.Sprintf("per-tenant concurrency limit reached for tenant %s", schedule.TenantID)))
+		RecordCronConcurrencyRejection(s.config.Name, "per_tenant")
 		return nil, false
 	}
 }
@@ -458,6 +464,7 @@ func (s *CronScheduler) acquireLockAndExecute(ctx context.Context, schedule Sche
 			s.logger.Debug("lock not acquired, skipping",
 				"schedule_id", schedule.ID)
 			s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("lock not acquired"))
+			RecordCronLockContention(s.config.Name)
 			return
 		}
 		defer release()
@@ -467,7 +474,26 @@ func (s *CronScheduler) acquireLockAndExecute(ctx context.Context, schedule Sche
 	now := time.Now().UTC()
 	s.recordExecutionStart(ctx, execID, schedule, now)
 
+	execStart := time.Now()
 	err := s.executor.Execute(ctx, schedule)
+	execDuration := time.Since(execStart)
+
+	execStatus := ExecutionStatusCompleted
+	if err != nil {
+		execStatus = ExecutionStatusFailed
+	}
+	RecordCronExecution(s.config.Name, execStatus, execDuration)
+
+	// Only update the per-schedule timestamp gauge when the schedule is still registered.
+	// This prevents resurrecting Prometheus series for schedules that were removed
+	// while an execution was in flight.
+	s.mu.Lock()
+	_, stillRegistered := s.schedules[schedule.ID]
+	s.mu.Unlock()
+	if stillRegistered {
+		RecordCronLastExecutionTimestamp(s.config.Name, schedule.ID)
+	}
+
 	s.recordExecutionResult(ctx, execID, schedule, err)
 
 	if err != nil {
