@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -80,4 +82,91 @@ func RecordInFlightWork(worker string, count float64) {
 // RecordPoll increments the poll cycle counter.
 func RecordPoll(worker string) {
 	workerPollTotal.WithLabelValues(worker).Inc()
+}
+
+// Prometheus metrics for cron schedule execution health.
+var (
+	cronExecutionDurationSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_execution_duration_seconds",
+		Help:      "Duration of cron schedule executions in seconds",
+		Buckets:   prometheus.ExponentialBuckets(0.1, 2, 13), // 0.1s to ~409s, covers 5-minute default timeout
+	}, []string{"scheduler", "status"}) // tenant_id and schedule_id omitted: cardinality scales with tenants × schedules
+
+	cronExecutionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_executions_total",
+		Help:      "Total number of cron schedule executions by status",
+	}, []string{"scheduler", "status"}) // tenant_id omitted: per-schedule detail is in the execution store
+
+	cronLockContentionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_lock_contention_total",
+		Help:      "Number of times a schedule was skipped because the distributed lock was already held",
+	}, []string{"scheduler"})
+
+	cronConcurrencyRejectionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_concurrency_rejections_total",
+		Help:      "Number of executions skipped due to concurrency limits",
+	}, []string{"scheduler", "limit_type"})
+
+	cronLastExecutionTimestamp = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_last_execution_timestamp",
+		Help:      "Unix timestamp of the most recent completed or failed execution for each schedule",
+	}, []string{"scheduler", "schedule_id"})
+
+	cronActiveSchedules = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "meridian",
+		Subsystem: "scheduler",
+		Name:      "cron_active_schedules",
+		Help:      "Number of active schedules currently registered in the cron runner",
+	}, []string{"scheduler"})
+)
+
+// RecordCronExecution records duration and count metrics for a completed or failed
+// schedule execution. Uses only bounded labels (scheduler, status) to keep cardinality
+// predictable. Per-schedule/tenant detail is available in the execution store.
+func RecordCronExecution(schedulerName string, status ExecutionStatus, duration time.Duration) {
+	statusStr := string(status)
+	cronExecutionDurationSeconds.WithLabelValues(schedulerName, statusStr).Observe(duration.Seconds())
+	cronExecutionsTotal.WithLabelValues(schedulerName, statusStr).Inc()
+}
+
+// RecordCronLastExecutionTimestamp updates the last-execution gauge for a schedule.
+// Callers should only invoke this when the schedule is confirmed to still be registered,
+// to avoid resurrecting Prometheus series for deregistered schedules.
+func RecordCronLastExecutionTimestamp(schedulerName, scheduleID string) {
+	cronLastExecutionTimestamp.WithLabelValues(schedulerName, scheduleID).SetToCurrentTime()
+}
+
+// RecordCronLockContention increments the counter for schedules skipped due to distributed lock contention.
+func RecordCronLockContention(schedulerName string) {
+	cronLockContentionTotal.WithLabelValues(schedulerName).Inc()
+}
+
+// RecordCronConcurrencyRejection increments the counter for schedules skipped due to concurrency limits.
+// limitType should be "global" or "per_tenant".
+func RecordCronConcurrencyRejection(schedulerName, limitType string) {
+	cronConcurrencyRejectionsTotal.WithLabelValues(schedulerName, limitType).Inc()
+}
+
+// UpdateCronActiveSchedules sets the gauge for the number of active schedules registered.
+func UpdateCronActiveSchedules(schedulerName string, count float64) {
+	cronActiveSchedules.WithLabelValues(schedulerName).Set(count)
+}
+
+// DeleteCronScheduleMetrics removes per-schedule Prometheus series for a schedule that
+// has been deregistered. This prevents stale series from persisting after schedules are
+// removed from the provider.
+func DeleteCronScheduleMetrics(schedulerName, scheduleID string) {
+	// The histogram is labeled by tenant_id only (not schedule_id), so no per-schedule
+	// cleanup is needed there. Only the last-execution timestamp gauge is per-schedule.
+	cronLastExecutionTimestamp.DeleteLabelValues(schedulerName, scheduleID)
 }

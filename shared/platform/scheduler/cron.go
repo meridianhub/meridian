@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/meridianhub/meridian/shared/platform/audit"
+	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"github.com/robfig/cron/v3"
 )
@@ -29,6 +31,11 @@ type ScheduleProvider interface {
 // Executor runs the business logic for a triggered schedule.
 type Executor interface {
 	Execute(ctx context.Context, schedule Schedule) error
+}
+
+// TenantStatusChecker checks if a tenant is active before scheduled execution.
+type TenantStatusChecker interface {
+	IsActive(ctx context.Context, tenantID string) (bool, error)
 }
 
 // DistributedLock provides distributed locking to prevent duplicate execution
@@ -111,6 +118,8 @@ type CronScheduler struct {
 	semaphore        chan struct{}
 	tenantSemaphores map[string]chan struct{}
 	tenantSemMu      sync.Mutex
+
+	statusChecker TenantStatusChecker
 }
 
 // NewCronScheduler creates a new CronScheduler. The store parameter is optional;
@@ -164,6 +173,14 @@ type CronSchedulerOption func(*CronScheduler)
 func WithCronExecutionStore(store ExecutionStore) CronSchedulerOption {
 	return func(s *CronScheduler) {
 		s.store = store
+	}
+}
+
+// WithTenantStatusChecker sets a checker that gates execution on tenant active status.
+// If nil (default), all tenants are allowed to execute.
+func WithTenantStatusChecker(checker TenantStatusChecker) CronSchedulerOption {
+	return func(s *CronScheduler) {
+		s.statusChecker = checker
 	}
 }
 
@@ -269,6 +286,7 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			s.cron.Remove(entryID)
 			delete(s.entryIDs, id)
 			delete(s.schedules, id)
+			DeleteCronScheduleMetrics(s.config.Name, id)
 			s.logger.Info("removed schedule", "schedule_id", id)
 		}
 	}
@@ -283,6 +301,7 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			s.cron.Remove(s.entryIDs[sched.ID])
 			delete(s.entryIDs, sched.ID)
 			delete(s.schedules, sched.ID)
+			DeleteCronScheduleMetrics(s.config.Name, sched.ID)
 			s.logger.Info("schedule changed, re-registering",
 				"schedule_id", sched.ID,
 				"old_cron_expr", prev.CronExpr,
@@ -306,6 +325,8 @@ func (s *CronScheduler) refreshSchedules(ctx context.Context) error {
 			"tenant_id", sched.TenantID)
 	}
 
+	UpdateCronActiveSchedules(s.config.Name, float64(len(s.entryIDs)))
+
 	return nil
 }
 
@@ -321,6 +342,30 @@ func (s *CronScheduler) addSchedule(sched Schedule) (cron.EntryID, error) {
 	return entryID, nil
 }
 
+// tenantIsEligible returns true if execution should proceed for the schedule's tenant.
+// When no checker is configured or the schedule has no tenant ID, it returns true.
+// On check error it fails open (returns true) to preserve availability.
+func (s *CronScheduler) tenantIsEligible(ctx context.Context, schedule Schedule) bool {
+	if s.statusChecker == nil || schedule.TenantID == "" {
+		return true
+	}
+	active, err := s.statusChecker.IsActive(ctx, schedule.TenantID)
+	if err != nil {
+		s.logger.Error("failed to check tenant status",
+			"schedule_id", schedule.ID,
+			"error", err)
+		return true // fail open
+	}
+	if !active {
+		s.logger.Info("skipping execution for inactive tenant",
+			"schedule_id", schedule.ID,
+			"tenant_id", schedule.TenantID)
+		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("tenant not active"))
+		return false
+	}
+	return true
+}
+
 // acquireGlobalSemaphore tries to acquire the global concurrency semaphore.
 // Returns a release function and true if acquired, or nil and false if the limit is reached.
 func (s *CronScheduler) acquireGlobalSemaphore(ctx context.Context, schedule Schedule) (func(), bool) {
@@ -332,6 +377,7 @@ func (s *CronScheduler) acquireGlobalSemaphore(ctx context.Context, schedule Sch
 			"schedule_id", schedule.ID,
 			"tenant_id", schedule.TenantID)
 		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("concurrency limit reached"))
+		RecordCronConcurrencyRejection(s.config.Name, "global")
 		return nil, false
 	}
 }
@@ -352,6 +398,7 @@ func (s *CronScheduler) acquireTenantSemaphore(ctx context.Context, schedule Sch
 			"tenant_id", schedule.TenantID)
 		s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil,
 			strPtr(fmt.Sprintf("per-tenant concurrency limit reached for tenant %s", schedule.TenantID)))
+		RecordCronConcurrencyRejection(s.config.Name, "per_tenant")
 		return nil, false
 	}
 }
@@ -369,6 +416,22 @@ func (s *CronScheduler) executeJob(schedule Schedule) {
 			}
 		}
 
+		// Inject Actor so downstream audit records attribute the operation correctly
+		ctx = auth.WithActor(ctx, auth.Actor{
+			ID:            fmt.Sprintf("system:scheduler:%s", s.config.Name),
+			Type:          auth.ActorTypeScheduler,
+			Authenticated: false,
+			Source:        "cron-scheduler",
+		})
+
+		// Inject correlation ID for distributed tracing
+		ctx = audit.WithCorrelationID(ctx, uuid.New().String())
+
+		// Check tenant status before consuming semaphore slots
+		if !s.tenantIsEligible(ctx, schedule) {
+			return
+		}
+
 		// Acquire global concurrency semaphore
 		releaseGlobal, ok := s.acquireGlobalSemaphore(ctx, schedule)
 		if !ok {
@@ -383,46 +446,66 @@ func (s *CronScheduler) executeJob(schedule Schedule) {
 		}
 		defer releaseTenant()
 
-		// Acquire distributed lock
-		if s.lock != nil {
-			acquired, release, err := s.lock.Acquire(ctx, schedule.TenantID, s.lockKey(schedule.ID))
-			if err != nil {
-				s.logger.Error("failed to acquire lock",
-					"schedule_id", schedule.ID,
-					"error", err)
-				return
-			}
-			if !acquired {
-				s.logger.Debug("lock not acquired, skipping",
-					"schedule_id", schedule.ID)
-				s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("lock not acquired"))
-				return
-			}
-			defer release()
-		}
+		s.acquireLockAndExecute(ctx, schedule)
+	})
+}
 
-		// Record execution start
-		execID := uuid.New()
-		now := time.Now().UTC()
-		s.recordExecutionStart(ctx, execID, schedule, now)
-
-		// Execute
-		err := s.executor.Execute(ctx, schedule)
-
-		// Record result
-		s.recordExecutionResult(ctx, execID, schedule, err)
-
+// acquireLockAndExecute acquires the distributed lock (if configured) and runs the job.
+func (s *CronScheduler) acquireLockAndExecute(ctx context.Context, schedule Schedule) {
+	if s.lock != nil {
+		acquired, release, err := s.lock.Acquire(ctx, schedule.TenantID, s.lockKey(schedule.ID))
 		if err != nil {
-			s.logger.Error("schedule execution failed",
+			s.logger.Error("failed to acquire lock",
 				"schedule_id", schedule.ID,
 				"error", err)
 			return
 		}
+		if !acquired {
+			s.logger.Debug("lock not acquired, skipping",
+				"schedule_id", schedule.ID)
+			s.recordExecution(ctx, schedule, ExecutionStatusSkipped, nil, strPtr("lock not acquired"))
+			RecordCronLockContention(s.config.Name)
+			return
+		}
+		defer release()
+	}
 
-		s.logger.Info("schedule execution completed",
+	execID := uuid.New()
+	now := time.Now().UTC()
+	s.recordExecutionStart(ctx, execID, schedule, now)
+
+	execStart := time.Now()
+	err := s.executor.Execute(ctx, schedule)
+	execDuration := time.Since(execStart)
+
+	execStatus := ExecutionStatusCompleted
+	if err != nil {
+		execStatus = ExecutionStatusFailed
+	}
+	RecordCronExecution(s.config.Name, execStatus, execDuration)
+
+	// Only update the per-schedule timestamp gauge when the schedule is still registered.
+	// This prevents resurrecting Prometheus series for schedules that were removed
+	// while an execution was in flight.
+	s.mu.Lock()
+	_, stillRegistered := s.schedules[schedule.ID]
+	s.mu.Unlock()
+	if stillRegistered {
+		RecordCronLastExecutionTimestamp(s.config.Name, schedule.ID)
+	}
+
+	s.recordExecutionResult(ctx, execID, schedule, err)
+
+	if err != nil {
+		s.logger.Error("schedule execution failed",
 			"schedule_id", schedule.ID,
-			"tenant_id", schedule.TenantID)
-	})
+			"error", err)
+		return
+	}
+
+	s.logger.Info("schedule execution completed",
+		"schedule_id", schedule.ID,
+		"tenant_id", schedule.TenantID)
 }
 
 // getOrCreateTenantSemaphore lazily creates a per-tenant semaphore channel.
