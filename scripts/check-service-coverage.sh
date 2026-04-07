@@ -8,12 +8,12 @@
 #   ./scripts/check-service-coverage.sh
 #
 # Environment variables:
-#   COVERAGE_THRESHOLD  Minimum coverage % required per service (default: 70)
+#   COVERAGE_THRESHOLD  Minimum coverage % required per service (default: 80)
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-THRESHOLD="${COVERAGE_THRESHOLD:-70}"
+THRESHOLD="${COVERAGE_THRESHOLD:-80}"
 TMPDIR="${TMPDIR:-/tmp}"
 
 # Validate THRESHOLD is a non-negative integer in range 0–100
