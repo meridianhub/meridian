@@ -6,8 +6,7 @@
 #
 # Services:
 #   postgres-develop    - PostgreSQL 16 (isolated from demo, not exposed to host)
-#   meridian-develop    - Unified binary (develop branch build)
-#   mcp-server-develop  - MCP server for AI integration (develop branch build)
+#   meridian-develop    - Unified binary with MCP server (develop branch build)
 #
 # Usage:
 #   cp deploy/develop/.env.develop.template /opt/meridian-develop/.env
@@ -111,6 +110,12 @@ services:
       DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
       DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
       DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-10m}
+
+      # --- MCP OAuth 2.1 (runs inside unified binary, shares consent stores with BFF) ---
+      MCP_OAUTH_ENABLED: ${MCP_OAUTH_ENABLED:-false}
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-meridian-mcp}
+      MCP_BASE_URL: ${MCP_BASE_URL:-}
+      MCP_DEFAULT_TENANT_SLUG: ${MCP_DEFAULT_TENANT_SLUG:-}
     volumes:
       - /opt/meridian-develop/secrets:/run/secrets:ro
     networks:
@@ -124,62 +129,6 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
-
-  mcp-server-develop:
-    image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:develop}
-    container_name: mcp-server-develop
-    entrypoint: ["/mcp-server"]
-    restart: unless-stopped
-    depends_on:
-      meridian-develop:
-        condition: service_started
-    environment:
-      # --- MCP Transport ---
-      MCP_TRANSPORT: http
-      MCP_PORT: "8090"
-      MCP_SERVER_NAME: ${MCP_SERVER_NAME:-meridian-mcp-develop}
-      MCP_BASE_URL: ${MCP_BASE_URL:?MCP_BASE_URL must be set in the env file (e.g. https://develop.meridianhub.cloud)}
-
-      # --- Meridian API ---
-      MERIDIAN_API_URL: meridian-develop:50051
-      MERIDIAN_API_KEY: ${MERIDIAN_API_KEY:?MERIDIAN_API_KEY must be set in the env file}
-
-      # --- Application ---
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-
-      # --- OAuth 2.1 + OIDC (optional) ---
-      MCP_OAUTH_ENABLED: ${MCP_OAUTH_ENABLED:-false}
-      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-meridian-mcp}
-      MCP_BASE_DOMAIN: ${BASE_DOMAIN:-}
-
-      # --- Tenant defaults (single-tenant demo mode) ---
-      MCP_DEFAULT_TENANT_SLUG: ${MCP_DEFAULT_TENANT_SLUG:-}
-
-      # --- Dex OIDC ---
-      MCP_DEX_ISSUER_URL: ${MCP_DEX_ISSUER_URL:-}
-      MCP_DEX_CLIENT_ID: ${MCP_DEX_CLIENT_ID:-meridian-service}
-      MCP_DEX_CALLBACK_URL: ${MCP_DEX_CALLBACK_URL:-}
-
-      # --- JWT signing (SEPARATE from demo) ---
-      JWT_SIGNING_KEY_FILE: ${JWT_SIGNING_KEY_FILE:-}
-      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
-      JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-meridian-develop-1}
-      JWT_SIGNING_ISSUER: ${JWT_SIGNING_ISSUER:-meridian-develop}
-
-      # --- Bearer token validation ---
-      MCP_JWKS_URL: ${MCP_JWKS_URL:-}
-    volumes:
-      - /opt/meridian-develop/secrets:/run/secrets:ro
-    networks:
-      - meridian
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
 
 volumes:
   postgres_develop_data:
