@@ -2,9 +2,11 @@
 #
 # Services:
 #   postgres    - PostgreSQL 16 (internal only, not exposed to host)
-#   meridian    - Unified binary with embedded Dex OIDC; starts after postgres is healthy
+#   meridian    - Unified binary with embedded Dex OIDC + MCP server; starts after postgres is healthy
 #   caddy       - Reverse proxy; exposes 80/443, terminates TLS via Cloudflare Origin Certificate
-#   mcp-server  - MCP server for AI integration (internal, proxied via Caddy)
+#
+# MCP OAuth runs inside the unified binary so the BFF and MCP share in-memory
+# consent/state stores (PRD-061). No separate mcp-server container needed.
 #
 # Usage:
 #   cp deploy/demo/.env.demo.example /opt/meridian/.env
@@ -116,6 +118,12 @@ services:
       DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
       DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
       DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME:-10m}
+
+      # --- MCP OAuth 2.1 (runs inside unified binary, shares consent stores with BFF) ---
+      MCP_OAUTH_ENABLED: ${MCP_OAUTH_ENABLED:-false}
+      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-meridian-mcp}
+      MCP_BASE_URL: ${MCP_BASE_URL:-}
+      MCP_DEFAULT_TENANT_SLUG: ${MCP_DEFAULT_TENANT_SLUG:-}
     volumes:
       # Mount the secrets directory read-only so JWT_SIGNING_KEY_FILE can reference
       # /run/secrets/jwt-signing-key.pem without the key appearing in docker inspect.
@@ -133,61 +141,6 @@ services:
     # the gRPC health check service on port 50051. Caddy uses service_started
     # and retries upstream connections itself during meridian startup.
     # Not exposed to host — accessed only by caddy on the internal network
-
-  mcp-server:
-    image: ${MERIDIAN_IMAGE:-ghcr.io/meridianhub/meridian:demo}
-    entrypoint: ["/mcp-server"]
-    restart: unless-stopped
-    depends_on:
-      meridian:
-        condition: service_started
-    environment:
-      # --- MCP Transport ---
-      MCP_TRANSPORT: http
-      MCP_PORT: "8090"
-      MCP_SERVER_NAME: ${MCP_SERVER_NAME:-meridian-mcp}
-      MCP_BASE_URL: ${MCP_BASE_URL:?MCP_BASE_URL must be set in the env file (e.g. https://your-domain)}
-
-      # --- Meridian API ---
-      MERIDIAN_API_URL: meridian:50051
-      MERIDIAN_API_KEY: ${MERIDIAN_API_KEY:?MERIDIAN_API_KEY must be set in the env file}
-
-      # --- Application ---
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-
-      # --- OAuth 2.1 + OIDC (optional) ---
-      MCP_OAUTH_ENABLED: ${MCP_OAUTH_ENABLED:-false}
-      MCP_OAUTH_CLIENT_ID: ${MCP_OAUTH_CLIENT_ID:-meridian-mcp}
-      MCP_BASE_DOMAIN: ${BASE_DOMAIN:-}
-
-      # --- Tenant defaults (single-tenant demo mode) ---
-      MCP_DEFAULT_TENANT_SLUG: ${MCP_DEFAULT_TENANT_SLUG:-}       # e.g. "volterra" — used when no tenant subdomain is present
-
-      # --- Dex OIDC (delegates authentication to embedded Dex when MCP_OAUTH_ENABLED=true) ---
-      MCP_DEX_ISSUER_URL: ${MCP_DEX_ISSUER_URL:-}                 # e.g. https://demo.meridianhub.cloud/dex (Dex is embedded in meridian binary)
-      MCP_DEX_CLIENT_ID: ${MCP_DEX_CLIENT_ID:-meridian-service}   # Dex static client ID
-      MCP_DEX_CALLBACK_URL: ${MCP_DEX_CALLBACK_URL:-}             # e.g. https://demo.meridianhub.cloud/oauth/callback
-
-      # --- JWT signing (shared with BFF for session interoperability) ---
-      JWT_SIGNING_KEY_FILE: ${JWT_SIGNING_KEY_FILE:-}
-      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
-      JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-meridian-1}
-      JWT_SIGNING_ISSUER: ${JWT_SIGNING_ISSUER:-meridian}
-
-      # --- Bearer token validation ---
-      MCP_JWKS_URL: ${MCP_JWKS_URL:-}                             # e.g. https://demo.meridianhub.cloud/api/auth/jwks
-    volumes:
-      - /opt/meridian/secrets:/run/secrets:ro
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
-    # Not exposed to host — accessed only by caddy on the internal network
-    # Caddy proxies /mcp to this container
 
   caddy:
     image: caddy:2-alpine

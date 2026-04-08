@@ -16,12 +16,14 @@ demo.meridianhub.cloud, *.demo.meridianhub.cloud {
 	}
 
 	# MCP Server: streamable HTTP transport + OAuth 2.1 endpoints
+	# Routed to the unified binary where MCP OAuth shares in-memory
+	# consent stores with the BFF (required by PRD-061).
 	# Also handles /.well-known/* for OAuth metadata discovery.
 	@mcp_transport {
 		path /mcp /mcp/* /oauth/* /.well-known/oauth-authorization-server
 	}
 	handle @mcp_transport {
-		reverse_proxy mcp-server:8090
+		reverse_proxy meridian:8090
 	}
 
 	# Dex OIDC endpoints (embedded in meridian binary)
@@ -64,11 +66,13 @@ develop.meridianhub.cloud, *.develop.meridianhub.cloud {
 	}
 
 	# MCP Server: streamable HTTP transport + OAuth 2.1 endpoints
+	# Routed to the unified binary where MCP OAuth shares in-memory
+	# consent stores with the BFF (required by PRD-061).
 	@mcp_transport {
 		path /mcp /mcp/* /oauth/* /.well-known/oauth-authorization-server
 	}
 	handle @mcp_transport {
-		reverse_proxy mcp-server-develop:8090
+		reverse_proxy meridian-develop:8090
 	}
 
 	# Dex OIDC endpoints (embedded in meridian binary)
