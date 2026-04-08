@@ -21,7 +21,7 @@ This document describes the Docker setup for Meridian, optimized for production 
 
 Meridian uses a multi-stage Docker build to create minimal, secure production images:
 
-- **Build stage**: golang:1.26.0-bookworm for compiling static binaries
+- **Build stage**: golang:1.26.2-bookworm for compiling static binaries
 - **Runtime stage**: gcr.io/distroless/static:nonroot for minimal attack surface
 - **Image size**: ~3-5MB (binary: 1.4MB + distroless base: ~2MB)
 - **Security**: Non-root user, no shell, minimal dependencies
@@ -64,7 +64,7 @@ docker build \
 ### Multi-Stage Build
 
 1. **Builder Stage**
-   - Base: `golang:1.26.0-bookworm`
+   - Base: `golang:1.26.2-bookworm`
    - Installs: git, ca-certificates, tzdata
    - Compiles: Static binary with CGO disabled
    - Optimizations: `-ldflags="-w -s"` for stripped, reduced size
