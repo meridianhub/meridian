@@ -167,7 +167,7 @@ func TestTransactionLineage_DefensiveCopy_Related(t *testing.T) {
 func TestTransactionLineage_Constructor_DefensiveCopy(t *testing.T) {
 	// Test that mutating input slices after construction doesn't affect lineage
 	parentID := uuid.New()
-	children := []uuid.UUID{uuid.New(), uuid.New()}
+	children := []uuid.UUID{uuid.New(), uuid.New()} //nolint:prealloc // intentional: testing defensive copy, not building a collection
 	related := []uuid.UUID{uuid.New()}
 
 	lineage, err := NewTransactionLineage(uuid.New(), "payment", &parentID, children, related)

@@ -65,29 +65,29 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 		// Consider adding configurable timeout settings for production resilience:
 		// ResponseHeaderTimeout, IdleConnTimeout, MaxIdleConnsPerHost
 
-		// Configure the proxy director to add X-Forwarded-Host and identity headers.
+		// Configure the proxy rewrite to add X-Forwarded-Host and identity headers.
 		// Connect protocol headers (Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms)
 		// are standard headers (not hop-by-hop) and are preserved by httputil.ReverseProxy.
-		originalDirector := proxy.Director
-		proxy.Director = func(req *http.Request) {
-			originalDirector(req)
-			// Set X-Forwarded-Host so backends know the original Host header
-			if req.Header.Get("X-Forwarded-Host") == "" {
-				req.Header.Set("X-Forwarded-Host", req.Host)
+		proxy.Rewrite = func(r *httputil.ProxyRequest) {
+			r.SetURL(target)
+			r.SetXForwarded()
+			// Preserve the original Host header for X-Forwarded-Host
+			if r.Out.Header.Get("X-Forwarded-Host") == "" {
+				r.Out.Header.Set("X-Forwarded-Host", r.In.Host)
 			}
 
 			// SECURITY: Strip any incoming identity headers to prevent spoofing.
 			// These headers are set only by the gateway after successful authentication.
-			req.Header.Del(HeaderUserID)
-			req.Header.Del(HeaderTenantID)
-			req.Header.Del(HeaderAuthMethod)
-			req.Header.Del(HeaderAuthRoles)
+			r.Out.Header.Del(HeaderUserID)
+			r.Out.Header.Del(HeaderTenantID)
+			r.Out.Header.Del(HeaderAuthMethod)
+			r.Out.Header.Del(HeaderAuthRoles)
 
 			// SECURITY: Strip X-API-Key header to prevent credential leakage to backends.
-			req.Header.Del(auth.APIKeyHeader)
+			r.Out.Header.Del(auth.APIKeyHeader)
 
 			// Add identity headers if the request was authenticated
-			addIdentityHeaders(req)
+			addIdentityHeaders(r.Out)
 		}
 
 		routes = append(routes, proxyRoute{

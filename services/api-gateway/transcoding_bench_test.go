@@ -117,7 +117,7 @@ func startBenchEnv(b *testing.B, backends []ServiceBackend) *benchEnv {
 		AtMost(5 * time.Second).
 		PollInterval(20 * time.Millisecond).
 		Until(func() bool {
-			resp, e := http.Get(baseURL + "/health") //nolint:noctx // Health check in benchmark setup does not need request context
+			resp, e := http.Get(baseURL + "/health")
 			if e != nil {
 				return false
 			}

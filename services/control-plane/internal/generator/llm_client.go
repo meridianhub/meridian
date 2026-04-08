@@ -212,13 +212,13 @@ func buildFixPrompt(manifest string, errors []ValidationError) string {
 	b.WriteString("## Validation Errors\n\n")
 
 	for i, e := range errors {
-		b.WriteString(fmt.Sprintf("%d. **[%s]** at `%s`\n", i+1, e.Code, e.Path))
-		b.WriteString(fmt.Sprintf("   - Message: %s\n", e.Message))
+		fmt.Fprintf(&b, "%d. **[%s]** at `%s`\n", i+1, e.Code, e.Path)
+		fmt.Fprintf(&b, "   - Message: %s\n", e.Message)
 		if e.Suggestion != "" {
-			b.WriteString(fmt.Sprintf("   - Suggestion: %s\n", e.Suggestion))
+			fmt.Fprintf(&b, "   - Suggestion: %s\n", e.Suggestion)
 		}
 		if len(e.AvailableFields) > 0 {
-			b.WriteString(fmt.Sprintf("   - Available values: %s\n", strings.Join(e.AvailableFields, ", ")))
+			fmt.Fprintf(&b, "   - Available values: %s\n", strings.Join(e.AvailableFields, ", "))
 		}
 	}
 
