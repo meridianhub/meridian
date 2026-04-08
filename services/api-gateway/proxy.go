@@ -70,6 +70,7 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 		// are standard headers (not hop-by-hop) and are preserved by httputil.ReverseProxy.
 		proxy.Rewrite = func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
+			r.Out.Host = r.In.Host // Preserve original Host (SetURL overwrites it)
 			r.SetXForwarded()
 			// Preserve the original Host header for X-Forwarded-Host
 			if r.Out.Header.Get("X-Forwarded-Host") == "" {
