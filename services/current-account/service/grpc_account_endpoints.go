@@ -98,7 +98,7 @@ func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCu
 	// Save to database (context carries audit user info for created_by/updated_by fields)
 	if err := s.repo.Save(ctx, account); err != nil {
 		operationStatus = opStatusSaveFailed
-		if errors.Is(err, persistence.ErrAccountExists) {
+		if errors.Is(err, persistence.ErrAccountExists) || errors.Is(err, persistence.ErrVersionConflict) {
 			return nil, status.Errorf(codes.AlreadyExists, "account already exists: %v", err)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to create account: %v", err)

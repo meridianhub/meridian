@@ -382,6 +382,31 @@ func TestInitiateCurrentAccount(t *testing.T) {
 	}
 }
 
+func TestInitiateCurrentAccount_DuplicateReturnsAlreadyExists(t *testing.T) {
+	db, ctx, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewRepository(db)
+	svc := mustNewService(t, repo, nil)
+
+	req := &pb.InitiateCurrentAccountRequest{
+		ExternalIdentifier: "GB82WEST12345698765432",
+		PartyId:            uuid.New().String(),
+		InstrumentCode:     "GBP",
+	}
+
+	_, err := svc.InitiateCurrentAccount(ctx, req)
+	require.NoError(t, err)
+
+	// Second call with same external identifier should return AlreadyExists.
+	_, err = svc.InitiateCurrentAccount(ctx, req)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.AlreadyExists, st.Code(), "duplicate account should return AlreadyExists, got %v: %s", st.Code(), st.Message())
+}
+
 func TestExecuteDeposit(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()
