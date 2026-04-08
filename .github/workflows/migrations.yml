@@ -36,7 +36,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.1'
+          go-version: '1.26.2'
           cache: true
 
       - name: Install Atlas CLI
@@ -82,7 +82,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.1'
+          go-version: '1.26.2'
           cache: true
 
       - name: Install Atlas CLI

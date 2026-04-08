@@ -35,10 +35,10 @@ func BuildTopicList() string {
 		topicList := byService[svc]
 		sort.Strings(topicList)
 
-		sb.WriteString(fmt.Sprintf("### %s\n\n", svc))
+		fmt.Fprintf(&sb, "### %s\n\n", svc)
 		for _, topic := range topicList {
 			desc := describeTopicName(topic)
-			sb.WriteString(fmt.Sprintf("- `%s` — %s\n", topic, desc))
+			fmt.Fprintf(&sb, "- `%s` — %s\n", topic, desc)
 		}
 		sb.WriteString("\n")
 	}

@@ -60,35 +60,38 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 			continue
 		}
 
-		proxy := httputil.NewSingleHostReverseProxy(target)
-
+		// Create ReverseProxy with Rewrite (not the deprecated Director API).
 		// Consider adding configurable timeout settings for production resilience:
 		// ResponseHeaderTimeout, IdleConnTimeout, MaxIdleConnsPerHost
-
-		// Configure the proxy director to add X-Forwarded-Host and identity headers.
+		//
 		// Connect protocol headers (Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms)
 		// are standard headers (not hop-by-hop) and are preserved by httputil.ReverseProxy.
-		originalDirector := proxy.Director
-		proxy.Director = func(req *http.Request) {
-			originalDirector(req)
-			// Set X-Forwarded-Host so backends know the original Host header
-			if req.Header.Get("X-Forwarded-Host") == "" {
-				req.Header.Set("X-Forwarded-Host", req.Host)
+		proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) {
+			// Capture any existing X-Forwarded-Host before SetXForwarded overwrites it
+			existingXFH := r.In.Header.Get("X-Forwarded-Host")
+
+			r.SetURL(target)
+			r.Out.Host = r.In.Host // Preserve original Host (SetURL overwrites it)
+			r.SetXForwarded()
+
+			// Restore pre-existing X-Forwarded-Host if the client already set one
+			if existingXFH != "" {
+				r.Out.Header.Set("X-Forwarded-Host", existingXFH)
 			}
 
 			// SECURITY: Strip any incoming identity headers to prevent spoofing.
 			// These headers are set only by the gateway after successful authentication.
-			req.Header.Del(HeaderUserID)
-			req.Header.Del(HeaderTenantID)
-			req.Header.Del(HeaderAuthMethod)
-			req.Header.Del(HeaderAuthRoles)
+			r.Out.Header.Del(HeaderUserID)
+			r.Out.Header.Del(HeaderTenantID)
+			r.Out.Header.Del(HeaderAuthMethod)
+			r.Out.Header.Del(HeaderAuthRoles)
 
 			// SECURITY: Strip X-API-Key header to prevent credential leakage to backends.
-			req.Header.Del(auth.APIKeyHeader)
+			r.Out.Header.Del(auth.APIKeyHeader)
 
 			// Add identity headers if the request was authenticated
-			addIdentityHeaders(req)
-		}
+			addIdentityHeaders(r.Out)
+		}}
 
 		routes = append(routes, proxyRoute{
 			prefix: b.Prefix,

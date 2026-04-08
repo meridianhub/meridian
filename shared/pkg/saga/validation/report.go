@@ -36,12 +36,12 @@ func (f *HumanReadableFormatter) Format(result *ValidationResult) string {
 		complexityScore := calculateComplexityScore(result.Metrics.HandlerCallCount)
 		complexityLabel := getComplexityLabel(complexityScore)
 
-		output.WriteString(fmt.Sprintf("   • %d handlers called\n", result.Metrics.HandlerCallCount))
-		output.WriteString(fmt.Sprintf("   • Complexity: %d/10 (%s)\n", complexityScore, complexityLabel))
+		fmt.Fprintf(&output, "   • %d handlers called\n", result.Metrics.HandlerCallCount)
+		fmt.Fprintf(&output, "   • Complexity: %d/10 (%s)\n", complexityScore, complexityLabel)
 
 		// Show estimated duration
 		durationMs := result.Metrics.EstimatedDuration.Milliseconds()
-		output.WriteString(fmt.Sprintf("   • Estimated execution: <%dms\n", durationMs))
+		fmt.Fprintf(&output, "   • Estimated execution: <%dms\n", durationMs)
 
 		output.WriteString("\nScript ready for deployment.\n")
 	} else {
@@ -57,7 +57,7 @@ func (f *HumanReadableFormatter) Format(result *ValidationResult) string {
 		if errorCount == 1 {
 			output.WriteString("   1 error found:\n\n")
 		} else {
-			output.WriteString(fmt.Sprintf("   %d errors found:\n\n", errorCount))
+			fmt.Fprintf(&output, "   %d errors found:\n\n", errorCount)
 		}
 
 		// Show each error

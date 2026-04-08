@@ -48,7 +48,7 @@ func BuildHandlerReferenceCard(registry *schema.Registry) string {
 			return handlers[i].fullName < handlers[j].fullName
 		})
 
-		sb.WriteString(fmt.Sprintf("### %s\n\n", svc))
+		fmt.Fprintf(&sb, "### %s\n\n", svc)
 
 		for _, h := range handlers {
 			writeHandlerEntry(&sb, h.fullName, h.def)

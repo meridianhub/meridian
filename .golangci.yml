@@ -88,6 +88,7 @@ linters:
           - err113           # Tests need dynamic errors to test error pattern matching
           - funlen           # Tests can be verbose with setup/assertions
           - cyclop           # Tests can have complex control flow
+          - noctx            # httptest.NewRequest creates a valid context; requiring WithContext in tests is noise
 
       # Allow context-as-argument after *testing.T in test helper functions
       - path: _test\.go

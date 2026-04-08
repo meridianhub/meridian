@@ -4,7 +4,7 @@
 # Uses distroless base image (~2MB) enabled by pure-Go dependencies
 
 # Build stage
-FROM golang:1.26.1-bookworm AS builder
+FROM golang:1.26.2-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
