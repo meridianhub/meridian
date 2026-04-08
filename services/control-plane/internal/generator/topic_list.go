@@ -38,7 +38,7 @@ func BuildTopicList() string {
 		fmt.Fprintf(&sb, "### %s\n\n", svc)
 		for _, topic := range topicList {
 			desc := describeTopicName(topic)
-			fmt.Fprintf(&sb, "- `%s` - %s\n", topic, desc)
+			fmt.Fprintf(&sb, "- `%s` — %s\n", topic, desc)
 		}
 		sb.WriteString("\n")
 	}
