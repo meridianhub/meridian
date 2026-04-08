@@ -60,21 +60,23 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 			continue
 		}
 
-		proxy := httputil.NewSingleHostReverseProxy(target)
-
+		// Create ReverseProxy with Rewrite (not the deprecated Director API).
 		// Consider adding configurable timeout settings for production resilience:
 		// ResponseHeaderTimeout, IdleConnTimeout, MaxIdleConnsPerHost
-
-		// Configure the proxy rewrite to add X-Forwarded-Host and identity headers.
+		//
 		// Connect protocol headers (Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms)
 		// are standard headers (not hop-by-hop) and are preserved by httputil.ReverseProxy.
-		proxy.Rewrite = func(r *httputil.ProxyRequest) {
+		proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) {
+			// Capture any existing X-Forwarded-Host before SetXForwarded overwrites it
+			existingXFH := r.In.Header.Get("X-Forwarded-Host")
+
 			r.SetURL(target)
 			r.Out.Host = r.In.Host // Preserve original Host (SetURL overwrites it)
 			r.SetXForwarded()
-			// Preserve the original Host header for X-Forwarded-Host
-			if r.Out.Header.Get("X-Forwarded-Host") == "" {
-				r.Out.Header.Set("X-Forwarded-Host", r.In.Host)
+
+			// Restore pre-existing X-Forwarded-Host if the client already set one
+			if existingXFH != "" {
+				r.Out.Header.Set("X-Forwarded-Host", existingXFH)
 			}
 
 			// SECURITY: Strip any incoming identity headers to prevent spoofing.
@@ -89,7 +91,7 @@ func NewProxyHandler(backends []BackendRoute) *ProxyHandler {
 
 			// Add identity headers if the request was authenticated
 			addIdentityHeaders(r.Out)
-		}
+		}}
 
 		routes = append(routes, proxyRoute{
 			prefix: b.Prefix,
