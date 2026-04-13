@@ -50,7 +50,7 @@ jobs:
 
       - name: Comment on PR if linting fails
         if: steps.markdown-lint.outcome == 'failure' && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const marker = '<!-- markdown-lint-comment -->';
