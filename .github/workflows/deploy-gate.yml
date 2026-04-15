@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Check latest deploy-develop status
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             // Find the most recent deploy-develop workflow run on the develop branch
