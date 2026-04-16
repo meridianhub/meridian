@@ -1,4 +1,4 @@
-h1:PnPRafxLtbQAhHssRdEu02xkP/eQb96IF7HwUpVmYvE=
+h1:C1bgEjVoS7bhttB5ntNjdmFCKz9yaBltHLl5kwGkbXk=
 20251216000001_initial.sql h1:nyRf35O3eYNJqShAvOEhvliXKLIR6e/V8B9JhOHde9w=
 20251216000002_audit_system.sql h1:X/0ZHt9cGTYmFbUUvKAkBgEiGw9fYEqfnbMB8I4SCR8=
 20251217000001_fix_audit_status_constraint.sql h1:yQxsHxbUp5g+ehkKFjOhZs59SbfaQIPw4/sA2xE2rwU=
@@ -28,3 +28,4 @@ h1:PnPRafxLtbQAhHssRdEu02xkP/eQb96IF7HwUpVmYvE=
 20260316000002_add_event_outbox_tenant_id_index.sql h1:hrEPnXoHQ1bnaMtvFFwZ9UzJVtryQrIe6zDSDqfoLbM=
 20260323000001_align_audit_schema.sql h1:AmTi2tik7qBcMVH589i0pvv14DxTbPMbK0w24n0aw+g=
 20260323000002_align_audit_schema_data.sql h1:5AqTImsCsnJIDldKPVAxFCwmb/8uabn7KZULF/PzQs8=
+20260416000001_drop_syndicate_scope_integrity_index.sql h1:S9u8OUer3WusmW31j2zAsNGaZRwMV3v6+BxA5k0FxDk=
