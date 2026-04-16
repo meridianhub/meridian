@@ -244,7 +244,9 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			UpdatedBy:             "system",
 		}
 		err = gormDB.Create(dup).Error
-		assert.Error(t, err, "Duplicate account_identification must still be rejected")
+		require.Error(t, err, "Duplicate account_identification must still be rejected")
+		assert.Contains(t, err.Error(), "duplicate key", "rejection should be a uniqueness violation")
+		assert.Contains(t, err.Error(), "account_identification", "rejection must reference idx_account_account_identification, not some other constraint")
 	})
 
 	t.Run("UniqueConstraintDoesNotAffectPersonalAccounts", func(t *testing.T) {
