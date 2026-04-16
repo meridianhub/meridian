@@ -73,11 +73,9 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 	})
 
 	t.Run("IndexesCreated", func(t *testing.T) {
-		// Verify the three indexes were created
 		for _, indexName := range []string{
 			"idx_account_participant_syndicate",
 			"idx_account_syndicate_participants",
-			"idx_account_syndicate_scope_integrity",
 		} {
 			var count int64
 			err := gormDB.Raw(`
@@ -87,6 +85,20 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, int64(1), count, "Index %s should exist", indexName)
 		}
+	})
+
+	t.Run("ScopeIntegrityIndexDropped", func(t *testing.T) {
+		// Migration 20260416000001 dropped idx_account_syndicate_scope_integrity to allow
+		// multiple accounts per (party_id, org_party_id, instrument_code) — required by
+		// utility billing patterns (e.g. separate GBP accounts for electricity and gas
+		// from the same supplier).
+		var count int64
+		err := gormDB.Raw(`
+			SELECT COUNT(*) FROM pg_indexes
+			WHERE tablename = 'account' AND indexname = 'idx_account_syndicate_scope_integrity'
+		`).Scan(&count).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), count, "idx_account_syndicate_scope_integrity should have been dropped")
 	})
 
 	t.Run("CanCreateOrgScopedAccount", func(t *testing.T) {
@@ -149,16 +161,18 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 		assert.Nil(t, retrieved.OrgPartyID, "Personal account should have NULL org_party_id")
 	})
 
-	t.Run("UniqueConstraintOnPartyOrgInstrumentCode", func(t *testing.T) {
+	t.Run("MultipleAccountsPerPartyOrgInstrumentAllowed", func(t *testing.T) {
+		// Utility billing case: a customer has separate GBP billing accounts for electricity
+		// and gas with the same supplier. After migration 20260416000001, both succeed and
+		// uniqueness is preserved only by account_identification.
 		partyID := uuid.New()
 		orgPartyID := uuid.New()
 		now := time.Now()
 
-		// First account: party + org + GBP
 		entity1 := &CurrentAccountEntity{
 			ID:                    uuid.New(),
 			AccountID:             "ACC-UNIQ-001",
-			AccountIdentification: "GB82WEST33333333333333",
+			AccountIdentification: "PPM-ELEC-DEMO-001",
 			AccountType:           "current",
 			InstrumentCode:        "GBP",
 			Dimension:             "CURRENCY",
@@ -172,13 +186,12 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			UpdatedBy:             "system",
 		}
 		err := gormDB.Create(entity1).Error
-		require.NoError(t, err, "First org-scoped account should succeed")
+		require.NoError(t, err, "First org-scoped GBP account should succeed")
 
-		// Duplicate: same party + org + instrument_code should fail
 		entity2 := &CurrentAccountEntity{
 			ID:                    uuid.New(),
 			AccountID:             "ACC-UNIQ-002",
-			AccountIdentification: "GB82WEST44444444444444",
+			AccountIdentification: "PPM-GAS-DEMO-001",
 			AccountType:           "current",
 			InstrumentCode:        "GBP",
 			Dimension:             "CURRENCY",
@@ -192,13 +205,12 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 			UpdatedBy:             "system",
 		}
 		err = gormDB.Create(entity2).Error
-		assert.Error(t, err, "Duplicate (party_id, org_party_id, instrument_code) should be rejected by unique index")
+		assert.NoError(t, err, "Second GBP account for same (party, org) should succeed (multi-service billing)")
 
-		// Different instrument_code: same party + org + EUR should succeed
 		entity3 := &CurrentAccountEntity{
 			ID:                    uuid.New(),
 			AccountID:             "ACC-UNIQ-003",
-			AccountIdentification: "GB82WEST55555555555555",
+			AccountIdentification: "PPM-EUR-DEMO-001",
 			AccountType:           "current",
 			InstrumentCode:        "EUR",
 			Dimension:             "CURRENCY",
@@ -213,6 +225,26 @@ func TestOrgScopedMigrations_CockroachDB(t *testing.T) {
 		}
 		err = gormDB.Create(entity3).Error
 		assert.NoError(t, err, "Different instrument_code for same (party_id, org_party_id) should succeed")
+
+		// Account-identifier uniqueness is still enforced by idx_account_account_identification.
+		dup := &CurrentAccountEntity{
+			ID:                    uuid.New(),
+			AccountID:             "ACC-UNIQ-004",
+			AccountIdentification: "PPM-ELEC-DEMO-001",
+			AccountType:           "current",
+			InstrumentCode:        "GBP",
+			Dimension:             "CURRENCY",
+			Status:                "active",
+			PartyID:               partyID,
+			OrgPartyID:            &orgPartyID,
+			OverdraftLimit:        0,
+			CreatedAt:             now,
+			UpdatedAt:             now,
+			CreatedBy:             "system",
+			UpdatedBy:             "system",
+		}
+		err = gormDB.Create(dup).Error
+		assert.Error(t, err, "Duplicate account_identification must still be rejected")
 	})
 
 	t.Run("UniqueConstraintDoesNotAffectPersonalAccounts", func(t *testing.T) {
