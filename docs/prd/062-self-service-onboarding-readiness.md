@@ -182,7 +182,7 @@ processed the login and rejected it at bcrypt compare. The most likely causes, i
 - `frontend/src/features/registration/pages/register-page.tsx` - copy + client-side
   validation + error display + post-submit navigation
 - `services/api-gateway/registration_handler.go:196-284` - policy error message surface
-  + response gating
+  - response gating
 - `services/api-gateway/auth_handler.go:170-196` - provisioning-pending error differentiation
 - `services/api-gateway/tenant_resolver.go` - confirm `/login` is covered by provisioning gate
 - `services/identity/bootstrap/self_registered_admin.go` - confirm fail-hard semantics;
