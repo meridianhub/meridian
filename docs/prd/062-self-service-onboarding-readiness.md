@@ -9,8 +9,22 @@
 - [PRD-044: Auth Flow Architecture](044-auth-flow-architecture.md)
 - [PRD-053: Auth Email Flows](053-auth-email-flows.md)
 - [PRD-050: Demo Sandbox](050-demo-sandbox.md)
-- Memory note: `project_demo_self_service_vision.md`
-- Memory note: `project_self_service_signup_flow.md`
+
+### Inlined background context
+
+Two strategic threads from prior agent-only design notes are inlined here so this document
+is self-contained and Task Master / future contributors can read it without external state:
+
+- **Self-service vision.** The demo environment is intended to support a sign-up → tenant
+  provisioning → MCP connection → economy generation flow with no human in the loop.
+  Demo tenants are treated as ephemeral; a nightly reset is the intended posture for
+  cleaning up state. This PRD's first-run path is a precondition for that vision.
+- **Self-service sign-up flow.** Sign-ups create a tenant record with the admin email and
+  password hash held in metadata. When async provisioning is enabled, schema creation runs
+  in the background and a post-provisioning hook (`self_registered_admin`) creates the
+  identity from that metadata before clearing it. The gateway's tenant-resolver middleware
+  is expected to serve a progress UI when a request lands on a tenant whose state is
+  `provisioning_pending`, so the user does not see a broken login.
 
 ---
 
@@ -63,8 +77,8 @@ This PRD treats them as one package.
 - Replacing the outbox-based audit path with Kafka.
 - Email verification UX - demo currently skips it; a proper verification flow is a later PRD.
 - Backfilling historical public-schema data into tenant schemas. Demo tenants are
-  considered ephemeral (nightly reset is the intended posture per
-  `project_demo_self_service_vision.md`).
+  considered ephemeral (nightly reset is the intended posture; see the inlined
+  background context above).
 - Fixing the `admin@volterra.energy` identity being seeded into every tenant schema
   (unrelated demo-seed anomaly observed during diagnosis; tracked separately).
 
@@ -160,17 +174,31 @@ processed the login and rejected it at bcrypt compare. The most likely causes, i
    `errPasswordPolicyViolation` with the underlying reason today, but the frontend likely
    displays a generic toast. Wire the specific message (too short / missing upper /
    missing lower / missing digit) into the form-field error slot below the Password input.
-3. **Differentiate login errors on demo.** In `services/api-gateway/auth_handler.go:170-196`,
-   when credentials fail but the tenant is in `provisioning_pending` state (not `active`),
-   return "Your tenant is still being set up - please wait a moment and try again" instead
-   of the generic "invalid email or password". Safe to disclose because the tenant slug is
-   already public in the URL.
+3. **Differentiate login errors on demo.** Modify `handleLoginError()` in
+   `services/api-gateway/auth_handler.go:170-196` (this is the error-mapping function that
+   converts `errInvalidCredentials` from `authenticateAndSign()` at lines 142-164 into the
+   HTTP response). Add a branch: when credentials fail but the tenant is in
+   `provisioning_pending` state (not `active`), return "Your tenant is still being set up -
+   please wait a moment and try again" with HTTP 503 instead of the generic 401 "invalid
+   email or password". Safe to disclose because the tenant slug is already public in the URL.
 4. **Gate the registration response on provisioning state.**
    `registration_handler.go:279-284` returns `login_url` unconditionally. When
    `ProvisioningPending=true`, the frontend should show a "Provisioning..." progress state
-   and poll a status endpoint before allowing navigation to `/login`, not redirect straight
+   and poll for completion before allowing navigation to `/login`, not redirect straight
    there. This eliminates the race where a user lands on `/login` before the admin-identity
-   hook has run.
+   hook has run. Concrete polling spec:
+   - **Endpoint:** the existing `GetTenantProvisioningStatus` gRPC method on
+     `services/tenant/client/client.go:281-303` (already exposed; surface via the BFF if
+     not yet routed). Frontend polls per-service progress and waits for all services to
+     reach `COMPLETED`.
+   - **Interval:** 1 second (provisioning typically completes in under 10 seconds on demo
+     based on the `tests` tenant: 7 seconds tenant-create → identity-create observed
+     2026-04-24).
+   - **Timeout:** 60 seconds. After timeout, surface a named error linking to a support
+     contact and offer a "Retry" action that re-polls without resubmitting the form.
+   - **Failure mode:** if any per-service status is `FAILED`, stop polling immediately and
+     show the failure with the specific service that failed. Do not auto-retry; user must
+     contact support or trigger manual re-provisioning.
 5. **Fail-hard in the post-provisioning admin hook.**
    `services/identity/bootstrap/self_registered_admin.go` already returns errors up the
    stack, but verify the provisioning worker marks the tenant `provisioning_failed` (not
