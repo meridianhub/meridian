@@ -72,6 +72,27 @@ func TestDisplayNameFromContext_nil_context(t *testing.T) {
 	assert.Equal(t, "", name)
 }
 
+func TestWithStatus_and_StatusFromContext(t *testing.T) {
+	ctx := WithStatus(context.Background(), "provisioning")
+
+	status, ok := StatusFromContext(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, "provisioning", status)
+}
+
+func TestStatusFromContext_missing(t *testing.T) {
+	status, ok := StatusFromContext(context.Background())
+	assert.False(t, ok)
+	assert.Equal(t, "", status)
+}
+
+func TestStatusFromContext_nil_context(t *testing.T) {
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
+	status, ok := StatusFromContext(nil)
+	assert.False(t, ok)
+	assert.Equal(t, "", status)
+}
+
 func TestMustFromContext_success(t *testing.T) {
 	tid := TenantID("acme_corp")
 	ctx := WithTenant(context.Background(), tid)
@@ -105,6 +126,7 @@ func TestPropagateToBackground_with_tenant(t *testing.T) {
 	parent := WithTenant(context.Background(), tid)
 	parent = WithSlug(parent, "acme-corp")
 	parent = WithDisplayName(parent, "Acme Corp")
+	parent = WithStatus(parent, "active")
 
 	asyncCtx := PropagateToBackground(parent)
 
@@ -122,6 +144,11 @@ func TestPropagateToBackground_with_tenant(t *testing.T) {
 	name, ok := DisplayNameFromContext(asyncCtx)
 	assert.True(t, ok)
 	assert.Equal(t, "Acme Corp", name)
+
+	// Status propagated
+	status, ok := StatusFromContext(asyncCtx)
+	assert.True(t, ok)
+	assert.Equal(t, "active", status)
 
 	// No deadline from parent
 	_, hasDeadline := asyncCtx.Deadline()

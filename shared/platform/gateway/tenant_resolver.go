@@ -56,6 +56,32 @@ func isProvisioningAllowedPath(path string) bool {
 	return false
 }
 
+// statusAwarePassThroughPaths are URL paths that must reach their downstream
+// handler even when the tenant is in a non-active provisioning state. The
+// handler is expected to check the status from context (via
+// tenant.StatusFromContext) and return an appropriate JSON response.
+//
+// This exists because the BFF login endpoint receives JSON requests and
+// needs to return JSON errors. Without this allow-list the tenant resolver
+// would intercept the request and serve the HTML provisioning page, which
+// the SPA cannot parse, leaving the user with a misleading "invalid email
+// or password" message.
+var statusAwarePassThroughPaths = []string{
+	"/api/auth/login",
+}
+
+// isStatusAwarePassThroughPath returns true if the request path is one whose
+// handler must run even for non-active tenants (with status injected into
+// context so it can return a status-specific response).
+func isStatusAwarePassThroughPath(path string) bool {
+	for _, p := range statusAwarePassThroughPaths {
+		if path == p {
+			return true
+		}
+	}
+	return false
+}
+
 // ErrTenantNotFound is returned when a tenant cannot be found by slug.
 var ErrTenantNotFound = errors.New("tenant not found")
 
@@ -287,11 +313,7 @@ func (m *TenantResolverMiddleware) HandlerOptionalTenant(next http.Handler) http
 		)
 
 		r.Header.Set(tenant.TenantIDKey, string(resolved.ID))
-		ctx = tenant.WithTenant(ctx, resolved.ID)
-		ctx = tenant.WithSlug(ctx, slug)
-		if resolved.DisplayName != "" {
-			ctx = tenant.WithDisplayName(ctx, resolved.DisplayName)
-		}
+		ctx = m.injectTenantContext(ctx, resolved, slug)
 		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
@@ -338,6 +360,17 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 				slog.Int64("resolution_time_ms", resolutionTimeMs),
 			)
 
+			// Status-aware pass-through paths (e.g., /api/auth/login) need to
+			// reach their handler so it can return a JSON status-specific error
+			// instead of HTML. Inject tenant ID, slug, display name, and status
+			// into context, then forward to the downstream handler.
+			if isStatusAwarePassThroughPath(r.URL.Path) {
+				ctx = m.injectTenantContext(ctx, resolved, slug)
+				r = r.WithContext(ctx)
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// For provisioning states, serve a progress page instead of a bare 503.
 			// Allow the provisioning status polling endpoint through so the page
 			// can fetch updates.
@@ -363,12 +396,8 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 		// Step 5: Inject tenant ID into request header
 		r.Header.Set(tenant.TenantIDKey, string(resolved.ID))
 
-		// Step 6: Add tenant ID, slug, and display name to context
-		ctx = tenant.WithTenant(ctx, resolved.ID)
-		ctx = tenant.WithSlug(ctx, slug)
-		if resolved.DisplayName != "" {
-			ctx = tenant.WithDisplayName(ctx, resolved.DisplayName)
-		}
+		// Step 6: Add tenant ID, slug, display name, and status to context
+		ctx = m.injectTenantContext(ctx, resolved, slug)
 
 		// Step 7: Update request with new context
 		r = r.WithContext(ctx)
@@ -376,6 +405,23 @@ func (m *TenantResolverMiddleware) Handler(next http.Handler) http.Handler {
 		// Step 8: Call next handler
 		next.ServeHTTP(w, r)
 	})
+}
+
+// injectTenantContext attaches the resolved tenant ID, slug, display name, and
+// lifecycle status to the context. The status is always set so downstream
+// handlers can return status-aware responses (for example, an HTTP 503 with a
+// "still provisioning" message when the BFF login handler is reached during
+// async provisioning).
+func (m *TenantResolverMiddleware) injectTenantContext(ctx context.Context, resolved resolvedTenant, slug string) context.Context {
+	ctx = tenant.WithTenant(ctx, resolved.ID)
+	ctx = tenant.WithSlug(ctx, slug)
+	if resolved.DisplayName != "" {
+		ctx = tenant.WithDisplayName(ctx, resolved.DisplayName)
+	}
+	if resolved.Status != "" {
+		ctx = tenant.WithStatus(ctx, string(resolved.Status))
+	}
+	return ctx
 }
 
 // serveProvisioningPage renders the provisioning progress page for tenants

@@ -229,6 +229,142 @@ func TestAuthHandler_MethodNotAllowed(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
+func TestAuthHandler_TenantProvisioning_Returns503(t *testing.T) {
+	signer := newTestSigner(t)
+
+	connectorCalled := false
+	conn := &stubConnector{
+		loginFn: func(_ context.Context, _ []string, _, _ string) (connector.Identity, bool, error) {
+			connectorCalled = true
+			return connector.Identity{}, false, nil
+		},
+	}
+
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+		Connector: conn,
+		Signer:    signer,
+		Logger:    slog.Default(),
+	})
+	require.NoError(t, err)
+
+	statuses := []string{"provisioning_pending", "provisioning"}
+	for _, status := range statuses {
+		t.Run(status, func(t *testing.T) {
+			connectorCalled = false
+
+			body, _ := json.Marshal(map[string]string{
+				"email":    "user@example.com",
+				"password": "correct",
+			})
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			tid, _ := tenant.NewTenantID("acme")
+			ctx := tenant.WithTenant(req.Context(), tid)
+			ctx = tenant.WithStatus(ctx, status)
+			req = req.WithContext(ctx)
+
+			rec := httptest.NewRecorder()
+			handler.HandleLogin(rec, req)
+
+			assert.Equal(t, http.StatusServiceUnavailable, rec.Code,
+				"login during %s must return 503, not 401", status)
+			assert.False(t, connectorCalled,
+				"connector must not be called when tenant is %s", status)
+
+			var resp map[string]string
+			err := json.NewDecoder(rec.Body).Decode(&resp)
+			require.NoError(t, err)
+			assert.Contains(t, resp["error"], "still being set up",
+				"error message should mention provisioning, got %q", resp["error"])
+			assert.Equal(t, status, resp["status"], "status field should reflect tenant lifecycle")
+		})
+	}
+}
+
+func TestAuthHandler_TenantProvisioningFailed_Returns503(t *testing.T) {
+	signer := newTestSigner(t)
+
+	connectorCalled := false
+	conn := &stubConnector{
+		loginFn: func(_ context.Context, _ []string, _, _ string) (connector.Identity, bool, error) {
+			connectorCalled = true
+			return connector.Identity{}, true, nil
+		},
+	}
+
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+		Connector: conn,
+		Signer:    signer,
+		Logger:    slog.Default(),
+	})
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]string{
+		"email":    "user@example.com",
+		"password": "anything",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	tid, _ := tenant.NewTenantID("acme")
+	ctx := tenant.WithTenant(req.Context(), tid)
+	ctx = tenant.WithStatus(ctx, "provisioning_failed")
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.HandleLogin(rec, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.False(t, connectorCalled,
+		"connector must not be called when tenant provisioning failed")
+
+	var resp map[string]string
+	err = json.NewDecoder(rec.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Contains(t, resp["error"], "provisioning failed",
+		"error message should explain provisioning failure, got %q", resp["error"])
+	assert.Equal(t, "provisioning_failed", resp["status"])
+}
+
+func TestAuthHandler_TenantActive_ProceedsToAuth(t *testing.T) {
+	signer := newTestSigner(t)
+
+	conn := &stubConnector{
+		loginFn: func(_ context.Context, _ []string, username, password string) (connector.Identity, bool, error) {
+			if username == "user@example.com" && password == "correct" {
+				return connector.Identity{
+					UserID: "user-123",
+					Email:  "user@example.com",
+				}, true, nil
+			}
+			return connector.Identity{}, false, nil
+		},
+	}
+
+	handler, err := gateway.NewAuthHandler(gateway.AuthHandlerConfig{
+		Connector: conn,
+		Signer:    signer,
+		Logger:    slog.Default(),
+	})
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(map[string]string{
+		"email":    "user@example.com",
+		"password": "correct",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	tid, _ := tenant.NewTenantID("acme")
+	ctx := tenant.WithTenant(req.Context(), tid)
+	ctx = tenant.WithStatus(ctx, "active")
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	handler.HandleLogin(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code,
+		"active tenant must proceed to authentication and succeed")
+}
+
 func TestAuthHandler_EmailNotVerified_Returns403(t *testing.T) {
 	signer := newTestSigner(t)
 

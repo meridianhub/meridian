@@ -1206,8 +1206,12 @@ func TestServeHTTP(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		nextCalled := false
-		next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		capturedStatus := ""
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			nextCalled = true
+			if s, ok := tenant.StatusFromContext(r.Context()); ok {
+				capturedStatus = s
+			}
 			w.WriteHeader(http.StatusOK)
 		})
 
@@ -1216,6 +1220,155 @@ func TestServeHTTP(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, rec.Code, "should return 200 for active tenant")
 		assert.True(t, nextCalled, "next handler should be called")
+		assert.Equal(t, "active", capturedStatus,
+			"tenant resolver should inject status into context for downstream handlers")
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("login path passes through during provisioning_pending with status in context", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		pendingTenant := &domain.Tenant{
+			ID:          testTenantID,
+			DisplayName: "Acme Corp",
+			Slug:        testSlug,
+			Status:      domain.StatusProvisioningPending,
+		}
+
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(pendingTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "provisioning_pending").Return(nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "http://"+testHost+"/api/auth/login", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+		capturedStatus := ""
+		capturedTenantID := tenant.TenantID("")
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nextCalled = true
+			if s, ok := tenant.StatusFromContext(r.Context()); ok {
+				capturedStatus = s
+			}
+			if tid, ok := tenant.FromContext(r.Context()); ok {
+				capturedTenantID = tid
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.True(t, nextCalled,
+			"login handler must be reached during provisioning so it can return JSON status-aware error")
+		assert.Equal(t, "provisioning_pending", capturedStatus,
+			"status should be injected into context for the login handler")
+		assert.Equal(t, testTenantID, capturedTenantID,
+			"tenant ID should be injected into context")
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("login path passes through during provisioning_failed with status in context", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		failedTenant := &domain.Tenant{
+			ID:          testTenantID,
+			DisplayName: "Acme Corp",
+			Slug:        testSlug,
+			Status:      domain.StatusProvisioningFailed,
+		}
+
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(failedTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "provisioning_failed").Return(nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "http://"+testHost+"/api/auth/login", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+		capturedStatus := ""
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nextCalled = true
+			if s, ok := tenant.StatusFromContext(r.Context()); ok {
+				capturedStatus = s
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.True(t, nextCalled,
+			"login handler must be reached for provisioning_failed so it can return JSON error")
+		assert.Equal(t, "provisioning_failed", capturedStatus)
+
+		mockCache.AssertExpectations(t)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("non-login paths still serve provisioning page during provisioning", func(t *testing.T) {
+		mockCache := new(MockSlugCache)
+		mockRepo := new(MockTenantRepository)
+		logger := slog.Default()
+
+		pendingTenant := &domain.Tenant{
+			ID:          testTenantID,
+			DisplayName: "Acme Corp",
+			Slug:        testSlug,
+			Status:      domain.StatusProvisioning,
+		}
+
+		mockCache.On("Get", ctx, testSlug).Return(tenant.TenantID(""), "", nil)
+		mockRepo.On("GetBySlug", ctx, testSlug).Return(pendingTenant, nil)
+		mockCache.On("Set", ctx, testSlug, testTenantID, "provisioning").Return(nil)
+
+		middleware := &TenantResolverMiddleware{
+			slugCache:  mockCache,
+			tenantRepo: mockRepo,
+			baseDomain: baseDomain,
+			logger:     logger,
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "http://"+testHost+"/api/transactions", nil)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+
+		nextCalled := false
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			nextCalled = true
+		})
+
+		handler := middleware.Handler(next)
+		handler.ServeHTTP(rec, req)
+
+		assert.False(t, nextCalled,
+			"non-login paths must still be intercepted by the provisioning page during provisioning")
+		assert.Contains(t, rec.Header().Get("Content-Type"), "text/html",
+			"non-login paths should receive HTML provisioning page")
 
 		mockCache.AssertExpectations(t)
 		mockRepo.AssertExpectations(t)

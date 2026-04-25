@@ -23,6 +23,11 @@ type fakeRepo struct {
 	// schemaNotProvisioned makes FindByEmail return ErrTenantSchemaNotProvisioned
 	// for any email lookup, simulating a missing tenant schema.
 	schemaNotProvisioned bool
+
+	// Error injection fields for failure-path tests. When non-nil, the matching
+	// method returns the configured error instead of its normal result.
+	findByEmailErr   error
+	saveWithRolesErr error
 }
 
 func newFakeRepo() *fakeRepo {
@@ -47,6 +52,9 @@ func (f *fakeRepo) FindByID(_ context.Context, id uuid.UUID) (*domain.Identity, 
 }
 
 func (f *fakeRepo) FindByEmail(_ context.Context, email string) (*domain.Identity, error) {
+	if f.findByEmailErr != nil {
+		return nil, f.findByEmailErr
+	}
 	if f.schemaNotProvisioned {
 		return nil, db.ErrTenantSchemaNotProvisioned
 	}
@@ -80,6 +88,9 @@ func (f *fakeRepo) SaveIdentityWithInvitation(_ context.Context, identity *domai
 
 func (f *fakeRepo) SaveIdentityWithRoles(_ context.Context, identity *domain.Identity, roles []*domain.RoleAssignment) error {
 	f.saveWithRolesCalled = true
+	if f.saveWithRolesErr != nil {
+		return f.saveWithRolesErr
+	}
 	f.identities[identity.Email()] = identity
 	f.roles[identity.ID()] = append(f.roles[identity.ID()], roles...)
 	return nil

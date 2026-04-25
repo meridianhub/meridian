@@ -14,6 +14,9 @@ const slugContextKey contextKey = TenantSlugKey
 // displayNameContextKey is the context key for the tenant display name.
 const displayNameContextKey contextKey = TenantDisplayNameKey
 
+// statusContextKey is the context key for the tenant lifecycle status.
+const statusContextKey contextKey = TenantStatusKey
+
 // WithTenant returns a new context with the tenant ID attached.
 func WithTenant(ctx context.Context, tenantID TenantID) context.Context {
 	return context.WithValue(ctx, tenantContextKey, tenantID)
@@ -29,6 +32,15 @@ func WithDisplayName(ctx context.Context, displayName string) context.Context {
 	return context.WithValue(ctx, displayNameContextKey, displayName)
 }
 
+// WithStatus returns a new context with the tenant lifecycle status attached.
+// The value is the string form of services/tenant/domain.Status (for example
+// "active", "provisioning", "provisioning_pending", "provisioning_failed").
+// We carry it as an untyped string to avoid importing the tenant domain
+// package here (which would create a dependency cycle).
+func WithStatus(ctx context.Context, status string) context.Context {
+	return context.WithValue(ctx, statusContextKey, status)
+}
+
 // DisplayNameFromContext extracts the tenant display name from the context.
 // Returns the display name and true if present, or empty string and false if not.
 func DisplayNameFromContext(ctx context.Context) (string, bool) {
@@ -36,6 +48,17 @@ func DisplayNameFromContext(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	s, ok := ctx.Value(displayNameContextKey).(string)
+	return s, ok
+}
+
+// StatusFromContext extracts the tenant lifecycle status from the context.
+// Returns the status and true if present, or empty string and false if not.
+// The status is the string form of services/tenant/domain.Status.
+func StatusFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	s, ok := ctx.Value(statusContextKey).(string)
 	return s, ok
 }
 
@@ -117,6 +140,9 @@ func PropagateToBackground(parent context.Context) context.Context {
 	}
 	if displayName, ok := DisplayNameFromContext(parent); ok {
 		asyncCtx = WithDisplayName(asyncCtx, displayName)
+	}
+	if status, ok := StatusFromContext(parent); ok {
+		asyncCtx = WithStatus(asyncCtx, status)
 	}
 	return asyncCtx
 }
