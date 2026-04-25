@@ -84,6 +84,14 @@ func (h *SelfRegisteredAdminHook) AsPostProvisioningHook() func(ctx context.Cont
 // Provision creates the self-registered admin identity from tenant metadata.
 // If no registration metadata is present (e.g., tenant was created via API, not
 // self-registration), this is a no-op.
+//
+// Fail-hard semantics: every infrastructure or domain failure surfaces as a
+// non-nil error. The provisioning worker treats a non-nil hook error as fatal
+// (services/tenant/worker.executePostProvisioningHooks): tenant status stays
+// in provisioning and the worker transitions it to provisioning_failed instead
+// of active. This prevents an apparently-active tenant whose admin identity
+// was never created (which would surface to the user as a misleading "invalid
+// email or password" 401 on the very first login attempt).
 func (h *SelfRegisteredAdminHook) Provision(ctx context.Context, tenantID tenant.TenantID) error {
 	// Read tenant metadata to check for registration credentials.
 	metadata, err := h.tenantStore.GetMetadata(ctx, tenantID)
