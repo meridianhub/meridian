@@ -78,6 +78,14 @@ async function mockRegistrationAPIs(page: Page, options: RegisterMockOptions = {
     })
   })
 
+  // Guard rail: if a future test sets provisioningPending without a sequence,
+  // the provisioning poll would escape to the real network and become flaky.
+  if (provisioningPending && (!provisioningStatusSequence || provisioningStatusSequence.length === 0)) {
+    throw new Error(
+      'mockRegistrationAPIs: provisioningPending=true requires provisioningStatusSequence for deterministic polling',
+    )
+  }
+
   if (provisioningStatusSequence && provisioningStatusSequence.length > 0) {
     let callIndex = 0
     await page.route(/\/api\/v1\/provisioning-status/, async (route) => {
@@ -216,8 +224,10 @@ test.describe('Self-Service Onboarding - registration form', () => {
       page.getByRole('heading', { name: /Setup failed/i }),
     ).toBeVisible({ timeout: 10_000 })
     // We must NOT navigate to /login when provisioning fails - the user stays
-    // on the progress screen so they can contact support or retry.
-    await expect(page).not.toHaveURL(/\/login/)
+    // on the progress screen so they can contact support or retry. The timeout
+    // gives a stability window to catch any delayed bounce after the failed
+    // state appears.
+    await expect(page).not.toHaveURL(/\/login/, { timeout: 5_000 })
   })
 })
 
