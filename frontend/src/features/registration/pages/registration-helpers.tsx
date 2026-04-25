@@ -113,7 +113,7 @@ export function PasswordInput({ value, onChange, inputClass, error, submitted }:
           aria-describedby={hasError ? 'password-error password-hint' : 'password-strength password-hint'}
           aria-invalid={hasError ? true : undefined}
           className={`${errorClass} pr-10`}
-          minLength={8}
+          minLength={12}
         />
         <button
           type="button"
@@ -125,7 +125,7 @@ export function PasswordInput({ value, onChange, inputClass, error, submitted }:
         </button>
       </div>
       <p id="password-hint" className="mt-1 text-xs text-muted-foreground">
-        Minimum 8 characters.
+        At least 12 characters with uppercase, lowercase, and a digit.
       </p>
       {hasError ? (
         <p id="password-error" className="mt-1 text-xs text-destructive" role="alert">{error}</p>

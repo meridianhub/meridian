@@ -240,7 +240,7 @@ describe('RegisterPage', () => {
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/at least 8 characters/i)
+      expect(screen.getByRole('alert')).toHaveTextContent(/at least 12 characters/i)
     })
   })
 

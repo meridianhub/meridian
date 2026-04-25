@@ -36,12 +36,28 @@ export function validateRegistrationFields(slug: string, email: string, password
   } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
     errors.email = 'Please enter a valid email address'
   }
-  if (!password) {
-    errors.password = 'Password is required'
-  } else if (password.length < 8) {
-    errors.password = 'Password must be at least 8 characters'
+  const passwordError = validatePassword(password)
+  if (passwordError) {
+    errors.password = passwordError
   }
   return errors
+}
+
+/**
+ * Validates a password against the platform's minimum policy: at least
+ * 12 characters with one uppercase letter, one lowercase letter, and one digit.
+ *
+ * Mirrors the backend rules in shared/pkg/credentials/password.go
+ * (ValidatePasswordPolicy). Length is checked before complexity so the
+ * surfaced error matches the backend's first failure.
+ */
+export function validatePassword(password: string): string | null {
+  if (!password) return 'Password is required'
+  if (password.length < 12) return 'Password must be at least 12 characters'
+  if (!/[A-Z]/.test(password)) return 'Password must contain an uppercase letter'
+  if (!/[a-z]/.test(password)) return 'Password must contain a lowercase letter'
+  if (!/[0-9]/.test(password)) return 'Password must contain a digit'
+  return null
 }
 
 /** Returns true if the URL is HTTPS and shares the current hostname suffix. */
