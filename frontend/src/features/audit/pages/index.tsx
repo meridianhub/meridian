@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
-import { ClipboardList } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { DataTable, type DataTableQueryParams, type DataTableResult, type FilterConfig } from '@/shared/data-table'
@@ -11,6 +10,7 @@ import { usePageTitle } from '@/hooks/use-page-title'
 import { useApiClients } from '@/api/context'
 import { AuditOperation as AuditOperationEnum } from '@/api/gen/meridian/audit/v1/audit_events_pb'
 import { cn } from '@/lib/utils'
+import { AuditEmptyState } from '../components/audit-empty-state'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -158,28 +158,6 @@ function AuditDetailPanel({ entry, onClose }: AuditDetailPanelProps) {
             )}
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Audit Empty State
-// ---------------------------------------------------------------------------
-
-function AuditEmptyState() {
-  return (
-    <div
-      data-testid="empty-state"
-      className="flex flex-col items-center justify-center gap-3 py-12 px-4 text-center"
-    >
-      <ClipboardList className="size-10 text-muted-foreground" />
-      <div className="flex flex-col gap-1.5 max-w-sm">
-        <p className="text-sm font-medium text-foreground">No audit events yet</p>
-        <p className="text-sm text-muted-foreground">
-          Audit entries appear here when you create parties, update accounts, or run sagas.
-          Try creating a party to see your first event.
-        </p>
       </div>
     </div>
   )
