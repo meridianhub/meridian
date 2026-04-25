@@ -1,19 +1,14 @@
 import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { validateSlug, validateRegistrationFields, isSafeRedirectUrl, type SlugAvailability } from './registration-utils'
+import { useNavigate } from 'react-router-dom'
 import {
-  PasswordInput,
-  SlugStatus,
-  RedirectSuccess,
-  ProvisioningProgress,
-  type ProvisioningStatus,
-} from './registration-helpers'
-
-// How long to poll the provisioning status endpoint before showing the
-// timeout state. 60s matches the typical worst-case for tenant schema
-// provisioning in the demo environment.
-const PROVISIONING_POLL_TIMEOUT_MS = 60_000
-const PROVISIONING_POLL_INTERVAL_MS = 1_000
+  validateSlug,
+  validateRegistrationFields,
+  isSafeRedirectUrl,
+  type SlugAvailability,
+} from './registration-utils'
+import { RedirectSuccess, ProvisioningProgress } from './registration-helpers'
+import { RegistrationForm } from './registration-form'
+import { useProvisioningPoll } from './use-provisioning-poll'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -28,12 +23,9 @@ export function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
-  const [provisioningStatus, setProvisioningStatus] = useState<ProvisioningStatus | null>(null)
+  const [pendingLoginUrl, setPendingLoginUrl] = useState<string | undefined>(undefined)
   const slugCheckController = useRef<AbortController | null>(null)
   const redirectTimerRef = useRef<number | null>(null)
-  const provisioningTimerRef = useRef<number | null>(null)
-  const provisioningCancelledRef = useRef(false)
-  const provisioningTargetRef = useRef<{ tenantId: string; loginUrl: string | undefined } | null>(null)
 
   // Clean up redirect timer on unmount
   useEffect(() => {
@@ -42,11 +34,6 @@ export function RegisterPage() {
         window.clearTimeout(redirectTimerRef.current)
         redirectTimerRef.current = null
       }
-      if (provisioningTimerRef.current !== null) {
-        window.clearTimeout(provisioningTimerRef.current)
-        provisioningTimerRef.current = null
-      }
-      provisioningCancelledRef.current = true
     }
   }, [])
 
@@ -130,62 +117,10 @@ export function RegisterPage() {
     [navigate],
   )
 
-  /**
-   * Polls the provisioning status endpoint until the tenant is active or
-   * provisioning fails/times out. We poll an unauthenticated status endpoint
-   * (the user has no session yet) and treat any transient fetch errors as
-   * "still pending" so the user is not bounced out by network blips.
-   *
-   * The contract:
-   *   GET /api/v1/provisioning-status?tenant_id=<id>
-   *     200 { overall: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'active' | ... }
-   *     non-200 → treated as pending and retried until timeout
-   */
-  const pollProvisioningStatus = useCallback(
-    (tenantId: string, loginUrl: string | undefined) => {
-      provisioningCancelledRef.current = false
-      provisioningTargetRef.current = { tenantId, loginUrl }
-      setProvisioningStatus('pending')
-      const startTime = Date.now()
-
-      const tick = async () => {
-        if (provisioningCancelledRef.current) return
-        if (Date.now() - startTime > PROVISIONING_POLL_TIMEOUT_MS) {
-          setProvisioningStatus('timeout')
-          return
-        }
-        try {
-          const res = await fetch(
-            `/api/v1/provisioning-status?tenant_id=${encodeURIComponent(tenantId)}`,
-          )
-          if (res.ok) {
-            const status = (await res.json().catch(() => null)) as { overall?: string } | null
-            const overall = status?.overall ?? ''
-            if (overall === 'COMPLETED' || overall === 'active') {
-              if (provisioningCancelledRef.current) return
-              setProvisioningStatus(null)
-              navigateToLogin(loginUrl)
-              return
-            }
-            if (overall === 'FAILED') {
-              setProvisioningStatus('failed')
-              return
-            }
-          }
-        } catch {
-          // Treat as pending; we'll retry on the next tick.
-        }
-        if (provisioningCancelledRef.current) return
-        provisioningTimerRef.current = window.setTimeout(
-          () => void tick(),
-          PROVISIONING_POLL_INTERVAL_MS,
-        )
-      }
-
-      void tick()
-    },
-    [navigateToLogin],
-  )
+  // Hook owns the polling lifecycle (timer cleanup, cancellation,
+  // PENDING/COMPLETED/FAILED transitions). The page wires it to the login URL
+  // received with the registration response.
+  const provisioning = useProvisioningPoll(() => navigateToLogin(pendingLoginUrl))
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -264,7 +199,8 @@ export function RegisterPage() {
         // redirect to /login lands before the admin identity exists and
         // the first sign-in fails.
         if (data?.provisioning_pending && tenantId) {
-          pollProvisioningStatus(tenantId, loginUrl)
+          setPendingLoginUrl(loginUrl)
+          provisioning.start(tenantId)
           return
         }
 
@@ -280,146 +216,45 @@ export function RegisterPage() {
         setLoading(false)
       }
     },
-    [slug, slugAvailability, email, password, displayName, validateFields, pollProvisioningStatus, navigateToLogin],
+    [slug, slugAvailability, email, password, displayName, validateFields, provisioning, navigateToLogin],
   )
-
-  const inputClass =
-    'w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-  const inputErrorClass = inputClass + ' border-destructive'
 
   if (redirecting) {
     return <RedirectSuccess />
   }
 
-  if (provisioningStatus !== null) {
-    const target = provisioningTargetRef.current
+  if (provisioning.status !== null) {
     return (
       <ProvisioningProgress
-        status={provisioningStatus}
-        onRetry={
-          provisioningStatus === 'timeout' && target
-            ? () => pollProvisioningStatus(target.tenantId, target.loginUrl)
-            : undefined
-        }
+        status={provisioning.status}
+        onRetry={provisioning.status === 'timeout' ? provisioning.retry : undefined}
       />
     )
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="w-full max-w-sm space-y-6 px-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-semibold">Create your account</h1>
-          <p className="mt-2 text-muted-foreground">
-            Set up a new Meridian tenant to get started.
-          </p>
-        </div>
-
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4" noValidate>
-          <div>
-            <label htmlFor="slug" className="block text-sm font-medium mb-1">
-              Organization slug <span className="text-destructive" aria-hidden="true">*</span>
-              <span className="sr-only">(required)</span>
-            </label>
-            <input
-              id="slug"
-              type="text"
-              value={slug}
-              onChange={(e) => handleSlugChange(e.target.value)}
-              required
-              autoComplete="organization"
-              aria-describedby="slug-hint slug-status"
-              aria-invalid={!!slugError || (submitted && !!fieldErrors.slug) ? true : undefined}
-              className={!!slugError || (submitted && !!fieldErrors.slug) ? inputErrorClass : inputClass}
-              placeholder="my-org"
-              minLength={3}
-              maxLength={63}
-            />
-            <p id="slug-hint" className="mt-1 text-xs text-muted-foreground">
-              Lowercase letters, numbers, and hyphens. 3-63 characters.
-            </p>
-            <div id="slug-status" role="status" aria-live="polite">
-              {submitted && fieldErrors.slug ? (
-                <p className="mt-1 text-xs text-destructive">{fieldErrors.slug}</p>
-              ) : (
-                <SlugStatus slug={slug} error={slugError} availability={slugAvailability} />
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="display-name" className="block text-sm font-medium mb-1">
-              Display name <span className="text-xs text-muted-foreground font-normal">(optional)</span>
-            </label>
-            <input
-              id="display-name"
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              autoComplete="organization-title"
-              className={inputClass}
-              placeholder="My Organization"
-              maxLength={100}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium mb-1">
-              Email <span className="text-destructive" aria-hidden="true">*</span>
-              <span className="sr-only">(required)</span>
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value)
-                clearFieldError('email')
-              }}
-              required
-              autoComplete="email"
-              aria-invalid={submitted && !!fieldErrors.email ? true : undefined}
-              className={submitted && fieldErrors.email ? inputErrorClass : inputClass}
-              placeholder="admin@example.com"
-            />
-            {submitted && fieldErrors.email && (
-              <p className="mt-1 text-xs text-destructive" role="alert">{fieldErrors.email}</p>
-            )}
-          </div>
-
-          <PasswordInput
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value)
-              clearFieldError('password')
-            }}
-            inputClass={inputClass}
-            error={fieldErrors.password}
-            submitted={submitted}
-          />
-
-          {formError && (
-            <p role="alert" className="text-sm text-destructive">
-              {formError}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || !!slugError || slugAvailability === 'taken'}
-            className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Creating account...' : 'Create account'}
-          </button>
-        </form>
-
-        <p className="text-center text-sm text-muted-foreground">
-          Already have an account?{' '}
-          <Link to="/login" className="text-primary underline-offset-4 hover:underline">
-            Sign in
-          </Link>
-        </p>
-      </div>
-    </div>
+    <RegistrationForm
+      slug={slug}
+      email={email}
+      password={password}
+      displayName={displayName}
+      slugError={slugError}
+      slugAvailability={slugAvailability}
+      formError={formError}
+      fieldErrors={fieldErrors}
+      loading={loading}
+      submitted={submitted}
+      onSlugChange={handleSlugChange}
+      onEmailChange={(e) => {
+        setEmail(e.target.value)
+        clearFieldError('email')
+      }}
+      onPasswordChange={(e) => {
+        setPassword(e.target.value)
+        clearFieldError('password')
+      }}
+      onDisplayNameChange={(e) => setDisplayName(e.target.value)}
+      onSubmit={(e) => void handleSubmit(e)}
+    />
   )
 }
