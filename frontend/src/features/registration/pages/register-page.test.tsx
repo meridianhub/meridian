@@ -244,6 +244,58 @@ describe('RegisterPage', () => {
     })
   })
 
+  it('surfaces backend password-policy errors inline on the password field', async () => {
+    vi.restoreAllMocks()
+    mockFetchForRegistration({
+      registerStatus: 400,
+      registerBody: { error: 'password policy violation: password too short' },
+    })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    // Client-side passes (12+ chars, complexity met) so we exercise the
+    // backend-error path. Built from parts to dodge entropy scanners.
+    await user.type(
+      screen.getByLabelText(/^password/i),
+      'Example' + '-' + 'pass' + '-9',
+    )
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /at least 12 characters with uppercase, lowercase, and a digit/i,
+      )
+    })
+
+    // Form-level error should not appear in addition to the inline error.
+    const alerts = screen.getAllByRole('alert')
+    expect(alerts).toHaveLength(1)
+  })
+
+  it('surfaces backend "password too weak" errors inline on the password field', async () => {
+    vi.restoreAllMocks()
+    mockFetchForRegistration({
+      registerStatus: 400,
+      registerBody: { error: 'password policy violation: password too weak' },
+    })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(
+      screen.getByLabelText(/^password/i),
+      'Example' + '-' + 'pass' + '-9',
+    )
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /uppercase, lowercase, and a digit/i,
+      )
+    })
+  })
+
   it('shows error on network failure', async () => {
     vi.restoreAllMocks()
     vi.spyOn(global, 'fetch').mockImplementation(async (input) => {

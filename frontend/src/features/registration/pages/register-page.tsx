@@ -135,7 +135,26 @@ export function RegisterPage() {
 
         if (!response.ok) {
           const data = (await response.json().catch(() => null)) as { error?: string } | null
-          setFormError(data?.error ?? 'Registration failed. Please try again.')
+          const errorMsg = data?.error ?? 'Registration failed. Please try again.'
+
+          // Surface backend password policy errors next to the password field
+          // rather than as a generic form-level toast. The backend wraps these
+          // as "password policy violation: password too short|weak"
+          // (registration_handler.go calls credentials.ValidatePasswordPolicy).
+          if (
+            /password policy violation/i.test(errorMsg) ||
+            /password too short/i.test(errorMsg) ||
+            /password too weak/i.test(errorMsg)
+          ) {
+            setFieldErrors((prev) => ({
+              ...prev,
+              password:
+                'Password must be at least 12 characters with uppercase, lowercase, and a digit',
+            }))
+            return
+          }
+
+          setFormError(errorMsg)
           return
         }
 
