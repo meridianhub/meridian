@@ -42,6 +42,10 @@ type MockProvisioner struct {
 	// PurgeCalls tracks calls to PurgeSchemas for verification
 	PurgeCalls []tenant.TenantID
 
+	// ReconciliationCalls tracks calls to ReconcileMigrations for verification.
+	// Each entry is the tenantID argument; nil entries indicate "all tenants" reconciliation.
+	ReconciliationCalls []*tenant.TenantID
+
 	// DataRetentionPeriod for testing retention enforcement
 	DataRetentionPeriod time.Duration
 
@@ -63,6 +67,7 @@ func NewMockProvisioner(services []ServiceConfig) *MockProvisioner {
 		ProvisioningCalls:     make([]tenant.TenantID, 0),
 		DeprovisioningCalls:   make([]tenant.TenantID, 0),
 		PurgeCalls:            make([]tenant.TenantID, 0),
+		ReconciliationCalls:   make([]*tenant.TenantID, 0),
 		DataRetentionPeriod:   0, // No retention period by default for testing
 	}
 }
@@ -288,10 +293,20 @@ func (m *MockProvisioner) SetStatus(status *ProvisioningStatus) {
 
 // ReconcileMigrations simulates reconciling migrations for existing tenants.
 // In the mock, this is a no-op that returns success. Tests can verify calls
-// via ReconciliationCalls if needed.
+// via ReconciliationCalls.
 func (m *MockProvisioner) ReconcileMigrations(_ context.Context, tenantID *tenant.TenantID) (int, []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Record the call for test verification. Copy the tenant ID so tests can
+	// distinguish between separate "single tenant" calls without the caller's
+	// pointer aliasing affecting recorded history.
+	if tenantID != nil {
+		copied := *tenantID
+		m.ReconciliationCalls = append(m.ReconciliationCalls, &copied)
+	} else {
+		m.ReconciliationCalls = append(m.ReconciliationCalls, nil)
+	}
 
 	if tenantID != nil {
 		// Single tenant reconciliation
