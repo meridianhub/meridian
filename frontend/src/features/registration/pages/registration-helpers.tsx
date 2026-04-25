@@ -46,6 +46,79 @@ export function RedirectSuccess() {
   )
 }
 
+export type ProvisioningStatus = 'pending' | 'timeout' | 'failed'
+
+interface ProvisioningProgressProps {
+  status: ProvisioningStatus
+  onRetry?: () => void
+}
+
+/**
+ * Visible while the tenant is being provisioned asynchronously after
+ * registration. Shows a spinner during the wait and surfaces actionable
+ * messaging if the wait times out or the saga fails.
+ */
+export function ProvisioningProgress({ status, onRetry }: ProvisioningProgressProps) {
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div
+        className="w-full max-w-sm space-y-4 px-4 text-center"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {status === 'pending' && (
+          <>
+            <Spinner />
+            <h1 className="text-2xl font-semibold">Setting up your tenant...</h1>
+            <p className="text-muted-foreground">
+              We are creating your organization. This usually takes less than a minute.
+            </p>
+          </>
+        )}
+        {status === 'timeout' && (
+          <>
+            <h1 className="text-2xl font-semibold">Still working on it</h1>
+            <p className="text-muted-foreground">
+              Provisioning is taking longer than expected. You can try signing in
+              shortly, or refresh to keep waiting.
+            </p>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Keep waiting
+              </button>
+            )}
+          </>
+        )}
+        {status === 'failed' && (
+          <>
+            <h1 className="text-2xl font-semibold text-destructive">
+              Setup failed
+            </h1>
+            <p className="text-muted-foreground">
+              We could not finish provisioning your tenant. Please contact support
+              or try registering again.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Spinner() {
+  return (
+    <div
+      className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary"
+      aria-hidden="true"
+    />
+  )
+}
+
 export function SlugStatus({ slug, error, availability }: SlugStatusProps) {
   if (!slug) return null
   if (error) {
@@ -113,7 +186,7 @@ export function PasswordInput({ value, onChange, inputClass, error, submitted }:
           aria-describedby={hasError ? 'password-error password-hint' : 'password-strength password-hint'}
           aria-invalid={hasError ? true : undefined}
           className={`${errorClass} pr-10`}
-          minLength={8}
+          minLength={12}
         />
         <button
           type="button"
@@ -125,7 +198,7 @@ export function PasswordInput({ value, onChange, inputClass, error, submitted }:
         </button>
       </div>
       <p id="password-hint" className="mt-1 text-xs text-muted-foreground">
-        Minimum 8 characters.
+        At least 12 characters with uppercase, lowercase, and a digit.
       </p>
       {hasError ? (
         <p id="password-error" className="mt-1 text-xs text-destructive" role="alert">{error}</p>

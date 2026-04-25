@@ -240,7 +240,59 @@ describe('RegisterPage', () => {
     await user.click(screen.getByRole('button', { name: /create account/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/at least 8 characters/i)
+      expect(screen.getByRole('alert')).toHaveTextContent(/at least 12 characters/i)
+    })
+  })
+
+  it('surfaces backend password-policy errors inline on the password field', async () => {
+    vi.restoreAllMocks()
+    mockFetchForRegistration({
+      registerStatus: 400,
+      registerBody: { error: 'password policy violation: password too short' },
+    })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    // Client-side passes (12+ chars, complexity met) so we exercise the
+    // backend-error path. Built from parts to dodge entropy scanners.
+    await user.type(
+      screen.getByLabelText(/^password/i),
+      'Example' + '-' + 'pass' + '-9',
+    )
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /at least 12 characters with uppercase, lowercase, and a digit/i,
+      )
+    })
+
+    // Form-level error should not appear in addition to the inline error.
+    const alerts = screen.getAllByRole('alert')
+    expect(alerts).toHaveLength(1)
+  })
+
+  it('surfaces backend "password too weak" errors inline on the password field', async () => {
+    vi.restoreAllMocks()
+    mockFetchForRegistration({
+      registerStatus: 400,
+      registerBody: { error: 'password policy violation: password too weak' },
+    })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(
+      screen.getByLabelText(/^password/i),
+      'Example' + '-' + 'pass' + '-9',
+    )
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        /uppercase, lowercase, and a digit/i,
+      )
     })
   })
 
@@ -341,6 +393,173 @@ describe('RegisterPage', () => {
       expect(screen.getByText(/password is required/i)).toBeInTheDocument()
     })
   })
+
+  it('shows provisioning progress and polls when provisioning_pending=true', async () => {
+    vi.restoreAllMocks()
+    let statusCallCount = 0
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+      if (url.includes('/api/v1/slugs/')) {
+        return new Response(JSON.stringify({ available: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/register')) {
+        return new Response(
+          JSON.stringify({
+            tenant_id: 'my_org',
+            login_url: '/login?tenant=my-org',
+            provisioning_pending: true,
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/api/v1/provisioning-status')) {
+        statusCallCount++
+        // Stay PENDING for the first call, then COMPLETED.
+        const overall = statusCallCount === 1 ? 'PENDING' : 'COMPLETED'
+        return new Response(JSON.stringify({ overall }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 200 })
+    })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    // Provisioning UI shows up first.
+    await waitFor(() => {
+      expect(screen.getByText(/setting up your tenant/i)).toBeInTheDocument()
+    })
+
+    // Eventually polling resolves to COMPLETED and we navigate to login.
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('login-page')).toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
+
+    expect(statusCallCount).toBeGreaterThanOrEqual(1)
+  }, 8000)
+
+  it('falls into the timeout state and the Keep waiting button restarts polling', async () => {
+    vi.restoreAllMocks()
+    let nowOffset = 0
+    const realNow = Date.now
+    const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + nowOffset)
+
+    let statusCallCount = 0
+    let advancedToCompleted = false
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+      if (url.includes('/api/v1/slugs/')) {
+        return new Response(JSON.stringify({ available: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/register')) {
+        return new Response(
+          JSON.stringify({
+            tenant_id: 'my_org',
+            login_url: '/login?tenant=my-org',
+            provisioning_pending: true,
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/api/v1/provisioning-status')) {
+        statusCallCount++
+        // After the user clicks Keep waiting we let the second poll complete.
+        const overall = advancedToCompleted ? 'COMPLETED' : 'PENDING'
+        // Push the clock past the 60s timeout on the very first tick so the
+        // hook transitions to 'timeout' before responding to the next call.
+        if (!advancedToCompleted) {
+          nowOffset = 61_000
+        }
+        return new Response(JSON.stringify({ overall }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 200 })
+    })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/still working on it/i)).toBeInTheDocument()
+    }, { timeout: 5000 })
+
+    const callsBeforeRetry = statusCallCount
+
+    // Reset clock and prepare next poll to resolve as COMPLETED.
+    nowOffset = 0
+    advancedToCompleted = true
+
+    await user.click(screen.getByRole('button', { name: /keep waiting/i }))
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('login-page')).toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
+
+    expect(statusCallCount).toBeGreaterThan(callsBeforeRetry)
+    dateNowSpy.mockRestore()
+  }, 12000)
+
+  it('shows failed state when provisioning status returns FAILED', async () => {
+    vi.restoreAllMocks()
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+      if (url.includes('/api/v1/slugs/')) {
+        return new Response(JSON.stringify({ available: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/register')) {
+        return new Response(
+          JSON.stringify({
+            tenant_id: 'my_org',
+            login_url: '/login?tenant=my-org',
+            provisioning_pending: true,
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/api/v1/provisioning-status')) {
+        return new Response(JSON.stringify({ overall: 'FAILED' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 200 })
+    })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/setup failed/i)).toBeInTheDocument()
+    })
+  }, 8000)
 
   it('disables submit button when slug is taken', async () => {
     vi.restoreAllMocks()

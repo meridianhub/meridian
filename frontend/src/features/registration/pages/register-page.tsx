@@ -1,7 +1,14 @@
 import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { validateSlug, validateRegistrationFields, isSafeRedirectUrl, type SlugAvailability } from './registration-utils'
-import { PasswordInput, SlugStatus, RedirectSuccess } from './registration-helpers'
+import { useNavigate } from 'react-router-dom'
+import {
+  validateSlug,
+  validateRegistrationFields,
+  isSafeRedirectUrl,
+  type SlugAvailability,
+} from './registration-utils'
+import { RedirectSuccess, ProvisioningProgress } from './registration-helpers'
+import { RegistrationForm } from './registration-form'
+import { useProvisioningPoll } from './use-provisioning-poll'
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -16,6 +23,7 @@ export function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [pendingLoginUrl, setPendingLoginUrl] = useState<string | undefined>(undefined)
   const slugCheckController = useRef<AbortController | null>(null)
   const redirectTimerRef = useRef<number | null>(null)
 
@@ -94,6 +102,26 @@ export function RegisterPage() {
     return Object.keys(errors).length === 0
   }, [slug, email, password])
 
+  const navigateToLogin = useCallback(
+    (loginUrl: string | undefined) => {
+      if (loginUrl && isSafeRedirectUrl(loginUrl)) {
+        setRedirecting(true)
+        redirectTimerRef.current = window.setTimeout(() => {
+          window.location.href = loginUrl
+        }, 1500)
+      } else {
+        const fallbackPath = loginUrl && !loginUrl.startsWith('http') ? loginUrl : '/login?registered=1'
+        void navigate(fallbackPath)
+      }
+    },
+    [navigate],
+  )
+
+  // Hook owns the polling lifecycle (timer cleanup, cancellation,
+  // PENDING/COMPLETED/FAILED transitions). The page wires it to the login URL
+  // received with the registration response.
+  const provisioning = useProvisioningPoll(() => navigateToLogin(pendingLoginUrl))
+
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault()
@@ -135,25 +163,48 @@ export function RegisterPage() {
 
         if (!response.ok) {
           const data = (await response.json().catch(() => null)) as { error?: string } | null
-          setFormError(data?.error ?? 'Registration failed. Please try again.')
+          const errorMsg = data?.error ?? 'Registration failed. Please try again.'
+
+          // Surface backend password policy errors next to the password field
+          // rather than as a generic form-level toast. The backend wraps these
+          // as "password policy violation: password too short|weak"
+          // (registration_handler.go calls credentials.ValidatePasswordPolicy).
+          if (
+            /password policy violation/i.test(errorMsg) ||
+            /password too short/i.test(errorMsg) ||
+            /password too weak/i.test(errorMsg)
+          ) {
+            setFieldErrors((prev) => ({
+              ...prev,
+              password:
+                'Password must be at least 12 characters with uppercase, lowercase, and a digit',
+            }))
+            return
+          }
+
+          setFormError(errorMsg)
           return
         }
 
         const data = (await response.json().catch(() => null)) as {
           tenant_id?: string
           login_url?: string
+          provisioning_pending?: boolean
         } | null
         const loginUrl = typeof data?.login_url === 'string' ? data.login_url : undefined
+        const tenantId = typeof data?.tenant_id === 'string' ? data.tenant_id : undefined
 
-        if (loginUrl && isSafeRedirectUrl(loginUrl)) {
-          setRedirecting(true)
-          redirectTimerRef.current = window.setTimeout(() => {
-            window.location.href = loginUrl
-          }, 1500)
-        } else {
-          const fallbackPath = (loginUrl && !loginUrl.startsWith('http')) ? loginUrl : '/login?registered=1'
-          void navigate(fallbackPath)
+        // When the backend reports async provisioning, hold the user on a
+        // progress screen until provisioning completes. Otherwise the
+        // redirect to /login lands before the admin identity exists and
+        // the first sign-in fails.
+        if (data?.provisioning_pending && tenantId) {
+          setPendingLoginUrl(loginUrl)
+          provisioning.start(tenantId)
+          return
         }
+
+        navigateToLogin(loginUrl)
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           setFormError('Registration timed out. Please try again.')
@@ -165,132 +216,45 @@ export function RegisterPage() {
         setLoading(false)
       }
     },
-    [slug, slugAvailability, email, password, displayName, navigate, validateFields],
+    [slug, slugAvailability, email, password, displayName, validateFields, provisioning, navigateToLogin],
   )
-
-  const inputClass =
-    'w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-  const inputErrorClass = inputClass + ' border-destructive'
 
   if (redirecting) {
     return <RedirectSuccess />
   }
 
+  if (provisioning.status !== null) {
+    return (
+      <ProvisioningProgress
+        status={provisioning.status}
+        onRetry={provisioning.status === 'timeout' ? provisioning.retry : undefined}
+      />
+    )
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="w-full max-w-sm space-y-6 px-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-semibold">Create your account</h1>
-          <p className="mt-2 text-muted-foreground">
-            Set up a new Meridian tenant to get started.
-          </p>
-        </div>
-
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4" noValidate>
-          <div>
-            <label htmlFor="slug" className="block text-sm font-medium mb-1">
-              Organization slug <span className="text-destructive" aria-hidden="true">*</span>
-              <span className="sr-only">(required)</span>
-            </label>
-            <input
-              id="slug"
-              type="text"
-              value={slug}
-              onChange={(e) => handleSlugChange(e.target.value)}
-              required
-              autoComplete="organization"
-              aria-describedby="slug-hint slug-status"
-              aria-invalid={!!slugError || (submitted && !!fieldErrors.slug) ? true : undefined}
-              className={!!slugError || (submitted && !!fieldErrors.slug) ? inputErrorClass : inputClass}
-              placeholder="my-org"
-              minLength={3}
-              maxLength={63}
-            />
-            <p id="slug-hint" className="mt-1 text-xs text-muted-foreground">
-              Lowercase letters, numbers, and hyphens. 3-63 characters.
-            </p>
-            <div id="slug-status" role="status" aria-live="polite">
-              {submitted && fieldErrors.slug ? (
-                <p className="mt-1 text-xs text-destructive">{fieldErrors.slug}</p>
-              ) : (
-                <SlugStatus slug={slug} error={slugError} availability={slugAvailability} />
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="display-name" className="block text-sm font-medium mb-1">
-              Display name <span className="text-xs text-muted-foreground font-normal">(optional)</span>
-            </label>
-            <input
-              id="display-name"
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              autoComplete="organization-title"
-              className={inputClass}
-              placeholder="My Organization"
-              maxLength={100}
-            />
-          </div>
-
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium mb-1">
-              Email <span className="text-destructive" aria-hidden="true">*</span>
-              <span className="sr-only">(required)</span>
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value)
-                clearFieldError('email')
-              }}
-              required
-              autoComplete="email"
-              aria-invalid={submitted && !!fieldErrors.email ? true : undefined}
-              className={submitted && fieldErrors.email ? inputErrorClass : inputClass}
-              placeholder="admin@example.com"
-            />
-            {submitted && fieldErrors.email && (
-              <p className="mt-1 text-xs text-destructive" role="alert">{fieldErrors.email}</p>
-            )}
-          </div>
-
-          <PasswordInput
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value)
-              clearFieldError('password')
-            }}
-            inputClass={inputClass}
-            error={fieldErrors.password}
-            submitted={submitted}
-          />
-
-          {formError && (
-            <p role="alert" className="text-sm text-destructive">
-              {formError}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || !!slugError || slugAvailability === 'taken'}
-            className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Creating account...' : 'Create account'}
-          </button>
-        </form>
-
-        <p className="text-center text-sm text-muted-foreground">
-          Already have an account?{' '}
-          <Link to="/login" className="text-primary underline-offset-4 hover:underline">
-            Sign in
-          </Link>
-        </p>
-      </div>
-    </div>
+    <RegistrationForm
+      slug={slug}
+      email={email}
+      password={password}
+      displayName={displayName}
+      slugError={slugError}
+      slugAvailability={slugAvailability}
+      formError={formError}
+      fieldErrors={fieldErrors}
+      loading={loading}
+      submitted={submitted}
+      onSlugChange={handleSlugChange}
+      onEmailChange={(e) => {
+        setEmail(e.target.value)
+        clearFieldError('email')
+      }}
+      onPasswordChange={(e) => {
+        setPassword(e.target.value)
+        clearFieldError('password')
+      }}
+      onDisplayNameChange={(e) => setDisplayName(e.target.value)}
+      onSubmit={(e) => void handleSubmit(e)}
+    />
   )
 }
