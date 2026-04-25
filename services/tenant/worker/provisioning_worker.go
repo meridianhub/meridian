@@ -150,8 +150,16 @@ func applyConfigDefaults(config Config) Config {
 // It runs until ctx is cancelled or Stop() is called.
 // The method blocks and should be run in a separate goroutine.
 //
-// On startup, it recovers any tenants that were stuck in PROVISIONING status
-// from a previous worker crash. This ensures they get re-queued for provisioning.
+// On startup, it performs two best-effort passes before entering the polling loop:
+//  1. Recover any tenants stuck in PROVISIONING status from a previous worker crash,
+//     re-queuing them for provisioning.
+//  2. Reconcile migrations against all active tenants, applying any new migration
+//     files that were added since each tenant was originally provisioned. This
+//     allows new schema additions (e.g. audit tables) to roll out to existing
+//     tenants on the next deploy without requiring a manual gRPC trigger.
+//
+// Both passes log errors but never block the worker from starting - a failed
+// reconciliation should not stop the worker from processing pending tenants.
 func (w *ProvisioningWorker) Start(ctx context.Context) {
 	// Recover any tenants stuck in PROVISIONING status from previous worker crash.
 	// This is best-effort - we log errors but continue starting the worker.
@@ -161,6 +169,12 @@ func (w *ProvisioningWorker) Start(ctx context.Context) {
 	} else if recoveredCount > 0 {
 		w.logger.Info("startup recovery completed", "recovered_count", recoveredCount)
 	}
+
+	// Reconcile migrations across all active tenants. This applies new migration
+	// files (e.g. the identity audit_log/audit_outbox tables) to schemas that
+	// were provisioned before those migrations existed. Best-effort - per-tenant
+	// errors are logged but do not prevent the worker from starting.
+	w.reconcileMigrationsOnStartup(ctx)
 
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
@@ -595,6 +609,36 @@ var permanentPatterns = []string{
 	"invalid tenant", // Specific provisioner validation error
 	"already active", // Tenant already provisioned
 	"deprovisioned",  // Tenant is deprovisioned
+}
+
+// reconcileMigrationsOnStartup invokes the provisioner's ReconcileMigrations against
+// all active tenants. This applies any new migration files that were added since the
+// tenant was originally provisioned.
+//
+// Best-effort: per-tenant errors are logged but never propagated. The method panics
+// recovery so a misbehaving provisioner cannot prevent worker startup.
+func (w *ProvisioningWorker) reconcileMigrationsOnStartup(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			w.logger.Error("panic during startup migration reconciliation",
+				"panic", r)
+		}
+	}()
+
+	w.logger.Info("starting migration reconciliation for active tenants")
+
+	reconciledCount, errs := w.provisioner.ReconcileMigrations(ctx, nil)
+
+	if len(errs) > 0 {
+		w.logger.Warn("startup migration reconciliation completed with errors",
+			"reconciled_count", reconciledCount,
+			"error_count", len(errs),
+			"errors", errs)
+		return
+	}
+
+	w.logger.Info("startup migration reconciliation completed",
+		"reconciled_count", reconciledCount)
 }
 
 // RecoverStuckTenants resets tenants that have been stuck in PROVISIONING status

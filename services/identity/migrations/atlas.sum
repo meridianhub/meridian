@@ -1,4 +1,4 @@
-h1:HbreHZ7DfYjRRTYEAvjljVJTg+KizbMvh1A0wMA0WcU=
+h1:c25TZhcUPvpzfYUa0V6OPPg1/HQbd7kkUtN8519OZdM=
 20260302000001_initial.sql h1:SsQN4cGTrm/6qs12GD9YXoSO6QyKTIpNZrM+4rRBWJA=
 20260326000001_add_tenant_id.sql h1:+/NF9LBhT7EjKVqu5gxY1B+vJ+YDM9acG8lLSXGJEWs=
 20260326000002_add_tenant_id_indexes.sql h1:Ov5Wfsl+MTIrtNdnqdh9p5qGpaeBW/wBPXILN4JvuvM=
@@ -8,3 +8,4 @@ h1:HbreHZ7DfYjRRTYEAvjljVJTg+KizbMvh1A0wMA0WcU=
 20260327000004_password_reset_tokens.sql h1:KbLBrcNV5fCjyj04r6YNETLkNXg1dwSUGL4ZHk1pqqQ=
 20260327000005_drop_role_constraint.sql h1:d4mxJFQHkcJEtDEZ+ztR+U1j7Z47eud+KorVVr50TUQ=
 20260327000006_add_role_constraint.sql h1:WAiUQF0nKzDyrc506KuT1RGEkVeWbMEIfPYd/c+gfuM=
+20260425000001_audit_system.sql h1:1LjVA/FeCTwjkuQqroCA03dFlmClLKxd/1VAwJjFduo=
