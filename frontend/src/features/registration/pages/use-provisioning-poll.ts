@@ -39,6 +39,12 @@ export function useProvisioningPoll(
   const timerRef = useRef<number | null>(null)
   const cancelledRef = useRef(false)
   const targetRef = useRef<string | null>(null)
+  // Generation guard: each call to start() bumps this counter. Async ticks
+  // captured by an older generation bail out before mutating state, so a
+  // stale in-flight fetch from a previous run cannot race the current loop
+  // (e.g. user clicks 'Keep waiting' just as the previous loop's tick was
+  // about to fire setStatus('timeout')).
+  const pollGenerationRef = useRef(0)
   // Always read the freshest onComplete in async ticks without re-running the
   // poll loop. The ref is updated in an effect so render stays pure.
   const onCompleteRef = useRef(onComplete)
@@ -59,14 +65,26 @@ export function useProvisioningPoll(
   }, [])
 
   const startPolling = useCallback((tenantId: string) => {
+    // Cancel any prior loop before starting a new one. Bumping the generation
+    // invalidates ticks already queued by the previous run; clearing the
+    // timer drops the next-scheduled poll.
+    pollGenerationRef.current += 1
+    const generation = pollGenerationRef.current
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+
     cancelledRef.current = false
     targetRef.current = tenantId
     setStatus('pending')
     const startTime = Date.now()
 
+    const isStale = () => cancelledRef.current || generation !== pollGenerationRef.current
+
     const tick = async () => {
-      if (cancelledRef.current) return
-      if (Date.now() - startTime > PROVISIONING_POLL_TIMEOUT_MS) {
+      if (isStale()) return
+      if (Date.now() - startTime >= PROVISIONING_POLL_TIMEOUT_MS) {
         setStatus('timeout')
         return
       }
@@ -86,12 +104,13 @@ export function useProvisioningPoll(
             overall === 'active' ||
             overall === 'TENANT_STATUS_ACTIVE'
           ) {
-            if (cancelledRef.current) return
+            if (isStale()) return
             setStatus(null)
             onCompleteRef.current()
             return
           }
           if (overall === 'FAILED' || overall === 'TENANT_STATUS_PROVISIONING_FAILED') {
+            if (isStale()) return
             setStatus('failed')
             return
           }
@@ -99,7 +118,7 @@ export function useProvisioningPoll(
       } catch {
         // Treat as pending; we'll retry on the next tick.
       }
-      if (cancelledRef.current) return
+      if (isStale()) return
       timerRef.current = window.setTimeout(
         () => void tick(),
         PROVISIONING_POLL_INTERVAL_MS,
