@@ -230,4 +230,33 @@
   body {
     @apply bg-background text-foreground;
     }
+
+  /*
+   * Theme-aware autofill styling.
+   *
+   * Browsers (Chrome, Safari) override input backgrounds with a pale blue and
+   * dark text when autofill is applied, regardless of the active theme. Bind
+   * the autofill background and text color to the theme variables so /register,
+   * /login, and any future autofilled inputs render correctly in light and dark
+   * mode.
+   *
+   * - The inset box-shadow trick repaints the autofill background using the
+   *   active theme's --background.
+   * - -webkit-text-fill-color and caret-color follow --foreground.
+   * - The 5000s transition is a known workaround for a Chrome regression where
+   *   the box-shadow alone briefly flashes the default autofill color before
+   *   settling. The transition delays the browser's repaint long enough for
+   *   the override to take effect.
+   */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active,
+  textarea:-webkit-autofill,
+  select:-webkit-autofill {
+    -webkit-text-fill-color: var(--foreground);
+    -webkit-box-shadow: 0 0 0 1000px var(--background) inset;
+    caret-color: var(--foreground);
+    transition: background-color 5000s ease-in-out 0s;
+  }
 }
