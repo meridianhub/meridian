@@ -36,9 +36,12 @@ export function useProvisioningPoll(
   const timerRef = useRef<number | null>(null)
   const cancelledRef = useRef(false)
   const targetRef = useRef<string | null>(null)
-  // Always read the freshest onComplete in async ticks without re-running the loop.
+  // Always read the freshest onComplete in async ticks without re-running the
+  // poll loop. The ref is updated in an effect so render stays pure.
   const onCompleteRef = useRef(onComplete)
-  onCompleteRef.current = onComplete
+  useEffect(() => {
+    onCompleteRef.current = onComplete
+  }, [onComplete])
 
   // Cancel any pending tick on unmount so React state updates don't fire on
   // an unmounted component.
