@@ -120,6 +120,16 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject login attempts against tenants that are not yet operational. The
+	// tenant resolver middleware allows /api/auth/login through during async
+	// provisioning so this handler can return a JSON status-aware error
+	// instead of HTML, distinguishing "still being set up" from "wrong
+	// password" (which would otherwise confuse self-registered users).
+	if status, ok := tenant.StatusFromContext(ctx); ok && status != "" && status != tenantStatusActive {
+		h.handleNonActiveTenant(ctx, w, tenantID, status)
+		return
+	}
+
 	// Validate credentials and sign JWT.
 	tokenStr, identity, err := h.authenticateAndSign(ctx, tenantID, req)
 	if err != nil {
@@ -165,6 +175,44 @@ func (h *AuthHandler) authenticateAndSign(ctx context.Context, tenantID tenant.T
 
 // errInvalidCredentials is a sentinel for invalid email/password.
 var errInvalidCredentials = errors.New("invalid credentials")
+
+// Tenant lifecycle status string constants matching services/tenant/domain.Status.
+// Duplicated here as untyped strings to avoid importing the tenant domain package
+// into the API gateway (which would invert the existing dependency direction).
+const (
+	tenantStatusActive              = "active"
+	tenantStatusProvisioningPending = "provisioning_pending"
+	tenantStatusProvisioning        = "provisioning"
+	tenantStatusProvisioningFailed  = "provisioning_failed"
+)
+
+// handleNonActiveTenant responds to login attempts against tenants that are not
+// yet (or no longer) operational, returning a status-specific JSON message so
+// the SPA can render an actionable error to the user.
+func (h *AuthHandler) handleNonActiveTenant(ctx context.Context, w http.ResponseWriter, tenantID tenant.TenantID, status string) {
+	h.logger.InfoContext(ctx, "auth: login rejected - tenant not active",
+		"tenant_id", tenantID,
+		"tenant_status", status)
+
+	switch status {
+	case tenantStatusProvisioningPending, tenantStatusProvisioning:
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":  "Your tenant is still being set up. Please wait a moment and try again.",
+			"status": status,
+		})
+	case tenantStatusProvisioningFailed:
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":  "Tenant provisioning failed. Please contact support.",
+			"status": status,
+		})
+	default:
+		// suspended, deprovisioned, or any future non-active status.
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":  "This tenant is not currently available.",
+			"status": status,
+		})
+	}
+}
 
 // handleLoginError maps authenticateAndSign errors to HTTP responses.
 func (h *AuthHandler) handleLoginError(ctx context.Context, w http.ResponseWriter, tenantID tenant.TenantID, err error) {
