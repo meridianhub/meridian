@@ -449,6 +449,78 @@ describe('RegisterPage', () => {
     expect(statusCallCount).toBeGreaterThanOrEqual(1)
   }, 8000)
 
+  it('falls into the timeout state and the Keep waiting button restarts polling', async () => {
+    vi.restoreAllMocks()
+    let nowOffset = 0
+    const realNow = Date.now
+    const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + nowOffset)
+
+    let statusCallCount = 0
+    let advancedToCompleted = false
+    vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+      if (url.includes('/api/v1/slugs/')) {
+        return new Response(JSON.stringify({ available: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/register')) {
+        return new Response(
+          JSON.stringify({
+            tenant_id: 'my_org',
+            login_url: '/login?tenant=my-org',
+            provisioning_pending: true,
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/api/v1/provisioning-status')) {
+        statusCallCount++
+        // After the user clicks Keep waiting we let the second poll complete.
+        const overall = advancedToCompleted ? 'COMPLETED' : 'PENDING'
+        // Push the clock past the 60s timeout on the very first tick so the
+        // hook transitions to 'timeout' before responding to the next call.
+        if (!advancedToCompleted) {
+          nowOffset = 61_000
+        }
+        return new Response(JSON.stringify({ overall }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 200 })
+    })
+
+    const { user } = setup()
+    await user.type(screen.getByLabelText(/organization slug/i), 'my-org')
+    await user.type(screen.getByLabelText(/email/i), 'admin@example.com')
+    await user.type(screen.getByLabelText(/^password/i), 'SecurePass123!')
+    await user.click(screen.getByRole('button', { name: /create account/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/still working on it/i)).toBeInTheDocument()
+    }, { timeout: 5000 })
+
+    const callsBeforeRetry = statusCallCount
+
+    // Reset clock and prepare next poll to resolve as COMPLETED.
+    nowOffset = 0
+    advancedToCompleted = true
+
+    await user.click(screen.getByRole('button', { name: /keep waiting/i }))
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('login-page')).toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
+
+    expect(statusCallCount).toBeGreaterThan(callsBeforeRetry)
+    dateNowSpy.mockRestore()
+  }, 12000)
+
   it('shows failed state when provisioning status returns FAILED', async () => {
     vi.restoreAllMocks()
     vi.spyOn(global, 'fetch').mockImplementation(async (input) => {

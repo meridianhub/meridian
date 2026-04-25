@@ -91,8 +91,18 @@ describe('passwordStrength', () => {
     expect(passwordStrength('')).toBe(0)
   })
 
-  it('caps at 4', () => {
+  it('caps at 4 for policy-compliant passwords', () => {
     expect(passwordStrength('SuperSecure!Pass1234')).toBe(4)
+  })
+
+  it('caps below 4 for sub-12-char passwords so the bar never says Strong on a rejected password', () => {
+    // Has upper, lower, digit, symbol but only 9 chars - rejected by policy.
+    expect(passwordStrength('Abcd123!a')).toBeLessThan(4)
+  })
+
+  it('caps below 4 for 12-char passwords missing complexity', () => {
+    // 12 chars but no digit - rejected by policy.
+    expect(passwordStrength('AbcdefghIjkl')).toBeLessThan(4)
   })
 })
 

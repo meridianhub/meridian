@@ -24,9 +24,12 @@ interface UseProvisioningPollResult {
  * Treats any transient fetch errors as "still pending" so a network blip
  * does not bounce the user out. Returns null status until polling starts.
  *
- * Contract:
+ * Contract (parsed defensively to absorb both REST and proto-style shapes):
  *   GET /api/v1/provisioning-status?tenant_id=<id>
- *     200 { overall: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'active' | ... }
+ *     200 → one of:
+ *       { overall: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'active' }
+ *       { overall_status: 'TENANT_STATUS_ACTIVE' | 'TENANT_STATUS_PROVISIONING_FAILED' | ... }
+ *       { overallStatus: <same enum, camelCase variant> }
  *     non-200 → treated as pending and retried until timeout
  */
 export function useProvisioningPoll(
@@ -72,15 +75,23 @@ export function useProvisioningPoll(
           `/api/v1/provisioning-status?tenant_id=${encodeURIComponent(tenantId)}`,
         )
         if (res.ok) {
-          const body = (await res.json().catch(() => null)) as { overall?: string } | null
-          const overall = body?.overall ?? ''
-          if (overall === 'COMPLETED' || overall === 'active') {
+          const body = (await res.json().catch(() => null)) as {
+            overall?: string
+            overall_status?: string
+            overallStatus?: string
+          } | null
+          const overall = body?.overall ?? body?.overall_status ?? body?.overallStatus ?? ''
+          if (
+            overall === 'COMPLETED' ||
+            overall === 'active' ||
+            overall === 'TENANT_STATUS_ACTIVE'
+          ) {
             if (cancelledRef.current) return
             setStatus(null)
             onCompleteRef.current()
             return
           }
-          if (overall === 'FAILED') {
+          if (overall === 'FAILED' || overall === 'TENANT_STATUS_PROVISIONING_FAILED') {
             setStatus('failed')
             return
           }

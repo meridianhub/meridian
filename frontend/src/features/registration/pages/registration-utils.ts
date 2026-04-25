@@ -7,7 +7,12 @@ export function validateSlug(slug: string): string | null {
   return null
 }
 
-/** Returns 0-4 strength score for a password. */
+/**
+ * Returns 0-4 strength score for a password. Caps below 4 ('Strong') for
+ * passwords that fail the policy minimum (12 chars + upper/lower/digit), so
+ * the strength bar can never label a password 'Strong' that the form will
+ * reject on submit.
+ */
 export function passwordStrength(password: string): number {
   if (password.length === 0) return 0
   let score = 0
@@ -16,7 +21,10 @@ export function passwordStrength(password: string): number {
   if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++
   if (/[0-9]/.test(password)) score++
   if (/[^A-Za-z0-9]/.test(password)) score++
-  return Math.min(score, 4)
+
+  // Keep the top tier reserved for passwords that pass policy validation.
+  const meetsPolicy = validatePassword(password) === null
+  return Math.min(score, meetsPolicy ? 4 : 3)
 }
 
 export type SlugAvailability = 'idle' | 'checking' | 'available' | 'taken' | 'error'
