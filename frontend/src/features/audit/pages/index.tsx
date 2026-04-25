@@ -10,6 +10,7 @@ import { usePageTitle } from '@/hooks/use-page-title'
 import { useApiClients } from '@/api/context'
 import { AuditOperation as AuditOperationEnum } from '@/api/gen/meridian/audit/v1/audit_events_pb'
 import { cn } from '@/lib/utils'
+import { AuditEmptyState } from '../components/audit-empty-state'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -288,6 +289,7 @@ export function AuditLogPage() {
           filters={filters}
           pageSize={25}
           onRowClick={setSelectedEntry}
+          emptyState={<AuditEmptyState />}
           className="w-full"
         />
       </Card>

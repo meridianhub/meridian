@@ -147,7 +147,7 @@ describe('AuditLogPage', () => {
       })
     })
 
-    it('shows empty state when no entries', async () => {
+    it('shows audit-specific empty state when no entries', async () => {
       mockListAuditEntries.mockResolvedValue({ entries: [] })
 
       render(
@@ -157,7 +157,12 @@ describe('AuditLogPage', () => {
       )
 
       await waitFor(() => {
-        expect(screen.getByTestId('empty-state')).toBeInTheDocument()
+        const emptyState = screen.getByTestId('empty-state')
+        expect(emptyState).toBeInTheDocument()
+        expect(screen.getByText('No audit events yet')).toBeInTheDocument()
+        expect(
+          screen.getByText(/Audit entries appear here when you create parties/i),
+        ).toBeInTheDocument()
       })
     })
   })
