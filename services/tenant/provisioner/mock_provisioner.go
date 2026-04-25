@@ -276,6 +276,7 @@ func (m *MockProvisioner) Reset() {
 	m.ProvisioningCalls = make([]tenant.TenantID, 0)
 	m.DeprovisioningCalls = make([]tenant.TenantID, 0)
 	m.PurgeCalls = make([]tenant.TenantID, 0)
+	m.ReconciliationCalls = make([]*tenant.TenantID, 0)
 	m.FailProvisioningFor = make(map[string]error)
 	m.FailDeprovisioningFor = make(map[string]error)
 	m.FailPurgeFor = make(map[string]error)
