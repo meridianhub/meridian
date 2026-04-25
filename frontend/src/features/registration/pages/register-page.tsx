@@ -1,7 +1,19 @@
 import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { validateSlug, validateRegistrationFields, isSafeRedirectUrl, type SlugAvailability } from './registration-utils'
-import { PasswordInput, SlugStatus, RedirectSuccess } from './registration-helpers'
+import {
+  PasswordInput,
+  SlugStatus,
+  RedirectSuccess,
+  ProvisioningProgress,
+  type ProvisioningStatus,
+} from './registration-helpers'
+
+// How long to poll the provisioning status endpoint before showing the
+// timeout state. 60s matches the typical worst-case for tenant schema
+// provisioning in the demo environment.
+const PROVISIONING_POLL_TIMEOUT_MS = 60_000
+const PROVISIONING_POLL_INTERVAL_MS = 1_000
 
 export function RegisterPage() {
   const navigate = useNavigate()
@@ -16,8 +28,12 @@ export function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [provisioningStatus, setProvisioningStatus] = useState<ProvisioningStatus | null>(null)
   const slugCheckController = useRef<AbortController | null>(null)
   const redirectTimerRef = useRef<number | null>(null)
+  const provisioningTimerRef = useRef<number | null>(null)
+  const provisioningCancelledRef = useRef(false)
+  const provisioningTargetRef = useRef<{ tenantId: string; loginUrl: string | undefined } | null>(null)
 
   // Clean up redirect timer on unmount
   useEffect(() => {
@@ -26,6 +42,11 @@ export function RegisterPage() {
         window.clearTimeout(redirectTimerRef.current)
         redirectTimerRef.current = null
       }
+      if (provisioningTimerRef.current !== null) {
+        window.clearTimeout(provisioningTimerRef.current)
+        provisioningTimerRef.current = null
+      }
+      provisioningCancelledRef.current = true
     }
   }, [])
 
@@ -94,6 +115,78 @@ export function RegisterPage() {
     return Object.keys(errors).length === 0
   }, [slug, email, password])
 
+  const navigateToLogin = useCallback(
+    (loginUrl: string | undefined) => {
+      if (loginUrl && isSafeRedirectUrl(loginUrl)) {
+        setRedirecting(true)
+        redirectTimerRef.current = window.setTimeout(() => {
+          window.location.href = loginUrl
+        }, 1500)
+      } else {
+        const fallbackPath = loginUrl && !loginUrl.startsWith('http') ? loginUrl : '/login?registered=1'
+        void navigate(fallbackPath)
+      }
+    },
+    [navigate],
+  )
+
+  /**
+   * Polls the provisioning status endpoint until the tenant is active or
+   * provisioning fails/times out. We poll an unauthenticated status endpoint
+   * (the user has no session yet) and treat any transient fetch errors as
+   * "still pending" so the user is not bounced out by network blips.
+   *
+   * The contract:
+   *   GET /api/v1/provisioning-status?tenant_id=<id>
+   *     200 { overall: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'active' | ... }
+   *     non-200 → treated as pending and retried until timeout
+   */
+  const pollProvisioningStatus = useCallback(
+    (tenantId: string, loginUrl: string | undefined) => {
+      provisioningCancelledRef.current = false
+      provisioningTargetRef.current = { tenantId, loginUrl }
+      setProvisioningStatus('pending')
+      const startTime = Date.now()
+
+      const tick = async () => {
+        if (provisioningCancelledRef.current) return
+        if (Date.now() - startTime > PROVISIONING_POLL_TIMEOUT_MS) {
+          setProvisioningStatus('timeout')
+          return
+        }
+        try {
+          const res = await fetch(
+            `/api/v1/provisioning-status?tenant_id=${encodeURIComponent(tenantId)}`,
+          )
+          if (res.ok) {
+            const status = (await res.json().catch(() => null)) as { overall?: string } | null
+            const overall = status?.overall ?? ''
+            if (overall === 'COMPLETED' || overall === 'active') {
+              if (provisioningCancelledRef.current) return
+              setProvisioningStatus(null)
+              navigateToLogin(loginUrl)
+              return
+            }
+            if (overall === 'FAILED') {
+              setProvisioningStatus('failed')
+              return
+            }
+          }
+        } catch {
+          // Treat as pending; we'll retry on the next tick.
+        }
+        if (provisioningCancelledRef.current) return
+        provisioningTimerRef.current = window.setTimeout(
+          () => void tick(),
+          PROVISIONING_POLL_INTERVAL_MS,
+        )
+      }
+
+      void tick()
+    },
+    [navigateToLogin],
+  )
+
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault()
@@ -161,18 +254,21 @@ export function RegisterPage() {
         const data = (await response.json().catch(() => null)) as {
           tenant_id?: string
           login_url?: string
+          provisioning_pending?: boolean
         } | null
         const loginUrl = typeof data?.login_url === 'string' ? data.login_url : undefined
+        const tenantId = typeof data?.tenant_id === 'string' ? data.tenant_id : undefined
 
-        if (loginUrl && isSafeRedirectUrl(loginUrl)) {
-          setRedirecting(true)
-          redirectTimerRef.current = window.setTimeout(() => {
-            window.location.href = loginUrl
-          }, 1500)
-        } else {
-          const fallbackPath = (loginUrl && !loginUrl.startsWith('http')) ? loginUrl : '/login?registered=1'
-          void navigate(fallbackPath)
+        // When the backend reports async provisioning, hold the user on a
+        // progress screen until provisioning completes. Otherwise the
+        // redirect to /login lands before the admin identity exists and
+        // the first sign-in fails.
+        if (data?.provisioning_pending && tenantId) {
+          pollProvisioningStatus(tenantId, loginUrl)
+          return
         }
+
+        navigateToLogin(loginUrl)
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           setFormError('Registration timed out. Please try again.')
@@ -184,7 +280,7 @@ export function RegisterPage() {
         setLoading(false)
       }
     },
-    [slug, slugAvailability, email, password, displayName, navigate, validateFields],
+    [slug, slugAvailability, email, password, displayName, validateFields, pollProvisioningStatus, navigateToLogin],
   )
 
   const inputClass =
@@ -193,6 +289,20 @@ export function RegisterPage() {
 
   if (redirecting) {
     return <RedirectSuccess />
+  }
+
+  if (provisioningStatus !== null) {
+    const target = provisioningTargetRef.current
+    return (
+      <ProvisioningProgress
+        status={provisioningStatus}
+        onRetry={
+          provisioningStatus === 'timeout' && target
+            ? () => pollProvisioningStatus(target.tenantId, target.loginUrl)
+            : undefined
+        }
+      />
+    )
   }
 
   return (
