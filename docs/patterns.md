@@ -16,7 +16,7 @@ outages in the past (see ADR-0009 for the audit-pipeline example).
 | 2 | [Audit Pipeline](#2-audit-pipeline) | `shared/platform/audit/` + `services/audit-worker/` | Tamper-evident change history |
 | 3 | [Saga Handler (Starlark)](#3-saga-handler-starlark) | `shared/pkg/saga/` + `services/reference-data/saga/defaults/` | Multi-step workflows with compensation |
 | 4 | [Tenant Scoping](#4-tenant-scoping) | `shared/platform/tenant/` | Multi-tenant isolation |
-| 5 | [Idempotency](#5-idempotency) | `shared/pkg/idempotency/` | Exactly-once RPC semantics |
+| 5 | [Idempotency](#5-idempotency) | `shared/pkg/idempotency/` | Idempotent RPC outcomes under retries |
 | 6 | [Starlark Sandbox](#6-starlark-sandbox) | `shared/platform/sandbox/` | Bounded execution of tenant scripts |
 
 ---
@@ -302,8 +302,8 @@ Backends:
 
 ### When to Use
 
-Every state-mutating RPC handler. Clients retry on network failures; without idempotency the platform
-double-charges, double-credits, or double-issues. Read-only handlers do not need this.
+Every state-mutating RPC handler. Clients retry on network failures; idempotency ensures retries produce a single
+logical outcome (no duplicate side effects). Read-only handlers do not need this.
 
 ### How It Works
 
