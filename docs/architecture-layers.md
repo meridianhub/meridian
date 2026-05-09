@@ -83,12 +83,12 @@ flowchart TB
     PO --> CA
     PO --> FGW
     CP --> TEN
+    CP --> OGW
 
     CA --> PARTY
     CA --> PK
     CA --> FA
     IBA --> PK
-    FA --> PK
 
     PK --> RD
     FC --> MI
@@ -250,8 +250,9 @@ counterparty accounts (`internal-account`), and the general ledger
 
 ### Outbound
 
-- `position-keeping` for balance queries and transaction history (all three services
-  delegate balance ownership per ADR-0023)
+- `position-keeping` for balance queries and transaction history (`current-account`
+  and `internal-account` delegate balance ownership per ADR-0023; `financial-accounting`
+  has no PK client and does not query positions)
 - `party` for ownership validation (current-account)
 - `reference-data` for instrument definitions (transitively, via position-keeping)
 
@@ -267,8 +268,10 @@ counterparty accounts (`internal-account`), and the general ledger
 
 ### Boundary Rules
 
-- Balance is never stored. All balance state lives in `position-keeping`. These
-  services compute nothing locally and do not cache balances.
+- Balance is never stored on customer or internal accounts. `current-account` and
+  `internal-account` delegate balance reads to `position-keeping` per ADR-0023.
+  `financial-accounting` owns booking logs and ledger postings but does not own
+  balances.
 - No service in this layer calls another directly outside well-defined orchestration
   flows. `payment-order` is the orchestrator; Core Ledger services are participants.
 
