@@ -179,13 +179,17 @@ resolution at retrieval time.
 ```mermaid
 sequenceDiagram
     participant Caller as payment-order / event-router
-    participant Registry as SagaRegistry (reference-data DB)
+    participant Registry as PostgresRegistry (reference-data)
     participant DB as tenant schema saga_definition
 
     Caller->>Registry: GetActive(ctx, name)
-    Registry->>DB: SELECT WHERE name=$1 AND status='ACTIVE'<br/>ORDER BY is_system ASC, version DESC LIMIT 1
-    Note over DB: is_system=FALSE rows sort first<br/>Tenant override wins; falls back to system default
-    DB-->>Registry: *Definition{Script, IsSystem, ...}
+    Registry->>DB: Step 1 - query WHERE name=$1<br/>AND is_system=false AND status='ACTIVE'
+    alt tenant override found
+        DB-->>Registry: *Definition (tenant saga)
+    else no tenant override
+        Registry->>DB: Step 2 - query WHERE name=$1<br/>AND is_system=true AND status='ACTIVE'
+        DB-->>Registry: *Definition (platform default) or ErrNotFound
+    end
     Registry-->>Caller: *Definition
 ```
 
@@ -204,5 +208,5 @@ returns `ErrSystemSagaReadOnly` for any mutation attempt on them.
 | `BuildServiceModules` | `shared/pkg/saga/schema/service_modules.go` | Converts registry + proto schema into `starlark.StringDict` of typed service structs |
 | `DeriveSchema` | `shared/pkg/saga/schema/derive.go` | Reflects proto descriptors to build `FieldDef` maps for params/returns |
 | `Seeder` | `services/reference-data/saga/seeder.go` | Copies embedded `.star` files into tenant `saga_definition` rows at provisioning |
-| `SagaRegistry` interface | `services/reference-data/saga/registry.go` | Defines `GetActive`, `CreateDraft`, `ActivateSaga`, etc. for the reference-data service |
+| `Registry` interface | `services/reference-data/saga/registry.go` | Defines `GetActive`, `CreateDraft`, `ActivateSaga`, etc. for the reference-data service |
 | `handlers.yaml` | `shared/pkg/saga/schema/handlers.yaml` | Canonical handler schema: descriptions, compensation relationships, proto references |
