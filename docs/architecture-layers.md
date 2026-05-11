@@ -118,7 +118,8 @@ flowchart TB
 
 **Legend:**
 
-- Solid arrows: synchronous gRPC dependency in the request path
+- Solid arrows: directional dependency in the request path (gRPC for
+  internal service-to-service calls; HTTP/MCP for external client flows)
 - Dashed arrows: asynchronous or polling dependency
 
 ---
