@@ -1,72 +1,148 @@
 ---
-name: party-service
-description: BIAN party reference data directory for customer and counterparty identity management
+name: party
+description: BIAN Party Reference Data Directory - INDIVIDUAL and ORGANIZATION lifecycle management with write-once external references, KYC verification, and payment method registration
 triggers:
-  - Implementing party registration
-  - Managing party lifecycle (status transitions)
-  - External reference validation (Companies House, LEI, Tax ID)
-  - Building gRPC party reference services
-  - Database schema design for party entities
-  - Optimistic locking patterns
+  - Registering customers or counterparties (individuals or organizations)
+  - Managing party lifecycle (ACTIVE, RESTRICTED, TERMINATED)
+  - Validating external references (Companies House, LEI, National ID, Tax ID)
+  - Configuring KYC/identity verification providers (Onfido, Stripe)
+  - Adding or removing payment methods on a party
+  - Debugging party association or demographic update failures
 instructions: |
-  Party service manages customer and counterparty identities with external reference validation.
+  Party is the BIAN Party Reference Data Directory. It stores legal identities
+  for customers and counterparties, not platform users. Platform users live in
+  the identity service.
 
-  Key patterns:
-  - PartyType: PERSON (individual) or ORGANIZATION (legal entity)
-  - PartyStatus: ACTIVE → RESTRICTED → TERMINATED (state machine)
-  - External references: Write-once, unique per type, format-validated
-  - Optimistic locking via version field
+  Party records are never hard-deleted. Status transitions to TERMINATED are
+  terminal; RESTRICTED can return to ACTIVE. External references (Companies
+  House, LEI, etc.) are write-once; format is validated by regex only.
 
-  External reference validation (regex):
-  - COMPANIES_HOUSE: ^[A-Z]{0,2}\d{6,8}$
-  - LEI: ^[A-Z0-9]{20}$
-  - NATIONAL_ID: ^[A-Z0-9]{5,20}$
-  - TAX_ID: ^[A-Z0-9]{5,20}$
+  Port: 50055 (gRPC). Optional HTTP on 8081 for KYC verification webhooks
+  (only started if VERIFICATION_PROVIDER is configured). Kafka outbox worker
+  starts only if KAFKA_BOOTSTRAP_SERVERS is set.
 
-  Port: 50055 (gRPC)
+  CEL-based attribute validation is driven by PartyTypeDefinition records.
+  Each party type can declare custom attribute schemas; AddPaymentMethod
+  enforces the party type's allowed payment method types.
 ---
 
-# Party Service
+# party
 
-BIAN-compliant party reference data directory for managing customer and counterparty identities.
+BIAN Party Reference Data Directory. Stores and manages the legal identities of
+customers and counterparties: individuals and organizations. Supports KYC verification
+via pluggable providers (Onfido, Stripe), party associations, demographics, bank
+relations, and payment methods.
+
+Sits on the [Identity layer](../../docs/architecture-layers.md#7-identity)
+of the Meridian architecture.
 
 ## Overview
 
 | Attribute | Value |
 |-----------|-------|
 | **BIAN Domain** | Party Reference Data Directory |
-| **Port** | 50055 (gRPC) |
-| **Language** | Go |
-| **Database** | PostgreSQL/CockroachDB |
-| **Standalone** | Yes |
+| **Layer** | Identity |
+| **Port** | 50055 (gRPC), 8081 (HTTP webhooks, when `VERIFICATION_PROVIDER` is configured) |
+| **Database** | CockroachDB (per-tenant schema) |
+| **Standalone** | No (requires CockroachDB; optional: Kafka for events, Onfido/Stripe for KYC) |
 
-## gRPC Methods
+## API Surface
 
-| Method | HTTP | Purpose |
+### gRPC
+
+| Service | RPC | Purpose |
+|---------|-----|---------|
+| `PartyService` | `RegisterParty` | Create a new party (INDIVIDUAL or ORGANIZATION) |
+| `PartyService` | `ListParties` | Paginated list with type and status filters |
+| `PartyService` | `RetrieveParty` | Fetch a party by ID |
+| `PartyService` | `UpdateParty` | Update mutable party fields (display name, attributes) |
+| `PartyService` | `ControlParty` | Transition party status (ACTIVE/RESTRICTED/TERMINATED) |
+| `PartyService` | `UpdateReference` | Set write-once external reference (Companies House, LEI, etc.) |
+| `PartyService` | `RetrieveReference` | Fetch external references for a party |
+| `PartyService` | `RegisterAssociations` | Create party-to-party associations (e.g., director/company) |
+| `PartyService` | `UpdateAssociations` | Modify existing associations |
+| `PartyService` | `RetrieveAssociations` | Fetch associations for a party |
+| `PartyService` | `ExchangeDemographics` | Upsert demographic records (address, contact details) |
+| `PartyService` | `UpdateDemographics` | Modify existing demographic records |
+| `PartyService` | `RetrieveDemographics` | Fetch demographics for a party |
+| `PartyService` | `UpdateBankRelations` | Upsert bank account relationships for a party |
+| `PartyService` | `RetrieveBankRelations` | Fetch bank relations |
+| `PartyService` | `ListParticipants` | List parties by association role |
+| `PartyService` | `GetStructuringData` | Return aggregated structuring data for a party |
+| `PartyService` | `AddPaymentMethod` | Add a payment method (card, bank account) to a party |
+| `PartyService` | `RemovePaymentMethod` | Remove a payment method |
+| `PartyService` | `SetDefaultPaymentMethod` | Set the default payment method |
+| `PartyService` | `ListPaymentMethods` | List all payment methods for a party |
+| `PartyService` | `GetDefaultPaymentMethod` | Fetch the default payment method |
+| `PartyService` | `RegisterPartyType` | Register a custom party type definition |
+| `PartyService` | `GetPartyType` | Fetch a party type by code |
+| `PartyService` | `ListPartyTypes` | List all party type definitions |
+| `PartyService` | `UpdatePartyType` | Modify a party type definition |
+
+Proto: [`api/proto/meridian/party/v1/party.proto`](../../api/proto/meridian/party/v1/party.proto).
+
+### HTTP
+
+Available only when `VERIFICATION_PROVIDER` is configured.
+
+| Method | Path | Purpose |
 |--------|------|---------|
-| `RegisterParty` | `POST /v1/parties` | Create new party |
-| `RetrieveParty` | `GET /v1/parties/{party_id}` | Get party details |
+| `POST` | `/webhooks/verification/` | Inbound KYC webhook receiver (HMAC-verified) |
+| `POST` | `/webhooks/verification/stripe` | Stripe-specific KYC webhook with Stripe signature verification |
+| `GET` | `/health` | Liveness probe with verification provider status |
 
 ## Domain Model
 
 ```mermaid
 classDiagram
     class Party {
-        +UUID ID
-        +PartyType PartyType
-        +string LegalName
-        +string DisplayName
-        +PartyStatus Status
-        +string ExternalReference
-        +ExternalReferenceType ExternalReferenceType
-        +int64 Version
-        +Time CreatedAt
-        +Time UpdatedAt
+        +UUID id
+        +PartyType partyType
+        +string legalName
+        +string displayName
+        +PartyStatus status
+        +int64 version
+        +time createdAt
+        +time updatedAt
+    }
+
+    class ExternalReference {
+        +UUID id
+        +UUID partyID
+        +ExternalReferenceType refType
+        +string value
+        +time createdAt
+    }
+
+    class PartyAssociation {
+        +UUID id
+        +UUID fromPartyID
+        +UUID toPartyID
+        +string roleType
+        +time effectiveFrom
+        +time effectiveTo
+    }
+
+    class PaymentMethod {
+        +UUID id
+        +UUID partyID
+        +string methodType
+        +string providerRef
+        +bool isDefault
+        +time createdAt
+    }
+
+    class PartyTypeDefinition {
+        +UUID id
+        +string code
+        +string validationExpression
+        +JSON attributeSchema
+        +time createdAt
     }
 
     class PartyType {
         <<enumeration>>
-        PERSON
+        INDIVIDUAL
         ORGANIZATION
     }
 
@@ -80,32 +156,21 @@ classDiagram
     class ExternalReferenceType {
         <<enumeration>>
         COMPANIES_HOUSE
-        NATIONAL_ID
         LEI
+        NATIONAL_ID
         TAX_ID
     }
 
     Party --> PartyType
     Party --> PartyStatus
-    Party --> ExternalReferenceType
+    Party "1" --> "*" ExternalReference : holds
+    Party "1" --> "*" PartyAssociation : member of
+    Party "1" --> "*" PaymentMethod : owns
+    Party --> PartyTypeDefinition : validated by
+    ExternalReference --> ExternalReferenceType
 ```
 
-**Party Types:**
-
-| Type | Description |
-|------|-------------|
-| `PERSON` | Natural person (individual) |
-| `ORGANIZATION` | Legal entity (company, partnership) |
-
-**Party Status:**
-
-| Status | Description |
-|--------|-------------|
-| `ACTIVE` | Can participate in banking operations |
-| `RESTRICTED` | Limited access (e.g., pending KYC) |
-| `TERMINATED` | Relationship ended (terminal) |
-
-**Status Transitions:**
+### Status Machine
 
 ```mermaid
 stateDiagram-v2
@@ -117,78 +182,90 @@ stateDiagram-v2
     TERMINATED --> [*]
 ```
 
-- TERMINATED is terminal (cannot be reactivated)
-- RESTRICTED can return to ACTIVE
+`TERMINATED` is terminal. External references are write-once: once set, the value
+and type cannot be changed. Format validation is regex-only (no registry lookup):
 
-## External Reference Validation
+| Type | Pattern |
+|------|---------|
+| `COMPANIES_HOUSE` | `^[A-Z]{0,2}\d{6,8}$` |
+| `LEI` | `^[A-Z0-9]{20}$` |
+| `NATIONAL_ID` | `^[A-Z0-9]{5,20}$` |
+| `TAX_ID` | `^[A-Z0-9]{5,20}$` |
 
-External references are write-once and unique per type:
+## Dependencies
 
-| Type | Pattern | Example |
-|------|---------|---------|
-| `COMPANIES_HOUSE` | `^[A-Z]{0,2}\d{6,8}$` | `12345678`, `GB12345678` |
-| `LEI` | `^[A-Z0-9]{20}$` | `5493001KJTIIGC8K1K12` |
-| `NATIONAL_ID` | `^[A-Z0-9]{5,20}$` | `AB12345` |
-| `TAX_ID` | `^[A-Z0-9]{5,20}$` | `TB123456789` |
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| CockroachDB | SQL | All party, association, demographic, and payment method persistence |
+| Kafka (optional) | TCP | Outbox worker publishes party domain events when `KAFKA_BOOTSTRAP_SERVERS` is set |
+| Onfido / Stripe (optional) | HTTP | KYC verification provider when `VERIFICATION_PROVIDER` is configured |
 
-**Note:** Validation is format-only (regex pattern matching). LEI checksum (ISO 17442 MOD 97-10)
-and Companies House registry lookups are not performed. External validation should be done
-upstream before registration if required.
+## Dependents
 
-## Database Schema
+Grepped from `rg "party/v1|NewPartyClient|PartyServiceClient" services/ --exclude-dir services/party` across the codebase.
 
-**Schema**: `party`
+| Service | Entry Point | Purpose |
+|---------|-------------|---------|
+| `current-account` | `services/current-account/service/client_interfaces.go` | Validate party status before account operations |
+| `tenant` | `services/tenant/service/party_client_adapter.go` | Register organization party for the tenant on provisioning |
+| `payment-order` | `services/payment-order/service/payment_orchestrator.go` | Party lookup for billing and invoice generation |
+| `control-plane` | `services/control-plane/service/apply_manifest.go` | Party registration in manifest apply |
+| `internal-account` | `services/internal-account/client/starlark.go` | Starlark client exposes party lookup to saga scripts |
 
-```mermaid
-erDiagram
-    parties {
-        uuid id PK
-        varchar(20) party_type "PERSON, ORGANIZATION"
-        varchar(255) legal_name
-        varchar(255) display_name "nullable"
-        varchar(20) status "ACTIVE, RESTRICTED, TERMINATED"
-        varchar(100) external_reference "nullable, write-once"
-        varchar(30) external_reference_type "nullable"
-        bigint version "optimistic lock"
-        timestamptz created_at
-        timestamptz updated_at
-        timestamptz deleted_at "nullable, soft-delete"
-    }
-```
+## Load-Bearing Files
 
-**Indexes:**
+Paths are relative to `services/party/`.
 
-- `idx_parties_party_type`: Query by type
-- `idx_parties_status`: Query by status
-- `idx_party_external_ref`: Unique on (reference, type) where `deleted_at IS NULL`
-- `idx_party_parties_deleted_at`: Query active (non-deleted) records
+| File | Why It Matters |
+|------|----------------|
+| `cmd/main.go` | Wires gRPC server, optional HTTP server, Kafka outbox worker, and verification provider |
+| `service/server.go` | gRPC service root; all handler groups are registered here |
+| `service/party_handlers.go` | Core party CRUD and status transitions |
+| `service/reference_handlers.go` | Write-once external reference enforcement |
+| `service/association_handlers.go` | Party association lifecycle |
+| `service/attribute_validator.go` | CEL-based attribute validation driven by PartyTypeDefinition |
+| `domain/party.go` | Party aggregate; status machine and optimistic locking invariants |
+| `verification/` | KYC provider abstraction (Onfido, Stripe); factory, provider interface, timeout handler |
+| `config/verification.go` | Verification provider configuration loaded from environment variables |
+| `migrations/` | Atlas-managed schema; never edit applied files |
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `GRPC_PORT` | 50055 | gRPC server port |
-| `DATABASE_URL` | - | PostgreSQL connection string |
-| `DB_MAX_OPEN_CONNS` | 25 | Connection pool size |
+### Core
 
-## Key Patterns
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `GRPC_PORT` | No | `50055` | gRPC listen port |
+| `LOG_LEVEL` | No | `info` | Structured log level (`debug`, `info`, `warn`, `error`) |
+| `ENVIRONMENT` | No | `development` | Runtime environment (`development`, `production`); affects verification config strictness |
+| `KAFKA_BOOTSTRAP_SERVERS` | No | - | Kafka broker addresses; outbox worker disabled if not set |
 
-### Registration Flow
+### Verification (KYC)
 
-1. Validate party_type (PERSON or ORGANIZATION)
-2. Create Party aggregate with ACTIVE status
-3. If external_reference provided:
-   - Check uniqueness
-   - Validate format against type-specific regex
-   - Set reference (write-once)
-4. Persist with version = 1
+Required only when `VERIFICATION_PROVIDER` is set. If absent in non-production environments,
+verification is disabled gracefully; in `ENVIRONMENT=production` the service refuses to start.
 
-### Optimistic Locking
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `VERIFICATION_PROVIDER` | No | - | KYC provider: `onfido` or `stripe` |
+| `VERIFICATION_API_KEY` | Conditional | - | Provider API key |
+| `VERIFICATION_API_SECRET` | Conditional | - | Provider API secret |
+| `VERIFICATION_BASE_URL` | No | - | Override provider API base URL |
+| `VERIFICATION_WEBHOOK_SECRET` | Conditional | - | HMAC secret for verifying inbound webhooks |
+| `VERIFICATION_WEBHOOK_URL` | No | - | Public URL for the webhook receiver (reported to provider) |
+| `STRIPE_WEBHOOK_SECRET` | Conditional | - | Stripe-specific webhook signing secret |
+| `HTTP_PORT` | No | `8081` | HTTP port for verification webhooks (only started when provider is configured) |
 
-Updates check `WHERE version = expected_version`. Returns conflict error on mismatch.
+## Security Considerations
+
+RBAC method permissions are declared in `rbac/method_permissions.go`. Inbound
+verification webhooks are HMAC-verified before processing - requests with invalid
+signatures return `401 Unauthorized` and are never processed. Stripe webhooks use
+Stripe's own signature scheme in addition to the inner HMAC check.
 
 ## References
 
-- [BIAN Party Reference Data Directory Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/PartyReferenceDataDirectory.yaml)
-- [Service Architecture](../README.md)
-- [Proto Definitions](../../api/proto/meridian/party/v1/)
+- [`docs/architecture-layers.md`](../../docs/architecture-layers.md) - Identity layer description
+- [`api/proto/meridian/party/v1/`](../../api/proto/meridian/party/v1/) - Proto definitions
+- ADR-0002: Microservices per BIAN Domain
