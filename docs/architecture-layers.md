@@ -75,6 +75,7 @@ flowchart TB
     APIGW --> CA
     APIGW --> IBA
     APIGW --> PO
+    APIGW --> IDP
     APIGW --> PARTY
     APIGW --> MI
     APIGW --> REC
