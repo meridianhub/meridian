@@ -209,7 +209,7 @@ Paths are relative to `services/market-information/`.
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `DATABASE_URL` | Yes | - | CockroachDB connection string (relative to service startup directory) |
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
 | `GRPC_PORT` | No | `50058` | gRPC listen port |
 | `METRICS_PORT` | No | `8082` | HTTP port for `/metrics`, `/health`, `/ready` endpoints |
 | `LOG_LEVEL` | No | `info` | Structured log level (`debug`, `info`, `warn`, `error`) |

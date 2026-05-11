@@ -202,7 +202,7 @@ and type cannot be changed. Format validation is regex-only (no registry lookup)
 
 ## Dependents
 
-Grepped from `rg "party" services/` across the codebase.
+Grepped from `rg "party/v1|NewPartyClient|PartyServiceClient" services/ --exclude-dir services/party` across the codebase.
 
 | Service | Entry Point | Purpose |
 |---------|-------------|---------|
@@ -226,7 +226,7 @@ Paths are relative to `services/party/`.
 | `service/attribute_validator.go` | CEL-based attribute validation driven by PartyTypeDefinition |
 | `domain/party.go` | Party aggregate; status machine and optimistic locking invariants |
 | `verification/` | KYC provider abstraction (Onfido, Stripe); factory, provider interface, timeout handler |
-| `config/verification.go` | Verification provider configuration loaded from environment variables (relative to `services/party/`) |
+| `config/verification.go` | Verification provider configuration loaded from environment variables |
 | `migrations/` | Atlas-managed schema; never edit applied files |
 
 ## Configuration
@@ -235,7 +235,7 @@ Paths are relative to `services/party/`.
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `DATABASE_URL` | Yes | - | CockroachDB connection string (relative to service startup directory) |
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
 | `GRPC_PORT` | No | `50055` | gRPC listen port |
 | `LOG_LEVEL` | No | `info` | Structured log level (`debug`, `info`, `warn`, `error`) |
 | `ENVIRONMENT` | No | `development` | Runtime environment (`development`, `production`); affects verification config strictness |

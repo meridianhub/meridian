@@ -17,10 +17,10 @@ instructions: |
   at /dex/* without auth middleware. Connector type "meridian" bridges Dex to
   the identity domain via PasswordConnector.
 
-  Per-tenant isolation: identities live in org_<tenant_id> schemas. The
-  meridian_master tenant holds the platform admin. SeedDemoUsers reads
-  DEMO_OPERATOR_TENANT as a comma-separated list - each named tenant must
-  already be provisioned.
+  Per-tenant isolation: identities live in org_<tenant_id> schemas; the
+  meridian_master tenant follows the same pattern (org_meridian_master holds
+  the platform admin). SeedDemoUsers reads DEMO_OPERATOR_TENANT as a
+  comma-separated list - each named tenant must already be provisioned.
 
   Key invariant: account lockout (5 failed attempts) blocks Authenticate but
   not SetPassword or admin ReactivateIdentity.
@@ -42,7 +42,7 @@ of the Meridian architecture.
 | **BIAN Domain** | Infrastructure (non-BIAN) |
 | **Layer** | Identity |
 | **Port** | Shared gRPC port of the unified binary (default `50051`); Dex OIDC served at `/dex/*` via `api-gateway` HTTP port |
-| **Database** | CockroachDB (`meridian_identity` schema and per-tenant `org_<id>` schemas) |
+| **Database** | CockroachDB (per-tenant `org_<id>` schemas; platform admin in `org_meridian_master`) |
 | **Standalone** | No (embedded in `cmd/meridian`; requires `api-gateway` to expose OIDC endpoints) |
 
 ## API Surface
@@ -172,8 +172,8 @@ granted. This hierarchy is implemented in `domain/identity.go:CanGrant`.
 flowchart LR
     Client -- "POST /dex/token" --> APIGW["api-gateway"]
     APIGW -- "forward /dex/*" --> Dex["Embedded Dex (in-process)"]
-    Dex -- "PasswordConnector.Login" --> Connector["connector/connector.go"]
-    Connector -- "FindByEmail + bcrypt verify" --> Repo["identity domain/repository"]
+    Dex -- "PasswordConnector.Login" --> Connector["Connector"]
+    Connector -- "FindByEmail + bcrypt verify" --> Repo["Identity Repository"]
     Connector -- "FindRoleAssignments" --> Repo
     Dex -- "JWT with groups claim" --> APIGW
     APIGW -- "JWT" --> Client
@@ -191,12 +191,11 @@ identity repository directly (no gRPC hop) and maps role assignments to JWT `gro
 
 ## Dependents
 
-Grepped from the codebase for `IdentityService` callers and Dex JWKS consumers.
+Grepped from the codebase for `identityconnector` and `IdentityService` callers.
 
 | Service | Entry Point | Purpose |
 |---------|-------------|---------|
-| `api-gateway` | `services/api-gateway/auth/combined_middleware.go` | JWT validation via Dex JWKS; mounts `/dex/*` handler |
-| `tenant` | `services/tenant/provisioner/provisioner.go` | Post-provisioning hook to seed platform admin into new tenant schemas |
+| `api-gateway` | `services/api-gateway/cmd/main.go` | Wires `identityconnector` for SSO; mounts `/dex/*` handler and validates JWTs via Dex JWKS |
 
 ## Load-Bearing Files
 
@@ -223,7 +222,7 @@ Identity is embedded in the unified binary. Configuration is consumed at the
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `DATABASE_URL` | Yes | `postgres://root@localhost:26257/defaultdb?sslmode=disable` | CockroachDB base DSN (relative to `cmd/meridian` startup directory) |
+| `DATABASE_URL` | Yes | `postgres://root@localhost:26257/defaultdb?sslmode=disable` | CockroachDB base DSN |
 | `BASE_DOMAIN` | No | `app.meridianhub.cloud` | Base domain used to construct invitation accept links |
 | `PLATFORM_ADMIN_EMAIL` | No | - | Email for the bootstrapped platform admin (first-boot only) |
 | `PLATFORM_ADMIN_PASSWORD` | No | - | Password for the bootstrapped platform admin |
