@@ -1,341 +1,165 @@
 ---
-name: forecasting-service
-description: Forward curve generation engine using tenant-defined Starlark strategies with cron-based scheduling
+name: forecasting
+description: Forward curve generation engine using tenant-defined Starlark strategies scheduled by cron against Market Information Service observations
 triggers:
-  - Implementing forecasting strategies for forward curves
-  - Starlark script execution and sandboxing
-  - Cron-based scheduled forecast execution
-  - Market data observation fetching and publishing
-  - Forward curve generation from historical data
-  - Strategy lifecycle management (DRAFT, ACTIVE, DEPRECATED)
+  - Implementing or debugging a forecasting strategy
+  - Understanding the Starlark sandbox used for forecasting scripts
+  - Configuring a cron-based forward curve schedule
+  - Investigating why a scheduled forecast did not run
+  - Tracing forecast output quality (ESTIMATE) back to market-information
 instructions: |
-  Forecasting service manages tenant-defined Starlark strategies that generate forward curves
-  from Market Data Service observations.
+  Forecasting executes tenant-defined Starlark scripts that read historical
+  observations from market-information and publish forward curve points back
+  as ESTIMATE quality observations.
 
-  Key patterns:
-  - Starlark sandbox: Guaranteed termination (no while loops, no recursion, no imports)
-  - Strategy lifecycle: DRAFT -> ACTIVE -> DEPRECATED (DEPRECATED is terminal)
-  - Cron scheduler: Polls for active strategies, acquires Redis leases to prevent duplicate execution
-  - MDS integration: Reads historical observations as input, publishes forecast points as ESTIMATE quality
-  - Optimistic locking via version field
-  - Immutable domain model (value types, defensive slice copies)
-  - Built-in templates: moving_average, seasonal_decomposition, capacity_pricing, external_blend
+  Strategy lifecycle: DRAFT -> ACTIVE -> DEPRECATED (DEPRECATED is terminal).
+  Only ACTIVE strategies are scheduled and can be executed via ComputeForwardCurve.
 
-  Port: 50061 (gRPC)
+  Starlark sandbox: ForecasterConfig (shared/platform/sandbox) - 10 s timeout,
+  1,000,000 max steps, 64 KB script size limit. No while loops, no recursion, no
+  load/import. The sandbox guarantees termination.
+
+  Cron scheduler: polls active strategies every SCHEDULER_REFRESH_INTERVAL (default 60 s),
+  acquires a Redis lease per strategy (TTL 5 min, renewed every 30 s) to prevent
+  duplicate execution across replicas.
+
+  Built-in templates: moving_average, seasonal_decomposition, capacity_pricing,
+  external_blend (see services/forecasting/templates/).
+
+  Port: 50061 (gRPC, ports.Forecasting), 8082 (HTTP metrics and health).
+  MDS_TARGET is the market-information gRPC endpoint (default market-information:50051).
+  REDIS_ADDR defaults to localhost:6379; set it explicitly in production for distributed lease management.
 ---
 
-# Forecasting Service
+# forecasting
 
-Forward curve generation engine that executes tenant-defined Starlark strategies against Market Data Service observations.
+Forward curve generation engine that executes tenant-defined Starlark strategies against
+Market Information Service observations on a cron schedule. Part of the
+[Observability and Routing layer](../../docs/architecture-layers.md#8-observability-and-routing).
 
 ## Overview
 
 | Attribute | Value |
 |-----------|-------|
-| **Type** | Domain Service |
-| **Port** | 50061 (gRPC), 8082 (HTTP/metrics) |
-| **Language** | Go |
-| **Database** | CockroachDB (`meridian_forecasting`) |
-| **Standalone** | No (depends on Market Information Service) |
+| **BIAN Domain** | Market Information Management |
+| **Layer** | Observability and Routing |
+| **Port** | 50061 (gRPC), 8082 (HTTP metrics and health) |
+| **Database** | CockroachDB (tenant-scoped schemas) |
+| **Standalone** | No (requires `market-information` gRPC; Redis for scheduler lease management, defaults to `localhost:6379`) |
 
-The Forecasting service allows tenants to define Starlark scripts that read historical market data observations,
-compute forward curve predictions, and publish the results back to the Market Data Service as ESTIMATE quality
-observations. Strategies are executed on cron schedules with distributed locking to prevent duplicate execution
-across replicas.
+## API Surface
 
-## Architecture
+### gRPC
 
-```mermaid
-graph LR
-    subgraph Forecasting Service
-        H[gRPC Handler]
-        S[Starlark Runner]
-        CR[Cron Scheduler]
-        LM[Lease Manager]
-    end
+| Service | RPC | Purpose |
+|---------|-----|---------|
+| `ForecastingService` | `ComputeForwardCurve` | Execute a forecasting strategy and publish output points to `market-information` as ESTIMATE quality |
 
-    MDS[Market Information Service]
-    DB[(CockroachDB)]
-    RD[(Redis)]
+Proto: [`api/proto/meridian/forecasting/v1/forecasting.proto`](../../api/proto/meridian/forecasting/v1/forecasting.proto).
 
-    H --> S
-    CR --> LM
-    CR --> H
-    LM --> RD
-    S -->|fetch observations| MDS
-    H -->|publish forecasts| MDS
-    H --> DB
-    CR --> DB
-```
+### HTTP
 
-**Execution flow:**
-
-1. Cron scheduler fires for an active strategy
-2. Lease manager acquires a Redis lock (prevents duplicate execution across pods)
-3. Handler fetches the strategy from the database
-4. Starlark runner fetches historical observations from MDS
-5. Starlark runner resolves reference data (if configured)
-6. Starlark script executes in a sandboxed environment (30s timeout)
-7. Output forecast points are validated (horizon, monotonicity, granularity alignment)
-8. Forecast points are published to MDS as ESTIMATE quality observations in batches of 1000
-
-## gRPC Methods
-
-| Method | Purpose |
-|--------|---------|
-| `ComputeForwardCurve` | Execute a forecasting strategy and publish results to MDS |
-
-The service currently exposes a single RPC. Strategy CRUD operations are planned but not yet implemented.
-
-## Starlark Sandbox
-
-Strategies are written in [Starlark](https://github.com/bazelbuild/starlark), a Python-like language that
-guarantees termination (no `while` loops, no recursion). Each script must define a `compute_forecast(ctx)` function.
-
-**Context fields available to scripts:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `observations` | `dict[string, list[dict]]` | Historical observations keyed by dataset code |
-| `reference_data` | `dict` or `None` | Resolved reference data node attributes |
-| `horizon_seconds` | `int` | Total forecast window in seconds |
-| `granularity_seconds` | `int` | Spacing between forecast points in seconds |
-| `now` | `string` | Execution timestamp (RFC3339) |
-
-**Builtin functions:**
-
-| Category | Functions |
-|----------|-----------|
-| Statistical | `avg`, `sum`, `percentile` |
-| Observation | `filter_by_hour`, `group_by_hour` |
-| Time | `duration`, `add_seconds` |
-| Arithmetic | `Decimal` (arbitrary-precision) |
-| Stdlib (safe subset) | `len`, `str`, `int`, `float`, `bool`, `list`, `dict`, `tuple`, `range`, `enumerate`, `zip`, `sorted`, `reversed`, `min`, `max`, `abs`, `any`, `all`, `hasattr`, `getattr`, `dir`, `type`, `repr`, `hash`, `print` |
-
-**Forbidden operations:** `import`, `load` -- all required functionality is provided via builtins.
-
-**Script return format:** List of dicts with `timestamp` (RFC3339 string or unix int),
-`value` (Decimal, string, float, or int), and optional `metadata` (dict).
-
-### Built-in Templates
-
-| Template | Description |
-|----------|-------------|
-| `moving_average.star` | Simple/exponential moving average projection |
-| `seasonal_decomposition.star` | Hour-of-day seasonal pattern decomposition |
-| `capacity_pricing.star` | Capacity-based pricing with reference data attributes |
-| `external_blend.star` | Weighted blend of multiple input datasets |
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/health` | Kubernetes liveness probe |
+| `GET` | `/ready` | Kubernetes readiness probe |
+| `GET` | `/metrics` | Prometheus metrics endpoint |
 
 ## Domain Model
 
 ```mermaid
 classDiagram
     class ForecastingStrategy {
-        +UUID ID
-        +string TenantID
-        +string Name
-        +string Description
-        +string StarlarkCode
-        +int HorizonHours
-        +int GranularityHours
-        +string Schedule
-        +[]string InputDatasetCodes
-        +string OutputDatasetCode
-        +string ReferenceDataResolutionKey
-        +StrategyStatus Status
-        +int64 Version
-        +Time CreatedAt
-        +Time UpdatedAt
+        +UUID id
+        +string tenantId
+        +string name
+        +string starlarkCode
+        +int horizonHours
+        +int granularityHours
+        +string schedule
+        +string[] inputDatasetCodes
+        +string outputDatasetCode
+        +StrategyStatus status
+        +int64 version
     }
-
     class StrategyStatus {
         <<enumeration>>
         DRAFT
         ACTIVE
         DEPRECATED
     }
-
-    ForecastingStrategy --> StrategyStatus
+    ForecastingStrategy --> StrategyStatus : has
 ```
 
-**Field Notes:**
-
-- `HorizonHours`: 1-168 (max 7 days)
-- `GranularityHours`: 1 to HorizonHours
-- `Schedule`: Standard cron expression (e.g., `0 16 * * *`)
-- `InputDatasetCodes`: At least one MDS dataset code required
-- `ReferenceDataResolutionKey`: Optional hierarchy node context for the forecast
-
-### Strategy Status
-
-| Status | Description |
-|--------|-------------|
-| `DRAFT` | Strategy is being configured, not yet scheduled |
-| `ACTIVE` | Strategy is scheduled for cron execution |
-| `DEPRECATED` | Terminal state, strategy is retired |
-
-**Status Transitions:**
-
-```mermaid
-stateDiagram-v2
-    [*] --> DRAFT
-    DRAFT --> ACTIVE
-    DRAFT --> DEPRECATED
-    ACTIVE --> DEPRECATED
-    DEPRECATED --> [*]
-```
-
-- Only ACTIVE strategies can be executed via `ComputeForwardCurve`
-- DEPRECATED is terminal (cannot be reactivated)
-- Starlark code, description, and schedule can be updated while in DRAFT or ACTIVE
-
-## Cron Scheduler
-
-The scheduler polls the database every 60 seconds for active strategies and registers cron jobs for each.
-
-| Setting | Value |
-|---------|-------|
-| Poll interval | 60 seconds |
-| Shutdown timeout | 5 minutes |
-| Lease TTL | 5 minutes (Redis) |
-| Lease renewal | Every 30 seconds |
-| Execution timezone | UTC |
-
-**Distributed locking:** The `LeaseManager` uses Redis-based distributed locks to prevent multiple pods from
-executing the same strategy simultaneously. Locks are automatically renewed during execution and released
-on completion or during graceful shutdown.
-
-## Database Schema
-
-**Database**: `meridian_forecasting`
-
-```mermaid
-erDiagram
-    forecasting_strategy {
-        uuid id PK
-        text tenant_id "NOT NULL"
-        text name "NOT NULL"
-        text description "nullable"
-        text starlark_code "NOT NULL"
-        int horizon_hours "1-168"
-        int granularity_hours "1 to horizon_hours"
-        text schedule "cron expression"
-        text_array input_dataset_codes "NOT NULL"
-        text output_dataset_code "NOT NULL"
-        text reference_data_resolution_key "nullable"
-        text status "DRAFT, ACTIVE, DEPRECATED"
-        bigint version "optimistic lock"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-```
-
-**Indexes:**
-
-- `idx_forecasting_strategy_unique_active`: Partial unique on (tenant_id, name) WHERE status = 'ACTIVE'
-- `idx_forecasting_strategy_tenant_status`: Covering index for tenant listing queries
-- `idx_forecasting_strategy_active`: Partial index for scheduler lookups WHERE status = 'ACTIVE'
-
-**Constraints:**
-
-- `chk_forecasting_strategy_status`: status IN ('DRAFT', 'ACTIVE', 'DEPRECATED')
-- `horizon_hours > 0 AND horizon_hours <= 168`
-- `granularity_hours > 0 AND granularity_hours <= horizon_hours`
-
-## Configuration
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `GRPC_PORT` | 50061 | gRPC server port |
-| `METRICS_PORT` | 8082 | HTTP metrics and health endpoint |
-| `DATABASE_URL` | - | CockroachDB connection string |
-| `DB_MAX_OPEN_CONNS` | 25 | Connection pool size |
-| `DB_MAX_IDLE_CONNS` | 5 | Idle connections |
-| `DB_CONN_MAX_LIFETIME` | 5m | Connection max age |
-| `DB_CONN_MAX_IDLE_TIME` | 10m | Idle connection max age |
-| `MDS_TARGET` | `market-information:50051` | Market Information Service gRPC target |
-| `LOG_LEVEL` | info | Log level (debug, info, warn, error) |
-| `LOG_FORMAT` | json | Log format |
-| `AUTH_ENABLED` | false | Enable gRPC auth interceptor |
-| `OTEL_SERVICE_NAME` | forecasting-service | OpenTelemetry service name |
-| `OTEL_SAMPLING_RATE` | 0.1 | Trace sampling rate |
-| `GRPC_MAX_CONCURRENT_STREAMS` | 100 | Max concurrent gRPC streams |
-
-## Observability
-
-### Metrics Endpoint
-
-The service exposes Prometheus metrics on port 8082:
-
-- **Endpoint**: `http://localhost:8082/metrics`
-- **Health Check**: `http://localhost:8082/health`
-- **Readiness Check**: `http://localhost:8082/ready`
-
-### Prometheus Metrics
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `meridian_forecasting_scheduled_executions_total` | Counter | tenant_id, strategy_id, status | Total scheduled forecast executions |
-| `meridian_forecasting_execution_duration_seconds` | Histogram | tenant_id, strategy_id | Duration of forecast execution |
-| `meridian_forecasting_lease_acquisition_failures_total` | Counter | reason | Lease acquisition failures |
-| `meridian_forecasting_active_strategies` | Gauge | - | Currently registered active strategies |
-| `meridian_forecasting_scheduler_reloads_total` | Counter | outcome | Strategy reload cycles |
-| `meridian_forecasting_scheduler_errors_total` | Counter | error_type | Scheduler errors |
-
-**Note**: `tenant_id` and `strategy_id` labels on execution metrics can produce high cardinality. Monitor in production.
+`ForecastingStrategy.status` lifecycle: `DRAFT` -> `ACTIVE` -> `DEPRECATED`.
+`DEPRECATED` is terminal - a deprecated strategy cannot be reactivated.
+Optimistic locking is enforced via the `version` field; updates must supply the current version.
 
 ## Dependencies
 
-| Service | Purpose |
-|---------|---------|
-| Market Information Service (50051) | Fetch historical observations; publish forecast points |
-| CockroachDB | Strategy persistence |
-| Redis | Distributed lease management for cron scheduler |
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| `market-information` | gRPC | Fetch historical observations as input; publish forward curve points as ESTIMATE quality |
+| CockroachDB | SQL | Persists forecasting strategies and scheduler execution records |
+| Redis | TCP | Distributed lease management per strategy to prevent duplicate cron execution |
 
-## Key Patterns
+## Dependents
 
-### Starlark Script Validation
+No Meridian services call `forecasting` directly. The service publishes its output to
+`market-information` as new ESTIMATE quality observations which other services may
+then query via `market-information`.
 
-The `validation` package performs static analysis before execution:
+## Load-Bearing Files
 
-1. Checks Starlark syntax
-2. Verifies `compute_forecast(ctx)` function exists with correct signature
-3. Rejects forbidden operations (`import`, `load`)
-4. Optionally performs dry-run execution with stub builtins
+Paths are relative to `services/forecasting/`.
 
-Validation results include AI-friendly suggestions for fixing issues (line, column, message, suggestion).
+| File | Why It Matters |
+|------|----------------|
+| `cmd/main.go` | Entry point; wires database pool, MDS client, Starlark runner, handler, scheduler, and both servers |
+| `config/config.go` | Configuration loading; the only source of env var names |
+| `handler/forecasting_handler.go` | gRPC handler and internal execution entry point; orchestrates the full compute-and-publish flow |
+| `starlark/runner.go` | `ForecastRunner` - applies sandbox, executes Starlark script, validates output, publishes to MDS |
+| `domain/forecasting_strategy.go` | Aggregate root; enforces status transitions and immutability invariants |
+| `scheduler/scheduler_adapters.go` | `ForecastScheduleProvider` and `ForecastScheduleExecutor` - plugs strategies into the shared cron scheduler |
+| `templates/templates.go` | Built-in Starlark strategy templates (moving_average, seasonal_decomposition, capacity_pricing, external_blend) |
 
-### Forecast Point Validation
+## Configuration
 
-After Starlark execution, returned points are validated:
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `MDS_TARGET` | No | `market-information:50051` | gRPC address of `market-information` |
+| `REDIS_ADDR` | No | `localhost:6379` | Redis address for distributed scheduler lease management |
+| `GRPC_PORT` | No | `50061` | gRPC listen port |
+| `METRICS_PORT` | No | `8082` | HTTP metrics and health listen port |
+| `SCHEDULER_REFRESH_INTERVAL` | No | `60s` | How often the cron scheduler reloads active strategies |
+| `LOG_LEVEL` | No | `info` | Log verbosity (`debug`, `info`, `warn`, `error`) |
 
-- Timestamps must be within `[now, now + horizon]`
-- Timestamps must be monotonically increasing
-- Timestamps must be aligned to the granularity interval
+## Architecture
 
-### MDS Publishing
+```mermaid
+flowchart LR
+    Scheduler[CronScheduler] -->|fires per strategy| Handler[ForecastingHandler]
+    Handler -->|fetch observations| MIS[market-information]
+    Handler -->|execute| Runner[StarlarkRunner]
+    Runner -->|sandbox.ForecasterConfig| Sandbox[Starlark sandbox]
+    Sandbox -->|compute_forecast ctx| Script[tenant Starlark script]
+    Script --> Points[forecast points]
+    Points -->|publish ESTIMATE quality| MIS
+```
 
-Forecast points are published to MDS as ESTIMATE quality observations in batches of 1000. Each observation
-includes a client reference in the format `forecast:{strategy_id}:v{version}:{timestamp}` for idempotency.
+**Starlark sandbox:** Uses `sandbox.ForecasterConfig` from `shared/platform/sandbox` - 10 s
+wall-clock timeout, 1,000,000 max execution steps, 64 KB script size cap. Because Starlark
+forbids `while` loops and recursion, every script is guaranteed to terminate. See
+[`docs/patterns.md`](../../docs/patterns.md#6-starlark-sandbox) for the full sandbox
+pattern reference.
 
-### Optimistic Locking
-
-Updates check `WHERE version = expected_version`. Returns conflict error on mismatch.
-
-## Kubernetes Deployment
-
-| Setting | Value |
-|---------|-------|
-| Replicas | 2 |
-| CPU | 50m-200m |
-| Memory | 64Mi-256Mi |
-| User | 65532 (non-root) |
-| Filesystem | Read-only |
-| Service Type | Headless (ClusterIP: None) |
-| Grace Period | 30 seconds |
+**Distributed execution safety:** The scheduler holds a per-strategy Redis lease (TTL 5 min)
+before executing. If a pod dies mid-execution, the lease expires and another pod picks up the
+next scheduled run. The lease renews every 30 seconds during execution.
 
 ## References
 
-- [Service Architecture](../README.md)
-- [Proto Definitions](../../api/proto/meridian/forecasting/v1/)
-- [Port Assignments](../../shared/platform/ports/ports.go)
+- Starlark sandbox pattern: [`docs/patterns.md`](../../docs/patterns.md#6-starlark-sandbox)
+- Architecture layers: [`docs/architecture-layers.md`](../../docs/architecture-layers.md#8-observability-and-routing)
+- Sandbox presets: [`shared/platform/sandbox/config.go`](../../shared/platform/sandbox/config.go)

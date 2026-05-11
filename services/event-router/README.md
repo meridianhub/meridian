@@ -1,183 +1,163 @@
 ---
 name: event-router
-description: CEL-filtered saga dispatcher that routes domain events from Kafka to saga workflows and platform billing handlers
+description: Kafka consumer that routes audit events to CEL-filtered saga triggers and transforms them into platform billing measurements via position-keeping
 triggers:
-  - Working on event-driven saga triggering
-  - Implementing CEL-based event filtering and routing
-  - Configuring platform billing and utilization metering
-  - Debugging event routing pipelines
-  - Understanding how domain events trigger saga workflows
+  - Debugging event-driven saga triggering
+  - Understanding how domain events reach control-plane workflows
+  - Configuring platform utilization metering for tenant-zero billing
+  - Investigating missing saga executions or billing measurements
+  - Adding a new event handler or routing rule
 instructions: |
-  Event Router is a Kafka consumer that routes domain events to registered handlers
-  using CEL filter expressions. Its primary responsibilities are saga triggering
-  and platform utilization metering.
+  event-router is a stateless Kafka consumer with no gRPC port of its own.
+  It consumes six audit topics (audit.events.*.v1) and dispatches each event
+  to registered EventHandler implementations:
 
-  Key concepts:
-  - Consumes domain events from multiple Kafka topics
-  - Routes events to handlers based on channel and event type
-  - Triggers saga workflows via the control-plane's SagaExecutionService
-  - Transforms audit events into utilization measurements for platform billing
-  - Idempotent saga triggering via idempotency keys
+  - SagaTrigger: triggers sagas via control-plane ExecuteSaga gRPC with an
+    idempotency key derived from the source event (prevents duplicate triggers
+    on Kafka redelivery).
+  - PlatformMeteringHandler: transforms audit events into utilization
+    measurements and calls position-keeping RecordMeasurement on tenant-zero
+    (the platform billing tenant). The MDS output (ENABLE_MDS_OUTPUT) buffers
+    measurements and flushes to market-information on a configurable interval.
 
-  Architecture patterns:
-  - Handler registry with pluggable EventHandler interface
-  - CEL expressions for event filtering
-  - Fire-and-forget event consumption (at-least-once semantics)
-  - Saga triggering via gRPC to control-plane
-  - Utilization metering via Position Keeping tenant-zero
+  Required env vars: KAFKA_BOOTSTRAP_SERVERS, POSITION_KEEPING_ENDPOINT,
+  TENANT_ZERO_ID. The consumer group is "event-router" by default.
 
-  Port: 8080 (HTTP - health checks and metrics)
+  Scale via HPA on Kafka consumer lag - do not run more than one instance per
+  topic partition to avoid duplicate saga triggering (idempotency keys mitigate
+  this but do not eliminate latency spikes).
+
+  Port: 8080 (HTTP - health checks and metrics only, no gRPC).
 ---
 
-# Event Router
+# event-router
 
-CEL-filtered saga dispatcher that routes domain events from Kafka to saga workflows and platform billing handlers.
+Kafka consumer that routes domain events to saga triggers and platform billing measurements.
+Part of the [Observability and Routing layer](../../docs/architecture-layers.md#8-observability-and-routing).
 
 ## Overview
 
 | Attribute | Value |
 |-----------|-------|
-| **Domain** | Infrastructure (Event Routing) |
-| **Port** | 8080 (HTTP) |
-| **Language** | Go |
+| **BIAN Domain** | Infrastructure (non-BIAN) |
+| **Layer** | Observability and Routing |
+| **Port** | 8080 (HTTP, health checks and metrics only; no gRPC port) |
 | **Database** | None (stateless consumer) |
-| **Standalone** | No (requires Kafka, Control Plane, Position Keeping) |
+| **Standalone** | No (requires Kafka, `position-keeping`, and `control-plane`) |
 
-## Purpose
+## API Surface
 
-The Event Router provides event-driven workflow orchestration by:
+event-router exposes no gRPC port and no business API endpoints. It is a pure consumer.
+HTTP endpoints below are for operational use only (health probes and metrics).
 
-- Consuming domain events from Kafka audit topics
-- Routing events to registered handlers via the `EventHandler` interface
-- Triggering saga workflows through the control-plane's `SagaExecutionService`
-- Transforming audit events into utilization measurements for platform billing (tenant-zero)
+### HTTP
 
-## HTTP Endpoints
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/healthz` | Kubernetes liveness probe |
+| `GET` | `/ready` | Readiness probe (checks consumer initialization) |
+| `GET` | `/metrics` | Prometheus metrics endpoint |
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/healthz` | GET | Liveness probe |
-| `/ready` | GET | Readiness probe (checks consumer initialization) |
-| `/metrics` | GET | Prometheus metrics endpoint |
+## Domain Model
 
-## Architecture
-
-### Handler Registry
-
-The Event Router uses a pluggable handler model:
-
-- **`EventHandler`** interface: `Handle(ctx, channel, event, metadata) error`
-- **`SagaTrigger`** interface: Triggers sagas via control-plane gRPC with idempotency keys
-- **`UtilizationPublisher`**: Transforms audit events into billing measurements
+event-router is a stateless routing adapter. It does not own persistent domain
+entities. The key interfaces are:
 
 ```mermaid
-flowchart LR
-    subgraph Kafka["Kafka Topics"]
-        T1["audit.events.*"]
-        T2["position-keeping<br/>.transaction-captured.v1"]
-    end
-
-    subgraph ER["Event Router"]
-        Consumer["Multi-Topic<br/>Consumer"]
-        Router["Handler<br/>Router"]
-        SH["Saga<br/>Handler"]
-        UH["Utilization<br/>Handler"]
-    end
-
-    subgraph Downstream["Downstream Services"]
-        CP["Control Plane<br/>(Saga Execution)"]
-        PK["Position Keeping<br/>(Tenant-Zero)"]
-    end
-
-    T1 --> Consumer
-    T2 --> Consumer
-    Consumer --> Router
-    Router --> SH
-    Router --> UH
-    SH -->|ExecuteSaga| CP
-    UH -->|RecordMeasurement| PK
-
-    classDef kafka fill:#50c878,stroke:#2d7a4a,color:#fff
-    classDef service fill:#4a90d9,stroke:#2d5a87,color:#fff
-    classDef downstream fill:#9c27b0,stroke:#6a1b9a,color:#fff
-    class T1,T2 kafka
-    class Consumer,Router,SH,UH service
-    class CP,PK downstream
+classDiagram
+    class EventHandler {
+        <<interface>>
+        +Handle(ctx, channel, event, metadata) error
+    }
+    class AuditConsumer {
+        +topics []string
+        +groupID string
+        +handlerRegistry map
+    }
+    class PlatformMeteringHandler {
+        +tenantZeroID UUID
+        +tenantAccountMapping map
+    }
+    class SagaTrigger {
+        <<interface>>
+        +TriggerSaga(ctx, channel, event, metadata) error
+    }
+    AuditConsumer --> EventHandler : dispatches to
+    PlatformMeteringHandler ..|> EventHandler
+    SagaTrigger ..|> EventHandler
 ```
 
-### Event Processing Pipeline
+Events consumed: protobuf `AuditEvent` messages from `audit.events.<service>.v1` topics.
+Measurements produced: gRPC `RecordMeasurement` calls to `position-keeping` on tenant-zero.
 
-1. **Consume**: Read event from Kafka topic
-2. **Deserialize**: Parse Protobuf event
-3. **Route**: Dispatch to registered handler(s) based on channel
-4. **Handle**: Handler processes event (trigger saga or record measurement)
-5. **Commit**: Commit Kafka offset (at-least-once semantics)
+## Dependencies
 
-## Service Dependencies
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| Kafka (`audit.events.*.v1` topics) | Kafka consumer | Source of all audit domain events |
+| `position-keeping` | gRPC | `RecordMeasurement` for platform billing (tenant-zero) |
+| `control-plane` | gRPC | `ExecuteSaga` for event-triggered saga workflows |
+| `market-information` | gRPC (optional) | MDS observation publishing when `ENABLE_MDS_OUTPUT=true` |
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| Kafka | 9092 | Domain event streaming |
-| Control Plane | gRPC | Saga workflow triggering |
-| Position Keeping | 50053 | Utilization measurements (tenant-zero billing) |
+## Dependents
+
+event-router has no callers. It is an event consumer; all data flows outbound.
+
+## Load-Bearing Files
+
+Paths are relative to `services/event-router/`.
+
+| File | Why It Matters |
+|------|----------------|
+| `cmd/main.go` | Entry point; wires the consumer pipeline, HTTP server, and shutdown |
+| `app/config.go` | All configuration fields and defaults; the only source of required env var names |
+| `adapters/messaging/audit_consumer.go` | Multi-topic Kafka consumer; dispatches each event to the handler registry |
+| `adapters/messaging/platform_metering_handler.go` | Transforms audit events to utilization measurements; calls `RecordMeasurement` on tenant-zero |
+| `adapters/grpc/position_keeping_client.go` | gRPC client for `position-keeping` `RecordMeasurement` |
+| `domain/handler.go` | `EventHandler` interface contract; all new handlers must implement this |
+| `domain/tenant_mapping.go` | Tenant-to-account mapping used to resolve billing accounts from tenant IDs |
 
 ## Configuration
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `KAFKA_BOOTSTRAP_SERVERS` | Yes | `kafka:9092` | Kafka broker addresses |
-| `CONSUMER_GROUP_ID` | Yes | `event-router` | Consumer group identifier |
-| `AUDIT_TOPICS` | Yes | - | Comma-separated list of topics to consume |
-| `POSITION_KEEPING_ENDPOINT` | Yes | `position-keeping:50053` | Position Keeping gRPC endpoint |
-| `TENANT_ZERO_ID` | Yes | - | UUID of platform billing tenant |
-| `TENANT_ACCOUNT_MAPPING` | No | `{}` | JSON mapping of tenant IDs to billing accounts |
-| `HTTP_PORT` | No | `8080` | HTTP server port for health/metrics |
-| `CONTROL_PLANE_ENDPOINT` | Yes | - | Control Plane gRPC endpoint for saga triggering |
-| `MARKET_DATA_ENDPOINT` | No | - | Market Information gRPC endpoint |
+| `KAFKA_BOOTSTRAP_SERVERS` | Yes | - | Comma-separated Kafka broker addresses |
+| `POSITION_KEEPING_ENDPOINT` | Yes | - | gRPC address of `position-keeping` (e.g., `position-keeping:50053`) |
+| `TENANT_ZERO_ID` | Yes | - | UUID of the platform billing tenant for utilization metering |
+| `CONSUMER_GROUP_ID` | No | `event-router` | Kafka consumer group ID |
+| `TENANT_ACCOUNT_MAPPING` | No | - | JSON mapping of tenant UUIDs to billing account UUIDs |
+| `HTTP_PORT` | No | `8080` | HTTP listen port (health and metrics) |
+| `ENABLE_MDS_OUTPUT` | No | `true` | Enable MDS observation publishing to `market-information` |
+| `MDS_SERVICE_ADDR` | No | - | gRPC address of `market-information` (required when `ENABLE_MDS_OUTPUT=true`) |
+| `MDS_AGGREGATION_WINDOW` | No | `1h` | Measurement aggregation window before flush |
+| `MDS_FLUSH_INTERVAL` | No | `5m` | How often to flush buffered MDS observations |
 
-## Key Patterns
+The six default audit topics are hard-coded in `app/config.go`:
+`audit.events.current-account.v1`, `audit.events.financial-accounting.v1`,
+`audit.events.position-keeping.v1`, `audit.events.party.v1`,
+`audit.events.payment-order.v1`, `audit.events.tenant.v1`.
 
-### Idempotent Saga Triggering
+## Architecture
 
-Saga triggers include an idempotency key derived from the source event. Duplicate triggers
-(e.g., Kafka redelivery) return the existing saga ID without re-executing.
-
-### Stateless Consumer
-
-No local database. All state resides in downstream services (Control Plane for sagas,
-Position Keeping for billing). This enables horizontal scaling without data partitioning.
-
-### At-Least-Once Semantics
-
-Manual Kafka offset commits after successful processing. Duplicate events are handled
-by downstream idempotency.
-
-## Directory Structure
-
-```text
-services/event-router/
-├── cmd/                    # Entry point (main.go, Dockerfile)
-├── domain/                 # Domain models
-│   ├── handler.go          # EventHandler interface
-│   ├── saga_trigger.go     # SagaTrigger interface
-│   ├── measurement.go      # UtilizationMeasurement type
-│   ├── instruments.go      # Instrument code mapping
-│   ├── metrics.go          # Prometheus metrics
-│   └── tenant_mapping.go   # Tenant-to-account mapping
-├── adapters/               # External adapters
-│   ├── grpc/               # Control Plane saga trigger client
-│   ├── mds/                # Market Data Service client
-│   └── messaging/          # Kafka consumer
-├── app/                    # Application configuration
-│   └── config.go           # Config loading and validation
-├── internal/               # Internal implementation
-├── k8s/                    # Kubernetes manifests
-└── tests/                  # Integration tests
+```mermaid
+flowchart LR
+    Kafka["Kafka<br/>audit.events.*.v1"] --> Consumer[AuditConsumer]
+    Consumer --> Metering[PlatformMeteringHandler]
+    Consumer --> Saga[SagaTrigger]
+    Metering -->|RecordMeasurement| PK[position-keeping<br/>tenant-zero]
+    Saga -->|ExecuteSaga| CP[control-plane]
+    Metering -->|PublishObservation| MDS[market-information<br/>optional]
 ```
+
+**Key properties:**
+
+- At-least-once semantics: Kafka offsets commit only after successful handler dispatch.
+- Idempotent saga triggering: idempotency key derived from event ID prevents duplicate saga starts on
+  redelivery.
+- Scale via HPA on Kafka consumer lag. A single consumer group (`event-router`) ensures each event is
+  processed once per partition.
 
 ## References
 
-- [Service Architecture](../README.md)
-- [Kubernetes Deployment Guide](k8s/README.md)
-- [Position Keeping Service](../position-keeping/README.md)
-- [Control Plane Service](../control-plane/README.md)
+- Architecture layers: [`docs/architecture-layers.md`](../../docs/architecture-layers.md#8-observability-and-routing)
+- Event-driven architecture: [`docs/architecture/event-driven-architecture.md`](../../docs/architecture/event-driven-architecture.md)

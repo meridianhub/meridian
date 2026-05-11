@@ -1,449 +1,212 @@
 ---
-name: position-keeping-service
-description: BIAN transaction log for immutable financial transaction history, position tracking, and balance computation
+name: position-keeping
+description: BIAN Transaction Log - authoritative source for balance computation across all 7 BIAN balance types; immutable transaction history with parent-child lineage
 triggers:
-  - Designing transaction capture and position keeping systems
-  - Implementing financial audit trails and reconciliation workflows
-  - Working with BIAN Transaction Log domain patterns
-  - Building event-driven transaction systems
-  - Understanding capacity limits and state machines for financial data
-  - Handling optimistic concurrency control in transactional systems
-  - Querying account balances (7 BIAN balance types)
-  - Understanding balance computation responsibility
+  - Querying account balances or transaction history
+  - Debugging balance discrepancies across services
+  - Implementing a new transaction capture flow
+  - Understanding ADR-0023 (balance delegation)
+  - Adding a new balance type or measurement
+  - Diagnosing compaction or reservation issues
 instructions: |
-  PositionKeeping maintains immutable transaction history with comprehensive audit trails
-  and serves as the authoritative source for balance computation.
+  position-keeping is the read-side authority for balances. Per ADR-0023, all other
+  services (current-account, internal-account) delegate balance queries here.
+  Do not compute balances in any other service.
 
-  Key concepts:
-  - FinancialPositionLog: Aggregate root with 10,000 entry limit
-  - Transaction state machine: PENDING → RECONCILED → POSTED → REVERSED
-  - Parent-child lineage for reversals and amendments
-  - Kafka event publishing (fire-and-forget) for downstream consumers
-  - Balance ownership: Computes all 7 BIAN balance types (see Balance Calculation section)
+  FinancialPositionLog is the aggregate root. Each log is append-only and
+  enforces a hard limit of 10,000 entries. Transaction status machine:
+  PENDING -> RECONCILED -> POSTED -> REVERSED. POSTED is effectively immutable
+  (terminal for most mutations).
 
-  Balance Query APIs:
-  - GetAccountBalance: Query single balance type
-  - GetAccountBalances: Query all 7 balance types for an account
+  Parent-child lineage: reversals and amendments reference their parent log entry
+  via parent_log_id. This is how the audit chain for compensation is maintained.
 
-  Balance Types: OPENING, CLOSING, CURRENT, AVAILABLE, LEDGER, RESERVE, FREE
+  7 BIAN balance types: OPENING, CLOSING, CURRENT, AVAILABLE, LEDGER, RESERVE, FREE.
+  GetAccountBalance and GetAccountBalances are the two balance query RPCs; all other
+  services call these rather than computing balances themselves.
 
-  Capacity limits:
-  - MaxTransactionEntries: 10,000 per log
-  - MaxAuditEntries: 10,000 per log
+  Background compaction (COMPACTION_ENABLED, default true): merges fragmented bucket
+  rows into consolidated entries. Do not disable in production - high fragmentation
+  degrades query performance.
 
-  Immutability: POSTED logs cannot be modified (terminal state)
-
-  Port: 50053 (gRPC)
+  Port: 50053 (gRPC, ports.PositionKeeping), 9090 (HTTP metrics).
+  Instability I=0.00 - the most depended-on service in the platform; treat its proto
+  contract as load-bearing across the entire codebase.
 ---
 
-# PositionKeeping Service
+# position-keeping
 
-BIAN-compliant position keeping service for immutable financial transaction history and audit trails.
+BIAN Transaction Log service. Authoritative source for balance computation and immutable
+transaction history across all asset classes. Part of the
+[Observability and Routing layer](../../docs/architecture-layers.md#8-observability-and-routing).
 
 ## Overview
 
 | Attribute | Value |
 |-----------|-------|
 | **BIAN Domain** | Position Keeping |
-| **Port** | 50053 (gRPC) |
-| **Language** | Go |
-| **Database** | PostgreSQL/CockroachDB |
-| **Standalone** | Yes |
+| **Layer** | Observability and Routing |
+| **Port** | 50053 (gRPC), 9090 (HTTP metrics) |
+| **Database** | CockroachDB (tenant-scoped schemas) |
+| **Standalone** | No (requires `reference-data` for instrument resolution; optionally `current-account` and `internal-account` for account validation) |
 
-## gRPC Methods
+## API Surface
 
-### Position Log Operations
+### gRPC
 
-| Method | HTTP | Purpose |
-|--------|------|---------|
-| `InitiateFinancialPositionLog` | `POST /v1/position-logs` | Create log with initial transaction |
-| `RetrieveFinancialPositionLog` | `GET /v1/position-logs/{id}` | Get log details |
-| `ListFinancialPositionLogs` | `GET /v1/position-logs` | List with filters |
-| `UpdateFinancialPositionLog` | `PATCH /v1/position-logs/{id}` | State transitions |
-| `BulkImportTransactions` | `POST /v1/position-logs/bulk` | Batch import |
+| Service | RPC | Purpose |
+|---------|-----|---------|
+| `PositionKeepingService` | `InitiateFinancialPositionLog` | Create a new position log with an initial transaction entry |
+| `PositionKeepingService` | `InitiateFinancialPositionLogBatch` | Bulk create position log entries |
+| `PositionKeepingService` | `InitiateWithOpeningBalance` | Create a position log pre-loaded with an opening balance entry |
+| `PositionKeepingService` | `UpdateFinancialPositionLog` | Append a transaction entry and drive status transitions |
+| `PositionKeepingService` | `RetrieveFinancialPositionLog` | Fetch a position log by ID |
+| `PositionKeepingService` | `ListFinancialPositionLogs` | List position logs with filters |
+| `PositionKeepingService` | `BulkImportTransactions` | Batch import historical transactions |
+| `PositionKeepingService` | `GetAccountBalance` | Query a single BIAN balance type for an account |
+| `PositionKeepingService` | `GetAccountBalances` | Query all 7 BIAN balance types for an account |
+| `PositionKeepingService` | `RecordMeasurement` | Record a utilization or billing measurement (used by event-router for platform billing) |
+| `PositionKeepingService` | `UpdatePosition` | Update a position record (UNIMPLEMENTED stub) |
+| `PositionKeepingService` | `MergePositions` | Merge two position records - compaction support (UNIMPLEMENTED stub) |
+| `PositionKeepingService` | `RecordReservation` | Record a fund reservation against an account |
+| `PositionKeepingService` | `ReleaseReservation` | Release a previously recorded reservation |
+| `PositionKeepingService` | `GetProjectedBalance` | Compute projected balance including open reservations |
 
-### Balance Query Operations
-
-| Method | HTTP | Purpose |
-|--------|------|---------|
-| `GetAccountBalance` | `GET /v1/accounts/{account_id}/balance/{balance_type}` | Query single balance type |
-| `GetAccountBalances` | `GET /v1/accounts/{account_id}/balances` | Query all balance types |
+Proto: [`api/proto/meridian/position_keeping/v1/position_keeping.proto`](../../api/proto/meridian/position_keeping/v1/position_keeping.proto).
 
 ## Domain Model
 
 ```mermaid
 classDiagram
     class FinancialPositionLog {
-        +UUID LogID
-        +string AccountID
-        +int64 Version
-        +TransactionStatus CurrentStatus
-        +TransactionStatus PreviousStatus
-        +ReconciliationStatus ReconciliationStatus
-        +string StatusReason
-        +string FailureReason
-        +TransactionLineage Lineage
+        +UUID logId
+        +string accountId
+        +string instrumentCode
+        +TransactionStatus status
+        +int64 version
+        +int entryCount
+        +time createdAt
     }
-
-    class TransactionLogEntry {
-        +UUID EntryID
-        +UUID TransactionID
-        +string AccountID
-        +Money Amount
-        +Direction Direction
-        +Time Timestamp
-        +string Description
-        +string Reference
-        +TransactionSource Source
+    class TransactionEntry {
+        +UUID entryId
+        +UUID logId
+        +UUID parentLogId
+        +decimal amount
+        +PostingDirection direction
+        +TransactionStatus status
+        +TransactionSource source
+        +time effectiveAt
     }
-
-    class AuditTrailEntry {
-        +UUID AuditID
-        +string UserID
-        +string Action
-        +string IPAddress
-        +JSON Details
-        +Time Timestamp
+    class Balance {
+        +BalanceType type
+        +decimal amount
+        +string instrumentCode
     }
-
-    class TransactionLineage {
-        +UUID TransactionID
-        +UUID ParentTransactionID
-        +UUID[] ChildTransactionIDs
-        +UUID[] RelatedTransactionIDs
-        +string TransactionType
+    class Measurement {
+        +UUID measurementId
+        +string accountId
+        +string metricCode
+        +decimal value
+        +time recordedAt
     }
-
-    class TransactionStatus {
-        <<enumeration>>
-        PENDING
-        RECONCILED
-        POSTED
-        AMENDED
-        FAILED
-        REJECTED
-        CANCELLED
-        REVERSED
+    class Reservation {
+        +UUID reservationId
+        +string accountId
+        +decimal amount
+        +ReservationStatus status
+        +time expiresAt
     }
-
-    class ReconciliationStatus {
-        <<enumeration>>
-        UNRECONCILED
-        MATCHED
-        MISMATCHED
-        RESOLVED
-    }
-
-    class TransactionSource {
-        <<enumeration>>
-        API
-        BATCH
-        MANUAL
-        SYSTEM
-        IMPORT
-        MIGRATION
-        CORRECTION
-    }
-
-    FinancialPositionLog "1" --> "*" TransactionLogEntry : entries
-    FinancialPositionLog "1" --> "*" AuditTrailEntry : auditTrail
-    FinancialPositionLog "1" --> "1" TransactionLineage : lineage
-    FinancialPositionLog --> TransactionStatus
-    FinancialPositionLog --> ReconciliationStatus
-    TransactionLogEntry --> TransactionSource
+    FinancialPositionLog "1" --> "*" TransactionEntry : contains (append-only)
+    TransactionEntry --> TransactionEntry : parent-child lineage (reversals)
+    FinancialPositionLog ..> Balance : computed from entries
 ```
 
-**Capacity Limits:**
+`TransactionEntry.status`: `PENDING` -> `RECONCILED` -> `POSTED` -> `REVERSED`.
+`POSTED` entries are immutable; reversals create a new child entry referencing the parent.
+Hard limit: 10,000 entries per `FinancialPositionLog`.
 
-- `Entries`: max 10,000 per log
-- `AuditTrail`: max 10,000 per log
+**7 BIAN Balance Types:**
 
-## Transaction Status State Machine
+| Type | Meaning |
+|------|---------|
+| `OPENING` | Balance at the start of the current period |
+| `CLOSING` | Balance at the end of the current period |
+| `CURRENT` | Real-time balance including all transactions |
+| `AVAILABLE` | Funds available for immediate use (CURRENT minus active reservations) |
+| `LEDGER` | Balance of posted transactions only |
+| `RESERVE` | Funds held or reserved |
+| `FREE` | Unencumbered funds with no restrictions |
 
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING
-    PENDING --> RECONCILED
-    PENDING --> FAILED
-    PENDING --> REJECTED
-    PENDING --> CANCELLED
-    RECONCILED --> POSTED
-    RECONCILED --> AMENDED
-    POSTED --> REVERSED
-    POSTED --> [*]
-    FAILED --> [*]
-    REJECTED --> [*]
-    CANCELLED --> [*]
-    REVERSED --> [*]
-```
+## Dependencies
 
-### Reconciliation Status
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| `reference-data` | gRPC | Instrument definition lookup for position log creation |
+| `current-account` | gRPC (optional) | Account existence validation before creating a position log |
+| `internal-account` | gRPC (optional) | Internal account existence validation |
+| CockroachDB | SQL | Persists position logs, entries, measurements, and reservations |
+| Kafka | Producer | Publishes `position-keeping-events` topic for downstream consumers |
+| Redis (optional) | TCP | Idempotency key caching when `REDIS_ENABLED=true` |
 
-| Status | Description |
-|--------|-------------|
-| `UNRECONCILED` | Not yet matched |
-| `MATCHED` | Matched with external data |
-| `MISMATCHED` | Discrepancy found |
-| `RESOLVED` | Discrepancy resolved |
+## Dependents
 
-## Kafka Event Publishing
+| Service | Entry Point | Purpose |
+|---------|-------------|---------|
+| `current-account` | `services/current-account/service/client_interfaces.go` | Balance queries for lien checks and account balance reads |
+| `internal-account` | `services/internal-account/adapters/grpc/position_keeping_client.go` | Balance queries for internal account reads |
+| `reconciliation` | `services/reconciliation/service/grpc_pk_client.go` | Snapshot capture and balance assertions |
+| `event-router` | `services/event-router/adapters/grpc/position_keeping_client.go` | `RecordMeasurement` for platform billing (tenant-zero) |
+| `control-plane` | `services/control-plane/internal/admin/balance_sheet_handler.go` | Balance sheet queries across accounts |
+| `mcp-server` | `services/mcp-server/internal/clients/clients.go` | Balance and transaction history MCP tools |
+| `api-gateway` | `services/api-gateway/eventstream/` | Event stream subscriptions on position events |
 
-**Topics:**
+## Load-Bearing Files
 
-| Topic | Event |
-|-------|-------|
-| `position-keeping.transaction-captured.v1` | New transaction |
-| `position-keeping.transaction-amended.v1` | Post-capture modification |
-| `position-keeping.transaction-reconciled.v1` | External matching |
-| `position-keeping.transaction-posted.v1` | Final committed |
-| `position-keeping.transaction-rejected.v1` | Rejected |
-| `position-keeping.transaction-failed.v1` | Processing failed |
-| `position-keeping.transaction-cancelled.v1` | Cancelled |
-| `position-keeping.bulk-transaction-captured.v1` | Batch import |
+Paths are relative to `services/position-keeping/`.
 
-**Publishing Pattern:**
-
-- Fire-and-forget (doesn't block main operation)
-- Partition key = LogID (ensures ordering per aggregate)
-- Protobuf serialization
-
-**Fire-and-Forget Semantics:**
-
-Events are published asynchronously after the database transaction commits:
-
-- **Best-effort delivery**: Publish failures are logged but don't fail the request
-- **No transactional outbox**: Events may be lost if the service crashes after DB commit but before publish
-- **Trade-off**: Lower latency vs potential event loss during failures
-
-For use cases requiring guaranteed event delivery (e.g., regulatory audit),
-consider the [Audit Outbox Pattern](../README.md#audit-outbox-pattern) or
-implement a transactional outbox with a separate publisher worker.
-
-## Database Schema
-
-**Schema**: `position_keeping`
-
-```mermaid
-erDiagram
-    financial_position_logs {
-        uuid log_id PK
-        varchar(34) account_id
-        bigint version "optimistic lock"
-        varchar(20) current_status
-        varchar(20) previous_status
-        varchar(20) reconciliation_status
-        text status_reason
-        text failure_reason
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    transaction_log_entries {
-        uuid entry_id PK
-        uuid financial_position_log_id FK
-        uuid transaction_id
-        bigint amount_cents
-        char(3) currency "ISO 4217"
-        varchar(10) direction "debit, credit"
-        varchar(20) source "API, BATCH, etc."
-        varchar(255) description
-        varchar(255) reference
-        timestamptz timestamp
-    }
-
-    audit_trail_entries {
-        uuid audit_id PK
-        uuid financial_position_log_id FK
-        varchar(100) user_id
-        varchar(100) action
-        varchar(45) ip_address
-        jsonb details
-        timestamptz timestamp
-    }
-
-    transaction_lineage {
-        uuid id PK
-        uuid financial_position_log_id FK
-        uuid transaction_id
-        uuid parent_transaction_id "nullable"
-        varchar(50) transaction_type
-    }
-
-    financial_position_logs ||--o{ transaction_log_entries : "entries"
-    financial_position_logs ||--o{ audit_trail_entries : "auditTrail"
-    financial_position_logs ||--o| transaction_lineage : "lineage"
-```
-
-## Capacity Limits
-
-| Limit | Value | Error |
-|-------|-------|-------|
-| Max Transaction Entries | 10,000 | `ErrTooManyEntries` |
-| Max Audit Entries | 10,000 | `ErrTooManyEntries` |
-
-## Instrument Resolution
-
-Position-keeping supports all instrument dimensions (CURRENCY, ENERGY, CARBON, COMPUTE, etc.).
-Instrument properties are resolved via `InstrumentResolver` from Reference Data.
-
-**Resolution flow:**
-
-1. Transaction recording receives `instrument_code` and resolves properties via `InstrumentResolver`
-2. Balance computation uses the resolved precision for decimal arithmetic
-3. Persistence reconstruction uses stored `instrument_code`, `dimension`, and `precision` columns
-   with `quantity.NewInstrument()` directly (no Reference Data call on read path)
-
-All instrument dimensions and precision values are defined in Reference Data. See
-[ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md) for the architectural decision.
+| File | Why It Matters |
+|------|----------------|
+| `app/config.go` | All configuration fields and defaults; the only source of env var names |
+| `service/server.go` | gRPC server construction; wires all handlers and interceptors |
+| `service/initiate.go` | `InitiateFinancialPositionLog` - creates the aggregate root and enforces capacity limits |
+| `service/balance.go` | `GetAccountBalance` / `GetAccountBalances` - balance computation from entries |
+| `domain/financial_position_log.go` | Aggregate root; enforces the 10,000 entry cap and append-only invariant |
+| `domain/balance_computer.go` | Computes all 7 BIAN balance types from position entries |
+| `domain/transaction_lineage.go` | Parent-child lineage for reversals and amendments |
+| `service/record_measurement.go` | `RecordMeasurement` - records billing measurements for tenant-zero |
+| `service/reservation.go` | `RecordReservation` / `ReleaseReservation` - fund reservation lifecycle |
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `GRPC_PORT` | 50053 | gRPC server port |
-| `DATABASE_URL` | - | PostgreSQL connection string |
-| `KAFKA_BROKERS` | kafka:9092 | Kafka broker addresses |
-| `REDIS_ENABLED` | false | Enable idempotency cache |
-| `REDIS_ADDRESS` | redis:6379 | Redis address |
-
-## Key Patterns
-
-### Idempotency
-
-- Redis-backed distributed locking (when enabled)
-- Idempotency keys for effectively-once processing (retries produce same result)
-- 5-minute TTL for pending operation locks
-- Fallback to in-memory cache when Redis unavailable
-
-### Optimistic Locking
-
-Version field required for all updates. Returns conflict error on mismatch.
-
-### Immutability
-
-POSTED logs cannot be modified. Returns `ErrAlreadyPosted`.
-
-## Balance Calculation Responsibility
-
-Position Keeping is the authoritative source for account balance computation. This design
-follows BIAN service domain principles where Position Keeping owns the transaction log and
-therefore has the data required to compute accurate balances.
-
-### Balance Types (BIAN-Compliant)
-
-Position Keeping computes 7 balance types per account:
-
-| Balance Type | Proto Enum | Computation |
-|--------------|------------|-------------|
-| **Opening** | `BALANCE_TYPE_OPENING` | Balance at start of accounting period |
-| **Closing** | `BALANCE_TYPE_CLOSING` | Balance at end of accounting period |
-| **Current** | `BALANCE_TYPE_CURRENT` | Sum of all POSTED transactions (real-time) |
-| **Available** | `BALANCE_TYPE_AVAILABLE` | Current minus holds, liens, and reserves |
-| **Ledger** | `BALANCE_TYPE_LEDGER` | Book balance (may differ from current due to holds) |
-| **Reserve** | `BALANCE_TYPE_RESERVE` | Amount held in reserve (not available for use) |
-| **Free** | `BALANCE_TYPE_FREE` | Unencumbered balance (current minus all encumbrances) |
-
-### Balance Calculation Formulas
-
-```text
-CURRENT   = Σ(POSTED transactions: credits - debits)
-AVAILABLE = CURRENT - RESERVE - ACTIVE_LIENS
-LEDGER    = CURRENT (excluding pending transactions)
-FREE      = CURRENT - RESERVE - HOLDS
-```
-
-### Balance Query APIs
-
-**GetAccountBalance** - Query a single balance type:
-
-```go
-// Request
-req := &pk.GetAccountBalanceRequest{
-    AccountId:   "ACC-12345678",
-    BalanceType: pk.BALANCE_TYPE_AVAILABLE,
-    Currency:    "GBP",  // Optional: filter by currency
-}
-
-// Response
-resp := &pk.GetAccountBalanceResponse{
-    AccountId:   "ACC-12345678",
-    BalanceType: pk.BALANCE_TYPE_AVAILABLE,
-    Amount:      &common.MoneyAmount{Units: 1500, Nanos: 0, CurrencyCode: "GBP"},
-    AsOf:        timestamppb.Now(),
-}
-```
-
-**GetAccountBalances** - Query all balance types:
-
-```go
-// Request
-req := &pk.GetAccountBalancesRequest{
-    AccountId: "ACC-12345678",
-    Currency:  "GBP",  // Optional
-}
-
-// Response contains all 7 balance types
-resp := &pk.GetAccountBalancesResponse{
-    AccountId: "ACC-12345678",
-    Balances: []*pk.BalanceEntry{
-        {BalanceType: pk.BALANCE_TYPE_OPENING, Amount: ...},
-        {BalanceType: pk.BALANCE_TYPE_CLOSING, Amount: ...},
-        {BalanceType: pk.BALANCE_TYPE_CURRENT, Amount: ...},
-        {BalanceType: pk.BALANCE_TYPE_AVAILABLE, Amount: ...},
-        {BalanceType: pk.BALANCE_TYPE_LEDGER, Amount: ...},
-        {BalanceType: pk.BALANCE_TYPE_RESERVE, Amount: ...},
-        {BalanceType: pk.BALANCE_TYPE_FREE, Amount: ...},
-    },
-    AsOf: timestamppb.Now(),
-}
-```
-
-### Balance Query Sequence
-
-```mermaid
-sequenceDiagram
-    participant CA as CurrentAccount
-    participant PK as PositionKeeping
-    participant DB as PositionKeeping DB
-
-    CA->>PK: GetAccountBalances(accountID)
-    PK->>DB: Query POSTED transactions
-    DB-->>PK: Transaction entries
-    PK->>PK: Compute balance types
-    PK-->>CA: BalanceEntry[] (7 types)
-```
-
-### Performance Characteristics
-
-| Operation | Complexity | Notes |
-|-----------|------------|-------|
-| `GetAccountBalance` | O(n) | Aggregates over POSTED transactions |
-| `GetAccountBalances` | O(n) | Single pass computes all types |
-
-**Optimization:** Balance snapshots may be cached or materialized for high-traffic accounts.
-
-### Opening Balance Support
-
-For account migration scenarios, Position Keeping supports initializing accounts with an
-opening balance:
-
-```go
-// InitiateWithOpeningBalance creates a position log with a synthetic
-// opening balance transaction for migration purposes
-req := &pk.InitiateFinancialPositionLogRequest{
-    AccountId: "ACC-12345678",
-    OpeningBalance: &common.MoneyAmount{
-        Units:        10000,
-        CurrencyCode: "GBP",
-    },
-}
-```
-
-This creates an initial transaction entry that establishes the account's starting position.
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `GRPC_PORT` | No | `50053` | gRPC listen port |
+| `METRICS_PORT` | No | `9090` | HTTP metrics endpoint port |
+| `KAFKA_BROKERS` | No | `kafka:9092` | Kafka broker addresses |
+| `KAFKA_TOPIC` | No | `position-keeping-events` | Kafka topic for position events |
+| `KAFKA_ENABLED` | No | `true` | Enable Kafka event publishing |
+| `REDIS_ENABLED` | No | `false` | Enable Redis-backed idempotency cache |
+| `REDIS_ADDRESS` | No | `redis:6379` | Redis address |
+| `REFERENCE_DATA_SERVICE_URL` | No | - | gRPC address of `reference-data` |
+| `CURRENT_ACCOUNT_SERVICE_URL` | No | - | gRPC address of `current-account` (for account validation) |
+| `INTERNAL_ACCOUNT_SERVICE_URL` | No | - | gRPC address of `internal-account` (for account validation) |
+| `ACCOUNT_VALIDATION_ENABLED` | No | `true` | Validate account existence before creating position logs |
+| `ACCOUNT_VALIDATION_CACHE_TTL` | No | `1m` | How long to cache account validation results |
+| `COMPACTION_ENABLED` | No | `true` | Enable background compaction worker |
+| `COMPACTION_RUN_INTERVAL` | No | `5m` | How often to run compaction |
+| `COMPACTION_FRAGMENT_THRESHOLD` | No | `100` | Minimum fragments in a bucket before compaction runs |
+| `COMPACTION_BATCH_SIZE` | No | `50` | Maximum buckets compacted per run |
+| `AUTH_ENABLED` | No | `true` | Enable JWT authentication interceptor |
+| `JWKS_URL` | No | - | JWKS endpoint URL for JWT validation |
+| `LOG_LEVEL` | No | `info` | Log verbosity |
+| `DB_MAX_OPEN_CONNS` | No | `25` | Database connection pool maximum |
+| `DB_MAX_IDLE_CONNS` | No | `5` | Database idle connection pool size |
 
 ## References
 
-- [BIAN Position Keeping Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/PositionKeeping.yaml)
-- [Service Architecture](../README.md)
-- [Proto Definitions](../../api/proto/meridian/position_keeping/v1/)
-- [ADR-0023: Balance Delegation to Position Keeping](../../docs/adr/0023-balance-delegation-to-position-keeping.md)
+- ADR-0023: Balance Delegation to Position Keeping:
+  [`docs/adr/0023-balance-delegation-to-position-keeping.md`](../../docs/adr/0023-balance-delegation-to-position-keeping.md)
+- BIAN Position Keeping domain: [`docs/architecture/bian-service-boundaries.md`](../../docs/architecture/bian-service-boundaries.md)
+- Architecture layers: [`docs/architecture-layers.md`](../../docs/architecture-layers.md#8-observability-and-routing)
+- Service coupling analysis: [`docs/architecture/service-coupling-analysis.md`](../../docs/architecture/service-coupling-analysis.md)
