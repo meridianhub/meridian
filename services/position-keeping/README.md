@@ -205,7 +205,7 @@ Paths are relative to `services/position-keeping/`.
 
 ## References
 
-- ADR-0023: Balance Delegation to Position Keeping -
+- ADR-0023: Balance Delegation to Position Keeping:
   [`docs/adr/0023-balance-delegation-to-position-keeping.md`](../../docs/adr/0023-balance-delegation-to-position-keeping.md)
 - BIAN Position Keeping domain: [`docs/architecture/bian-service-boundaries.md`](../../docs/architecture/bian-service-boundaries.md)
 - Architecture layers: [`docs/architecture-layers.md`](../../docs/architecture-layers.md#8-observability-and-routing)
