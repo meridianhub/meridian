@@ -48,7 +48,7 @@ Example: "correspondence-service (new): required for outbound notification deliv
 [Break down the development process into phases:
 - MVP requirements
 - Future enhancements
-- Do not think about timelines whatsoever -- all that matters is scope and detailing exactly what needs to be build in each phase so it can later be cut up into tasks]
+- Do not think about timelines whatsoever -- all that matters is scope and detailing exactly what needs to be built in each phase so it can later be cut up into tasks]
 
 # Logical Dependency Chain
 [Define the logical order of development:
