@@ -1,113 +1,187 @@
 ---
-name: audit-worker-service
-description: Fallback audit logging worker for Kafka outage recovery
+name: audit-worker
+description: Kafka consumer and outbox fallback poller that maintains the per-tenant audit_log; provides the ListAuditEntries gRPC read API via the unified binary
 triggers:
-  - Audit log processing and outbox draining
-  - Kafka unavailability and fallback mode
-  - Audit metrics and monitoring
-  - Audit event retention and recovery
+  - Investigating audit trail gaps or missing entries
+  - Debugging audit_outbox backlog or high outbox depth
+  - Understanding the dual-path audit pipeline (Kafka primary, outbox fallback)
+  - Adding auditable entities to a service
+  - Reading audit history via ListAuditEntries
 instructions: |
-  The audit-worker processes audit_outbox entries when Kafka is unavailable.
-  It polls the outbox table every 5 seconds and moves entries to audit_log.
-  Monitor via Prometheus metrics: meridian_audit_worker_outbox_depth (alert if > 1000).
+  audit-worker has two delivery paths, both converging on audit_log:
+  - Primary (Kafka): domain services publish AuditEvent to
+    audit.events.<service>.v1; the AuditConsumer in this service writes the
+    event to the tenant-scoped audit_log (identified via x-tenant-id header).
+  - Fallback (outbox): when Kafka is unavailable, GORM hooks write an
+    audit_outbox row in the same DB transaction as the business write. The
+    audit.Worker polls audit_outbox every 5 s (adaptive) and drains to
+    audit_log. Alert threshold: meridian_audit_worker_outbox_depth > 1000.
 
-  Port: 8080 (HTTP for health/metrics)
+  The standalone binary (cmd/main.go) runs the outbox Worker only.
+  The AuditService gRPC (ListAuditEntries) is implemented in service/server.go
+  and registered in the unified Meridian binary (cmd/meridian/wire_grpc.go:415).
+  Both paths use ON CONFLICT (event_id) DO NOTHING so duplicate delivery is safe.
+
+  SERVICE_NAME identifies which source service's audit events this instance
+  processes. AUDIT_SCHEMA identifies the schema the outbox Worker polls.
+  Tenant context comes from the x-tenant-id Kafka header, set by ProtoConsumer.
 ---
 
 # audit-worker
 
-**Fallback service** that processes audit log entries from the outbox table when Kafka is unavailable.
+Kafka consumer and fallback outbox poller for the Meridian audit trail. Part of the
+[Observability and Routing layer](../../docs/architecture-layers.md#8-observability-and-routing).
 
-## Purpose
+## Overview
 
-The audit-worker implements the **fallback path** of the dual-path audit system described in
-[ADR-0009][adr-0009]. Under normal operation, audit events flow through Kafka to dedicated audit consumers.
-When Kafka is unavailable (network partition, broker outage), GORM hooks automatically write to the `audit_outbox`
-table instead, and this worker:
+| Attribute | Value |
+|-----------|-------|
+| **BIAN Domain** | Infrastructure (non-BIAN) |
+| **Layer** | Observability and Routing |
+| **Port** | 8080 (HTTP, health checks and metrics); AuditService gRPC served through the unified Meridian binary (no dedicated standalone gRPC port) |
+| **Database** | All tenant schemas - reads `audit_outbox`, writes `audit_log` |
+| **Standalone** | No (requires CockroachDB and Kafka) |
 
-[adr-0009]: ../../docs/adr/0009-application-level-audit-logging.md
+## API Surface
 
-**Note**: "Unavailable" refers to runtime detection of Kafka connectivity issues (5s timeout), not a configuration
-flag. There is no feature flag to enable/disable this worker - it is always running in production to process outbox
-entries written during Kafka outages.
+### gRPC (served via unified binary)
 
-1. Polls the `audit_outbox` table every 5 seconds (for entries written during Kafka outages)
-2. Processes records in batches of 100
-3. Moves entries to the `audit_log` table
-4. Implements retry logic (max 3 retries)
-5. Exposes Prometheus metrics for monitoring
+| Service | RPC | Purpose |
+|---------|-----|---------|
+| `AuditService` | `ListAuditEntries` | Paginated cursor query of the tenant-scoped `audit_log` |
 
-**Normal flow**: GORM hooks → Kafka → Audit Consumers → `audit_log`
-**Fallback flow**: GORM hooks → `audit_outbox` → audit-worker → `audit_log`
+Proto: [`api/proto/meridian/audit/v1/audit_service.proto`](../../api/proto/meridian/audit/v1/audit_service.proto).
 
-## Endpoints
+### HTTP
 
-| Endpoint | Port | Purpose |
-|----------|------|---------|
-| `/health/live` | 8080 | Kubernetes liveness probe |
-| `/health/ready` | 8080 | Kubernetes readiness probe |
-| `/health/startup` | 8080 | Kubernetes startup probe |
-| `/metrics` | 8080 | Prometheus metrics |
-| `/` | 8080 | Version info |
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/health/live` | Kubernetes liveness probe |
+| `GET` | `/health/ready` | Kubernetes readiness probe |
+| `GET` | `/health/startup` | Kubernetes startup probe |
+| `GET` | `/metrics` | Prometheus metrics endpoint |
 
-## Metrics
+## Domain Model
 
-**Worker-specific metrics:**
+audit-worker is a pipeline service; it does not own domain entities. It reads from
+`audit_outbox` rows written by domain services and writes `audit_log` rows. The
+`AuditLogEntry` returned by `ListAuditEntries` is the read projection of `audit_log`:
 
-- `meridian_audit_worker_outbox_depth` - Current number of entries in outbox (gauge)
-- `meridian_audit_worker_outbox_processed_total` - Total entries processed (counter)
-- `meridian_audit_worker_outbox_failed_total` - Total entries failed (counter)
-- `meridian_audit_worker_processing_duration_seconds` - Batch processing duration (histogram)
-- `meridian_audit_worker_entry_age_seconds` - Age of entries when processed (histogram)
+```mermaid
+classDiagram
+    class AuditOutbox {
+        +UUID eventId
+        +string tableName
+        +string operation
+        +string recordId
+        +JSON oldValues
+        +JSON newValues
+        +string status
+        +int retryCount
+        +time createdAt
+    }
+    class AuditLog {
+        +UUID id
+        +string tableName
+        +string operation
+        +string recordId
+        +JSON oldValues
+        +JSON newValues
+        +string changedBy
+        +string transactionId
+        +time createdAt
+    }
+    AuditOutbox --> AuditLog : drained by Worker or AuditConsumer
+```
 
-**System-wide metrics** (for overall audit health):
+`audit_outbox.status` lifecycle: `pending` -> `processing` -> `completed` (or `failed`
+after `maxRetries`). `ResetStuckEntries` reclaims rows stuck in `processing` longer than
+the configured threshold.
 
-- `meridian_audit_kafka_events_published_total` - Primary path usage (Kafka) (counter)
-- `meridian_audit_kafka_fallback_used_total` - Fallback path activations (counter)
-- `meridian_audit_kafka_events_consumed_total` - Consumer throughput (counter)
+## Dependencies
 
-**Alerting thresholds:**
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| CockroachDB (all tenant schemas) | SQL | Reads `audit_outbox`; writes `audit_log` |
+| Kafka (`audit.events.<service>.v1` topics) | Kafka consumer | Primary delivery path for audit events from domain services |
 
-- Alert if `meridian_audit_worker_outbox_depth` > 1000 for 5 minutes (indicates Kafka outage or worker lag)
-- Alert if `entry_age_seconds` p99 > 60s (indicates processing delays)
+## Dependents
 
-See [ADR-0009](../../docs/adr/0009-application-level-audit-logging.md) for complete Prometheus metrics
-reference and monitoring strategy.
+| Service | Entry Point | Purpose |
+|---------|-------------|---------|
+| `api-gateway` | `services/api-gateway/` (proxies `AuditService` gRPC) | Exposes `ListAuditEntries` to external callers |
+| `mcp-server` | `services/mcp-server/internal/tools/audit.go` | Surfaces audit history as an MCP tool for LLM clients |
+
+## Load-Bearing Files
+
+Paths are relative to `services/audit-worker/`.
+
+| File | Why It Matters |
+|------|----------------|
+| `cmd/main.go` | Entry point for the standalone binary; wires the outbox `audit.Worker` and HTTP server |
+| `app/container.go` | Dependency injection for the Kafka consumer path; wires `AuditConsumer` and health checker |
+| `app/config.go` | All configuration fields with defaults; the only source of env var names for the Kafka consumer path |
+| `adapters/kafka/consumer.go` | `AuditConsumer.handleAuditEvent` - writes `audit_log` from Kafka events; idempotency gate |
+| `adapters/persistence/tenant_audit_writer.go` | `TenantAuditWriter` - tenant-scoped `audit_log` insert with `ON CONFLICT DO NOTHING` |
+| `service/server.go` | `AuditService.ListAuditEntries` gRPC implementation; cursor-paginated read of `audit_log` |
 
 ## Configuration
 
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `PORT` | `8080` | HTTP server port |
-| `DATABASE_URL` | (local dev default) | PostgreSQL connection string |
+### Standalone binary (`cmd/main.go`)
 
-## Directory Structure
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `AUDIT_SCHEMA` | Yes | - | Tenant schema to poll (e.g., `org_<tenant_id>`) |
+| `PORT` | No | `8080` | HTTP listen port (health and metrics) |
+| `GRACEFUL_SHUTDOWN_TIMEOUT` | No | `30s` | Maximum wait on shutdown |
 
-```text
-services/audit-worker/
-├── cmd/                    # Entry point (main.go)
-├── domain/                 # Domain models (Measurement, AuditOperation, Transformer)
-├── adapters/
-│   ├── kafka/              # Kafka consumer adapter (AuditConsumer)
-│   └── persistence/        # Database adapter (TenantAuditWriter)
-├── app/                    # Configuration and dependency injection (Container)
-├── observability/          # Metrics and health checks
-└── README.md
+### Kafka consumer path (`app/container.go`)
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `KAFKA_BOOTSTRAP_SERVERS` | Yes | - | Comma-separated broker addresses |
+| `AUDIT_TOPIC` | Yes | - | Kafka topic to consume (e.g., `audit.events.current-account.v1`) |
+| `SERVICE_NAME` | Yes | - | Identifies which service's events this instance processes |
+| `KAFKA_GROUP_ID` | No | `audit-consumer-group` | Consumer group ID |
+| `KAFKA_CLIENT_ID` | No | `audit-consumer` | Client identifier for logs and metrics |
+| `KAFKA_HANDLER_TIMEOUT` | No | `30s` | Maximum duration per message |
+| `KAFKA_MAX_RETRIES` | No | `3` | Maximum retries before DLQ |
+| `PORT` | No | `8080` | HTTP listen port |
+| `DB_MAX_OPEN_CONNS` | No | `25` | Database connection pool maximum |
+| `DB_MAX_IDLE_CONNS` | No | `5` | Database idle connection pool size |
+| `DB_CONN_MAX_LIFETIME` | No | `5m` | Maximum connection reuse duration |
+| `DB_CONN_MAX_IDLE_TIME` | No | `10m` | Maximum idle connection duration |
+
+## Architecture
+
+The audit pipeline has two independent delivery paths from domain mutation to `audit_log`.
+See [`docs/data-flows.md`](../../docs/data-flows.md#2-audit-pipeline) for the full sequence
+diagram and invariant analysis.
+
+```mermaid
+flowchart TD
+    Hook[GORM Hook<br/>AfterCreate / AfterUpdate / AfterDelete] --> Decision{Kafka<br/>reachable?}
+    Decision -->|Primary| Kafka[Kafka topic<br/>audit.events.service.v1]
+    Decision -->|Fallback| Outbox[(audit_outbox<br/>same DB tx)]
+    Kafka --> Consumer[AuditConsumer<br/>in audit-worker]
+    Outbox --> Worker[audit.Worker<br/>polls every 5 s adaptive]
+    Consumer --> AuditLog[(audit_log<br/>tenant schema)]
+    Worker --> AuditLog
 ```
 
-## Development
+**Key invariants:**
 
-```bash
-# Run locally
-go run ./services/audit-worker/cmd
+- The `audit_outbox` write shares the business transaction - if the business write rolls back, no audit row is produced.
+- `event_id` uniqueness prevents duplicate delivery between the two paths.
+- The alert threshold `meridian_audit_worker_outbox_depth > 1000` indicates either a Kafka outage or worker
+  lag requiring operator attention.
 
-# Run tests
-go test ./services/audit-worker/...
-```
+## References
 
-## Deployment
-
-Deployed via Kubernetes manifests in `deployments/k8s/base/`.
-
-- **Replicas**: 3 (production)
-- **Resource limits**: 500m CPU, 512Mi memory
+- ADR-0009: Application-Level Audit Logging - [`docs/adr/0009-application-level-audit-logging.md`](../../docs/adr/0009-application-level-audit-logging.md)
+- ADR-0020: Per-Service Audit Workers - [`docs/adr/0020-per-service-audit-workers.md`](../../docs/adr/0020-per-service-audit-workers.md)
+- Audit pattern canonical location: [`shared/platform/audit/README.md`](../../shared/platform/audit/README.md)
+- Outbox pattern: [`docs/patterns.md`](../../docs/patterns.md#1-outbox-pattern)
+- Audit pipeline data flow: [`docs/data-flows.md`](../../docs/data-flows.md#2-audit-pipeline)
