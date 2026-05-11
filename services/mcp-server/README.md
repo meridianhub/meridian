@@ -136,8 +136,8 @@ The MCP server opens a single gRPC connection to `MERIDIAN_API_URL` (the
 
 ## Dependents
 
-| Caller | Entry Point | Purpose |
-|--------|-------------|---------|
+| Service | Entry Point | Purpose |
+|---------|-------------|---------|
 | External: Claude Desktop | stdio transport | Local LLM developer workflows |
 | External: Claude Code, Claude.ai | streamable HTTP transport | Network-attached LLM clients |
 | External: MCP-compatible CLI tooling | stdio transport | Headless and CI-style automation |

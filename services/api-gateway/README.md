@@ -14,13 +14,14 @@ instructions: |
   Backend services always speak gRPC; Vanguard translates REST/JSON, Connect, and
   gRPC-Web at the gateway edge.
 
-  Ports: 8090 (HTTP gateway), 50051 (native gRPC on backend services directly).
+  Ports: 8080 (HTTP gateway, `PORT` env var default), 50051 (native gRPC on backend
+  services directly).
 
   After any proto change, regenerate the descriptor: `make proto-descriptors`.
   To add a new service, add a `ServiceBackend` entry in `cmd/meridian/main.go` and rerun
   `make proto-descriptors`.
 
-  Local dev: set `AUTH_MODE=disabled`. Pass `X-Tenant-ID` (or `X-Tenant-Slug` with
+  Local dev: set `AUTH_ENABLED=false`. Pass `X-Tenant-ID` (or `X-Tenant-Slug` with
   `LOCAL_DEV_MODE=true`) for tenant identification.
 ---
 
@@ -36,7 +37,7 @@ transcoding, and request routing for the Meridian platform. Sits on the
 |-----------|-------|
 | **BIAN Domain** | Infrastructure (non-BIAN) |
 | **Layer** | Edge Layer |
-| **Port** | 8090 (HTTP) - backend gRPC services on `:50051` |
+| **Port** | 8080 (HTTP, `PORT` env var default) - backend gRPC services on `:50051` |
 | **Database** | CockroachDB (tenant lookup cache only - no domain data) |
 | **Standalone** | No (requires every backend service it proxies to, plus a JWKS provider when `AUTH_ENABLED=true`) |
 
@@ -197,7 +198,7 @@ flowchart LR
         GRPC["gRPC Client"]
     end
 
-    subgraph Gateway["api-gateway :8090"]
+    subgraph Gateway["api-gateway :8080"]
         Auth["Auth Middleware<br/>(JWT / API Key)"]
         TenantRes["Tenant Resolver"]
         TenantAuthz["Tenant Authz"]
