@@ -40,7 +40,7 @@ Kafka consumer and fallback outbox poller for the Meridian audit trail. Part of 
 | **Layer** | Observability and Routing |
 | **Port** | 8080 (HTTP, health checks and metrics); AuditService gRPC served through the unified Meridian binary (no dedicated standalone gRPC port) |
 | **Database** | All tenant schemas - reads `audit_outbox`, writes `audit_log` |
-| **Standalone** | No (requires CockroachDB and Kafka) |
+| **Standalone** | No (requires CockroachDB; Kafka required for the Kafka consumer path - the outbox-only binary needs only CockroachDB) |
 
 ## API Surface
 

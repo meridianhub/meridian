@@ -47,7 +47,8 @@ Part of the [Observability and Routing layer](../../docs/architecture-layers.md#
 
 ## API Surface
 
-event-router exposes no gRPC or HTTP API. It is a pure consumer.
+event-router exposes no gRPC port and no business API endpoints. It is a pure consumer.
+HTTP endpoints below are for operational use only (health probes and metrics).
 
 ### HTTP
 

@@ -28,7 +28,7 @@ instructions: |
 
   Port: 50061 (gRPC, ports.Forecasting), 8082 (HTTP metrics and health).
   MDS_TARGET is the market-information gRPC endpoint (default market-information:50051).
-  REDIS_ADDR is required for distributed lease management.
+  REDIS_ADDR defaults to localhost:6379; set it explicitly in production for distributed lease management.
 ---
 
 # forecasting
@@ -45,7 +45,7 @@ Market Information Service observations on a cron schedule. Part of the
 | **Layer** | Observability and Routing |
 | **Port** | 50061 (gRPC), 8082 (HTTP metrics and health) |
 | **Database** | CockroachDB (tenant-scoped schemas) |
-| **Standalone** | No (requires `market-information` gRPC, Redis for scheduler lease management) |
+| **Standalone** | No (requires `market-information` gRPC; Redis for scheduler lease management, defaults to `localhost:6379`) |
 
 ## API Surface
 

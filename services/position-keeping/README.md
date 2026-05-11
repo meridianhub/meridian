@@ -66,8 +66,8 @@ transaction history across all asset classes. Part of the
 | `PositionKeepingService` | `GetAccountBalance` | Query a single BIAN balance type for an account |
 | `PositionKeepingService` | `GetAccountBalances` | Query all 7 BIAN balance types for an account |
 | `PositionKeepingService` | `RecordMeasurement` | Record a utilization or billing measurement (used by event-router for platform billing) |
-| `PositionKeepingService` | `UpdatePosition` | Update a position record |
-| `PositionKeepingService` | `MergePositions` | Merge two position records (compaction support) |
+| `PositionKeepingService` | `UpdatePosition` | Update a position record (UNIMPLEMENTED stub) |
+| `PositionKeepingService` | `MergePositions` | Merge two position records - compaction support (UNIMPLEMENTED stub) |
 | `PositionKeepingService` | `RecordReservation` | Record a fund reservation against an account |
 | `PositionKeepingService` | `ReleaseReservation` | Release a previously recorded reservation |
 | `PositionKeepingService` | `GetProjectedBalance` | Compute projected balance including open reservations |

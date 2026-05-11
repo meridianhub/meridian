@@ -43,7 +43,7 @@ manages variances and disputes through their resolution lifecycle. Part of the
 | **Layer** | Observability and Routing |
 | **Port** | 50060 (gRPC), 9090 (HTTP metrics and health) |
 | **Database** | CockroachDB (tenant-scoped schemas) |
-| **Standalone** | No (requires `position-keeping` gRPC for snapshot capture; `redis` for scheduler) |
+| **Standalone** | No (requires CockroachDB and `position-keeping` gRPC for snapshot capture; Redis required only when `SETTLEMENT_SCHEDULER_ENABLED=true`) |
 
 ## API Surface
 
@@ -151,7 +151,7 @@ Paths are relative to `services/reconciliation/`.
 | `service/grpc_pipeline_endpoints.go` | `Execute` and pipeline orchestration logic |
 | `adapters/persistence/settlement_run_repository.go` | Settlement run persistence; status transitions enforced here |
 | `adapters/persistence/variance_repository.go` | Variance storage and filtering |
-| `worker/settlement_executor.go` | Scheduler executor that calls `ExecuteAccountReconciliation` |
+| `worker/scheduler_adapters.go` | Scheduler executor that calls `ExecuteAccountReconciliation` via gRPC self-loop |
 
 ## Configuration
 
