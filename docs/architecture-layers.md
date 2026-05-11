@@ -576,14 +576,14 @@ For full coupling counts and inter-service import maps, see
 
 - [`services/README.md`](../services/README.md) - runtime architecture, ports,
   protocols
-- [`docs/architecture/bian-service-boundaries.md`](architecture/bian-service-boundaries.md)
-  \- BIAN domain mapping per service
-- [`docs/architecture/service-coupling-analysis.md`](architecture/service-coupling-analysis.md)
-  \- coupling metrics and import-graph analysis
-- [`docs/architecture/event-driven-architecture.md`](architecture/event-driven-architecture.md)
-  \- event flow and topic conventions
-- [`docs/architecture/starlark-saga-architecture.md`](architecture/starlark-saga-architecture.md)
-  \- saga execution model
+- [`docs/architecture/bian-service-boundaries.md`](architecture/bian-service-boundaries.md) -
+  BIAN domain mapping per service
+- [`docs/architecture/service-coupling-analysis.md`](architecture/service-coupling-analysis.md) -
+  coupling metrics and import-graph analysis
+- [`docs/architecture/event-driven-architecture.md`](architecture/event-driven-architecture.md) -
+  event flow and topic conventions
+- [`docs/architecture/starlark-saga-architecture.md`](architecture/starlark-saga-architecture.md) -
+  saga execution model
 - ADR-0002: Microservices per BIAN Domain
 - ADR-0009: Application-Level Audit Logging
 - ADR-0023: Balance Delegation to Position Keeping
