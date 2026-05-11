@@ -25,7 +25,11 @@ node_modules/
 .DS_Store
 
 # Task Master (managed at parent directory level)
-.taskmaster/
+# Ignore runtime state but track the templates directory so contributors
+# can find the canonical PRD template.
+.taskmaster/*
+!.taskmaster/templates/
+!.taskmaster/templates/**
 CLAUDE.md
 .mcp.json
 
