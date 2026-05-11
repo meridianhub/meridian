@@ -1,89 +1,70 @@
 ---
-name: payment-order-service
-description: BIAN payment order saga orchestrator for fund reservation, gateway execution, and settlement
+name: payment-order
+description: BIAN Payment Order saga orchestrator - coordinates fund reservation, external gateway dispatch, and ledger settlement across current-account, financial-accounting, and financial-gateway
 triggers:
-  - Implementing payment order workflows
-  - Designing saga patterns for distributed transactions
-  - Adding payment processing to services
-  - Handling external payment gateway callbacks
-  - Managing fund reservations and settlements
-  - Webhook signature validation (HMAC-SHA256)
+  - Implementing or debugging a payment flow from initiation to settlement
+  - Adding a new payment gateway provider or webhook handler
+  - Tracing a failed payment through the saga state machine
+  - Extending billing or dunning worker behaviour
+  - Handling lien lifecycle (reserve, execute, terminate)
 instructions: |
-  PaymentOrder orchestrates money movement as a saga:
+  PaymentOrder orchestrates money movement as a saga across three services:
+  current-account (liens), financial-accounting (ledger postings), and
+  financial-gateway or Stripe (external dispatch).
 
-  State Machine: INITIATED → RESERVED → EXECUTING → COMPLETED
-                        ↘ FAILED (with compensation)
-                        ↘ CANCELLED (before EXECUTING)
-  COMPLETED → REVERSED (post-completion compensation)
+  State machine: INITIATED -> RESERVED -> EXECUTING -> COMPLETED
+  Failures trigger LIFO compensation (lien release, reversal posting).
+  Cancellation is allowed before EXECUTING; reversal after COMPLETED.
 
-  Key flows:
-  1. InitiatePaymentOrder: Creates order, validates amount/IBAN
-  2. Async worker reserves funds via CurrentAccount.InitiateLien
-  3. Async worker sends to gateway, transitions to EXECUTING
-  4. Gateway webhook calls UpdatePaymentOrder (HMAC-protected)
-  5. On settlement: COMPLETED, async ExecuteLien with retry (max 5)
-  6. On rejection: FAILED, releases lien (automatic compensation)
+  Webhooks arrive over HTTP at port 8080 and are HMAC-SHA256 verified
+  before being forwarded to UpdatePaymentOrder. gRPC listens on port 50054.
 
-  Cancellation only allowed before EXECUTING
-  Reversal only allowed for COMPLETED orders
+  Payment orders are currency-only: non-fiat instruments (kWh, GPU_HOUR,
+  TONNE_CO2E) are rejected at the boundary by ValidateCurrencyDimension()
+  in domain/quantity.go.
 
-  Ports: 50054 (gRPC), 8080 (HTTP webhooks)
+  Starlark saga orchestration (USE_SAGA_ORCHESTRATION=true) is optional;
+  the default path uses the Go-native orchestrator in
+  service/payment_orchestrator.go.
 ---
 
-# PaymentOrder Service
+# payment-order
 
-BIAN-compliant payment order service with saga orchestration for distributed transactions.
+BIAN Payment Order saga orchestrator for fund reservation, external gateway dispatch,
+and ledger settlement.
 
 ## Overview
 
 | Attribute | Value |
 |-----------|-------|
 | **BIAN Domain** | Payment Order |
-| **Port** | 50054 (gRPC), 8080 (HTTP) |
-| **Language** | Go |
-| **Database** | PostgreSQL/CockroachDB |
-| **Standalone** | No (requires CurrentAccount) |
+| **Layer** | Lifecycle Orchestration |
+| **Port** | 50054 (gRPC), 8080 (HTTP webhooks) |
+| **Database** | CockroachDB tenant schema (`org_{tenant_id}`) |
+| **Standalone** | No - requires `current-account`, `financial-accounting`, and a payment gateway at runtime |
 
-## gRPC Methods
+## API Surface
 
-| Method | HTTP | Purpose |
+### gRPC
+
+| Service | RPC | Purpose |
+|---------|-----|---------|
+| `PaymentOrderService` | `InitiatePaymentOrder` | Create a payment order and begin the saga |
+| `PaymentOrderService` | `RetrievePaymentOrder` | Get order details by ID |
+| `PaymentOrderService` | `UpdatePaymentOrder` | Handle async gateway callback (status update) |
+| `PaymentOrderService` | `CancelPaymentOrder` | Cancel before EXECUTING; releases lien if RESERVED |
+| `PaymentOrderService` | `ListPaymentOrders` | Paginated list with status and date filters |
+| `PaymentOrderService` | `ReversePaymentOrder` | Post-completion compensation (COMPLETED -> REVERSED) |
+| `BillingService` | `ListBillingRuns` | List billing run history (available when `BILLING_ENABLED=true`) |
+
+Proto: `api/proto/meridian/payment_order/v1/payment_order.proto` (relative to repo root).
+
+### HTTP endpoints
+
+| Method | Path | Purpose |
 |--------|------|---------|
-| `InitiatePaymentOrder` | `POST /v1/payment-orders` | Create payment |
-| `RetrievePaymentOrder` | `GET /v1/payment-orders/{id}` | Get order details |
-| `UpdatePaymentOrder` | `PATCH /v1/payment-orders/{id}` | Handle webhook callback |
-| `CancelPaymentOrder` | `POST /v1/payment-orders/{id}/cancel` | Cancel before execution |
-| `ReversePaymentOrder` | `POST /v1/payment-orders/{id}/reverse` | Reverse completed payment |
-| `ListPaymentOrders` | `GET /v1/payment-orders` | List with filters |
-
-## HTTP Endpoints
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/webhook/payment-gateway` | POST | External gateway callbacks |
-| `/health` | GET | Health check |
-
-## Saga Definitions
-
-Payment execution saga is **NOT** stored locally. It is fetched at runtime from the
-reference-data service via `GetSaga()` RPC.
-
-**Canonical source:** `services/reference-data/saga/defaults/payment_execution/v1.0.0.star`
-
-To modify this saga, update the file in reference-data service and run
-`PlatformSync.SyncPlatformDefaults()`.
-
-## Currency-Only Constraint
-
-Payment Order is **intentionally restricted to CURRENCY dimension instruments**. This is a permanent business rule:
-
-- Payment orders model fiat money movements (bank transfers, direct debits, SEPA/SWIFT settlements)
-- These real-world payment rails only carry ISO 4217 currencies
-- The database stores currency as `CHAR(3)` for ISO 4217 codes
-- Non-currency assets (energy kWh, compute GPU_HOUR, carbon credits) belong in
-  the **position-keeping** service
-
-The `ValidateCurrencyDimension()` helper in `domain/quantity.go` enforces this
-at the service boundary by rejecting instruments outside the CURRENCY dimension.
+| `POST` | `/webhook/payment-gateway` | External gateway callback, HMAC-SHA256 verified |
+| `GET` | `/health` | Health check |
 
 ## Domain Model
 
@@ -94,9 +75,10 @@ classDiagram
         +string DebtorAccountID
         +string CreditorReference
         +Money Amount
-        +PaymentStatus Status
+        +PaymentOrderStatus Status
         +string LienID
         +string GatewayReferenceID
+        +string LedgerBookingID
         +string IdempotencyKey
         +string FailureReason
         +LienExecutionStatus LienExecutionStatus
@@ -104,7 +86,7 @@ classDiagram
         +int Version
     }
 
-    class PaymentStatus {
+    class PaymentOrderStatus {
         <<enumeration>>
         INITIATED
         RESERVED
@@ -122,158 +104,80 @@ classDiagram
         FAILED
     }
 
-    PaymentOrder --> PaymentStatus
+    class BillingRun {
+        +UUID ID
+        +string TenantID
+        +BillingRunStatus Status
+        +int DunningLevel
+        +time PeriodStart
+        +time PeriodEnd
+    }
+
+    PaymentOrder --> PaymentOrderStatus
     PaymentOrder --> LienExecutionStatus
 ```
 
-**Field Notes:**
+State machine: `INITIATED -> RESERVED -> EXECUTING -> COMPLETED` (happy path).
+Failed steps trigger LIFO compensation - lien release via
+`current-account.TerminateLien` and reversal posting via `financial-accounting`.
+Cancellation is allowed from INITIATED or RESERVED. Post-completion reversal
+transitions COMPLETED to REVERSED.
 
-- `CreditorReference`: IBAN format
-- `LienExecutionAttempts`: max 5 retries
+`CreditorReference` must be IBAN format. `LienExecutionAttempts` is capped at 5.
 
-## Payment Saga State Machine
+## Dependencies
 
-```mermaid
-stateDiagram-v2
-    [*] --> INITIATED
-    INITIATED --> RESERVED : InitiateLien success
-    INITIATED --> FAILED : reservation failed
-    RESERVED --> EXECUTING : sent to gateway
-    RESERVED --> CANCELLED : user cancelled
-    EXECUTING --> COMPLETED : gateway settled
-    EXECUTING --> FAILED : gateway rejected
-    COMPLETED --> REVERSED : post-completion reversal
-    CANCELLED --> [*]
-    FAILED --> [*]
-    COMPLETED --> [*]
-    REVERSED --> [*]
-```
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| `current-account` | gRPC | `InitiateLien`, `ExecuteLien`, `TerminateLien` for fund reservation |
+| `financial-accounting` | gRPC | Ledger posting on settlement via `InitiateFinancialBookingLog` and `CaptureLedgerPosting` |
+| `financial-gateway` | gRPC | External payment dispatch (Starlark handler registration) |
+| `position-keeping` | gRPC | Balance prefetch and position log updates (Starlark handler registration) |
+| `reference-data` | gRPC | Saga definition lookup when `USE_SAGA_ORCHESTRATION=true` |
+| `party` | gRPC | Starlark handler registration |
 
-## Saga Orchestration Flow
+## Dependents
 
-### Happy Path
+| Service | Entry Point | Purpose |
+|---------|-------------|---------|
+| `api-gateway` | `services/api-gateway/cmd/main.go` | Proxies payment order RPCs from external clients via Vanguard transcoder |
+| `financial-gateway` | `services/financial-gateway/service/server.go` | Publishes `payment-captured` and `payment-failed` Kafka events consumed by payment-order |
 
-1. **Initiation**: `InitiatePaymentOrder` creates order in INITIATED status
-2. **Reservation**: Async worker calls `CurrentAccount.InitiateLien` → RESERVED
-3. **Execution**: Async worker sends to payment gateway → EXECUTING
-4. **Settlement**: Gateway webhook confirms → COMPLETED
-5. **Lien Execution**: Async `ExecuteLien` converts reservation to debit (retries up to 5x)
+## Load-Bearing Files
 
-### Compensation
+Paths are relative to `services/payment-order/`.
 
-- **Gateway Rejection**: Automatically releases lien via `TerminateLien`
-- **Cancellation**: User cancels before EXECUTING, lien released
-- **Reversal**: Manual reversal of COMPLETED orders creates compensating entries
-
-## Webhook Security
-
-| Feature | Implementation |
-|---------|----------------|
-| Authentication | HMAC-SHA256 signature |
-| Header | `X-Webhook-Signature` |
-| Timestamp | Max 5 minutes age |
-| Rate Limiting | 100 req/sec per IP |
-
-**Idempotency Handling:**
-
-Webhooks are deduplicated using a deterministic idempotency key:
-
-```text
-idempotency_key = hash(gateway_reference_id + status + gateway_event_ts)
-```
-
-- `gateway_event_ts`: Timestamp from webhook payload (not receipt time)
-- Prefer gateway's `event_id` if provided (more reliable than timestamp)
-- Duplicate webhooks (same key) return 200 OK without re-processing
-
-**Rate Limiting with Reverse Proxy:**
-
-When behind a reverse proxy (nginx, AWS ALB, etc.), configure `X-Forwarded-For` handling:
-
-```text
-# Ensure the proxy sets X-Forwarded-For
-# PaymentOrder service uses client IP from:
-# 1. X-Forwarded-For header (first IP in chain)
-# 2. Direct connection IP if header absent
-
-# Trust only your proxy's IP to prevent spoofing
-TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
-```
-
-Without proper proxy configuration, all requests may share the gateway's IP,
-causing legitimate traffic to be rate-limited.
-
-## Service Dependencies
-
-| Service | Port | Purpose |
-|---------|------|---------|
-| CurrentAccount | 50057 | Lien operations (reserve, execute, terminate) |
-
-## Database Schema
-
-**Schema**: `payment_order`
-
-```mermaid
-erDiagram
-    payment_orders {
-        uuid id PK
-        varchar(255) debtor_account_id
-        varchar(255) creditor_reference "IBAN"
-        bigint amount_cents
-        char(3) currency "ISO 4217"
-        varchar(20) status "saga state"
-        varchar(255) lien_id "CurrentAccount reservation"
-        varchar(255) gateway_reference_id "external txn ID"
-        varchar(255) idempotency_key UK
-        varchar(255) failure_reason
-        varchar(20) lien_execution_status "PENDING, SUCCEEDED, FAILED"
-        int lien_execution_attempts "max 5"
-        int version "optimistic lock"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-```
-
-## Kafka Events
-
-| Topic | Purpose |
-|-------|---------|
-| `payment-order.initiated.v1` | Order created |
-| `payment-order.reserved.v1` | Funds reserved |
-| `payment-order.executing.v1` | Sent to gateway |
-| `payment-order.completed.v1` | Settlement confirmed |
-| `payment-order.failed.v1` | Processing failed |
-| `payment-order.cancelled.v1` | User cancelled |
-| `payment-order.reversed.v1` | Post-completion reversal |
+| File | Why It Matters |
+|------|----------------|
+| `cmd/main.go` | Wires every component; controls startup order and server lifecycle |
+| `service/server.go` | Registers gRPC service implementations; changes here break callers |
+| `domain/payment_order.go` | State machine and transition invariants; all status changes flow through here |
+| `service/payment_orchestrator.go` | Go-native saga orchestration (lien, gateway dispatch, ledger posting) |
+| `service/payment_orchestrator_lien.go` | Lien reservation and release logic; idempotency boundary for fund reservation |
+| `adapters/persistence/payment_order_entity.go` | GORM entity with audit hooks; `AuditID()` required by the audit pipeline |
+| `adapters/http/webhook_handler.go` | HMAC-SHA256 verification and webhook routing; rejects replays older than 5 minutes |
+| `config/service_config.go` | All env var defaults; authoritative source for service configuration |
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `GRPC_PORT` | 50054 | gRPC server port |
-| `HTTP_PORT` | 8080 | Webhook server port |
-| `WEBHOOK_HMAC_SECRET` | (required) | Signature validation secret |
-| `HTTP_RATE_LIMIT_PER_SECOND` | 100 | Rate limit |
-| `HTTP_RATE_LIMIT_BURST` | 200 | Burst allowance |
-
-**HMAC Secret Configuration:**
-
-- **Required:** Service will not start without a valid secret
-- **Minimum length:** 32 bytes recommended for security
-- **Generate:** `openssl rand -base64 32`
-- **Kubernetes:** Store in Secret, reference via `secretKeyRef`
-
-```bash
-# Generate secure secret
-openssl rand -base64 32
-
-# Example Kubernetes secret
-kubectl create secret generic payment-order-webhook \
-  --from-literal=hmac-secret="$(openssl rand -base64 32)"
-```
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `GRPC_PORT` | No | `50054` | gRPC listen port |
+| `HTTP_PORT` | No | `8080` | Webhook HTTP listen port |
+| `WEBHOOK_HMAC_SECRET` | Yes | - | HMAC-SHA256 secret for webhook signature verification |
+| `PAYMENT_GATEWAY_PROVIDER` | No | `mock` | Gateway mode: `stripe`, `financial-gateway`, or `mock` |
+| `STRIPE_API_KEY` | Conditional | - | Required when `PAYMENT_GATEWAY_PROVIDER=stripe` |
+| `STRIPE_WEBHOOK_SECRET` | Conditional | - | Required when `PAYMENT_GATEWAY_PROVIDER=stripe` |
+| `FINANCIAL_GATEWAY_ADDR` | Conditional | - | gRPC address, required when `PAYMENT_GATEWAY_PROVIDER=financial-gateway` |
+| `USE_SAGA_ORCHESTRATION` | No | `false` | Enable Starlark saga path (fetches saga script from `reference-data`) |
+| `BILLING_ENABLED` | No | `false` | Start billing cron scheduler and dunning worker |
+| `BILLING_CRON_SCHEDULE` | No | `0 0 * * *` | Cron expression for billing runs |
+| `BILLING_SHADOW_MODE` | No | `false` | Run billing as a dry run without posting charges |
+| `KAFKA_BOOTSTRAP_SERVERS` | No | - | Kafka bootstrap servers for event publishing and the payment event consumer |
 
 ## References
 
-- [BIAN Payment Order Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/PaymentOrder.yaml)
-- [Service Architecture](../README.md)
-- [Proto Definitions](../../api/proto/meridian/payment_order/v1/)
+- [`docs/data-flows.md`](../../docs/data-flows.md) - Payment lifecycle sequence diagram (section 1)
+- [`docs/patterns.md`](../../docs/patterns.md) - Saga, idempotency, and outbox patterns
+- [`api/proto/meridian/payment_order/v1/payment_order.proto`](../../api/proto/meridian/payment_order/v1/payment_order.proto)
