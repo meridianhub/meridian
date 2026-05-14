@@ -1,431 +1,216 @@
 ---
-name: control-plane-service
-description: Tenant configuration management with manifest-driven provisioning, causation tree visualization, and administrative operations
+name: control-plane
+description: Manifest-driven tenant configuration engine - validates, diffs, plans, and applies protobuf manifests as Starlark sagas across downstream services; hosts API key auth, Glass Box causation tree, balance sheet, and Stripe webhook integration
 triggers:
-  - Defining tenant business models (instruments, account types, sagas)
-  - Manifest validation (protobuf, CEL, Starlark)
-  - Manifest diff and apply workflow
-  - Causation tree tracing (Glass Box audit trail)
-  - Balance sheet aggregation and export
-  - Staff identity and API key management
-  - Stripe webhook processing for payment events
+  - Applying or debugging a tenant manifest (instruments, account types, sagas, valuation rules)
+  - Tracing a position, transaction, or event to its originating saga (Glass Box)
+  - Adding or modifying the manifest validation or diff pipeline
+  - Extending staff identity or API key management
+  - Investigating Stripe webhook signature failures or Kafka event publishing
+  - Triggering sagas programmatically from event-router or mcp-server
+  - Generating a manifest from a natural language description (EconomyGeneratorService)
 instructions: |
-  Control Plane manages tenant configuration through declarative manifests and provides
-  administrative operations for audit, balance sheet, and staff identity management.
+  Control Plane manages tenant configuration through declarative manifests and
+  provides administrative operations for audit, balance sheet, and staff identity.
 
-  Key patterns:
-  - Manifest-driven: Tenants declare instruments, account types, valuation rules, and sagas in a single JSON manifest
-  - Kubernetes-style apply: Diff last-applied manifest vs new, plan phased gRPC calls, execute as saga
-  - Glass Box: Trace any position, transaction, or event back to its originating saga causation tree
-  - Staff identity: Tenant-scoped staff users (admin/operator/auditor) with API key authentication
-  - Stripe webhooks: Verify signatures, extract metadata, publish payment events to Kafka
+  Manifest apply pipeline (apply_manifest Starlark saga, bootstrapped to
+  public.platform_saga_definition on startup):
+  1. Validate - protobuf constraints, CEL type-check, Starlark compile,
+     cross-references, immutability rules
+  2. Diff - Kubernetes-style CREATE/UPDATE/DELETE/NO_CHANGE against last-applied
+  3. Plan - map diff actions to five dependency-ordered phases targeting
+     reference-data, internal-account, market-information, party, operational-gateway
+  4. Execute - StarlarkSagaRunner with automatic compensation on failure
 
-  Manifest apply pipeline:
-  1. Validate (protobuf constraints, CEL type-check, Starlark compile, cross-references, immutability)
-  2. Diff (compare last-applied vs new, detect drift, safety-check deletions)
-  3. Plan (map actions to phased gRPC calls with dependency ordering)
-  4. Execute (run apply_manifest Starlark saga with automatic compensation)
+  Glass Box pattern: GetCausationTreeForPosition traces
+  position_log -> transaction_log_entry -> idempotency_key -> saga_instance
+  up the parent_saga_id chain to the root.
 
-  gRPC services: CausationVisualizerService, BalanceSheetService, ManifestHistoryService, AuthService
+  AuthService.ValidateAPIKey is called by api-gateway on every request. Key format:
+  pk_{tenant_slug}_{entropy}. Hash is SHA-256; prefix enables O(1) tenant routing.
+
+  gRPC port 50062. Stripe webhook handling runs in the unified binary's HTTP server.
+  Kafka required for Stripe payment event publishing (KAFKA_BOOTSTRAP_SERVERS).
 ---
 
-# Control Plane Service
+# control-plane
 
-Tenant configuration management service with manifest-driven provisioning, causation tree
-visualization, balance sheet aggregation, and staff identity management.
+Manifest-driven tenant configuration engine with Glass Box causation tracing, balance
+sheet aggregation, staff identity management, and AI-assisted economy generation.
 
 ## Overview
 
 | Attribute | Value |
 |-----------|-------|
-| **Type** | Infrastructure (not BIAN) |
-| **Language** | Go |
-| **Database** | PostgreSQL/CockroachDB |
-| **Standalone** | No (requires Position Keeping, Reference Data, Internal Account) |
+| **BIAN Domain** | Infrastructure (non-BIAN) |
+| **Layer** | Lifecycle Orchestration |
+| **Port** | 50062 (gRPC) |
+| **Database** | CockroachDB platform schema; per-tenant `org_{tenant_id}` for staff users, API keys, manifest versions |
+| **Standalone** | No - requires `reference-data`, `internal-account`, `operational-gateway`, `party`, `market-information`, and `position-keeping` at runtime |
 
-## Architecture
+## API Surface
 
-The control plane provides four distinct capabilities:
+### gRPC
 
-1. **Manifest Management** -- Validate, diff, plan, and apply tenant configuration manifests
-2. **Causation Visualization** -- Trace positions, transactions, and events to originating sagas
-3. **Balance Sheet** -- Aggregate positions into classified financial statements with drill-down
-4. **Staff Identity** -- Manage staff users and API keys per tenant schema
+| Service | RPC | Purpose |
+|---------|-----|---------|
+| `ApplyManifestService` | `ApplyManifest` | Validate, diff, plan, and apply a full tenant manifest |
+| `ApplyManifestService` | `ApplyResource` | Apply a single-resource mutation against the live manifest |
+| `ManifestHistoryService` | `GetCurrentManifest` | Retrieve the most recently applied manifest version |
+| `ManifestHistoryService` | `GetManifestVersion` | Retrieve a specific manifest version by version string |
+| `ManifestHistoryService` | `ListManifestVersions` | Paginated manifest version history (most recent first) |
+| `ManifestHistoryService` | `DiffManifestVersions` | Compare two manifest versions by sequence number |
+| `ManifestHistoryService` | `ExportManifest` | Reconstruct a manifest from live service state |
+| `ManifestHistoryService` | `ReconcileManifest` | Detect drift between stored manifest and live state |
+| `ManifestHistoryService` | `RollbackManifest` | Revert to a previous version (creates a new forward-only record) |
+| `SagaExecutionService` | `ExecuteSaga` | Trigger a named saga instance with idempotency key |
+| `CausationVisualizerService` | `GetCausationTreeForPosition` | Trace a position log to its originating saga (Glass Box) |
+| `CausationVisualizerService` | `GetCausationTreeForTransaction` | Trace a transaction to its originating saga |
+| `CausationVisualizerService` | `GetCausationTreeForEvent` | Trace an event via causation_id to its originating saga |
+| `BalanceSheetService` | `GetBalanceSheet` | Multi-asset balance sheet grouped by ASSETS/LIABILITIES/EQUITY |
+| `BalanceSheetService` | `GetPositionDetails` | Drill into individual positions for an account type and instrument |
+| `BalanceSheetService` | `ExportBalanceSheetCSV` | CSV export with metadata headers |
+| `AuthService` | `ValidateAPIKey` | Verify API key prefix and hash against tenant schema (called by api-gateway) |
+| `EconomyGeneratorService` | `GenerateManifest` | Generate a tenant manifest from a natural language description |
+| `EconomyGeneratorService` | `GetGenerationContext` | Return pattern-matching context for a description without generating |
 
-```mermaid
-flowchart TB
-    subgraph "Manifest Pipeline"
-        M[Manifest JSON] --> V[Validator]
-        V --> D[Differ]
-        D --> P[Planner]
-        P --> E[Executor]
-    end
+Proto files: `api/proto/meridian/control_plane/v1/` (relative to repo root).
 
-    subgraph "Downstream Services"
-        E -->|Phase 1| RD[Reference Data]
-        E -->|Phase 2| IBA[Internal Account]
-        E -->|Phase 3| RD
-        E -->|Phase 4| SR[Saga Registry]
-    end
+### HTTP endpoints
 
-    subgraph "Admin Services"
-        CV[Causation Visualizer]
-        BS[Balance Sheet]
-        SI[Staff Identity]
-        SW[Stripe Webhooks]
-    end
+Stripe webhook handling runs in the unified binary's shared HTTP server, not in the
+standalone control-plane binary.
 
-    CV -->|query| PK[Position Keeping]
-    BS -->|aggregate| PK
-    SW -->|publish| K[Kafka]
-```
-
-## gRPC Services
-
-### CausationVisualizerService
-
-Traces financial entities back to their originating saga, enabling the "Glass Box" audit pattern.
-
-| Method | HTTP | Purpose |
+| Method | Path | Purpose |
 |--------|------|---------|
-| `GetCausationTreeForPosition` | `GET /admin/causation-tree/position/{position_id}` | Trace position to saga tree |
-| `GetCausationTreeForTransaction` | `GET /admin/causation-tree/transaction/{transaction_id}` | Trace transaction to saga tree |
-| `GetCausationTreeForEvent` | `GET /admin/causation-tree/event/{event_id}` | Trace event to saga tree |
+| `POST` | `/stripe/webhook` | Stripe webhook: HMAC-SHA256 verified, publishes payment events to Kafka |
 
-### BalanceSheetService
-
-Aggregates positions into classified balance sheets with drill-down to individual positions.
-
-| Method | HTTP | Purpose |
-|--------|------|---------|
-| `GetBalanceSheet` | `GET /admin/balance-sheet/{tenant_id}` | Multi-asset balance sheet |
-| `GetPositionDetails` | `GET /admin/balance-sheet/{tenant_id}/details/{account_type}/{instrument}` | Drill into positions |
-| `ExportBalanceSheetCSV` | `GET /admin/balance-sheet/{tenant_id}/export` | CSV export with metadata |
-
-### ManifestHistoryService
-
-Version history and rollback for tenant manifests with forward-only audit trail.
-
-| Method | Purpose |
-|--------|---------|
-| `GetCurrentManifest` | Latest applied manifest |
-| `GetManifestVersion` | Specific version by version string |
-| `ListManifestVersions` | Paginated version history |
-
-### AuthService
-
-API key validation for the Gateway service.
-
-| Method | Purpose |
-|--------|---------|
-| `ValidateAPIKey` | Verify API key prefix and hash against tenant schema |
-
-## Manifest Pipeline
-
-### Manifest Structure
-
-A manifest declares the complete business model for a tenant:
-
-```json
-{
-  "version": "1.0",
-  "metadata": { "name": "Acme Energy", "industry": "energy" },
-  "instruments": [
-    {
-      "code": "GBP", "name": "British Pound",
-      "type": "INSTRUMENT_TYPE_FIAT",
-      "dimensions": { "unit": "GBP", "precision": 2 }
-    },
-    {
-      "code": "KWH", "name": "Kilowatt Hour",
-      "type": "INSTRUMENT_TYPE_COMMODITY",
-      "dimensions": { "unit": "kWh", "precision": 3 }
-    }
-  ],
-  "account_types": [
-    {
-      "code": "CURRENT", "name": "Current Account",
-      "normal_balance": "NORMAL_BALANCE_DEBIT",
-      "allowed_instruments": ["GBP"]
-    }
-  ],
-  "valuation_rules": [
-    {
-      "from_instrument": "KWH", "to_instrument": "GBP",
-      "method": "VALUATION_METHOD_SPOT_RATE",
-      "source": "nordpool_spot"
-    }
-  ],
-  "sagas": [
-    { "name": "process_deposit", "trigger": "api:/v1/deposits", "script": "..." }
-  ],
-  "payment_rails": [
-    { "provider": "stripe_connect", "mode": "CONNECT_MODE_STANDARD", "account_id": "acct_..." }
-  ]
-}
-```
-
-### Validation
-
-The manifest validator performs seven checks:
-
-| Check | Error Code | Description |
-|-------|-----------|-------------|
-| Structural | `PROTO_VALIDATION` | Protobuf field constraints (min/max length, patterns, required fields) |
-| Duplicates | `DUPLICATE_CODE` | No duplicate instrument codes, account type codes, or saga names |
-| CEL expressions | `CEL_COMPILATION_ERROR` | Type-check account type policy and bucketing expressions |
-| Starlark scripts | `STARLARK_COMPILATION_ERROR` | Compile saga scripts with service binding stubs |
-| Cross-references | `UNDEFINED_INSTRUMENT_REFERENCE` | All instrument references resolve within the manifest |
-| Payment rails | `INVALID_PAYMENT_PROVIDER` | Provider, account ID format, and method validation |
-| Immutability | `IMMUTABLE_FIELD_CHANGED` | Instrument and account type codes cannot change between versions |
-
-Errors include structured location paths, "Did you mean?" suggestions via Levenshtein distance,
-and available field lists for AI-friendly feedback loops.
-
-### Diff Engine
-
-Compares last-applied manifest against new manifest following Kubernetes apply semantics:
-
-- Resources present in new but not last-applied: **CREATE**
-- Resources present in both with field changes: **UPDATE**
-- Resources present in last-applied but not in new: **DELETE** (with safety checks)
-- Identical resources: **NO_CHANGE**
-
-Safety checks query downstream services before allowing deletions (e.g., non-zero balances
-block account type deletion, running sagas block saga deletion).
-
-### Execution Planner
-
-Maps diff actions to dependency-ordered gRPC calls in five phases:
-
-| Phase | Resources | Target Service |
-|-------|-----------|---------------|
-| 1 | Instruments | Reference Data |
-| 2 | Account Types | Internal Account |
-| 3 | Valuation Rules | Reference Data |
-| 4 | Saga Definitions | Saga Registry |
-| 5 | Seed Data | Various |
-
-Phases execute sequentially; calls within a phase may execute in parallel.
-Each call includes a deterministic SHA-256 idempotency key for safe retry.
-
-### Manifest Executor
-
-Orchestrates the apply as a Starlark saga with automatic compensation:
-
-1. Creates tracking job (PENDING)
-2. Resolves apply_manifest saga script from platform defaults (ADR-0028)
-3. Executes saga via StarlarkSagaRunner
-4. Marks job APPLIED or FAILED
-
-The apply_manifest saga definition is embedded in the binary and bootstrapped to
-`public.platform_saga_definition` on startup.
-
-## Causation Tree Visualization
-
-Enables the "Glass Box" pattern: click a balance sheet line item, see every saga step
-that produced it.
-
-**Tracing paths:**
-
-- Position: `position_log` -> `transaction_log_entry` -> `idempotency_key` -> `saga_instance`
-- Transaction: `transaction_id` -> `saga_step_results` (correlation_id) -> `saga_instance`
-- Event: `event_id` -> `event_outbox` (causation_id) -> `saga_step_results` -> `saga_instance`
-
-All paths walk up the `parent_saga_id` chain to find the root saga, then retrieve
-the full causation tree via `CausationTreeRepository`.
-
-**Export formats:** JSON (preserves tree structure) and CSV (flattened for spreadsheet audit).
-
-## Balance Sheet
-
-Aggregates positions from Position Keeping into a classified balance sheet:
-
-| Section | Normal Balance | Account Type Examples |
-|---------|---------------|---------------------|
-| ASSETS | Debit | STRIPE_NOSTRO, ENERGY_INVENTORY |
-| LIABILITIES | Credit | CUSTOMER_DEPOSIT, PAYABLE |
-| EQUITY | Credit | RETAINED_EARNINGS, OWNER_EQUITY |
-
-Features:
-
-- Multi-instrument support (each section has totals per instrument)
-- Point-in-time queries via `as_of` parameter
-- Drill-down to individual positions with causation tree links
-- CSV export with metadata headers and injection protection
-
-## Staff Identity
-
-Tenant-scoped staff user management for the Admin Console, stored in `org_{tenant_id}` schemas.
-
-### Staff User Lifecycle
+## Domain Model
 
 ```mermaid
-stateDiagram-v2
-    [*] --> invited
-    invited --> active : ActivateStaff
-    active --> suspended : SuspendStaff
-    suspended --> [*]
-```
-
-**Roles:**
-
-| Role | Description |
-|------|-------------|
-| `admin` | Full access to all operations |
-| `operator` | Operational access |
-| `auditor` | Read-only access |
-
-### API Key Management
-
-- Key format: `pk_{tenant_slug}_{entropy}` (prefix enables O(1) tenant routing)
-- Storage: SHA-256 hash (high-entropy keys do not need argon2id)
-- Validation: Constant-time hash comparison, expiry check, staff status check
-- Scoping: Per-key permission scopes and rate limits (default 100 RPS)
-
-## Stripe Webhook Integration
-
-Receives Stripe webhook events via HTTP, verifies signatures, and publishes payment events
-to Kafka for downstream saga processing.
-
-**Handled event types:**
-
-| Stripe Event | Action |
-|-------------|--------|
-| `payment_intent.succeeded` | Extract metadata, publish payment event to Kafka |
-| `payment_intent.payment_failed` | Log failure (no saga triggered) |
-| `charge.refunded` | Extract metadata, publish refund event to Kafka |
-
-**Required metadata** on PaymentIntent: `tenant_id`, `party_id`
-
-Idempotency keys are deterministic SHA-256 hashes of `event_id + event_type`.
-Unknown event types are acknowledged (HTTP 200) to prevent Stripe retries.
-
-## CLI Tools
-
-### Manifest Validator
-
-```bash
-# Validate manifest files against schema
-go run ./services/control-plane/cmd/validate -manifest='examples/manifests/*.json'
-
-# JSON output for CI pipelines
-go run ./services/control-plane/cmd/validate -manifest='manifests/*.json' -json
-```
-
-## Database Schema
-
-Tables are created in tenant schemas (`org_{tenant_id}`) using the schema-per-tenant pattern.
-
-### staff_user
-
-```mermaid
-erDiagram
-    staff_user {
-        uuid id PK
-        varchar(255) email UK "lowercase, trimmed"
-        varchar(255) name "nullable"
-        varchar(50) role "admin, operator, auditor"
-        varchar(20) status "invited, active, suspended"
-        varchar(255) auth_provider_id "nullable, external IdP"
-        timestamptz created_at
-        timestamptz updated_at
-    }
-```
-
-### api_key
-
-```mermaid
-erDiagram
-    api_key {
-        uuid id PK
-        uuid staff_user_id FK
-        varchar(100) key_prefix UK "pk_{slug}_{first8}, unique where not revoked"
-        bytea key_hash "SHA-256"
-        varchar(255) name "nullable"
-        text_array scopes "nullable"
-        integer rate_limit_rps "default 100"
-        timestamptz last_used_at "nullable"
-        timestamptz expires_at "nullable"
-        timestamptz created_at
-        timestamptz revoked_at "nullable"
+classDiagram
+    class ManifestVersion {
+        +UUID ID
+        +string Version
+        +Manifest ManifestJSON
+        +time AppliedAt
+        +string AppliedBy
+        +ApplyStatus ApplyStatus
+        +string DiffSummary
+        +int64 SequenceNumber
+        +string Checksum
+        +map PhaseStatus
     }
 
-    staff_user ||--o{ api_key : "has"
-```
-
-### manifest_versions
-
-```mermaid
-erDiagram
-    manifest_versions {
-        uuid id PK
-        varchar(50) version "schema version e.g. 1.0"
-        jsonb manifest_json "protobuf JSON snapshot"
-        timestamptz applied_at
-        varchar(255) applied_by "staff identity or system"
-        varchar(20) apply_status "APPLIED, FAILED, ROLLED_BACK"
-        uuid apply_job_id "nullable"
-        text diff_summary "nullable, human-readable"
-        timestamptz created_at
+    class ManifestApplyJob {
+        +UUID ID
+        +int ManifestVersion
+        +UUID SagaExecutionID
+        +string Status
+        +string Error
+        +time CreatedAt
+        +time CompletedAt
     }
-```
 
-### manifest_apply_job
-
-```mermaid
-erDiagram
-    manifest_apply_job {
-        uuid id PK
-        integer manifest_version
-        uuid saga_execution_id "nullable"
-        varchar(32) status "PENDING, APPLYING, APPLIED, FAILED"
-        text error "nullable"
-        timestamptz created_at
-        timestamptz completed_at "nullable"
+    class StaffUser {
+        +UUID ID
+        +string Email
+        +string Name
+        +StaffRole Role
+        +StaffStatus Status
+        +string AuthProviderID
+        +time CreatedAt
     }
+
+    class ApiKey {
+        +UUID ID
+        +UUID StaffUserID
+        +string KeyPrefix
+        +bytes KeyHash
+        +string Name
+        +[]string Scopes
+        +int RateLimitRPS
+        +time ExpiresAt
+        +time RevokedAt
+    }
+
+    class ApplyStatus {
+        <<enumeration>>
+        APPLIED
+        FAILED
+        ROLLED_BACK
+        PARTIAL
+    }
+
+    class StaffRole {
+        <<enumeration>>
+        admin
+        operator
+        auditor
+    }
+
+    ManifestVersion --> ApplyStatus
+    ManifestVersion --> ManifestApplyJob : tracked by
+    StaffUser --> StaffRole
+    StaffUser "1" --> "*" ApiKey : owns
 ```
 
-## Service Dependencies
+Apply pipeline state: `PENDING -> APPLYING -> APPLIED | FAILED | PARTIAL`.
+Rollback creates a new `ManifestVersion` record with the target version's content
+(forward-only audit trail; rollback does not overwrite existing records).
 
-| Service | Purpose |
-|---------|---------|
-| Position Keeping | Balance sheet aggregation, causation tree tracing |
-| Reference Data | Instrument, account type, valuation rule, and saga registration |
-| Internal Account | Account provisioning during manifest apply |
-| Kafka | Stripe payment event publishing |
+`ManifestVersion.SequenceNumber` is an optimistic lock. Callers must echo it back as
+`expected_sequence_number` in subsequent applies to prevent concurrent overwrites.
+
+## Dependencies
+
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| `reference-data` | gRPC | Instrument, valuation rule, and saga definition registration during manifest apply phases 1, 3, 4 |
+| `internal-account` | gRPC | Internal account type provisioning during manifest apply phase 2 |
+| `operational-gateway` | gRPC | Provider connection and instruction route registration during manifest apply |
+| `party` | gRPC | Party type definition registration during manifest apply |
+| `market-information` | gRPC | Market data source and set registration during manifest apply |
+| `position-keeping` | gRPC | Balance aggregation for `BalanceSheetService`; causation chain traversal for Glass Box |
+
+## Dependents
+
+| Service | Entry Point | Purpose |
+|---------|-------------|---------|
+| `api-gateway` | `services/api-gateway/auth/rpc_apikey_validator.go` | `ValidateAPIKey` on every authenticated request |
+| `event-router` | `services/event-router/adapters/grpc/saga_trigger_client.go` | `ExecuteSaga` on domain events from Kafka |
+| `mcp-server` | `services/mcp-server/internal/clients/clients.go` | Manifest apply, history, and economy generation from LLM clients |
+| `financial-gateway` | `services/financial-gateway/cmd/main.go` | Manifest tenant config lookup for Stripe rail connection details |
+| `payment-order` | `services/payment-order/adapters/gateway/stripe/manifest_tenant_config.go` | Manifest tenant config lookup for Stripe payment gateway |
+
+## Load-Bearing Files
+
+Paths are relative to `services/control-plane/`.
+
+| File | Why It Matters |
+|------|----------------|
+| `cmd/main.go` | Wires gRPC server with auth and RBAC interceptors; controls startup order and shutdown |
+| `service/apply_manifest.go` | Entry point for validate/diff/plan/execute pipeline; `RegisterApplyManifestService` |
+| `internal/applier/apply_job.go` | Apply job lifecycle tracking (`PENDING -> APPLIED/FAILED`); idempotency boundary |
+| `internal/applier/executor.go` | Starlark saga runner for manifest apply; calls `StarlarkSagaRunner` with `apply_manifest` |
+| `internal/validator/manifest_validator.go` | Seven-stage validation pipeline; changes here affect every manifest operation |
+| `internal/differ/manifest_differ.go` | Kubernetes-style diff engine (`CREATE/UPDATE/DELETE/NO_CHANGE`); safety-checks deletions |
+| `internal/planner/manifest_planner.go` | Maps diff actions to dependency-ordered phased gRPC calls with idempotency keys |
+| `internal/admin/handler.go` | `CausationVisualizerService` and `BalanceSheetService` gRPC implementations |
+| `internal/stripe/webhook.go` | HMAC-SHA256 signature verification and Kafka payment event publishing; 5-minute replay guard |
+| `rbac/method_permissions.go` | RBAC method-to-permission mapping; all RPC authorization rules live here |
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `DATABASE_URL` | - | PostgreSQL/CockroachDB connection string |
-| `STRIPE_WEBHOOK_SECRET` | - | Stripe webhook signing secret (whsec_...) |
-| `DB_MAX_OPEN_CONNS` | 25 | Connection pool size |
-
-## Key Patterns
-
-### Manifest Version History
-
-All manifest changes are stored as immutable snapshots. Rollbacks create new version records
-with the target version's content, maintaining a forward-only audit trail. Diff summaries
-are auto-generated by comparing against the previous applied version.
-
-### Platform Default Saga Bootstrap
-
-On startup, the control plane upserts the embedded `apply_manifest` Starlark saga into
-`public.platform_saga_definition`. This ensures the saga is available for all tenants
-via ADR-0028 platform default fallback resolution. The bootstrap is idempotent and handles
-concurrent startup race conditions.
-
-### Tenant Schema Isolation
-
-Staff users, API keys, manifest versions, and apply jobs are stored in tenant schemas
-(`org_{tenant_id}`). The service uses `search_path` or GORM tenant transactions to route
-queries to the correct schema based on tenant context from request metadata.
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `GRPC_PORT` | No | `50062` | gRPC listen port |
+| `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
 ## References
 
-- [Service Architecture](../README.md)
-- [Proto Definitions](../../api/proto/meridian/control_plane/v1/)
-- [Example Manifests](../../api/proto/meridian/control_plane/v1/examples/)
+- [`docs/architecture-layers.md`](../../docs/architecture-layers.md) - Lifecycle Orchestration layer (section 5)
+- [`docs/architecture/starlark-saga-architecture.md`](../../docs/architecture/starlark-saga-architecture.md) - Saga execution
+- [`api/proto/meridian/control_plane/v1/`](../../api/proto/meridian/control_plane/v1/) - Proto definitions
+- [`api/proto/meridian/control_plane/v1/examples/`](../../api/proto/meridian/control_plane/v1/examples/) - Example manifests
