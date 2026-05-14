@@ -14,6 +14,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICES_DIR="${1:-${REPO_ROOT}/services}"
 
+if [ ! -d "${SERVICES_DIR}" ]; then
+    echo "Error: services directory not found: ${SERVICES_DIR}" >&2
+    exit 1
+fi
+
 # The 8 required H2 sections (frontmatter checked separately).
 REQUIRED_SECTIONS=(
     "## Overview"
@@ -35,7 +40,7 @@ is_go_service() {
     if [ -d "${dir}/cmd" ] || [ -d "${dir}/service" ]; then
         return 0
     fi
-    if find "${dir}" -maxdepth 3 -name "*.go" -quit 2>/dev/null | grep -q .; then
+    if find "${dir}" -name "*.go" -quit 2>/dev/null | grep -q .; then
         return 0
     fi
     return 1

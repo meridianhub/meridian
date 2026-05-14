@@ -6,6 +6,9 @@ on:
       - "services/**/README.md"
       - "docs/service-readme-template.md"
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint service READMEs
