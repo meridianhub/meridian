@@ -118,11 +118,14 @@ equals the sum of all `CREDIT` postings (double-entry invariant enforced at serv
 `PostingAmount` uses `InstrumentAmount` for multi-asset support: currencies, energy (kWh),
 carbon credits, and compute hours are all valid posting units.
 
-`POSTED`, `CANCELLED`, and `REVERSED` are terminal states - the domain's `IsFinal()` method
-returns true for all three and the control actions block further transitions. `FAILED` is a
-suspended state used by the `SUSPEND` control action; it is resumable via `RESUME` and is NOT
-a true terminal state. `REVERSED` is reserved for future offsetting-entry support and is not
-yet produceable via `ControlFinancialBookingLog`.
+`POSTED`, `CANCELLED`, and `REVERSED` are behaviorally terminal: control actions block
+further transitions on them. `FAILED` is the suspended state produced by the `SUSPEND` control
+action and is resumable via `RESUME` (FAILED -> PENDING); it is not a true terminal from a
+user-workflow perspective. Note: `TransactionStatus.IsFinal()` returns true for FAILED as well
+(to prevent double-SUSPEND), while `FinancialBookingLog.IsTerminal()` returns true for
+POSTED/FAILED/CANCELLED - the distinction is a code-level guard, not a state-machine
+boundary. `REVERSED` is reserved for future offsetting-entry support and is not yet
+produceable via `ControlFinancialBookingLog`.
 
 ## Dependencies
 
