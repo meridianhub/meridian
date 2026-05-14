@@ -1,0 +1,20 @@
+name: Service README Lint
+
+on:
+  pull_request:
+    paths:
+      - "services/**/README.md"
+      - "docs/service-readme-template.md"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint service READMEs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check service README sections
+        run: bash scripts/lint-service-readmes.sh
