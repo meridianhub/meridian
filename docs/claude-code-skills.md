@@ -11,6 +11,20 @@ discoverable as "skills" - focused pieces of context that Claude Code can load j
 
 For detailed information about creating and using skills, see [docs/skills/README.md](skills/README.md).
 
+## AI Navigability Docs
+
+For AI contributors and new engineers, these documents describe the codebase structure:
+
+- [architecture-layers.md](architecture-layers.md) - 8-layer functional grouping with service-to-layer mapping
+- [patterns.md](patterns.md) - 6 cross-service patterns with canonical locations
+- [data-flows.md](data-flows.md) - 4 sequence diagrams: payment, audit, tenant provisioning, manifest apply
+- [saga-handler-loading.md](saga-handler-loading.md) - Starlark saga runtime loading flow
+- [service-readme-template.md](service-readme-template.md) - required structure for per-service READMEs
+- [../cookbook/README.md](../cookbook/README.md) - pattern templates vs reference-data distinction
+
+Every service has its own `README.md` following the template. When a service-level question
+comes up, read that service's README first.
+
 ## Available Skills
 
 **Architecture Decision Records** (in `docs/adr/`):
