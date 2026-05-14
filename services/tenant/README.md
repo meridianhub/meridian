@@ -1,67 +1,85 @@
 ---
-name: tenant-service
-description: Multi-tenant platform management with PostgreSQL schema-per-tenant isolation
+name: tenant
+description: Platform multi-tenancy registry - maintains tenant lifecycle state and drives schema-per-tenant provisioning across all CockroachDB service databases
 triggers:
-  - Implementing multi-tenancy patterns
-  - Managing tenant lifecycle (active, suspended, deprovisioned)
-  - Schema isolation for data segregation
-  - Building tenant registry services
-  - Platform infrastructure for shared clusters
+  - Creating or retrieving a tenant via InitiateTenant or RetrieveTenant
+  - Debugging provisioning failures (PROVISIONING_FAILED status or per-service errors)
+  - Running schema migrations against existing tenant databases (ReconcileMigrations)
+  - Tracing how a new tenant's org_{tenant_id} schema gets created across services
+  - Investigating slug routing or subdomain resolution
+  - Configuring PARTY_SERVICE_ENABLED or SCHEMA_PROVISIONING_ENABLED behaviour
 instructions: |
-  Tenant service manages platform multi-tenancy (NOT a BIAN component).
+  Tenant service manages platform multi-tenancy. It is NOT a BIAN component.
 
-  Key patterns:
-  - Schema isolation: Each tenant gets org_{tenant_id} PostgreSQL schema
-  - Status lifecycle: ACTIVE → SUSPENDED → DEPROVISIONED (terminal)
-  - Tenant ID: Alphanumeric + underscore, 1-50 chars
-  - Optimistic locking via version field
-  - Cached registry with async refresh (60s interval)
+  Lifecycle: PROVISIONING_PENDING -> PROVISIONING -> ACTIVE (happy path).
+  Failures land in PROVISIONING_FAILED and can be retried. DEPROVISIONED is
+  terminal - no operations can be performed after that transition.
 
-  Note: Distinct from BIAN Party.Organization which represents legal entities.
+  Schema provisioning: when SCHEMA_PROVISIONING_ENABLED=true the provisioner
+  opens connections to each service's CockroachDB database and runs
+  CREATE SCHEMA IF NOT EXISTS org_{tenant_id}, then applies all service migrations.
+  Services provisioned (in order): party, current-account, position-keeping,
+  financial-accounting, payment-order, market-information, reference-data,
+  internal-account, reconciliation, identity, control-plane.
 
-  Port: 50056 (gRPC)
+  Async provisioning: InitiateTenant returns PROVISIONING_PENDING immediately;
+  the ProvisioningWorker picks it up and drives it to ACTIVE. Poll
+  GetTenantProvisioningStatus for per-service progress.
+
+  Party registration: when PARTY_SERVICE_ENABLED=true (default), tenant creation
+  calls party.RegisterParty to create the corresponding BIAN Organization entity
+  and stores the returned party_id on the tenant record.
+
+  Port: 50056 (gRPC).
 ---
 
-# Tenant Service
+# tenant
 
-Platform infrastructure service for multi-tenant management with PostgreSQL schema isolation.
+Platform multi-tenancy registry and schema provisioner. Maintains tenant lifecycle
+state and creates `org_{tenant_id}` schemas across all CockroachDB service databases.
 
 ## Overview
 
 | Attribute | Value |
 |-----------|-------|
-| **Type** | Infrastructure (not BIAN) |
+| **BIAN Domain** | Infrastructure (non-BIAN) |
+| **Layer** | Lifecycle Orchestration |
 | **Port** | 50056 (gRPC) |
-| **Language** | Go |
-| **Database** | PostgreSQL/CockroachDB |
-| **Standalone** | Yes |
+| **Database** | CockroachDB platform schema (`platform`) for tenant registry; provisions `org_{tenant_id}` in all service databases |
+| **Standalone** | No - requires `party` at runtime when `PARTY_SERVICE_ENABLED=true`; requires per-service database URLs for schema provisioning |
 
-**Note**: This service is not part of the BIAN standard. It provides essential multi-tenancy
-infrastructure for shared-cluster deployments requiring data isolation between organizations.
+## API Surface
 
-## gRPC Methods
+### gRPC
 
-| Method | HTTP | Purpose |
-|--------|------|---------|
-| `InitiateTenant` | `POST /v1/tenants` | Create new tenant |
-| `RetrieveTenant` | `GET /v1/tenants/{tenant_id}` | Get tenant details |
-| `UpdateTenantStatus` | `PATCH /v1/tenants/{tenant_id}/status` | Change lifecycle status |
-| `ListTenants` | `GET /v1/tenants` | List with filters |
+| Service | RPC | Purpose |
+|---------|-----|---------|
+| `TenantService` | `InitiateTenant` | Register a new tenant; triggers async schema provisioning |
+| `TenantService` | `RetrieveTenant` | Get tenant details; used to poll provisioning status |
+| `TenantService` | `UpdateTenantStatus` | Lifecycle transitions (active, suspended, deprovisioned) with optimistic locking |
+| `TenantService` | `ListTenants` | Paginated list with optional status filter |
+| `TenantService` | `ReconcileMigrations` | Apply new service migrations to existing tenant schemas |
+| `TenantService` | `GetTenantProvisioningStatus` | Per-service provisioning progress with migration versions and error details |
+
+Proto: `api/proto/meridian/tenant/v1/tenant.proto` (relative to repo root).
 
 ## Domain Model
 
 ```mermaid
 classDiagram
     class Tenant {
-        +string ID
+        +string TenantID
         +string DisplayName
         +string SettlementAsset
         +string Subdomain
+        +string Slug
         +TenantStatus Status
-        +Time CreatedAt
-        +Time DeprovisionedAt
+        +string PartyID
         +JSON Metadata
         +int Version
+        +string ErrorMessage
+        +time CreatedAt
+        +time DeprovisionedAt
     }
 
     class TenantStatus {
@@ -69,181 +87,128 @@ classDiagram
         ACTIVE
         SUSPENDED
         DEPROVISIONED
+        PROVISIONING
+        PROVISIONING_FAILED
+        PROVISIONING_PENDING
+    }
+
+    class ServiceProvisioningStatus {
+        +string ServiceName
+        +ProvisioningState Status
+        +string MigrationVersion
+        +string ErrorMessage
+        +time StartedAt
+        +time CompletedAt
+    }
+
+    class ProvisioningState {
+        <<enumeration>>
+        PENDING
+        IN_PROGRESS
+        COMPLETED
+        FAILED
     }
 
     Tenant --> TenantStatus
+    Tenant "1" --> "*" ServiceProvisioningStatus : tracked per service
+    ServiceProvisioningStatus --> ProvisioningState
 ```
 
-**Field Notes:**
+Tenant ID is alphanumeric plus underscore (1-50 chars) and is used directly as
+the schema name suffix (`org_{tenant_id}`). Slug is a DNS label (lowercase
+alphanumeric with hyphens, 3-63 chars) used for subdomain routing.
 
-- `ID`: Alphanumeric + underscore, 1-50 chars (used for schema name `org_{id}`)
-- `SettlementAsset`: e.g., GBP, USD, GPU-HOUR
+Status transitions: `PROVISIONING_PENDING -> PROVISIONING -> ACTIVE` (happy path).
+`PROVISIONING_FAILED` is retryable (transitions back to `PROVISIONING`).
+`DEPROVISIONED` is terminal. Tenants are never hard-deleted.
 
-### Tenant Status
+`Version` field enables optimistic locking. `UpdateTenantStatus` returns `ABORTED`
+on version mismatch; callers should retry with a fresh `RetrieveTenant`.
 
-| Status | Description |
-|--------|-------------|
-| `ACTIVE` | Tenant is operational |
-| `SUSPENDED` | Temporarily disabled (recoverable) |
-| `DEPROVISIONED` | Terminal state (no operations) |
+## Dependencies
 
-**Note:** API enum uses uppercase (ACTIVE), DB stores lowercase (active).
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| `party` | gRPC | Registers the organization as a BIAN Party on tenant creation and stores the returned `party_id` (requires `PARTY_SERVICE_ENABLED=true`) |
+| All service CockroachDB databases | Direct SQL | Creates `org_{tenant_id}` schema and applies service migrations during provisioning |
 
-**Status Transitions:**
+Services whose databases receive schemas during provisioning: `party`, `current-account`,
+`position-keeping`, `financial-accounting`, `payment-order`, `market-information`,
+`reference-data`, `internal-account`, `reconciliation`, `identity`, `control-plane`.
 
-```mermaid
-stateDiagram-v2
-    [*] --> ACTIVE
-    ACTIVE --> SUSPENDED
-    ACTIVE --> DEPROVISIONED
-    SUSPENDED --> ACTIVE
-    SUSPENDED --> DEPROVISIONED
-    DEPROVISIONED --> [*]
-```
+## Dependents
 
-- DEPROVISIONED is terminal (cannot be reactivated)
-- SUSPENDED can return to ACTIVE
+| Service | Entry Point | Purpose |
+|---------|-------------|---------|
+| `api-gateway` | `services/api-gateway/registration_handler.go` | Tenant creation during user self-registration flow |
+| `identity` | `services/identity/bootstrap/self_registered_admin.go` | Tenant domain types for operator admin bootstrap |
 
-## Schema Isolation
+## Load-Bearing Files
 
-Each tenant's data is isolated in a dedicated PostgreSQL schema:
+Paths are relative to `services/tenant/`.
 
-```text
-org_{tenant_id}
-```
-
-Example: Tenant `acme_bank` → Schema `org_acme_bank`
-
-The tenant registry itself is stored in the shared `platform` schema.
-
-## Database Schema
-
-**Schema**: `platform`
-
-```mermaid
-erDiagram
-    tenants {
-        varchar(50) id PK "alphanumeric + underscore"
-        varchar(255) display_name
-        varchar(20) settlement_asset
-        varchar(255) subdomain UK "nullable"
-        varchar(20) status "active, suspended, deprovisioned"
-        timestamptz created_at
-        timestamptz deprovisioned_at "nullable"
-        jsonb metadata "flexible config"
-        integer version "optimistic lock"
-    }
-```
-
-**Constraints:**
-
-- `valid_status`: status IN ('active', 'suspended', 'deprovisioned')
-- `valid_org_id`: id matches `^[a-zA-Z0-9_]{1,50}$`
-- Subdomain unique when not null
-
-## Cached Registry
-
-In-memory tenant cache for validation middleware:
-
-| Setting | Value |
-|---------|-------|
-| Refresh interval | 60 seconds |
-| Per-refresh timeout | 30 seconds |
-| Strategy | Fail-open (uses stale cache if refresh fails) |
-
-**Fail-open guardrails:**
-
-- Only allows previously-seen tenants (cached entries)
-- Never accepts unknown tenant IDs during refresh failures
-- Emits metrics/alerts when operating in stale-cache mode
-- Cache populated on startup before accepting traffic
+| File | Why It Matters |
+|------|----------------|
+| `cmd/main.go` | Wires gRPC server with platform admin interceptor; loads worker config and controls startup order |
+| `app/container.go` | Dependency injection container; initialization order and worker lifecycle; controls which features are enabled based on env vars |
+| `service/server.go` | gRPC `TenantService` implementation; delegates to repository and provisioner |
+| `service/grpc_provisioning_endpoints.go` | `ReconcileMigrations` and `GetTenantProvisioningStatus` gRPC handlers |
+| `provisioner/provisioner.go` | Orchestrates multi-service schema provisioning; `DefaultConfig` enumerates all provisioned services |
+| `provisioner/postgres_provisioner.go` | Creates `org_{tenant_id}` schemas and runs migrations per service database; circuit breaker per service |
+| `domain/tenant.go` | Tenant entity and status transition invariants; all status changes validated here |
+| `adapters/persistence/repository.go` | CockroachDB GORM repository; GORM hooks for audit trail |
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `GRPC_PORT` | 50056 | gRPC server port |
-| `METRICS_PORT` | 9090 | Prometheus metrics endpoint port |
-| `DATABASE_URL` | - | PostgreSQL connection string |
-| `DB_MAX_OPEN_CONNS` | 25 | Connection pool size |
-| `DB_MAX_IDLE_CONNS` | 5 | Idle connections |
-| `DB_CONN_MAX_LIFETIME` | 5m | Connection max age |
+### Core
 
-## Observability
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string (platform schema) |
+| `GRPC_PORT` | No | `50056` | gRPC listen port |
+| `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
-### Metrics Endpoint
+### Schema Provisioning
 
-The service exposes Prometheus metrics on port 9090:
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `SCHEMA_PROVISIONING_ENABLED` | No | `false` | Enable per-tenant schema creation and migration on `InitiateTenant` |
+| `MIGRATIONS_BASE_PATH` | No | `/migrations` | Base path for service migration directories, relative to container root |
+| `PARTY_DATABASE_URL` | Conditional | derived from `DATABASE_URL` | CockroachDB URL for `party` service schema provisioning |
+| `CURRENT_ACCOUNT_DATABASE_URL` | Conditional | derived | CockroachDB URL for `current-account` schema provisioning |
+| `POSITION_KEEPING_DATABASE_URL` | Conditional | derived | CockroachDB URL for `position-keeping` schema provisioning |
+| `FINANCIAL_ACCOUNTING_DATABASE_URL` | Conditional | derived | CockroachDB URL for `financial-accounting` schema provisioning |
+| `PAYMENT_ORDER_DATABASE_URL` | Conditional | derived | CockroachDB URL for `payment-order` schema provisioning |
 
-- **Endpoint**: `http://localhost:9090/metrics`
-- **Health Check**: `http://localhost:9090/healthz`
+Per-service database URLs are derived from `DATABASE_URL` by substituting the database
+name if a specific `{SERVICE}_DATABASE_URL` variable is not set.
 
-**Provisioning Metrics:**
+### Party Client
 
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `tenant_provisioning_duration_seconds` | Histogram | status | Duration of tenant provisioning operations |
-| `tenant_provisioning_queue_depth` | Gauge | - | Number of tenants in PROVISIONING_PENDING status awaiting provisioning |
-| `tenant_service_provisioning_failures_total` | Counter | service_name | Service-specific provisioning failures |
-| `tenant_provisioning_retries_total` | Counter | - | Provisioning retry attempts across all tenants |
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `PARTY_SERVICE_ENABLED` | No | `true` | Register BIAN party on tenant creation |
+| `K8S_NAMESPACE` | No | `default` | Kubernetes namespace for party service discovery |
 
-**Prometheus Scrape Configuration:**
+### Provisioning Worker
 
-```yaml
-scrape_configs:
-  - job_name: 'tenant-service'
-    kubernetes_sd_configs:
-      - role: endpoints
-    relabel_configs:
-      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
-        action: keep
-        regex: true
-      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_port]
-        action: replace
-        target_label: __address__
-        regex: ([^:]+)(?::\d+)?;(\d+)
-        replacement: $1:$2
-      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
-        action: replace
-        target_label: __metrics_path__
-        regex: (.+)
-```
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `PROVISIONING_WORKER_POLL_INTERVAL` | No | `10s` | Polling interval for `PROVISIONING_PENDING` jobs |
+| `PROVISIONING_MAX_RETRIES` | No | `5` | Maximum retry attempts per provisioning job |
+| `PROVISIONING_RETRY_BASE_DELAY` | No | `2s` | Initial retry backoff delay |
+| `PROVISIONING_RETRY_MAX_DELAY` | No | `30s` | Maximum retry backoff delay |
+| `PROVISIONING_MAX_CONCURRENT` | No | `5` | Maximum concurrent provisioning jobs |
 
-## Key Patterns
+### Alerting
 
-### Tenant ID Validation
-
-Must match: `^[a-zA-Z0-9_]{1,50}$`
-
-Used for:
-
-- PostgreSQL schema routing (`org_{id}`)
-- API subdomain routing
-
-### No Delete Operations
-
-Tenants are managed through status transitions, not deletion:
-
-- Audit compliance (full history preserved)
-- Recoverable: suspended can be reactivated
-- Data integrity: no cascade delete complexities
-
-### Optimistic Locking
-
-Updates check `WHERE version = expected_version`. Returns conflict error on mismatch.
-
-## Kubernetes Deployment
-
-| Setting | Value |
-|---------|-------|
-| Replicas | 2 |
-| CPU | 50m-200m |
-| Memory | 64Mi-256Mi |
-| User | 65532 (non-root) |
-| Filesystem | Read-only |
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `PAGERDUTY_ENABLED` | No | `false` | Enable PagerDuty alerting on provisioning failure |
+| `PAGERDUTY_ROUTING_KEY` | Conditional | - | PagerDuty routing key (required when `PAGERDUTY_ENABLED=true`) |
+| `SLACK_WEBHOOK_URL` | No | - | Slack webhook URL for provisioning failure notifications |
 
 ## References
 
-- [Service Architecture](../README.md)
-- [Proto Definitions](../../api/proto/meridian/tenant/v1/)
-- [ADR-0002: Microservices per BIAN Domain](../../docs/adr/0002-microservices-per-bian-domain.md)
+- [`docs/architecture-layers.md`](../../docs/architecture-layers.md) - Lifecycle Orchestration layer (section 5)
+- [`api/proto/meridian/tenant/v1/tenant.proto`](../../api/proto/meridian/tenant/v1/tenant.proto)
