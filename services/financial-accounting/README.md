@@ -17,7 +17,12 @@ instructions: |
   Key invariants:
   - Posting amounts are always positive; direction (DEBIT/CREDIT) carries sign
   - Cross-instrument postings within a single booking log are rejected
-  - POSTED and CANCELLED are terminal states; no further mutations allowed
+  - POSTED, CANCELLED, and REVERSED are terminal states (IsFinal() = true);
+    no further control actions or mutations are allowed on these logs
+  - FAILED is used as a suspended (resumable) state by ControlLog SUSPEND;
+    it is NOT a final terminal state - RESUME returns it to PENDING
+  - REVERSED exists in the domain for offsetting-entry support; it is not
+    yet produceable via the ControlFinancialBookingLog CoCR actions
   - All mutations require an idempotency_key for exactly-once guarantees
 
   Port: 50052 (gRPC), 8082 (metrics)
@@ -113,6 +118,12 @@ equals the sum of all `CREDIT` postings (double-entry invariant enforced at serv
 `PostingAmount` uses `InstrumentAmount` for multi-asset support: currencies, energy (kWh),
 carbon credits, and compute hours are all valid posting units.
 
+`POSTED`, `CANCELLED`, and `REVERSED` are terminal states - the domain's `IsFinal()` method
+returns true for all three and the control actions block further transitions. `FAILED` is a
+suspended state used by the `SUSPEND` control action; it is resumable via `RESUME` and is NOT
+a true terminal state. `REVERSED` is reserved for future offsetting-entry support and is not
+yet produceable via `ControlFinancialBookingLog`.
+
 ## Dependencies
 
 | Service | Protocol | Purpose |
@@ -150,10 +161,11 @@ carbon credits, and compute hours are all valid posting units.
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `BANK_CASH_ACCOUNT_ID` | Yes | - | Bank cash account ID for the clearing side of double-entry; service fails to start without it |
 | `GRPC_PORT` | No | `50052` | gRPC listen port |
 | `METRICS_PORT` | No | `8082` | Prometheus metrics listen port |
 | `LOG_LEVEL` | No | `info` | Structured log level (`debug`, `info`, `warn`, `error`) |
-| `BANK_CASH_ACCOUNT_ID` | No | - | Well-known bank cash account ID for clearing side of double-entry |
+| `ENVIRONMENT` | No | - | Deployment environment; `production` makes Kafka and Redis required |
 | `REFERENCE_DATA_SERVICE_URL` | No | - | reference-data gRPC address; enables instrument validation when set |
 
 ### Authentication
@@ -174,7 +186,7 @@ carbon credits, and compute hours are all valid posting units.
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `REDIS_URL` | No | `redis://localhost:6379` | Redis connection URL for idempotency store |
+| `REDIS_URL` | No* | `redis://localhost:6379` | Redis connection URL for idempotency store; *required in production (`ENVIRONMENT=production`) |
 | `REDIS_PASSWORD` | No | - | Redis authentication password |
 | `REDIS_DB` | No | `0` | Redis database index |
 | `IDEMPOTENCY_CLEANUP_ENABLED` | No | `true` | Enable background cleanup of stale idempotency keys |
