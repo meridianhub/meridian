@@ -1,91 +1,97 @@
 ---
-name: financial-accounting-service
-description: BIAN-compliant double-entry bookkeeping and general ledger service
+name: financial-accounting
+description: BIAN-compliant double-entry general ledger service that owns booking logs and ledger postings for all asset classes
 triggers:
-  - Financial accounting operations
-  - Double-entry bookkeeping patterns
-  - Ledger posting validation
-  - Booking log lifecycle management
-  - Money and currency handling
-  - Idempotent gRPC operations
-  - Kafka event consumption (deposits)
+  - Double-entry bookkeeping for deposits, withdrawals, or payment settlement
+  - Ledger posting validation or booking log lifecycle management
+  - Multi-asset posting (currency, energy, carbon, compute)
+  - Understanding the accounting nucleus of the Core Ledger layer
+  - Idempotent ledger operations and exactly-once posting guarantees
+  - CaptureLedgerPosting or InitiateFinancialBookingLog usage
 instructions: |
-  FinancialAccounting implements double-entry bookkeeping where debits always equal credits.
+  financial-accounting implements BIAN Financial Accounting. Every financial
+  operation results in a FinancialBookingLog (the BIAN control record) plus one
+  or more LedgerPostings (the individual debit/credit lines). Debits must equal
+  credits within a booking log before it can transition to POSTED.
 
-  Key concepts:
-  - BookingLog: BIAN control record aggregating related postings
-  - LedgerPosting: Individual debit/credit line item
-  - PostingDirection: DEBIT (asset/expense increase) or CREDIT (liability/income increase)
-
-  Core operation (ProcessDeposit) - from bank's general ledger perspective:
-    Debit Entry:  Cash/Reserves (bank's asset ↑)
-    Credit Entry: Customer Deposit Account (bank's liability ↑)
-    Balance Check: Debits = Credits
+  Key invariants:
+  - Posting amounts are always positive; direction (DEBIT/CREDIT) carries sign
+  - Cross-instrument postings within a single booking log are rejected
+  - POSTED, CANCELLED, and REVERSED are terminal states (IsFinal() = true);
+    no further control actions or mutations are allowed on these logs
+  - FAILED is used as a suspended (resumable) state by ControlLog SUSPEND;
+    it is NOT a final terminal state - RESUME returns it to PENDING
+  - REVERSED exists in the domain for offsetting-entry support; it is not
+    yet produceable via the ControlFinancialBookingLog CoCR actions
+  - All mutations require an idempotency_key for exactly-once guarantees
 
   Port: 50052 (gRPC), 8082 (metrics)
+
+  financial-accounting has instability I=0.00 per the coupling analysis - it is
+  the most stable Core Ledger service. Treat its proto contract as load-bearing;
+  breaking changes require an ADR.
 ---
 
-# FinancialAccounting Service
+# financial-accounting
 
-BIAN-compliant financial accounting microservice for double-entry bookkeeping.
+BIAN Financial Accounting service - the general ledger nucleus of the Core Ledger
+layer. Part of the [Core Ledger layer](../../docs/architecture-layers.md#4-core-ledger).
 
 ## Overview
 
 | Attribute | Value |
 |-----------|-------|
-| **BIAN Domain** | Financial Standard Management |
+| **BIAN Domain** | Financial Accounting |
+| **Layer** | Core Ledger |
 | **Port** | 50052 (gRPC), 8082 (metrics) |
-| **Language** | Go |
-| **Database** | PostgreSQL/CockroachDB |
-| **Standalone** | Yes |
+| **Database** | CockroachDB (`financial_accounting` schema) |
+| **Standalone** | Yes (no required Meridian service dependencies at startup) |
 
-## gRPC Methods
+## API Surface
 
-### Booking Log Operations
+| Service | RPC | Purpose |
+|---------|-----|---------|
+| `FinancialAccountingService` | `InitiateFinancialBookingLog` | Create a new booking log (BIAN control record) |
+| `FinancialAccountingService` | `UpdateFinancialBookingLog` | Update booking log status or chart-of-accounts rules |
+| `FinancialAccountingService` | `RetrieveFinancialBookingLog` | Get booking log with all associated postings |
+| `FinancialAccountingService` | `ListFinancialBookingLogs` | Paginated list with status and business-unit filters |
+| `FinancialAccountingService` | `CaptureLedgerPosting` | Create a single debit or credit posting |
+| `FinancialAccountingService` | `UpdateLedgerPosting` | Update posting status or result field |
+| `FinancialAccountingService` | `RetrieveLedgerPosting` | Get a posting by ID |
+| `FinancialAccountingService` | `ListLedgerPostings` | Paginated list with account, direction, date, and instrument filters |
+| `FinancialAccountingService` | `ControlFinancialBookingLog` | SUSPEND / RESUME / TERMINATE lifecycle action (BIAN CoCR) |
 
-| Method | HTTP | Purpose |
-|--------|------|---------|
-| `InitiateFinancialBookingLog` | `POST /v1/booking-logs` | Create booking log |
-| `UpdateFinancialBookingLog` | `PUT /v1/booking-logs/{id}` | Update status/rules |
-| `RetrieveFinancialBookingLog` | `GET /v1/booking-logs/{id}` | Get with postings |
-| `ListFinancialBookingLogs` | `GET /v1/booking-logs` | List with filters |
-
-### Ledger Posting Operations
-
-| Method | HTTP | Purpose |
-|--------|------|---------|
-| `CaptureLedgerPosting` | `POST /v1/booking-logs/{id}/postings` | Create posting |
-| `UpdateLedgerPosting` | `PUT /v1/postings/{id}` | Update status |
-| `RetrieveLedgerPosting` | `GET /v1/postings/{id}` | Get posting |
-| `ListLedgerPostings` | `GET /v1/postings` | List with filters |
+Proto: [`api/proto/meridian/financial_accounting/v1/financial_accounting.proto`](../../api/proto/meridian/financial_accounting/v1/financial_accounting.proto)
 
 ## Domain Model
 
 ```mermaid
 classDiagram
     class FinancialBookingLog {
-        +UUID ID
+        +string ID
         +string FinancialAccountType
         +string ProductServiceReference
         +string BusinessUnitReference
         +string ChartOfAccountsRules
-        +string BaseCurrency
-        +BookingLogStatus Status
-        +int64 Version
+        +string BaseInstrumentCode
+        +TransactionStatus Status
+        +time CreatedAt
+        +time UpdatedAt
     }
 
     class LedgerPosting {
-        +UUID ID
-        +UUID FinancialBookingLogID
+        +string ID
+        +string FinancialBookingLogID
         +PostingDirection Direction
-        +Money Amount
+        +InstrumentAmount PostingAmount
         +string AccountID
-        +Time ValueDate
-        +PostingStatus Status
-        +string CorrelationID
+        +AccountServiceDomain AccountServiceDomain
+        +time ValueDate
+        +string PostingResult
+        +TransactionStatus Status
     }
 
-    class BookingLogStatus {
+    class TransactionStatus {
         <<enumeration>>
         PENDING
         POSTED
@@ -100,129 +106,101 @@ classDiagram
         CREDIT
     }
 
-    class PostingStatus {
-        <<enumeration>>
-        PENDING
-        POSTED
-        FAILED
-    }
-
     FinancialBookingLog "1" --> "*" LedgerPosting : contains
-    FinancialBookingLog --> BookingLogStatus
+    FinancialBookingLog --> TransactionStatus
     LedgerPosting --> PostingDirection
-    LedgerPosting --> PostingStatus
+    LedgerPosting --> TransactionStatus
 ```
 
-**Field Notes:**
+Every financial transaction creates at least one debit and one credit posting.
+The booking log transitions to `POSTED` only when the sum of all `DEBIT` postings
+equals the sum of all `CREDIT` postings (double-entry invariant enforced at service layer).
+`PostingAmount` uses `InstrumentAmount` for multi-asset support: currencies, energy (kWh),
+carbon credits, and compute hours are all valid posting units.
 
-- `BaseCurrency`: ISO 4217 currency code (GBP, USD, EUR, etc.)
-- `CorrelationID`: Trace ID for distributed tracing
+`POSTED`, `CANCELLED`, and `REVERSED` are behaviorally terminal: control actions block
+further transitions on them. `FAILED` is the suspended state produced by the `SUSPEND` control
+action and is resumable via `RESUME` (FAILED -> PENDING); it is not a true terminal from a
+user-workflow perspective. Note: `TransactionStatus.IsFinal()` returns true for FAILED as well
+(to prevent double-SUSPEND), while `FinancialBookingLog.IsTerminal()` returns true for
+POSTED/FAILED/CANCELLED - the distinction is a code-level guard, not a state-machine
+boundary. `REVERSED` is reserved for future offsetting-entry support and is not yet
+produceable via `ControlFinancialBookingLog`.
 
-## Double-Entry Bookkeeping
+## Dependencies
 
-Every financial transaction creates balanced postings:
+| Service | Protocol | Purpose |
+|---------|----------|---------|
+| `reference-data` | gRPC | Instrument validation for multi-asset postings (optional; enabled when `REFERENCE_DATA_SERVICE_URL` is set) |
+| `internal-account` | gRPC | Account metadata resolution for posting routing (optional; account resolver) |
+| Redis | TCP | Idempotency store for exactly-once posting guarantees |
 
-```text
-Deposit £500.00 (from bank's general ledger perspective):
-  DEBIT   Cash/Reserves (bank's asset ↑)          = £500.00
-  CREDIT  Customer Deposit Account (liability ↑)  = £500.00
-  ──────────────────────────────────────────────────────────
-  Balance Check: Debits (£500.00) = Credits (£500.00) ✓
-```
+## Dependents
 
-**Note:** Customer deposits are liabilities on the bank's balance sheet
-(money owed back to customers). The debit increases the bank's cash assets,
-while the credit increases the liability to the customer.
+| Service | Entry Point | Purpose |
+|---------|-------------|---------|
+| `current-account` | `service/saga_handler_financial_accounting.go` | Deposit and withdrawal saga - posts double-entry to the ledger |
+| `payment-order` | `service/payment_orchestrator_ledger.go` | Settlement ledger posting after external payment confirms |
+| `mcp-server` | `internal/clients/clients.go` | Read-side inspection of booking logs and postings |
 
-**Validation Rules:**
+## Load-Bearing Files
 
-- Amounts must be positive (reversals use opposite direction)
-- Debits must equal credits within a booking log
-- Terminal states (POSTED, FAILED) prevent further transitions
-
-## Kafka Integration
-
-**Consumer**: DepositEvent
-
-Consumes deposit events and creates balanced debit/credit postings automatically.
-
-**Idempotency Handling:**
-
-| Source Field | Maps To | Purpose |
-|--------------|---------|---------|
-| `event_id` | `idempotency_key` | Dedupe on consumer restart/redelivery |
-| `correlation_id` | `correlation_id` | Distributed tracing |
-
-- Duplicate events (same `event_id`) are skipped with logged warning
-- Partial failures: If booking log exists but posting missing, retry completes the posting
-- Consumer commits offset after successful DB transaction (at-least-once delivery)
-
-**Supported Currencies**: GBP, USD, EUR, JPY, CHF, CAD, AUD
-
-## Database Schema
-
-**Schema**: `financial_accounting`
-
-```mermaid
-erDiagram
-    financial_booking_logs {
-        uuid id PK
-        varchar(50) financial_account_type
-        varchar(100) product_service_reference
-        varchar(100) business_unit_reference
-        varchar(255) chart_of_accounts_rules
-        varchar(3) base_currency "ISO 4217"
-        varchar(50) status "PENDING, POSTED, FAILED, etc."
-        varchar(255) idempotency_key UK
-        bigint version "optimistic lock"
-    }
-
-    ledger_postings {
-        uuid id PK
-        uuid financial_booking_log_id FK
-        varchar(10) posting_direction "DEBIT, CREDIT"
-        bigint amount_cents
-        varchar(3) currency "ISO 4217"
-        varchar(255) account_id
-        timestamptz value_date
-        varchar(50) status "PENDING, POSTED, FAILED"
-        varchar(255) correlation_id "trace ID"
-    }
-
-    financial_booking_logs ||--o{ ledger_postings : "contains"
-```
+| File | Why It Matters |
+|------|----------------|
+| `cmd/main.go` | Process wiring; initialises container, gRPC server, and metrics server |
+| `app/container.go` | Dependency injection; wires database, Redis, Kafka, and optional service clients |
+| `service/server.go` | gRPC service registration; changes here affect the public contract |
+| `service/posting_service.go` | Core double-entry validation; enforces debits-equal-credits invariant |
+| `service/grpc_booking_endpoints.go` | Booking log RPC handlers; booking log lifecycle state machine |
+| `service/grpc_ledger_endpoints.go` | Ledger posting RPC handlers; idempotency enforcement per posting |
+| `domain/financial_booking_log.go` | FinancialBookingLog entity; status transition rules and aggregate invariants |
+| `domain/ledger_posting.go` | LedgerPosting entity; direction semantics and immutability rules after capture |
+| `config/config.go` | Idempotency cleanup worker configuration; Redis key TTL and batch parameters |
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `GRPC_PORT` | 50052 | gRPC server port |
-| `METRICS_PORT` | 8082 | Prometheus metrics |
-| `DATABASE_URL` | - | PostgreSQL connection string |
-| `BANK_CASH_ACCOUNT_ID` | - | Well-known bank account |
+### Core
 
-## Prometheus Metrics
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `DATABASE_URL` | Yes | - | CockroachDB connection string |
+| `BANK_CASH_ACCOUNT_ID` | Yes | - | Bank cash account ID for the clearing side of double-entry; service fails to start without it |
+| `GRPC_PORT` | No | `50052` | gRPC listen port |
+| `METRICS_PORT` | No | `8082` | Prometheus metrics listen port |
+| `LOG_LEVEL` | No | `info` | Structured log level (`debug`, `info`, `warn`, `error`) |
+| `ENVIRONMENT` | No | - | Deployment environment; `production` makes Kafka and Redis required |
+| `REFERENCE_DATA_SERVICE_URL` | No | - | reference-data gRPC address; enables instrument validation when set |
 
-| Metric | Type | Purpose |
-|--------|------|---------|
-| `financial_accounting_operation_duration_seconds` | Histogram | Operation latency |
-| `financial_accounting_postings_total` | Counter | Postings by direction/currency |
-| `financial_accounting_double_entry_validations_total` | Counter | Balance checks |
-| `financial_accounting_errors_total` | Counter | Errors by category |
+### Authentication
 
-## Instrument Resolution
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `AUTH_ENABLED` | No | `true` | Enable JWT bearer authentication on all gRPC calls |
+| `AUTH_JWKS_URL` | No | - | JWKS endpoint URL; required when `AUTH_ENABLED=true` |
 
-Ledger posting validation uses `InstrumentResolver` from Reference Data to verify instrument
-properties at the API boundary. The domain layer trusts caller-provided instrument properties.
+### Messaging
 
-The service validates that debit and credit entries within a booking log use matching
-instruments (cross-instrument postings are rejected). The database schema stores
-`instrument_code` as `VARCHAR(32)` to accommodate non-currency instrument codes.
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `KAFKA_BOOTSTRAP_SERVERS` | No | - | Kafka broker list; enables audit event publishing when set |
+| `KAFKA_AUDIT_TOPIC` | No | `audit.events.*` | Audit event topic name override |
 
-See [ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md) for the architectural decision.
+### Idempotency Store (Redis)
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `REDIS_URL` | No* | `redis://localhost:6379` | Redis connection URL for idempotency store; *required in production (`ENVIRONMENT=production`) |
+| `REDIS_PASSWORD` | No | - | Redis authentication password |
+| `REDIS_DB` | No | `0` | Redis database index |
+| `IDEMPOTENCY_CLEANUP_ENABLED` | No | `true` | Enable background cleanup of stale idempotency keys |
+| `IDEMPOTENCY_CLEANUP_STALE_THRESHOLD` | No | `15m` | Duration before a `PENDING` key is considered stale |
+| `IDEMPOTENCY_CLEANUP_RUN_INTERVAL` | No | `5m` | How often the cleanup worker polls for stale keys |
+| `IDEMPOTENCY_CLEANUP_BATCH_SIZE` | No | `100` | Maximum stale keys processed per cleanup iteration |
 
 ## References
 
-- [BIAN Financial Accounting Specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/FinancialAccounting.yaml)
-- [Service Architecture](../README.md)
-- [Proto Definitions](../../api/proto/meridian/financial_accounting/v1/)
+- [ADR-0023: Balance Delegation to Position Keeping](../../docs/adr/0023-balance-delegation-to-position-keeping.md)
+- [ADR-0035: Multi-Asset Purity](../../docs/adr/0035-multi-asset-purity.md)
+- [Architecture Layers - Core Ledger](../../docs/architecture-layers.md#4-core-ledger)
+- [Service Coupling Analysis](../../docs/architecture/service-coupling-analysis.md)
+- [BIAN Financial Accounting specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/FinancialAccounting.yaml)
