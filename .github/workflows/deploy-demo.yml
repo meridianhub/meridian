@@ -352,6 +352,7 @@ jobs:
               --subdomain=volterra.demo.meridianhub.cloud \
               --manifest=/app/examples/manifests/energy.json \
               --force \
+              --timeout=5m \
               --with-fixtures
 
       - name: Verify deployment health
