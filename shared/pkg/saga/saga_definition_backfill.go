@@ -49,59 +49,72 @@ func BackfillSagaDefinitionIDs(ctx context.Context, db *gorm.DB) (BackfillResult
 	// serializable isolation prevents another pod from claiming a saga we're
 	// rewriting underneath it.
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Find candidates: active instances whose SagaDefinitionID does NOT yet
-		// resolve to a saga_definitions row.
-		var candidates []SagaInstance
-		findErr := tx.Model(&SagaInstance{}).
-			Where("status IN ?", nonTerminalSagaStatuses()).
-			Where("NOT EXISTS (SELECT 1 FROM saga_definitions sd WHERE sd.id = saga_instances.saga_definition_id)").
-			Find(&candidates).Error
-		if findErr != nil {
-			return fmt.Errorf("scan candidate instances: %w", findErr)
+		candidates, scanErr := scanBackfillCandidates(tx)
+		if scanErr != nil {
+			return scanErr
 		}
-
 		for i := range candidates {
-			inst := &candidates[i]
-			match, matchErr := findLocalDefinitionByNameVersion(tx, inst.SagaName, inst.SagaVersion)
-			if matchErr != nil {
-				return matchErr
+			if procErr := reconcileSagaInstance(tx, &candidates[i], now, &result); procErr != nil {
+				return procErr
 			}
-			if match != nil {
-				if err := tx.Model(&SagaInstance{}).
-					Where("id = ?", inst.ID).
-					Updates(map[string]interface{}{
-						"saga_definition_id": match.ID,
-						"updated_at":         now,
-					}).Error; err != nil {
-					return fmt.Errorf("link instance %s: %w", inst.ID, err)
-				}
-				result.Linked++
-				continue
-			}
-
-			// No matching local definition - flag for manual intervention.
-			errMsg := fmt.Sprintf(
-				"Backfill failed: no matching saga_definition found for (name=%q, version=%d)",
-				inst.SagaName, inst.SagaVersion,
-			)
-			if err := tx.Model(&SagaInstance{}).
-				Where("id = ?", inst.ID).
-				Updates(map[string]interface{}{
-					"status":        SagaStatusFailedManualIntervention,
-					"error_message": errMsg,
-					"updated_at":    now,
-				}).Error; err != nil {
-				return fmt.Errorf("flag instance %s: %w", inst.ID, err)
-			}
-			result.FlaggedManualIntervention++
 		}
-
 		return nil
 	})
 	if err != nil {
 		return result, err
 	}
 	return result, nil
+}
+
+// scanBackfillCandidates finds non-terminal instances whose SagaDefinitionID
+// does not resolve to a row in saga_definitions and therefore needs reconciling.
+func scanBackfillCandidates(tx *gorm.DB) ([]SagaInstance, error) {
+	var candidates []SagaInstance
+	err := tx.Model(&SagaInstance{}).
+		Where("status IN ?", nonTerminalSagaStatuses()).
+		Where("NOT EXISTS (SELECT 1 FROM saga_definitions sd WHERE sd.id = saga_instances.saga_definition_id)").
+		Find(&candidates).Error
+	if err != nil {
+		return nil, fmt.Errorf("scan candidate instances: %w", err)
+	}
+	return candidates, nil
+}
+
+// reconcileSagaInstance attempts to re-link the instance to a matching local
+// definition, or flags it FAILED_MANUAL_INTERVENTION when no match exists.
+// Counters on result are incremented in place.
+func reconcileSagaInstance(tx *gorm.DB, inst *SagaInstance, now time.Time, result *BackfillResult) error {
+	match, matchErr := findLocalDefinitionByNameVersion(tx, inst.SagaName, inst.SagaVersion)
+	if matchErr != nil {
+		return matchErr
+	}
+	if match != nil {
+		if err := tx.Model(&SagaInstance{}).
+			Where("id = ?", inst.ID).
+			Updates(map[string]interface{}{
+				"saga_definition_id": match.ID,
+				"updated_at":         now,
+			}).Error; err != nil {
+			return fmt.Errorf("link instance %s: %w", inst.ID, err)
+		}
+		result.Linked++
+		return nil
+	}
+	errMsg := fmt.Sprintf(
+		"Backfill failed: no matching saga_definition found for (name=%q, version=%d)",
+		inst.SagaName, inst.SagaVersion,
+	)
+	if err := tx.Model(&SagaInstance{}).
+		Where("id = ?", inst.ID).
+		Updates(map[string]interface{}{
+			"status":        SagaStatusFailedManualIntervention,
+			"error_message": errMsg,
+			"updated_at":    now,
+		}).Error; err != nil {
+		return fmt.Errorf("flag instance %s: %w", inst.ID, err)
+	}
+	result.FlaggedManualIntervention++
+	return nil
 }
 
 // nonTerminalSagaStatuses returns the set of statuses for in-flight sagas that

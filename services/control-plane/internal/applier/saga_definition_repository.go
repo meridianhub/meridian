@@ -81,16 +81,26 @@ func (r *SagaDefinitionRepository) FindOrCreate(
 	existing, err := r.findByNameVersion(ctx, name, version)
 	switch {
 	case err == nil:
-		if existing.ScriptHash != hash {
-			return nil, fmt.Errorf("%w: name=%s version=%s (stored=%s incoming=%s)",
-				saga.ErrSagaDefinitionHashMismatch, name, version, existing.ScriptHash, hash)
-		}
-		return existing, nil
+		return verifyExistingHashMatch(existing, hash, name, version)
 	case !errors.Is(err, saga.ErrSagaDefinitionNotFound):
 		return nil, err
 	}
 
-	// Serialize params_schema. Empty payloads stored as NULL.
+	def, insertErr := r.insertSagaDefinition(ctx, name, version, script, paramsSchema, hash)
+	if insertErr == nil {
+		return def, nil
+	}
+	return r.resolveInsertRace(ctx, insertErr, name, version, hash)
+}
+
+// insertSagaDefinition inserts a new row and returns the in-memory entity on
+// success. Callers handle insertErr to detect race losses on the unique index.
+func (r *SagaDefinitionRepository) insertSagaDefinition(
+	ctx context.Context,
+	name, version, script string,
+	paramsSchema saga.JSONB,
+	hash string,
+) (*saga.SagaDefinition, error) {
 	var paramsBytes []byte
 	if paramsSchema != nil {
 		b, marshalErr := json.Marshal(paramsSchema)
@@ -102,38 +112,51 @@ func (r *SagaDefinitionRepository) FindOrCreate(
 
 	id := uuid.New()
 	createdAt := time.Now().UTC()
-	_, insertErr := r.pool.Exec(ctx,
+	if _, err := r.pool.Exec(ctx,
 		`INSERT INTO saga_definitions
 			(id, name, version, script, params_schema, script_hash, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		id, name, version, script, paramsBytes, hash, createdAt,
-	)
-	if insertErr == nil {
-		return &saga.SagaDefinition{
-			ID:           id,
-			Name:         name,
-			Version:      version,
-			Script:       script,
-			ParamsSchema: paramsSchema,
-			ScriptHash:   hash,
-			CreatedAt:    createdAt,
-		}, nil
+	); err != nil {
+		return nil, err
 	}
+	return &saga.SagaDefinition{
+		ID:           id,
+		Name:         name,
+		Version:      version,
+		Script:       script,
+		ParamsSchema: paramsSchema,
+		ScriptHash:   hash,
+		CreatedAt:    createdAt,
+	}, nil
+}
 
-	// Treat any insert failure as a possible race on the unique (name, version)
-	// index: re-read and validate the winner's hash.
-	raceWinner, lookupErr := r.findByNameVersion(ctx, name, version)
+// resolveInsertRace handles the case where the INSERT failed: typically the
+// unique (name, version) index lost a race with a concurrent caller. Re-read
+// the winning row and validate its hash matches.
+func (r *SagaDefinitionRepository) resolveInsertRace(
+	ctx context.Context,
+	insertErr error,
+	name, version, hash string,
+) (*saga.SagaDefinition, error) {
+	winner, lookupErr := r.findByNameVersion(ctx, name, version)
 	if lookupErr != nil {
 		if errors.Is(lookupErr, saga.ErrSagaDefinitionNotFound) {
 			return nil, fmt.Errorf("insert saga definition: %w", insertErr)
 		}
 		return nil, fmt.Errorf("insert saga definition (%w) and re-read failed: %w", insertErr, lookupErr)
 	}
-	if raceWinner.ScriptHash != hash {
+	return verifyExistingHashMatch(winner, hash, name, version)
+}
+
+// verifyExistingHashMatch returns the existing row when its script_hash matches
+// the incoming script's hash, or ErrSagaDefinitionHashMismatch otherwise.
+func verifyExistingHashMatch(existing *saga.SagaDefinition, hash, name, version string) (*saga.SagaDefinition, error) {
+	if existing.ScriptHash != hash {
 		return nil, fmt.Errorf("%w: name=%s version=%s (stored=%s incoming=%s)",
-			saga.ErrSagaDefinitionHashMismatch, name, version, raceWinner.ScriptHash, hash)
+			saga.ErrSagaDefinitionHashMismatch, name, version, existing.ScriptHash, hash)
 	}
-	return raceWinner, nil
+	return existing, nil
 }
 
 func (r *SagaDefinitionRepository) findByNameVersion(
