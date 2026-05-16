@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -129,6 +130,22 @@ func (r *MockSagaInstanceRepositoryForExecutor) UpdateStatusWithError(_ context.
 func (r *MockSagaInstanceRepositoryForExecutor) ResetReplayCount(_ context.Context, id uuid.UUID) error {
 	if instance, exists := r.instances[id]; exists {
 		instance.ReplayCount = 0
+	}
+	return nil
+}
+
+func (r *MockSagaInstanceRepositoryForExecutor) UpdateNextRetryAt(_ context.Context, id uuid.UUID, nextRetryAt time.Time) error {
+	if instance, exists := r.instances[id]; exists {
+		t := nextRetryAt
+		instance.NextRetryAt = &t
+	}
+	return nil
+}
+
+func (r *MockSagaInstanceRepositoryForExecutor) ResetReplayCountAndBackoff(_ context.Context, id uuid.UUID) error {
+	if instance, exists := r.instances[id]; exists {
+		instance.ReplayCount = 0
+		instance.NextRetryAt = nil
 	}
 	return nil
 }

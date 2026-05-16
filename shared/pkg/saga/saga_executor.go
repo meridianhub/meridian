@@ -44,6 +44,17 @@ type SagaInstanceRepository interface {
 
 	// ResetReplayCount resets the replay count to 0 (used when moving to next step).
 	ResetReplayCount(ctx context.Context, id uuid.UUID) error
+
+	// UpdateNextRetryAt sets the earliest wall-clock time this saga can be reclaimed
+	// after a transient failure. Called from handleTransientFailure before releasing
+	// the lease. The orphan watcher filters on this column to skip sagas still in backoff.
+	UpdateNextRetryAt(ctx context.Context, id uuid.UUID, nextRetryAt time.Time) error
+
+	// ResetReplayCountAndBackoff atomically resets replay_count to 0 AND clears
+	// next_retry_at. Called when a step completes successfully so the saga starts the
+	// next step with a clean slate. Combining both columns in a single UPDATE avoids
+	// any window where the saga could be picked up with mismatched state.
+	ResetReplayCountAndBackoff(ctx context.Context, id uuid.UUID) error
 }
 
 // NewSagaExecutor creates a new SagaExecutor.
