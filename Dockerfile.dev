@@ -1,7 +1,7 @@
 # audit-worker - Development Dockerfile for Tilt Live Update
 # Uses Debian bookworm for CGO support (required by confluent-kafka-go/librdkafka)
 
-FROM golang:1.26.2-bookworm AS builder
+FROM golang:1.26.3-bookworm AS builder
 
 # Install build dependencies for CGO (librdkafka)
 RUN apt-get update && apt-get install -y --no-install-recommends \
