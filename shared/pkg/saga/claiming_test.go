@@ -70,6 +70,33 @@ func TestNewClaimConfig_InvalidEnv(t *testing.T) {
 	assert.Equal(t, 500, config.MaxJitterMS, "Invalid jitter should fallback to default")
 }
 
+// TestNewClaimConfig_RejectsNegativeRetryDelay verifies that a negative
+// SAGA_RETRY_BASE_DELAY or SAGA_RETRY_MAX_DELAY is sanitized to defaults,
+// preventing operator misconfiguration from disabling backoff in production.
+func TestNewClaimConfig_RejectsNegativeRetryDelay(t *testing.T) {
+	t.Setenv("SAGA_RETRY_BASE_DELAY", "-1s")
+	t.Setenv("SAGA_RETRY_MAX_DELAY", "5m")
+
+	config := NewClaimConfig()
+	assert.Equal(t, DefaultRetryBaseDelay, config.RetryBaseDelay,
+		"negative base delay should fall back to default")
+	assert.Equal(t, DefaultRetryMaxDelay, config.RetryMaxDelay,
+		"both bounds should reset when one is invalid - keeps the pair consistent")
+}
+
+// TestNewClaimConfig_RejectsInvertedRetryDelay verifies that base > max is
+// rejected (would force every retry to saturate to the smaller value).
+func TestNewClaimConfig_RejectsInvertedRetryDelay(t *testing.T) {
+	t.Setenv("SAGA_RETRY_BASE_DELAY", "1h")
+	t.Setenv("SAGA_RETRY_MAX_DELAY", "5s") // inverted - base > max
+
+	config := NewClaimConfig()
+	assert.Equal(t, DefaultRetryBaseDelay, config.RetryBaseDelay,
+		"inverted (base > max) should fall back to default")
+	assert.Equal(t, DefaultRetryMaxDelay, config.RetryMaxDelay,
+		"inverted (base > max) should fall back to default")
+}
+
 // TestGetPodID_HostnameFallback verifies pod ID generation.
 func TestGetPodID_HostnameFallback(t *testing.T) {
 	t.Run("uses HOSTNAME when set", func(t *testing.T) {

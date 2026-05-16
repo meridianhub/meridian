@@ -74,8 +74,13 @@ func CalculateBackoffDelay(replayCount int, baseDelay, maxDelay time.Duration) t
 	multiplier := int64(1) << uint(count)
 
 	// Overflow check on the multiplication itself.
+	// maxDelay/baseDelay is integer division: if multiplier exceeds that
+	// quotient, multiplier*baseDelay strictly exceeds maxDelay so we saturate.
+	// (We dropped the +1 slop term that previously appeared here - it could
+	// overflow int64 at extreme maxDelay values and is unnecessary because
+	// equality already produces a delay <= maxDelay after the cap below.)
 	if multiplier > 0 && int64(baseDelay) > 0 &&
-		multiplier > int64(maxDelay)/int64(baseDelay)+1 {
+		multiplier > int64(maxDelay)/int64(baseDelay) {
 		// Even without jitter we'd exceed maxDelay - saturate.
 		return maxDelay
 	}

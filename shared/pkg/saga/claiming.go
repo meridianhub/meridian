@@ -63,16 +63,42 @@ type ClaimConfig struct {
 //   - SAGA_RETRY_BASE_DELAY: Base delay for exponential backoff. Default: 1s
 //   - SAGA_RETRY_MAX_DELAY: Max delay cap for exponential backoff. Default: 5m
 //   - HOSTNAME: Pod identifier (Kubernetes sets this). Fallback: generated UUID
+//
+// SAGA_RETRY_BASE_DELAY and SAGA_RETRY_MAX_DELAY are sanitized: negative
+// values or an inverted pair (base > max) fall back to the package defaults
+// rather than being silently accepted. Operator misconfiguration would
+// otherwise collapse or bypass backoff at runtime.
 func NewClaimConfig() *ClaimConfig {
+	baseDelay, maxDelay := loadRetryBounds()
 	return &ClaimConfig{
 		LeaseDuration:  env.GetEnvAsDuration("SAGA_LEASE_DURATION", 5*time.Minute),
 		BatchSize:      env.GetEnvAsInt("SAGA_CLAIM_BATCH_SIZE", 10),
 		MaxJitterMS:    env.GetEnvAsInt("SAGA_CLAIM_JITTER_MS", 500),
 		MaxReplays:     env.GetEnvAsInt("SAGA_MAX_REPLAYS", DefaultMaxReplays),
-		RetryBaseDelay: env.GetEnvAsDuration("SAGA_RETRY_BASE_DELAY", DefaultRetryBaseDelay),
-		RetryMaxDelay:  env.GetEnvAsDuration("SAGA_RETRY_MAX_DELAY", DefaultRetryMaxDelay),
+		RetryBaseDelay: baseDelay,
+		RetryMaxDelay:  maxDelay,
 		PodID:          GetPodID(),
 	}
+}
+
+// loadRetryBounds reads SAGA_RETRY_BASE_DELAY / SAGA_RETRY_MAX_DELAY and
+// returns sanitized values. A non-positive value or an inverted pair
+// (base > max) is rejected: both fields revert to the package defaults so
+// an operator typo cannot disable backoff in production.
+func loadRetryBounds() (time.Duration, time.Duration) {
+	baseDelay := env.GetEnvAsDuration("SAGA_RETRY_BASE_DELAY", DefaultRetryBaseDelay)
+	maxDelay := env.GetEnvAsDuration("SAGA_RETRY_MAX_DELAY", DefaultRetryMaxDelay)
+
+	if baseDelay <= 0 || maxDelay <= 0 || baseDelay > maxDelay {
+		slog.Default().Warn("invalid SAGA_RETRY_BASE_DELAY/SAGA_RETRY_MAX_DELAY - falling back to defaults",
+			"base_delay", baseDelay,
+			"max_delay", maxDelay,
+			"default_base", DefaultRetryBaseDelay,
+			"default_max", DefaultRetryMaxDelay,
+		)
+		return DefaultRetryBaseDelay, DefaultRetryMaxDelay
+	}
+	return baseDelay, maxDelay
 }
 
 // GetPodID returns the pod identifier from HOSTNAME env var or generates a UUID.

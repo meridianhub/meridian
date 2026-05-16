@@ -230,6 +230,51 @@ func TestHandleTransientFailure_PerHandlerRetryPolicyOverridesGlobal(t *testing.
 		"per-handler base delay must override global 1s default")
 }
 
+// TestHandleTransientFailure_NextRetryAtPersistenceFails verifies that an
+// infrastructure error when writing next_retry_at propagates back to the
+// caller rather than being logged and ignored. Silently continuing would
+// release the lease without a recorded backoff window, allowing immediate
+// re-claim and defeating the backoff guarantee.
+func TestHandleTransientFailure_NextRetryAtPersistenceFails(t *testing.T) {
+	instanceRepo := &failingNextRetryAtRepo{
+		MockSagaInstanceRepositoryForExecutor: NewMockSagaInstanceRepositoryForExecutor(),
+		failErr:                               errors.New("transient db outage"),
+	}
+	sagaID := uuid.New()
+	instanceRepo.Add(&SagaInstance{
+		ID:               sagaID,
+		SagaDefinitionID: uuid.New(),
+		CorrelationID:    uuid.New(),
+		Status:           SagaStatusRunning,
+		ReplayCount:      0,
+	})
+
+	executor := NewSagaExecutor(instanceRepo, nil, nil, nil)
+
+	_, err := executor.HandleStepFailure(
+		context.Background(),
+		sagaID,
+		0,
+		"step",
+		errors.New("timeout"),
+		5,
+	)
+	require.Error(t, err, "infra error during UpdateNextRetryAt must propagate")
+	assert.Contains(t, err.Error(), "next_retry_at",
+		"error message should identify the failing operation")
+}
+
+// failingNextRetryAtRepo wraps the standard mock and forces UpdateNextRetryAt
+// to fail with a configurable error.
+type failingNextRetryAtRepo struct {
+	*MockSagaInstanceRepositoryForExecutor
+	failErr error
+}
+
+func (r *failingNextRetryAtRepo) UpdateNextRetryAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return r.failErr
+}
+
 // TestProcessStepResult_SuccessClearsBackoff verifies that completing a step
 // resets BOTH replay_count and next_retry_at in one operation.
 func TestProcessStepResult_SuccessClearsBackoff(t *testing.T) {

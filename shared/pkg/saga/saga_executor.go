@@ -247,12 +247,17 @@ func (e *SagaExecutor) handleTransientFailure(
 	// crashes, the orphan watcher still respects the backoff window. The
 	// alternative (release first, then set) opens a race where another pod
 	// reclaims immediately before the backoff is recorded.
+	//
+	// If this UPDATE fails we return an infrastructure error: silently
+	// continuing and releasing the lease would let the orphan watcher
+	// reclaim immediately, defeating the backoff guarantee and
+	// re-introducing the thundering-herd we are trying to prevent. The
+	// caller will retry; in the meantime our existing lease keeps other
+	// pods out, so we are not "stuck" - we are just deferring the release
+	// until the persistence layer recovers (or the lease expires naturally).
 	if updateErr := e.instanceRepo.UpdateNextRetryAt(ctx, result.SagaID, nextRetryAt); updateErr != nil {
-		e.logger.Error("failed to set next_retry_at - retry will not respect backoff",
-			"saga_id", result.SagaID,
-			"error", updateErr,
-		)
-		// Continue: a missed backoff is preferable to leaving the lease held.
+		return nil, fmt.Errorf("failed to persist next_retry_at for saga %s: %w",
+			result.SagaID, updateErr)
 	}
 
 	if e.claimService != nil {
