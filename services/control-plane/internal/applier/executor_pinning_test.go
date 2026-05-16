@@ -32,17 +32,20 @@ func TestManifestExecutor_PinSagaDefinition(t *testing.T) {
 
 	executor.pinSagaDefinition(ctx, name, version, script)
 
-	// Subsequent FindByID must return the exact pinned row.
-	repo := NewSagaDefinitionRepository(pool)
-
-	// Locate by (name, version) since pinSagaDefinition doesn't return the ID.
-	stored, err := repo.FindOrCreate(ctx, name, version, script, nil)
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-	assert.Equal(t, name, stored.Name)
-	assert.Equal(t, version, stored.Version)
-	assert.Equal(t, script, stored.Script)
-	assert.Equal(t, saga.ComputeSagaDefinitionScriptHash(script), stored.ScriptHash)
+	// Verify the row exists by reading directly from the DB. Using FindOrCreate
+	// here would mask a pinning regression: it would insert the row itself if
+	// pinSagaDefinition had failed, and the assertions would still pass.
+	var (
+		storedScript     string
+		storedScriptHash string
+	)
+	err := pool.QueryRow(ctx,
+		`SELECT script, script_hash FROM saga_definitions WHERE name = $1 AND version = $2`,
+		name, version,
+	).Scan(&storedScript, &storedScriptHash)
+	require.NoError(t, err, "pinSagaDefinition must have written a saga_definitions row")
+	assert.Equal(t, script, storedScript)
+	assert.Equal(t, saga.ComputeSagaDefinitionScriptHash(script), storedScriptHash)
 }
 
 // TestManifestExecutor_PinSagaDefinition_Idempotent verifies that pinning the

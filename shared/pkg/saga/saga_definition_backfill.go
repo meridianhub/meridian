@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"gorm.io/gorm"
@@ -52,9 +53,7 @@ func BackfillSagaDefinitionIDs(ctx context.Context, db *gorm.DB) (BackfillResult
 		// resolve to a saga_definitions row.
 		var candidates []SagaInstance
 		findErr := tx.Model(&SagaInstance{}).
-			Where("status IN ?", []SagaStatus{
-				SagaStatusPending, SagaStatusRunning, SagaStatusCompensating,
-			}).
+			Where("status IN ?", nonTerminalSagaStatuses()).
 			Where("NOT EXISTS (SELECT 1 FROM saga_definitions sd WHERE sd.id = saga_instances.saga_definition_id)").
 			Find(&candidates).Error
 		if findErr != nil {
@@ -105,13 +104,32 @@ func BackfillSagaDefinitionIDs(ctx context.Context, db *gorm.DB) (BackfillResult
 	return result, nil
 }
 
+// nonTerminalSagaStatuses returns the set of statuses for in-flight sagas that
+// may eventually need to resume and therefore require a valid SagaDefinitionID.
+// Excludes COMPLETED, COMPENSATED, FAILED, and FAILED_MANUAL_INTERVENTION which
+// are terminal and never re-execute.
+func nonTerminalSagaStatuses() []SagaStatus {
+	return []SagaStatus{
+		SagaStatusPending,
+		SagaStatusRunning,
+		SagaStatusCompensating,
+		SagaStatusSuspended,
+		SagaStatusWaitingForEvent,
+	}
+}
+
 // findLocalDefinitionByNameVersion locates a saga_definitions row matching the
 // instance's (name, integer version). Returns nil when no row matches.
 //
 // The local saga_definitions.version column is a varchar (to accept both
 // integer reference-data versions and semver platform versions), but the
-// SagaInstance.SagaVersion is an int. We match by string-equality after
-// converting the int to its canonical decimal representation.
+// SagaInstance.SagaVersion field is an int. This backfill is therefore
+// scoped to services whose saga_definitions versions are integer-encoded; the
+// semver-versioned platform sagas live in control-plane's separate database
+// and never produce saga_instances rows that need backfilling.
+//
+// We match by string-equality after converting the int to its canonical
+// decimal representation.
 func findLocalDefinitionByNameVersion(tx *gorm.DB, name string, version int) (*SagaDefinition, error) {
 	if name == "" {
 		// Instances missing a saga_name cannot be looked up; treat as no match.
@@ -119,7 +137,7 @@ func findLocalDefinitionByNameVersion(tx *gorm.DB, name string, version int) (*S
 	}
 
 	var def SagaDefinition
-	versionStr := fmt.Sprintf("%d", version)
+	versionStr := strconv.Itoa(version)
 	err := tx.Where("name = ? AND version = ?", name, versionStr).First(&def).Error
 	if err != nil {
 		if isGormNotFound(err) {

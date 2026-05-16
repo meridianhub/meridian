@@ -105,6 +105,44 @@ func TestBackfillSagaDefinitionIDs_SkipsAlreadyLinkedInstance(t *testing.T) {
 	assert.Equal(t, 0, result.FlaggedManualIntervention)
 }
 
+// TestBackfillSagaDefinitionIDs_IncludesSuspendedAndWaitingForEvent verifies
+// that SUSPENDED and WAITING_FOR_EVENT instances are reconciled too. They are
+// non-terminal and will eventually resume, so they need a valid pinned
+// definition just like RUNNING instances.
+func TestBackfillSagaDefinitionIDs_IncludesSuspendedAndWaitingForEvent(t *testing.T) {
+	db, cleanup := setupTestPostgres(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	repo := NewSagaDefinitionRepository(db)
+	def, err := repo.FindOrCreate(ctx, "suspend_saga", "7", "def main(): pass", nil)
+	require.NoError(t, err)
+
+	statuses := []SagaStatus{SagaStatusSuspended, SagaStatusWaitingForEvent}
+	for _, status := range statuses {
+		instance := SagaInstance{
+			ID:               uuid.New(),
+			SagaDefinitionID: uuid.New(),
+			SagaName:         "suspend_saga",
+			SagaVersion:      7,
+			CorrelationID:    uuid.New(),
+			Status:           status,
+		}
+		require.NoError(t, db.Create(&instance).Error)
+	}
+
+	result, err := BackfillSagaDefinitionIDs(ctx, db)
+	require.NoError(t, err)
+	assert.Equal(t, 2, result.Linked, "must reconcile both SUSPENDED and WAITING_FOR_EVENT")
+
+	// Both instances should now point at the local definition.
+	var count int64
+	require.NoError(t, db.Model(&SagaInstance{}).
+		Where("saga_definition_id = ?", def.ID).
+		Count(&count).Error)
+	assert.Equal(t, int64(2), count)
+}
+
 // TestBackfillSagaDefinitionIDs_SkipsTerminalInstances verifies that the
 // backfill ignores COMPLETED/FAILED/etc. instances - only in-flight statuses
 // matter for resume correctness.

@@ -25,6 +25,10 @@ var ErrInstanceMissingDefinitionID = errors.New("saga instance has no saga_defin
 // nil instance pointer.
 var ErrNilSagaInstance = errors.New("saga instance is nil")
 
+// ErrNilSagaDefinitionRepository is returned when LoadPinnedDefinition is
+// called with a nil repository, preventing a nil-pointer panic on FindByID.
+var ErrNilSagaDefinitionRepository = errors.New("saga definition repository is nil")
+
 // LoadPinnedDefinition returns the SagaDefinition that the given instance was
 // started with - NOT the current "active" definition for that saga name.
 //
@@ -47,6 +51,9 @@ func LoadPinnedDefinition(
 ) (*SagaDefinition, error) {
 	if instance == nil {
 		return nil, ErrNilSagaInstance
+	}
+	if repo == nil {
+		return nil, ErrNilSagaDefinitionRepository
 	}
 	if instance.SagaDefinitionID == uuid.Nil {
 		return nil, ErrInstanceMissingDefinitionID

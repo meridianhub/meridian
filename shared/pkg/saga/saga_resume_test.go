@@ -56,6 +56,20 @@ func TestLoadPinnedDefinition_NilInstanceRejected(t *testing.T) {
 	repo := NewSagaDefinitionRepository(db)
 	_, err := LoadPinnedDefinition(context.Background(), repo, nil)
 	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNilSagaInstance)
+}
+
+func TestLoadPinnedDefinition_NilRepoRejected(t *testing.T) {
+	// Guard against the easy footgun: passing a nil repo would otherwise panic
+	// when LoadPinnedDefinition calls FindByID. The error path keeps the caller
+	// in control of how to react.
+	instance := &SagaInstance{
+		SagaDefinitionID: uuid.New(),
+		Status:           SagaStatusRunning,
+	}
+	_, err := LoadPinnedDefinition(context.Background(), nil, instance)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNilSagaDefinitionRepository)
 }
 
 func TestLoadPinnedDefinition_MissingDefinitionIDRejected(t *testing.T) {
