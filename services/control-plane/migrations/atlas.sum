@@ -1,4 +1,4 @@
-h1:KbyhuEXJILRR48NzKoX/qDGV7Vy5t98dLYHIMzulk7w=
+h1:ZKxMh7LQrjyguvHMaOpiQcNT0ouHSjVUwfiVaKmYdlc=
 20260209000001_staff_identity.sql h1:OR9Cq4l2MfrW7It8jLDt0Kzg/z1th9KJdSlZEVpOhqA=
 20260209000002_create_manifest_versions.sql h1:+HzLzVoK1e/nPNN9wb56hb1yxxC9K2I53CpwAks6nCE=
 20260209000004_manifest_apply_jobs.sql h1:nq4MOflgbXAfdltITMKqKWHg9RuUXVs0mrIa2CDkIig=
@@ -14,3 +14,4 @@ h1:KbyhuEXJILRR48NzKoX/qDGV7Vy5t98dLYHIMzulk7w=
 20260401000002_migrate_version_to_varchar.sql h1:A+WRTgqwZfgeU8VfQqmYUeXkzb27ArcAplSIMqmO0xs=
 20260401000003_rename_version_column.sql h1:1JEVT+cGxBeMuVImnP3/B5RN0YkUoIvN2147VgBydwk=
 20260406000001_create_tenant_schedule.sql h1:w88vPDnJfitk+GRwtFHh1XV9iQf688+NvHVENMDu2gg=
+20260516000001_saga_definitions.sql h1:m+5F3nsd0IcXgG85oZ2kBGlsCPXuZnT9K7yW/VvuzLw=

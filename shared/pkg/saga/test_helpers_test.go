@@ -107,6 +107,9 @@ func setupTestPostgres(t *testing.T) (*gorm.DB, func()) {
 	if err := sharedDB.Exec("DELETE FROM saga_instances").Error; err != nil {
 		t.Fatalf("Failed to clean saga_instances: %v", err)
 	}
+	if err := sharedDB.Exec("DELETE FROM saga_definitions").Error; err != nil {
+		t.Fatalf("Failed to clean saga_definitions: %v", err)
+	}
 
 	return sharedDB, func() {
 		// No-op: container lifecycle managed by TestMain.

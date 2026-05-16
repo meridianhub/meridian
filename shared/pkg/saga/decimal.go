@@ -94,7 +94,7 @@ func (d *DecimalValue) Hash() (uint32, error) {
 // CompareSameType compares two DecimalValue instances.
 // Returns -1 if d < other, 0 if equal, 1 if d > other.
 //
-//nolint:exhaustive // We only handle comparison operators; other tokens are invalid
+//nolint:exhaustive,nolintlint // We only handle comparison operators; other tokens are invalid
 func (d *DecimalValue) CompareSameType(op syntax.Token, y starlark.Value, _ int) (bool, error) {
 	other, ok := y.(*DecimalValue)
 	if !ok {
@@ -134,7 +134,7 @@ func (d *DecimalValue) Cmp(y starlark.Value, _ int) (int, error) {
 // Supports +, -, *, / operations.
 // The side parameter indicates whether d is on the left (Left) or right (Right) of the operator.
 //
-//nolint:exhaustive // We only handle arithmetic operators; other tokens are invalid
+//nolint:exhaustive,nolintlint // We only handle arithmetic operators; other tokens are invalid
 func (d *DecimalValue) Binary(op syntax.Token, y starlark.Value, side starlark.Side) (starlark.Value, error) {
 	// Only operate on Decimal types
 	other, ok := y.(*DecimalValue)

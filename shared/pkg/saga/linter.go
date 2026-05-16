@@ -488,7 +488,7 @@ func (v *lintVisitor) handleResolveCall(e *syntax.CallExpr) {
 
 // checkBinaryExpr checks binary operations for Decimal arithmetic.
 //
-//nolint:exhaustive // We only care about arithmetic operators
+//nolint:exhaustive,nolintlint // We only care about arithmetic operators
 func (v *lintVisitor) checkBinaryExpr(e *syntax.BinaryExpr) {
 	// Only check arithmetic operators
 	switch e.Op {
