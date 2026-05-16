@@ -132,6 +132,7 @@ ssh "${DEMO_HOST}" "docker exec ${APP_CONTAINER} /seed-dev \
   --display-name='Volterra Energy' \
   --subdomain=volterra-energy.demo.meridianhub.cloud \
   --manifest=/app/examples/manifests/volterra-energy-demo.json \
+  --timeout=5m \
   --with-fixtures"
 
 echo ""
@@ -144,6 +145,7 @@ ssh "${DEMO_HOST}" "docker exec ${APP_CONTAINER} /seed-dev \
   --display-name='PAYG Energy' \
   --subdomain=payg-energy.demo.meridianhub.cloud \
   --manifest=/app/examples/manifests/payg-energy.manifest.json \
+  --timeout=5m \
   --with-fixtures"
 
 echo ""
