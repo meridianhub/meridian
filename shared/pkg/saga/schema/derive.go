@@ -87,6 +87,16 @@ func DeriveHandlerDef(_ string, meta *saga.HandlerMetadata) (*HandlerDef, error)
 		})
 	}
 
+	// Propagate per-handler retry policy if the registry declared one.
+	// The schema.RetryPolicy mirrors saga.RetryPolicy 1:1 so YAML-emitted
+	// schemas round-trip with what the registry holds.
+	if meta.RetryPolicy != nil {
+		hd.Retry = &RetryPolicy{
+			BaseDelay: meta.RetryPolicy.BaseDelay,
+			MaxDelay:  meta.RetryPolicy.MaxDelay,
+		}
+	}
+
 	return hd, nil
 }
 

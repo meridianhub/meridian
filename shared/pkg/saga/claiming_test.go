@@ -20,6 +20,8 @@ func TestNewClaimConfig_Defaults(t *testing.T) {
 	os.Unsetenv("SAGA_LEASE_DURATION")
 	os.Unsetenv("SAGA_CLAIM_BATCH_SIZE")
 	os.Unsetenv("SAGA_CLAIM_JITTER_MS")
+	os.Unsetenv("SAGA_RETRY_BASE_DELAY")
+	os.Unsetenv("SAGA_RETRY_MAX_DELAY")
 	os.Unsetenv("HOSTNAME")
 
 	config := NewClaimConfig()
@@ -27,6 +29,8 @@ func TestNewClaimConfig_Defaults(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, config.LeaseDuration, "Default lease duration should be 5 minutes")
 	assert.Equal(t, 10, config.BatchSize, "Default batch size should be 10")
 	assert.Equal(t, 500, config.MaxJitterMS, "Default max jitter should be 500ms")
+	assert.Equal(t, DefaultRetryBaseDelay, config.RetryBaseDelay, "Default retry base delay should be 1s")
+	assert.Equal(t, DefaultRetryMaxDelay, config.RetryMaxDelay, "Default retry max delay should be 5m")
 	assert.NotEmpty(t, config.PodID, "PodID should be generated via UUID fallback")
 }
 
@@ -36,6 +40,8 @@ func TestNewClaimConfig_FromEnv(t *testing.T) {
 	t.Setenv("SAGA_LEASE_DURATION", "10m")
 	t.Setenv("SAGA_CLAIM_BATCH_SIZE", "25")
 	t.Setenv("SAGA_CLAIM_JITTER_MS", "1000")
+	t.Setenv("SAGA_RETRY_BASE_DELAY", "3s")
+	t.Setenv("SAGA_RETRY_MAX_DELAY", "2m")
 	t.Setenv("HOSTNAME", "pod-abc-123")
 
 	config := NewClaimConfig()
@@ -43,6 +49,8 @@ func TestNewClaimConfig_FromEnv(t *testing.T) {
 	assert.Equal(t, 10*time.Minute, config.LeaseDuration, "Lease duration should be parsed from env")
 	assert.Equal(t, 25, config.BatchSize, "Batch size should be parsed from env")
 	assert.Equal(t, 1000, config.MaxJitterMS, "Max jitter should be parsed from env")
+	assert.Equal(t, 3*time.Second, config.RetryBaseDelay, "Retry base delay should be parsed from env")
+	assert.Equal(t, 2*time.Minute, config.RetryMaxDelay, "Retry max delay should be parsed from env")
 	assert.Equal(t, "pod-abc-123", config.PodID, "PodID should use HOSTNAME when set")
 }
 
@@ -154,6 +162,42 @@ func TestSagaClaimService_ClaimOrphanedSagas_Integration(t *testing.T) {
 		claimed, err := service.ClaimOrphanedSagas(context.Background())
 		require.NoError(t, err)
 		assert.NotContains(t, claimed, activeSaga.ID, "Sagas with active lease should not be claimed")
+	})
+
+	t.Run("skips sagas in backoff (next_retry_at in future)", func(t *testing.T) {
+		// Create an orphaned saga that is mid-backoff: lease expired, but
+		// next_retry_at is still in the future. The watcher must skip it.
+		expiredLease := time.Now().Add(-10 * time.Minute)
+		future := time.Now().Add(10 * time.Minute)
+		sagaInBackoff := createTestSagaWithRetry(t, db, SagaStatusRunning, &expiredLease, nil, &future)
+
+		claimed, err := service.ClaimOrphanedSagas(context.Background())
+		require.NoError(t, err)
+		assert.NotContains(t, claimed, sagaInBackoff.ID,
+			"sagas with future next_retry_at must be skipped by orphan watcher")
+	})
+
+	t.Run("claims sagas whose backoff has elapsed", func(t *testing.T) {
+		// next_retry_at in the past = backoff window has elapsed, saga is eligible.
+		expiredLease := time.Now().Add(-10 * time.Minute)
+		past := time.Now().Add(-1 * time.Minute)
+		readySaga := createTestSagaWithRetry(t, db, SagaStatusRunning, &expiredLease, nil, &past)
+
+		claimed, err := service.ClaimOrphanedSagas(context.Background())
+		require.NoError(t, err)
+		assert.Contains(t, claimed, readySaga.ID,
+			"sagas with past next_retry_at must be claimable again")
+	})
+
+	t.Run("claims sagas with NULL next_retry_at", func(t *testing.T) {
+		// Fresh saga (no backoff ever set) - NULL means immediately eligible.
+		expiredLease := time.Now().Add(-10 * time.Minute)
+		freshSaga := createTestSagaWithRetry(t, db, SagaStatusRunning, &expiredLease, nil, nil)
+
+		claimed, err := service.ClaimOrphanedSagas(context.Background())
+		require.NoError(t, err)
+		assert.Contains(t, claimed, freshSaga.ID,
+			"sagas with NULL next_retry_at must be claimable (no backoff in effect)")
 	})
 
 	t.Run("respects batch size limit", func(t *testing.T) {
@@ -341,6 +385,24 @@ func createTestSaga(t *testing.T, db *gorm.DB, status SagaStatus, leaseExpires *
 		CorrelationID:    uuid.New(),
 		LeaseExpiresAt:   leaseExpires,
 		ClaimedByPod:     claimedBy,
+	}
+	err := db.Create(saga).Error
+	require.NoError(t, err)
+	return saga
+}
+
+// createTestSagaWithRetry is like createTestSaga but also sets next_retry_at,
+// for tests that exercise the backoff-aware orphan-claim predicate.
+func createTestSagaWithRetry(t *testing.T, db *gorm.DB, status SagaStatus, leaseExpires *time.Time, claimedBy *string, nextRetryAt *time.Time) *SagaInstance {
+	t.Helper()
+	saga := &SagaInstance{
+		ID:               uuid.New(),
+		SagaDefinitionID: uuid.New(),
+		Status:           status,
+		CorrelationID:    uuid.New(),
+		LeaseExpiresAt:   leaseExpires,
+		ClaimedByPod:     claimedBy,
+		NextRetryAt:      nextRetryAt,
 	}
 	err := db.Create(saga).Error
 	require.NoError(t, err)

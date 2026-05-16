@@ -14,6 +14,21 @@ const DefaultRetryBaseDelay = 1 * time.Second
 // Used when neither the global ClaimConfig nor a per-handler retry policy overrides it.
 const DefaultRetryMaxDelay = 5 * time.Minute
 
+// RetryPolicy defines per-handler exponential backoff parameters at the runtime
+// (registry-side) layer. It mirrors schema.RetryPolicy which is the YAML-parsed
+// counterpart - services that register handlers with custom retry behavior copy
+// values from the schema into HandlerMetadata.RetryPolicy.
+//
+// Either or both fields may be zero, in which case the corresponding global
+// ClaimConfig default applies.
+type RetryPolicy struct {
+	// BaseDelay overrides ClaimConfig.RetryBaseDelay for this handler.
+	BaseDelay time.Duration
+
+	// MaxDelay overrides ClaimConfig.RetryMaxDelay for this handler.
+	MaxDelay time.Duration
+}
+
 // CalculateBackoffDelay computes the wall-clock duration a saga should wait before
 // it is eligible for another reclaim attempt after a transient failure.
 //

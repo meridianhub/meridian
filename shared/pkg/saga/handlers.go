@@ -501,6 +501,10 @@ func cloneHandlerMetadata(meta *HandlerMetadata) *HandlerMetadata {
 		return nil
 	}
 	clone := *meta
+	if meta.RetryPolicy != nil {
+		policyCopy := *meta.RetryPolicy
+		clone.RetryPolicy = &policyCopy
+	}
 	if meta.ProducesInstruments != nil {
 		clone.ProducesInstruments = make([]string, len(meta.ProducesInstruments))
 		copy(clone.ProducesInstruments, meta.ProducesInstruments)
