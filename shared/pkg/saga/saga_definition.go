@@ -27,8 +27,11 @@ type SagaDefinition struct {
 	// Name is the saga name (e.g., "apply_manifest", "current_account_deposit").
 	Name string `gorm:"column:name;type:varchar(64);not null"`
 
-	// Version is the saga version (integer; increments on script change).
-	Version int `gorm:"column:version;not null"`
+	// Version is the saga version. Stored as a string to accommodate both
+	// integer (reference-data tenant sagas: "1", "2") and semver
+	// (platform sagas: "1.0.0") versioning schemes. The (name, version) pair
+	// is unique; FindOrCreate enforces script immutability per version.
+	Version string `gorm:"column:version;type:varchar(32);not null"`
 
 	// Script is the Starlark source code for this definition.
 	Script string `gorm:"column:script;type:text;not null"`
@@ -82,7 +85,7 @@ type SagaDefinitionRepository interface {
 	// or inserts a new row if no (name, version) entry exists.
 	// Returns ErrSagaDefinitionHashMismatch when (name, version) exists but the
 	// stored script hash differs from ComputeSagaDefinitionScriptHash(script).
-	FindOrCreate(ctx context.Context, name string, version int, script string, paramsSchema JSONB) (*SagaDefinition, error)
+	FindOrCreate(ctx context.Context, name, version, script string, paramsSchema JSONB) (*SagaDefinition, error)
 }
 
 // ErrSagaDefinitionNotFound is returned when a saga definition cannot be located.

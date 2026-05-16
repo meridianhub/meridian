@@ -18,13 +18,13 @@ func TestSagaDefinitionRepository_FindOrCreate_NewRow(t *testing.T) {
 	ctx := context.Background()
 
 	script := "def main(): return {'ok': True}"
-	def, err := repo.FindOrCreate(ctx, "test_saga", 1, script, nil)
+	def, err := repo.FindOrCreate(ctx, "test_saga", "1", script, nil)
 	require.NoError(t, err)
 	require.NotNil(t, def)
 
 	assert.NotEqual(t, uuid.Nil, def.ID)
 	assert.Equal(t, "test_saga", def.Name)
-	assert.Equal(t, 1, def.Version)
+	assert.Equal(t, "1", def.Version)
 	assert.Equal(t, script, def.Script)
 	assert.Equal(t, ComputeSagaDefinitionScriptHash(script), def.ScriptHash)
 	assert.False(t, def.CreatedAt.IsZero())
@@ -39,10 +39,10 @@ func TestSagaDefinitionRepository_FindOrCreate_Idempotent(t *testing.T) {
 
 	script := "def main(): return None"
 
-	first, err := repo.FindOrCreate(ctx, "saga_dup", 1, script, nil)
+	first, err := repo.FindOrCreate(ctx, "saga_dup", "1", script, nil)
 	require.NoError(t, err)
 
-	second, err := repo.FindOrCreate(ctx, "saga_dup", 1, script, nil)
+	second, err := repo.FindOrCreate(ctx, "saga_dup", "1", script, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, first.ID, second.ID, "same (name, version, script) must return same row")
@@ -50,7 +50,7 @@ func TestSagaDefinitionRepository_FindOrCreate_Idempotent(t *testing.T) {
 
 	// Verify only one row exists.
 	var count int64
-	require.NoError(t, db.Model(&SagaDefinition{}).Where("name = ? AND version = ?", "saga_dup", 1).Count(&count).Error)
+	require.NoError(t, db.Model(&SagaDefinition{}).Where("name = ? AND version = ?", "saga_dup", "1").Count(&count).Error)
 	assert.Equal(t, int64(1), count)
 }
 
@@ -61,15 +61,15 @@ func TestSagaDefinitionRepository_FindOrCreate_NewVersionCreatesNewRow(t *testin
 	repo := NewSagaDefinitionRepository(db)
 	ctx := context.Background()
 
-	v1, err := repo.FindOrCreate(ctx, "saga_versioned", 1, "def v1(): pass", nil)
+	v1, err := repo.FindOrCreate(ctx, "saga_versioned", "1", "def v1(): pass", nil)
 	require.NoError(t, err)
 
-	v2, err := repo.FindOrCreate(ctx, "saga_versioned", 2, "def v2(): pass", nil)
+	v2, err := repo.FindOrCreate(ctx, "saga_versioned", "2", "def v2(): pass", nil)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, v1.ID, v2.ID, "different versions must have different IDs")
-	assert.Equal(t, 1, v1.Version)
-	assert.Equal(t, 2, v2.Version)
+	assert.Equal(t, "1", v1.Version)
+	assert.Equal(t, "2", v2.Version)
 }
 
 func TestSagaDefinitionRepository_FindOrCreate_HashMismatchRejected(t *testing.T) {
@@ -79,11 +79,11 @@ func TestSagaDefinitionRepository_FindOrCreate_HashMismatchRejected(t *testing.T
 	repo := NewSagaDefinitionRepository(db)
 	ctx := context.Background()
 
-	_, err := repo.FindOrCreate(ctx, "immutable_saga", 1, "def v1(): pass", nil)
+	_, err := repo.FindOrCreate(ctx, "immutable_saga", "1", "def v1(): pass", nil)
 	require.NoError(t, err)
 
 	// Same (name, version) but different script content must error out.
-	_, err = repo.FindOrCreate(ctx, "immutable_saga", 1, "def v1_TAMPERED(): pass", nil)
+	_, err = repo.FindOrCreate(ctx, "immutable_saga", "1", "def v1_TAMPERED(): pass", nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSagaDefinitionHashMismatch)
 
@@ -102,7 +102,7 @@ func TestSagaDefinitionRepository_FindOrCreate_PersistsParamsSchema(t *testing.T
 
 	params := JSONB{"amount": map[string]any{"type": "Decimal", "required": true}}
 
-	def, err := repo.FindOrCreate(ctx, "schema_saga", 1, "def main(): pass", params)
+	def, err := repo.FindOrCreate(ctx, "schema_saga", "1", "def main(): pass", params)
 	require.NoError(t, err)
 	require.NotNil(t, def.ParamsSchema)
 
@@ -119,7 +119,7 @@ func TestSagaDefinitionRepository_FindByID_Success(t *testing.T) {
 	repo := NewSagaDefinitionRepository(db)
 	ctx := context.Background()
 
-	created, err := repo.FindOrCreate(ctx, "lookup_saga", 1, "def main(): pass", nil)
+	created, err := repo.FindOrCreate(ctx, "lookup_saga", "1", "def main(): pass", nil)
 	require.NoError(t, err)
 
 	loaded, err := repo.FindByID(ctx, created.ID)

@@ -28,10 +28,11 @@ type PlannedResourceAction struct {
 // It loads the saga definition (with platform default fallback per ADR-0028),
 // constructs the saga input from the manifest, and executes via the saga engine.
 type ManifestExecutor struct {
-	pool    *pgxpool.Pool
-	runner  *saga.StarlarkSagaRunner
-	jobRepo *ApplyJobRepository
-	logger  *slog.Logger
+	pool        *pgxpool.Pool
+	runner      *saga.StarlarkSagaRunner
+	jobRepo     *ApplyJobRepository
+	sagaDefRepo *SagaDefinitionRepository
+	logger      *slog.Logger
 }
 
 // ManifestExecutorConfig contains configuration for creating a ManifestExecutor.
@@ -49,10 +50,11 @@ func NewManifestExecutor(cfg ManifestExecutorConfig) *ManifestExecutor {
 	}
 
 	return &ManifestExecutor{
-		pool:    cfg.Pool,
-		runner:  cfg.Runner,
-		jobRepo: NewApplyJobRepository(cfg.Pool),
-		logger:  logger.With("component", "manifest_executor"),
+		pool:        cfg.Pool,
+		runner:      cfg.Runner,
+		jobRepo:     NewApplyJobRepository(cfg.Pool),
+		sagaDefRepo: NewSagaDefinitionRepository(cfg.Pool),
+		logger:      logger.With("component", "manifest_executor"),
 	}
 }
 
@@ -346,7 +348,15 @@ func (e *ManifestExecutor) Apply(ctx context.Context, input *ApplyManifestInput)
 	return e.executeSagaAndFinalize(ctx, input, job, script, logger)
 }
 
-// prepareApplyJob creates the tracking job and resolves the saga script.
+// prepareApplyJob creates the tracking job, resolves the saga script, and pins
+// the resolved definition into the saga_definitions table so a future resume
+// path can re-execute the same script even if the platform default is later
+// updated.
+//
+// Pinning is best-effort: if the saga_definitions table is missing (e.g. in
+// older environments yet to apply the migration) or the pin fails for an
+// infrastructure reason, we log and continue with the resolved script - the
+// current saga still runs correctly, only durable-resume parity is lost.
 func (e *ManifestExecutor) prepareApplyJob(ctx context.Context, input *ApplyManifestInput) (*ApplyJob, string, error) {
 	versionInt := parseManifestVersion(input.ManifestVersion)
 	job, err := e.jobRepo.Create(ctx, versionInt)
@@ -354,13 +364,38 @@ func (e *ManifestExecutor) prepareApplyJob(ctx context.Context, input *ApplyMani
 		return nil, "", fmt.Errorf("create apply job: %w", err)
 	}
 
-	script, err := e.resolveSagaScript(ctx)
+	script, sagaVersion, err := e.resolveSagaScript(ctx)
 	if err != nil {
 		_ = e.jobRepo.MarkFailed(ctx, job.ID, err.Error())
 		return nil, "", fmt.Errorf("resolve saga script: %w", err)
 	}
 
+	e.pinSagaDefinition(ctx, "apply_manifest", sagaVersion, script)
+
 	return job, script, nil
+}
+
+// pinSagaDefinition writes the resolved saga definition into saga_definitions
+// via FindOrCreate. Errors are logged but not returned: a pinning failure must
+// not block the apply itself.
+func (e *ManifestExecutor) pinSagaDefinition(ctx context.Context, name, version, script string) {
+	if e.sagaDefRepo == nil {
+		return
+	}
+	def, err := e.sagaDefRepo.FindOrCreate(ctx, name, version, script, nil)
+	if err != nil {
+		e.logger.Warn("failed to pin saga definition",
+			"saga_name", name,
+			"saga_version", version,
+			"error", err,
+		)
+		return
+	}
+	e.logger.Debug("pinned saga definition",
+		"saga_name", name,
+		"saga_version", version,
+		"saga_definition_id", def.ID,
+	)
 }
 
 // executeSagaAndFinalize runs the saga, handles failure/success, and updates the job status.
@@ -426,15 +461,15 @@ func (e *ManifestExecutor) executeSagaAndFinalize(ctx context.Context, input *Ap
 	}, nil
 }
 
-// resolveSagaScript resolves the apply_manifest saga script from the platform default table.
+// resolveSagaScript resolves the apply_manifest saga script and its semver version
+// from the platform default table.
 // Per ADR-0028, the control plane uses the platform default directly from
 // public.platform_saga_definition. Tenant-specific saga overrides are resolved
 // by the Reference Data service's saga registry (GetActive), not here.
-func (e *ManifestExecutor) resolveSagaScript(ctx context.Context) (string, error) {
+func (e *ManifestExecutor) resolveSagaScript(ctx context.Context) (script, version string, err error) {
 	// Query platform default (applies to all tenants including those with 0 local saga definitions)
-	var script string
-	err := e.pool.QueryRow(ctx,
-		`SELECT script FROM public.platform_saga_definition
+	err = e.pool.QueryRow(ctx,
+		`SELECT script, version FROM public.platform_saga_definition
 		 WHERE name = $1 AND status = 'ACTIVE'
 		 ORDER BY
 			COALESCE(NULLIF(split_part(version, '.', 1), '')::int, 0) DESC,
@@ -442,15 +477,15 @@ func (e *ManifestExecutor) resolveSagaScript(ctx context.Context) (string, error
 			COALESCE(NULLIF(split_part(version, '.', 3), '')::int, 0) DESC
 		 LIMIT 1`,
 		"apply_manifest",
-	).Scan(&script)
+	).Scan(&script, &version)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", ErrSagaNotFound
+			return "", "", ErrSagaNotFound
 		}
-		return "", fmt.Errorf("query platform saga definition: %w", err)
+		return "", "", fmt.Errorf("query platform saga definition: %w", err)
 	}
 
-	return script, nil
+	return script, version, nil
 }
 
 // buildSagaInput converts the structured input into the map[string]interface{}

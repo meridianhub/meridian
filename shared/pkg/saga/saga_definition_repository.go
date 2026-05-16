@@ -55,9 +55,7 @@ func (r *GormSagaDefinitionRepository) FindByID(ctx context.Context, id uuid.UUI
 // validate its hash matches.
 func (r *GormSagaDefinitionRepository) FindOrCreate(
 	ctx context.Context,
-	name string,
-	version int,
-	script string,
+	name, version, script string,
 	paramsSchema JSONB,
 ) (*SagaDefinition, error) {
 	hash := ComputeSagaDefinitionScriptHash(script)
@@ -67,7 +65,7 @@ func (r *GormSagaDefinitionRepository) FindOrCreate(
 	switch {
 	case err == nil:
 		if existing.ScriptHash != hash {
-			return nil, fmt.Errorf("%w: name=%s version=%d (stored=%s incoming=%s)",
+			return nil, fmt.Errorf("%w: name=%s version=%s (stored=%s incoming=%s)",
 				ErrSagaDefinitionHashMismatch, name, version, existing.ScriptHash, hash)
 		}
 		return existing, nil
@@ -99,7 +97,7 @@ func (r *GormSagaDefinitionRepository) FindOrCreate(
 		return nil, fmt.Errorf("insert saga definition (%w) and re-read failed: %w", createErr, lookupErr)
 	}
 	if raceWinner.ScriptHash != hash {
-		return nil, fmt.Errorf("%w: name=%s version=%d (stored=%s incoming=%s)",
+		return nil, fmt.Errorf("%w: name=%s version=%s (stored=%s incoming=%s)",
 			ErrSagaDefinitionHashMismatch, name, version, raceWinner.ScriptHash, hash)
 	}
 	return raceWinner, nil
@@ -109,8 +107,7 @@ func (r *GormSagaDefinitionRepository) FindOrCreate(
 // (nil, ErrSagaDefinitionNotFound) when no row exists.
 func (r *GormSagaDefinitionRepository) findByNameVersion(
 	ctx context.Context,
-	name string,
-	version int,
+	name, version string,
 ) (*SagaDefinition, error) {
 	var def SagaDefinition
 	err := r.db.WithContext(ctx).
