@@ -3,14 +3,13 @@
 #
 # This script:
 #   1. Pulls the latest develop Docker image
-#   2. Stops the meridian-develop and mcp-server-develop containers (keeps postgres running)
+#   2. Stops the meridian-develop container (keeps postgres running)
 #   3. Drops and recreates all dev_ per-service databases
 #   4. Runs pre-migration scripts for PostgreSQL compatibility
 #   5. Starts meridian-develop and runs migrations
 #   6. Restarts meridian-develop post-migration
 #   7. Seeds the develop tenant with fixture data via gRPC
-#   8. Starts mcp-server-develop
-#   9. Verifies the environment is healthy
+#   8. Verifies the environment is healthy
 #
 # Usage:
 #   ./scripts/reset-develop.sh
@@ -62,11 +61,11 @@ fi
 
 echo ""
 echo "=== Step 1: Pull latest develop image ==="
-ssh "${DEVELOP_HOST}" "cd ${DEVELOP_DIR} && ${COMPOSE_CMD} pull meridian-develop mcp-server-develop"
+ssh "${DEVELOP_HOST}" "cd ${DEVELOP_DIR} && ${COMPOSE_CMD} pull meridian-develop"
 
 echo ""
-echo "=== Step 2: Stop meridian-develop + mcp-server-develop (keep postgres) ==="
-ssh "${DEVELOP_HOST}" "cd ${DEVELOP_DIR} && ${COMPOSE_CMD} stop meridian-develop mcp-server-develop"
+echo "=== Step 2: Stop meridian-develop (keep postgres) ==="
+ssh "${DEVELOP_HOST}" "cd ${DEVELOP_DIR} && ${COMPOSE_CMD} stop meridian-develop"
 
 echo ""
 echo "=== Step 3: Drop and recreate databases ==="
@@ -151,11 +150,7 @@ ssh "${DEVELOP_HOST}" "docker exec ${APP_CONTAINER} /seed-dev \
   --with-fixtures"
 
 echo ""
-echo "=== Step 8: Start mcp-server-develop ==="
-ssh "${DEVELOP_HOST}" "cd ${DEVELOP_DIR} && ${COMPOSE_CMD} up -d mcp-server-develop"
-
-echo ""
-echo "=== Step 9: Health check ==="
+echo "=== Step 8: Health check ==="
 attempt=0
 until [ $attempt -ge 24 ]; do
   attempt=$((attempt + 1))

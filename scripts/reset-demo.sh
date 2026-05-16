@@ -59,11 +59,11 @@ fi
 
 echo ""
 echo "=== Step 1: Pull latest demo image ==="
-ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose pull meridian mcp-server"
+ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose pull meridian"
 
 echo ""
-echo "=== Step 2: Stop meridian + mcp-server (keep postgres) ==="
-ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose stop meridian mcp-server"
+echo "=== Step 2: Stop meridian (keep postgres) ==="
+ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose stop meridian"
 
 echo ""
 echo "=== Step 3: Drop and recreate databases ==="
@@ -147,11 +147,7 @@ ssh "${DEMO_HOST}" "docker exec ${APP_CONTAINER} /seed-dev \
   --with-fixtures"
 
 echo ""
-echo "=== Step 8: Start mcp-server ==="
-ssh "${DEMO_HOST}" "cd ${DEMO_DIR} && docker compose up -d mcp-server"
-
-echo ""
-echo "=== Step 9: Health check ==="
+echo "=== Step 8: Health check ==="
 attempt=0
 until [ $attempt -ge 24 ]; do
   attempt=$((attempt + 1))
