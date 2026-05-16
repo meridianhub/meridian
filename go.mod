@@ -1,6 +1,6 @@
 module github.com/meridianhub/meridian
 
-go 1.26.2
+go 1.26.3
 
 require (
 	ariga.io/atlas-provider-gorm v0.6.0
@@ -61,7 +61,7 @@ require (
 
 require (
 	github.com/AppsFlyer/go-sundheit v0.6.0 // indirect
-	github.com/Azure/go-ntlmssp v0.0.0-20221128193559-754e69321358 // indirect
+	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.3.0 // indirect
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
