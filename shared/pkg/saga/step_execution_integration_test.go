@@ -77,6 +77,25 @@ func (r *GormSagaInstanceRepository) Create(ctx context.Context, instance *SagaI
 	return r.db.WithContext(ctx).Create(instance).Error
 }
 
+// UpdateNextRetryAt sets the next_retry_at column on the saga instance.
+func (r *GormSagaInstanceRepository) UpdateNextRetryAt(ctx context.Context, id uuid.UUID, nextRetryAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&SagaInstance{}).
+		Where("id = ?", id).
+		Update("next_retry_at", nextRetryAt).Error
+}
+
+// ResetReplayCountAndBackoff atomically resets replay_count to 0 AND clears
+// next_retry_at in a single UPDATE so the orphan watcher cannot observe a
+// half-updated row.
+func (r *GormSagaInstanceRepository) ResetReplayCountAndBackoff(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).Model(&SagaInstance{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"replay_count":  0,
+			"next_retry_at": nil,
+		}).Error
+}
+
 // GormTransactionalRepository implements TransactionalRepository using GORM.
 type GormTransactionalRepository struct {
 	db *gorm.DB

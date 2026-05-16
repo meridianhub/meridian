@@ -245,6 +245,77 @@ func TestSagaMigrations_UniqueConstraints(t *testing.T) {
 	})
 }
 
+// TestSagaMigrations_NextRetryAtColumn verifies that the next_retry_at column
+// exists, is nullable, and is of the expected timestamp type.
+func TestSagaMigrations_NextRetryAtColumn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	err := RunSagaMigrations(db)
+	require.NoError(t, err)
+
+	var col struct {
+		ColumnName string `gorm:"column:column_name"`
+		DataType   string `gorm:"column:data_type"`
+		IsNullable string `gorm:"column:is_nullable"`
+	}
+	err = db.Raw(`
+		SELECT column_name, data_type, is_nullable
+		FROM information_schema.columns
+		WHERE table_name = 'saga_instances'
+		  AND column_name = 'next_retry_at'
+	`).Scan(&col).Error
+	require.NoError(t, err)
+
+	assert.Equal(t, "next_retry_at", col.ColumnName, "next_retry_at column should exist on saga_instances")
+	assert.Contains(t, col.DataType, "timestamp", "next_retry_at should be a timestamp type")
+	assert.Equal(t, "YES", col.IsNullable, "next_retry_at must be nullable (NULL means no backoff)")
+}
+
+// TestSagaMigrations_NextRetryAtPartialIndex verifies that the partial index
+// idx_saga_instances_next_retry_at is created and only covers rows with a value.
+func TestSagaMigrations_NextRetryAtPartialIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	err := RunSagaMigrations(db)
+	require.NoError(t, err)
+
+	var idxCount int64
+	err = db.Raw(`
+		SELECT COUNT(DISTINCT index_name)
+		FROM information_schema.statistics
+		WHERE table_name = 'saga_instances'
+		  AND index_name = 'idx_saga_instances_next_retry_at'
+	`).Scan(&idxCount).Error
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), idxCount, "partial index idx_saga_instances_next_retry_at should exist")
+}
+
+// TestSagaMigrations_NextRetryAtIdempotent verifies that re-running migrations
+// is safe even after the column and index already exist.
+func TestSagaMigrations_NextRetryAtIdempotent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	db, cleanup := setupTestPostgres(t)
+	defer cleanup()
+
+	// First run creates everything.
+	require.NoError(t, RunSagaMigrations(db))
+	// Second run must not error - all DDL is idempotent.
+	require.NoError(t, RunSagaMigrations(db))
+}
+
 // TestSagaMigrations_PartialIndex verifies the partial index for orphan queries.
 func TestSagaMigrations_PartialIndex(t *testing.T) {
 	if testing.Short() {

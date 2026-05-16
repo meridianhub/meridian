@@ -182,6 +182,11 @@ type HandlerMetadata struct {
 	// The value provides a migration message (e.g., "use handler_v2 instead").
 	// Empty string means the handler is not deprecated.
 	DeprecatedMessage string
+
+	// RetryPolicy overrides the global SAGA_RETRY_BASE_DELAY / SAGA_RETRY_MAX_DELAY
+	// for this specific handler. Used by saga_executor.resolveRetryBounds when
+	// computing next_retry_at on transient failures. Nil means "use global defaults".
+	RetryPolicy *RetryPolicy
 }
 
 // SemanticLinter performs AST-based semantic analysis on Starlark scripts.

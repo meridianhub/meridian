@@ -44,6 +44,17 @@ type SagaInstanceRepository interface {
 
 	// ResetReplayCount resets the replay count to 0 (used when moving to next step).
 	ResetReplayCount(ctx context.Context, id uuid.UUID) error
+
+	// UpdateNextRetryAt sets the earliest wall-clock time this saga can be reclaimed
+	// after a transient failure. Called from handleTransientFailure before releasing
+	// the lease. The orphan watcher filters on this column to skip sagas still in backoff.
+	UpdateNextRetryAt(ctx context.Context, id uuid.UUID, nextRetryAt time.Time) error
+
+	// ResetReplayCountAndBackoff atomically resets replay_count to 0 AND clears
+	// next_retry_at. Called when a step completes successfully so the saga starts the
+	// next step with a clean slate. Combining both columns in a single UPDATE avoids
+	// any window where the saga could be picked up with mismatched state.
+	ResetReplayCountAndBackoff(ctx context.Context, id uuid.UUID) error
 }
 
 // NewSagaExecutor creates a new SagaExecutor.
@@ -208,6 +219,11 @@ func (e *SagaExecutor) handleFatalFailure(
 
 // handleTransientFailure either retries (releasing the lease) or escalates to manual intervention
 // if max replays have been exceeded.
+//
+// Before releasing the lease, this method writes next_retry_at = now + backoff(replay_count)
+// to saga_instances. The orphan watcher's predicate (next_retry_at IS NULL OR <= now)
+// will then skip this saga until the backoff window elapses, preventing immediate
+// re-claim and breaking thundering herd when many sagas fail simultaneously.
 func (e *SagaExecutor) handleTransientFailure(
 	ctx context.Context,
 	result *StepFailureResult,
@@ -221,6 +237,29 @@ func (e *SagaExecutor) handleTransientFailure(
 
 	result.Action = FailureActionRetry
 
+	// Compute next_retry_at = now + backoff. Per-handler retry policy overrides
+	// global ClaimConfig defaults if present.
+	baseDelay, maxDelay := e.resolveRetryBounds(result.StepName)
+	delay := CalculateBackoffDelay(instance.ReplayCount, baseDelay, maxDelay)
+	nextRetryAt := time.Now().Add(delay)
+
+	// Set next_retry_at FIRST. If the subsequent lease release fails or the pod
+	// crashes, the orphan watcher still respects the backoff window. The
+	// alternative (release first, then set) opens a race where another pod
+	// reclaims immediately before the backoff is recorded.
+	//
+	// If this UPDATE fails we return an infrastructure error: silently
+	// continuing and releasing the lease would let the orphan watcher
+	// reclaim immediately, defeating the backoff guarantee and
+	// re-introducing the thundering-herd we are trying to prevent. The
+	// caller will retry; in the meantime our existing lease keeps other
+	// pods out, so we are not "stuck" - we are just deferring the release
+	// until the persistence layer recovers (or the lease expires naturally).
+	if updateErr := e.instanceRepo.UpdateNextRetryAt(ctx, result.SagaID, nextRetryAt); updateErr != nil {
+		return nil, fmt.Errorf("failed to persist next_retry_at for saga %s: %w",
+			result.SagaID, updateErr)
+	}
+
 	if e.claimService != nil {
 		if releaseErr := e.claimService.ReleaseLease(ctx, result.SagaID); releaseErr != nil {
 			e.logger.Error("failed to release lease for retry",
@@ -232,14 +271,55 @@ func (e *SagaExecutor) handleTransientFailure(
 
 	RecordStepFailure(result.StepName, string(result.ErrorCategory))
 
-	e.logger.Info("TRANSIENT error, releasing lease for retry",
+	e.logger.Info("TRANSIENT error, scheduled for retry with backoff",
 		"saga_id", result.SagaID,
 		"step_index", result.StepIndex,
 		"step_name", result.StepName,
 		"replay_count", instance.ReplayCount,
+		"backoff_delay", delay,
+		"next_retry_at", nextRetryAt,
 	)
 
 	return result, nil
+}
+
+// resolveRetryBounds returns the (baseDelay, maxDelay) pair to use for a given
+// step. Order of precedence:
+//  1. Per-handler retry policy declared in handlers.yaml (HandlerMetadata.RetryPolicy)
+//  2. Global ClaimConfig defaults (SAGA_RETRY_BASE_DELAY / SAGA_RETRY_MAX_DELAY)
+//  3. Package-level constants (DefaultRetryBaseDelay / DefaultRetryMaxDelay)
+//
+// This is forgiving by design: any layer is optional. If the executor has no
+// ClaimService wired in (some unit tests construct executors with nil), we fall
+// straight to the package defaults so behavior stays predictable.
+func (e *SagaExecutor) resolveRetryBounds(stepName string) (time.Duration, time.Duration) {
+	baseDelay := DefaultRetryBaseDelay
+	maxDelay := DefaultRetryMaxDelay
+
+	if e.claimService != nil && e.claimService.config != nil {
+		if e.claimService.config.RetryBaseDelay > 0 {
+			baseDelay = e.claimService.config.RetryBaseDelay
+		}
+		if e.claimService.config.RetryMaxDelay > 0 {
+			maxDelay = e.claimService.config.RetryMaxDelay
+		}
+	}
+
+	// Per-handler override via registry metadata (populated from handlers.yaml).
+	if e.handlerRegistry != nil && stepName != "" {
+		if _, meta, err := e.handlerRegistry.GetWithMetadata(stepName); err == nil && meta != nil {
+			if meta.RetryPolicy != nil {
+				if meta.RetryPolicy.BaseDelay > 0 {
+					baseDelay = meta.RetryPolicy.BaseDelay
+				}
+				if meta.RetryPolicy.MaxDelay > 0 {
+					maxDelay = meta.RetryPolicy.MaxDelay
+				}
+			}
+		}
+	}
+
+	return baseDelay, maxDelay
 }
 
 // handleZombieDetected transitions the saga to FAILED_MANUAL_INTERVENTION when max replays are exceeded.
@@ -346,9 +426,12 @@ func (e *SagaExecutor) ProcessStepResult(
 	maxReplays int,
 ) (*StepFailureResult, error) {
 	if err == nil {
-		// Success - reset replay count and move to next step
-		if resetErr := e.instanceRepo.ResetReplayCount(ctx, instance.ID); resetErr != nil {
-			return nil, fmt.Errorf("failed to reset replay count: %w", resetErr)
+		// Success - reset replay count AND clear any pending backoff atomically.
+		// Combining both columns in one UPDATE ensures the orphan watcher cannot
+		// observe a half-updated row (replay_count cleared but next_retry_at
+		// stale, or the inverse).
+		if resetErr := e.instanceRepo.ResetReplayCountAndBackoff(ctx, instance.ID); resetErr != nil {
+			return nil, fmt.Errorf("failed to reset replay count and backoff: %w", resetErr)
 		}
 		return nil, nil
 	}

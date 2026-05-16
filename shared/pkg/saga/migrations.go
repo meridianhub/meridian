@@ -62,6 +62,12 @@ func RunSagaMigrations(db *gorm.DB) error {
 		return fmt.Errorf("failed to create partial index for orphan detection: %w", err)
 	}
 
+	// Add next_retry_at column + partial index for exponential backoff on transient
+	// failures (see migrateNextRetryAtBackoff for the CockroachDB ordering rule).
+	if err := migrateNextRetryAtBackoff(db); err != nil {
+		return err
+	}
+
 	// Create composite unique constraint for (saga_instance_id, step_index)
 	// This prevents duplicate step results for the same saga step
 	if err := createCompositeUniqueConstraint(db); err != nil {
@@ -79,6 +85,42 @@ func createSagaDefinitionsNameVersionIndex(db *gorm.DB) error {
 		ON saga_definitions (name, version)
 	`
 	return db.Exec(sql).Error
+}
+
+// migrateNextRetryAtBackoff adds the next_retry_at column AND its supporting
+// partial index for exponential-backoff orphan claiming.
+//
+// The column is nullable: NULL means "no backoff in effect, immediately eligible
+// for reclaim by the orphan watcher". A non-NULL value is the earliest wall-clock
+// time at which the orphan watcher may reclaim the saga.
+//
+// CRITICAL CockroachDB ordering: the ALTER TABLE and the partial CREATE INDEX
+// MUST commit in separate transactions. Each db.Exec call here runs in
+// autocommit mode, so issuing them as two separate calls satisfies the rule.
+// Combining them inside a single Transaction(...) block would fail because the
+// new column is not yet "public" when the index references it.
+//
+// Both statements are idempotent (IF NOT EXISTS) and safe to re-run.
+func migrateNextRetryAtBackoff(db *gorm.DB) error {
+	if err := db.Exec(`
+		ALTER TABLE saga_instances
+		ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ NULL
+	`).Error; err != nil {
+		return fmt.Errorf("failed to add next_retry_at column: %w", err)
+	}
+
+	// Partial index keeps the index compact: only sagas currently in backoff
+	// appear here. Sagas with next_retry_at IS NULL are served from the
+	// existing idx_saga_instances_orphaned index.
+	if err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_saga_instances_next_retry_at
+		ON saga_instances (next_retry_at)
+		WHERE next_retry_at IS NOT NULL
+	`).Error; err != nil {
+		return fmt.Errorf("failed to create partial index for next_retry_at: %w", err)
+	}
+
+	return nil
 }
 
 // createPartialIndexForOrphanDetection creates the idx_saga_instances_orphaned partial index.

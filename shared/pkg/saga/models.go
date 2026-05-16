@@ -122,6 +122,11 @@ type SagaInstance struct {
 	CurrentStepIndex int `gorm:"column:current_step_index;not null;default:0"`
 	// ReplayCount tracks how many times this saga has been replayed (for zombie detection)
 	ReplayCount int `gorm:"column:replay_count;not null;default:0"`
+	// NextRetryAt is the earliest wall-clock time this saga can be reclaimed after a
+	// transient failure. NULL means the saga is immediately eligible for reclaim
+	// (no exponential backoff in effect). Set by handleTransientFailure and cleared
+	// by ResetReplayCountAndBackoff on successful step completion.
+	NextRetryAt *time.Time `gorm:"column:next_retry_at"`
 	// Status is the current lifecycle state
 	Status SagaStatus `gorm:"column:status;type:varchar(32);not null;default:'PENDING';index"`
 

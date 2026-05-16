@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -89,6 +90,7 @@ var (
 	ErrAliasCollision               = errors.New("param_alias target already exists as a field")
 	ErrDuplicateLeafName            = errors.New("duplicate leaf field name from exposed paths")
 	ErrCompositeWithProtoRef        = errors.New("composite handler must not set proto_ref")
+	ErrInvalidRetryPolicy           = errors.New("invalid retry policy")
 )
 
 // Schema represents a collection of handler definitions for a service.
@@ -173,6 +175,38 @@ type HandlerDef struct {
 
 	// Conversions defines rules for converting calls from previous handler versions.
 	Conversions []ConversionRule `yaml:"conversions,omitempty"`
+
+	// Retry overrides the saga runtime's global retry/backoff defaults for this
+	// handler. Useful for handlers that talk to slow external systems (longer
+	// base_delay) or that should fail fast (very short max_delay). When nil,
+	// the global SAGA_RETRY_BASE_DELAY / SAGA_RETRY_MAX_DELAY values apply.
+	Retry *RetryPolicy `yaml:"retry,omitempty"`
+}
+
+// RetryPolicy defines per-handler exponential backoff parameters.
+// Values are parsed by yaml.v3 from Go duration strings (e.g. "2s", "30s", "1m").
+//
+// Field semantics (intentionally asymmetric with runtime loadRetryBounds):
+//   - Each field is independently optional. Zero (or unset) means "inherit the
+//     corresponding global ClaimConfig default" - so a YAML author can override
+//     just base_delay or just max_delay without restating the other.
+//   - Negative values are rejected by Validate.
+//   - To disable per-handler retry entirely, omit the whole retry: block.
+//
+// The runtime layer (loadRetryBounds in claiming.go) is stricter and rejects
+// zero, because there the values come from environment variables - an operator
+// who sets SAGA_RETRY_BASE_DELAY=0s almost certainly meant something else.
+// At the schema layer, zero is a legitimate "use global default" signal.
+type RetryPolicy struct {
+	// BaseDelay is the starting delay for replayCount=0. The actual delay grows
+	// exponentially: BaseDelay * 2^replayCount plus uniform [0, BaseDelay) jitter.
+	// Zero or unset means "inherit ClaimConfig.RetryBaseDelay".
+	BaseDelay time.Duration `yaml:"base_delay"`
+
+	// MaxDelay caps the computed delay. Replay counts that would produce a delay
+	// beyond MaxDelay (or that would overflow) are saturated to this value.
+	// Zero or unset means "inherit ClaimConfig.RetryMaxDelay".
+	MaxDelay time.Duration `yaml:"max_delay"`
 }
 
 // ConversionRule defines how to convert a call from a deprecated handler to the current version.
@@ -298,6 +332,30 @@ func (h *HandlerDef) Validate(handlerName string) error {
 		}
 	}
 
+	return h.validateRetryPolicy(handlerName)
+}
+
+// validateRetryPolicy checks that any per-handler retry policy is well-formed.
+// Per the field-level contract on RetryPolicy, zero means "inherit the global
+// ClaimConfig default", so zero is allowed. Negative values are rejected as
+// nonsense, and an inverted pair (base > max, both non-zero) is rejected
+// because it would force every retry to saturate to the smaller value.
+func (h *HandlerDef) validateRetryPolicy(handlerName string) error {
+	if h.Retry == nil {
+		return nil
+	}
+	if h.Retry.BaseDelay < 0 {
+		return fmt.Errorf("%w: handler %s: base_delay must be >= 0, got %s",
+			ErrInvalidRetryPolicy, handlerName, h.Retry.BaseDelay)
+	}
+	if h.Retry.MaxDelay < 0 {
+		return fmt.Errorf("%w: handler %s: max_delay must be >= 0, got %s",
+			ErrInvalidRetryPolicy, handlerName, h.Retry.MaxDelay)
+	}
+	if h.Retry.BaseDelay > 0 && h.Retry.MaxDelay > 0 && h.Retry.BaseDelay > h.Retry.MaxDelay {
+		return fmt.Errorf("%w: handler %s: base_delay (%s) must not exceed max_delay (%s)",
+			ErrInvalidRetryPolicy, handlerName, h.Retry.BaseDelay, h.Retry.MaxDelay)
+	}
 	return nil
 }
 
