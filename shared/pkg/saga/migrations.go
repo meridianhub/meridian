@@ -30,10 +30,22 @@ func RunSagaMigrations(db *gorm.DB) error {
 	// The partial indexes and composite constraint below are already
 	// idempotent (IF NOT EXISTS / information_schema checks).
 	migrator := db.Migrator()
+	if !migrator.HasTable(&SagaDefinition{}) {
+		if err := db.AutoMigrate(&SagaDefinition{}); err != nil {
+			return fmt.Errorf("failed to auto-migrate saga_definitions: %w", err)
+		}
+	}
 	if !migrator.HasTable(&SagaInstance{}) || !migrator.HasTable(&SagaStepResult{}) {
 		if err := db.AutoMigrate(&SagaInstance{}, &SagaStepResult{}); err != nil {
 			return fmt.Errorf("failed to auto-migrate saga models: %w", err)
 		}
+	}
+
+	// Create the unique (name, version) constraint on saga_definitions.
+	// Two definitions with the same (name, version) are not allowed: per-version
+	// scripts are immutable, and FindOrCreate enforces hash match for reuse.
+	if err := createSagaDefinitionsNameVersionIndex(db); err != nil {
+		return fmt.Errorf("failed to create saga_definitions (name, version) index: %w", err)
 	}
 
 	// Create the partial index for orphan detection
@@ -57,6 +69,16 @@ func RunSagaMigrations(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+// createSagaDefinitionsNameVersionIndex creates a unique index on (name, version).
+// Each (name, version) combination resolves to exactly one immutable definition row.
+func createSagaDefinitionsNameVersionIndex(db *gorm.DB) error {
+	sql := `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_saga_definitions_name_version
+		ON saga_definitions (name, version)
+	`
+	return db.Exec(sql).Error
 }
 
 // createPartialIndexForOrphanDetection creates the idx_saga_instances_orphaned partial index.
@@ -115,6 +137,9 @@ func DropSagaTables(db *gorm.DB) error {
 	}
 	if err := db.Migrator().DropTable(&SagaInstance{}); err != nil {
 		return fmt.Errorf("failed to drop saga_instances: %w", err)
+	}
+	if err := db.Migrator().DropTable(&SagaDefinition{}); err != nil {
+		return fmt.Errorf("failed to drop saga_definitions: %w", err)
 	}
 	return nil
 }
