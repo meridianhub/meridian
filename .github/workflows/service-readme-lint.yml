@@ -14,7 +14,7 @@ jobs:
     name: Lint service READMEs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check service README sections
         run: bash scripts/lint-service-readmes.sh
