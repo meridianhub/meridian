@@ -1,0 +1,240 @@
+{
+  "files_scored": 3397,
+  "scoring_coverage": {
+    "lizard": 3397,
+    "scc": 0
+  },
+  "churn_window": "commits (last 12mo)",
+  "loc": {
+    "p50": 144.0,
+    "p95": 613.1999999999998,
+    "max": 5753.0,
+    "total": 745612
+  },
+  "ccn": {
+    "p50": 19.0,
+    "p95": 88.0,
+    "max": 864.0
+  },
+  "churn": {
+    "p50": 1.0,
+    "p95": 7.0,
+    "max": 66.0
+  },
+  "top_hotspots": [
+    {
+      "path": "api/proto/meridian/current_account/v1/current_account.pb.go",
+      "loc": 5084,
+      "ccn": 864.0,
+      "churn": 9,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/position_keeping/v1/position_keeping.pb.go",
+      "loc": 3295,
+      "ccn": 561.0,
+      "churn": 9,
+      "source": "lizard"
+    },
+    {
+      "path": "services/control-plane/internal/validator/manifest_validator_test.go",
+      "loc": 2889,
+      "ccn": 477.0,
+      "churn": 16,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/party/v1/party.pb.go",
+      "loc": 4805,
+      "ccn": 835.0,
+      "churn": 1,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/operational_gateway/v1/operational_gateway.pb.go",
+      "loc": 3630,
+      "ccn": 627.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/market_information/v1/market_information.pb.go",
+      "loc": 3534,
+      "ccn": 609.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/internal_account/v1/internal_account.pb.go",
+      "loc": 3621,
+      "ccn": 601.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "services/current-account/service/coverage_unit_test.go",
+      "loc": 5753,
+      "ccn": 423.0,
+      "churn": 6,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/control_plane/v1/manifest.pb.go",
+      "loc": 2694,
+      "ccn": 495.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/financial_accounting/v1/financial_accounting.pb.go",
+      "loc": 1821,
+      "ccn": 291.0,
+      "churn": 8,
+      "source": "lizard"
+    }
+  ],
+  "top_complex": [
+    {
+      "path": "api/proto/meridian/current_account/v1/current_account.pb.go",
+      "loc": 5084,
+      "ccn": 864.0,
+      "churn": 9,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/party/v1/party.pb.go",
+      "loc": 4805,
+      "ccn": 835.0,
+      "churn": 1,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/operational_gateway/v1/operational_gateway.pb.go",
+      "loc": 3630,
+      "ccn": 627.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/market_information/v1/market_information.pb.go",
+      "loc": 3534,
+      "ccn": 609.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/internal_account/v1/internal_account.pb.go",
+      "loc": 3621,
+      "ccn": 601.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/position_keeping/v1/position_keeping.pb.go",
+      "loc": 3295,
+      "ccn": 561.0,
+      "churn": 9,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/reconciliation/v1/reconciliation.pb.go",
+      "loc": 3288,
+      "ccn": 533.0,
+      "churn": 1,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/control_plane/v1/manifest.pb.go",
+      "loc": 2694,
+      "ccn": 495.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "services/control-plane/internal/validator/manifest_validator_test.go",
+      "loc": 2889,
+      "ccn": 477.0,
+      "churn": 16,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/identity/v1/identity.pb.go",
+      "loc": 2459,
+      "ccn": 432.0,
+      "churn": 2,
+      "source": "lizard"
+    }
+  ],
+  "top_large": [
+    {
+      "path": "services/current-account/service/coverage_unit_test.go",
+      "loc": 5753,
+      "ccn": 423.0,
+      "churn": 6,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/current_account/v1/current_account.pb.go",
+      "loc": 5084,
+      "ccn": 864.0,
+      "churn": 9,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/party/v1/party.pb.go",
+      "loc": 4805,
+      "ccn": 835.0,
+      "churn": 1,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/operational_gateway/v1/operational_gateway.pb.go",
+      "loc": 3630,
+      "ccn": 627.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/internal_account/v1/internal_account.pb.go",
+      "loc": 3621,
+      "ccn": 601.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/market_information/v1/market_information.pb.go",
+      "loc": 3534,
+      "ccn": 609.0,
+      "churn": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/position_keeping/v1/position_keeping.pb.go",
+      "loc": 3295,
+      "ccn": 561.0,
+      "churn": 9,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/reconciliation/v1/reconciliation.pb.go",
+      "loc": 3288,
+      "ccn": 533.0,
+      "churn": 1,
+      "source": "lizard"
+    },
+    {
+      "path": "services/control-plane/internal/validator/manifest_validator_test.go",
+      "loc": 2889,
+      "ccn": 477.0,
+      "churn": 16,
+      "source": "lizard"
+    },
+    {
+      "path": "api/proto/meridian/control_plane/v1/manifest.pb.go",
+      "loc": 2694,
+      "ccn": 495.0,
+      "churn": 2,
+      "source": "lizard"
+    }
+  ]
+}
