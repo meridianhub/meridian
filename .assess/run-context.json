@@ -1,0 +1,167 @@
+{
+  "run_date": "2026-05-22",
+  "repo_root": "/Users/ben/dev/github.com/meridianhub/meridian/worktree/assess-snapshot-2026-05-21",
+  "prior_stats_exists": true,
+  "stats_summary": {
+    "files_scored": 3264,
+    "loc": {
+      "p50": 141.0,
+      "p95": 575.0,
+      "max": 5753.0,
+      "total": 656693
+    },
+    "ccn": {
+      "p50": 18.0,
+      "p95": 81.84999999999991,
+      "max": 477.0
+    },
+    "top_hotspots": [
+      {
+        "path": "services/control-plane/internal/validator/manifest_validator_test.go",
+        "loc": 2889,
+        "ccn": 477.0,
+        "churn": 16,
+        "source": "lizard"
+      },
+      {
+        "path": "services/current-account/service/coverage_unit_test.go",
+        "loc": 5753,
+        "ccn": 423.0,
+        "churn": 6,
+        "source": "lizard"
+      },
+      {
+        "path": "services/payment-order/service/grpc_service_test.go",
+        "loc": 2283,
+        "ccn": 204.0,
+        "churn": 17,
+        "source": "lizard"
+      },
+      {
+        "path": "services/position-keeping/domain/financial_position_log_test.go",
+        "loc": 1597,
+        "ccn": 336.0,
+        "churn": 2,
+        "source": "lizard"
+      },
+      {
+        "path": "services/current-account/service/grpc_service_test.go",
+        "loc": 1427,
+        "ccn": 138.0,
+        "churn": 27,
+        "source": "lizard"
+      },
+      {
+        "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
+        "loc": 993,
+        "ccn": 155.0,
+        "churn": 15,
+        "source": "lizard"
+      },
+      {
+        "path": "services/mcp-server/internal/tools/economy_test.go",
+        "loc": 1023,
+        "ccn": 194.0,
+        "churn": 6,
+        "source": "lizard"
+      },
+      {
+        "path": "frontend/src/features/manifests/components/manifest-graph.test.tsx",
+        "loc": 696,
+        "ccn": 152.0,
+        "churn": 11,
+        "source": "lizard"
+      },
+      {
+        "path": "services/identity/service/grpc_service_test.go",
+        "loc": 1534,
+        "ccn": 161.0,
+        "churn": 7,
+        "source": "lizard"
+      },
+      {
+        "path": "shared/pkg/saga/schema/service_modules.go",
+        "loc": 474,
+        "ccn": 136.0,
+        "churn": 11,
+        "source": "lizard"
+      }
+    ]
+  },
+  "instruction_files": {},
+  "instructions_grade": "F",
+  "diff": {
+    "graduated": 0,
+    "regressed": 0,
+    "new": 0,
+    "persistent": 10
+  },
+  "diff_detail": {
+    "graduated": [],
+    "regressed": [],
+    "new": [],
+    "persistent": [
+      {
+        "path": "services/control-plane/internal/validator/manifest_validator_test.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/current-account/service/coverage_unit_test.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/payment-order/service/grpc_service_test.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/position-keeping/domain/financial_position_log_test.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/current-account/service/grpc_service_test.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/mcp-server/internal/tools/economy_test.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "frontend/src/features/manifests/components/manifest-graph.test.tsx",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/identity/service/grpc_service_test.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "shared/pkg/saga/schema/service_modules.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      }
+    ]
+  },
+  "anomalies": []
+}
