@@ -25,5 +25,5 @@ Hotspot (persistent). 2283 LOC, max cyclomatic complexity 204.0, 0 commits in ch
 
 ## Suggested actions
 
-- Group cases by RPC and split into per-RPC test files (Create, Update, Cancel, etc.)
+- Group cases by RPC and split into per-RPC test files
 

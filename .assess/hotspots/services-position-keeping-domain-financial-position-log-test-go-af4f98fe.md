@@ -25,5 +25,5 @@ Hotspot (persistent). 1597 LOC, max cyclomatic complexity 336.0, 0 commits in ch
 
 ## Suggested actions
 
-- Split domain unit tests by aggregate (FinancialPosition, MeasurementBucket, etc.)
+- Split domain unit tests by aggregate (FinancialPosition, MeasurementBucket)
 

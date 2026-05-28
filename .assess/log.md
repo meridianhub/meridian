@@ -22,3 +22,14 @@
 [Full report](./assess-report.md)
 
 ---
+## 2026-05-28
+
+- **Files scored:** 3264
+- **AI Readiness:** 7.0 / 8 (AI-Native)
+- **Instructions grade:** A
+- **Hotspot transitions:** 0 graduated, 0 regressed, 0 new, 10 persistent
+- **Top action:** Split coverage_unit_test.go (5,753 LOC) and extend the 800-line file cap to _test.go files
+
+[Full report](./assess-report.md)
+
+---

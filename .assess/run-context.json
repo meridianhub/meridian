@@ -105,20 +105,13 @@
   "instructions_grade": "A",
   "diff": {
     "graduated": 0,
-    "regressed": 1,
+    "regressed": 0,
     "new": 0,
-    "persistent": 9
+    "persistent": 10
   },
   "diff_detail": {
     "graduated": [],
-    "regressed": [
-      {
-        "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
-        "ccn_delta": 1.0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      }
-    ],
+    "regressed": [],
     "new": [],
     "persistent": [
       {
@@ -147,6 +140,12 @@
       },
       {
         "path": "services/current-account/service/grpc_service_test.go",
+        "ccn_delta": 0.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
         "ccn_delta": 0.0,
         "commits_delta": 0,
         "loc_delta": 0
@@ -772,7 +771,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "deploy/demo/cloudflare-setup-checklist.md",
@@ -781,7 +781,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "deployments/k8s/audit-consumer/README.md",
@@ -790,16 +791,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0016-tenant-id-naming-strategy.md",
-        "last_commit_days": 165,
+        "last_commit_days": 166,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0021-kyc-aml-verification-provider-architecture.md",
@@ -808,7 +811,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0022-instrument-successor-lineage.md",
@@ -817,7 +821,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0023-balance-delegation-to-position-keeping.md",
@@ -826,7 +831,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0029-settlement-scheduler-architecture.md",
@@ -835,16 +841,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0030-kyc-aml-provider-selection.md",
-        "last_commit_days": 104,
+        "last_commit_days": 105,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0033-event-triggered-sagas.md",
@@ -853,7 +861,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0036-embedded-dex-identity.md",
@@ -862,7 +871,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0037-scheduler-attribution-design.md",
@@ -871,7 +881,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/analysis/cmd-coverage-assessment.md",
@@ -880,7 +891,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/architecture-layers.md",
@@ -889,7 +901,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/DEMO_GUIDE.md",
@@ -898,7 +911,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/audit-analysis-findings.md",
@@ -907,7 +921,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/database-per-service-migration.md",
@@ -916,7 +931,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/panic-audit-inventory.md",
@@ -925,7 +941,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/audits/tenant-isolation-audit-2026-04-04.md",
@@ -934,7 +951,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/coupling-visualization-example.md",
@@ -943,7 +961,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/data-flows.md",
@@ -952,7 +971,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/development/audit-adding-new-service.md",
@@ -961,7 +981,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/adding-starlark-service-bindings.md",
@@ -970,7 +991,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/cli-tools.md",
@@ -979,7 +1001,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/coupling-analysis.md",
@@ -988,7 +1011,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/error-conventions.md",
@@ -997,7 +1021,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/multi-asset-integration.md",
@@ -1006,7 +1031,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/proto-conventions.md",
@@ -1015,16 +1041,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/saga-validation.md",
-        "last_commit_days": 110,
+        "last_commit_days": 111,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/service-file-conventions.md",
@@ -1033,7 +1061,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/value-types.md",
@@ -1042,7 +1071,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/integrations/kyc-aml-providers.md",
@@ -1051,7 +1081,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/mapping-layer/troubleshooting.md",
@@ -1060,7 +1091,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/007-starlark-typed-service-clients.md",
@@ -1069,7 +1101,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/010-starlark-testing-framework.md",
@@ -1078,7 +1111,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/012-codebase-health-audit.md",
@@ -1087,7 +1121,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/013-reconciliation-service.md",
@@ -1096,7 +1131,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/015-stripe-connect.md",
@@ -1105,7 +1141,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/016-market-data-dynamic-pricing.md",
@@ -1114,7 +1151,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/018-current-account-withdrawal-persistence.md",
@@ -1123,7 +1161,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/020-party-kyc-aml-provider-integration.md",
@@ -1132,7 +1171,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/021-platform-scheduler.md",
@@ -1141,7 +1181,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/030-asyncapi-specification.md",
@@ -1150,25 +1191,28 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/032-event-driven-valuation-saga.md",
-        "last_commit_days": 85,
+        "last_commit_days": 86,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/033-gateway-architecture.md",
-        "last_commit_days": 85,
+        "last_commit_days": 86,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/035-economy-cookbook.md",
@@ -1177,7 +1221,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/037-multi-asset-purity.md",
@@ -1186,16 +1231,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/038-manifest-business-model-visualization.md",
-        "last_commit_days": 82,
+        "last_commit_days": 83,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/039-meridian-vm.md",
@@ -1204,7 +1251,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/040-handler-schema-alignment.md",
@@ -1213,7 +1261,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/043-mcp-manifest-tenant-isolation.md",
@@ -1222,7 +1271,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/044-auth-flow-architecture.md",
@@ -1231,7 +1281,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/045-manifest-as-sole-source-of-truth.md",
@@ -1240,16 +1291,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/047-security-audit.md",
-        "last_commit_days": 72,
+        "last_commit_days": 73,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/048-test-coverage-80.md",
@@ -1258,16 +1311,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/051-party-navigation.md",
-        "last_commit_days": 65,
+        "last_commit_days": 66,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/057-convergent-manifest-apply.md",
@@ -1276,7 +1331,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/058-full-economy-visibility.md",
@@ -1285,7 +1341,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/059-asset-agnostic-posting-layer.md",
@@ -1294,7 +1351,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/060-per-tenant-scheduled-execution.md",
@@ -1303,7 +1361,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/061-mcp-auth-session-unification.md",
@@ -1312,7 +1371,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/062-self-service-onboarding-readiness.md",
@@ -1321,16 +1381,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/reports/cockroachdb-migration-audit.md",
-        "last_commit_days": 93,
+        "last_commit_days": 94,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/reports/market-information-go-live-readiness.md",
@@ -1339,7 +1401,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/reports/market-information-integration.md",
@@ -1348,7 +1411,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/event-router.md",
@@ -1357,7 +1421,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/market-information-operations.md",
@@ -1366,7 +1431,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/party-kyc-verification.md",
@@ -1375,7 +1441,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/troubleshooting-saga-handlers.md",
@@ -1384,7 +1451,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/saga-handler-loading.md",
@@ -1393,7 +1461,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/security/pgx-tenant-audit.md",
@@ -1402,7 +1471,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/service-readme-template.md",
@@ -1411,7 +1481,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/event-triggered-sagas.md",
@@ -1420,7 +1491,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "frontend/docs/tenant-subdomain-routing.md",
@@ -1429,7 +1501,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "services/mcp-server/internal/resources/docs/cel-reference.md",
@@ -1438,7 +1511,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "services/mcp-server/internal/resources/docs/starlark-guide.md",
@@ -1447,16 +1521,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "services/payment-order/service/HANDLER_ARCHITECTURE.md",
-        "last_commit_days": 119,
+        "last_commit_days": 120,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "shared/platform/bootstrap/SHUTDOWN_USAGE.md",
@@ -1465,7 +1541,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 8588.0
+        "ratio": 8588.0,
+        "confidence": "low"
       },
       {
         "path": "cookbook/docs/authoring-components.md",
@@ -1474,16 +1551,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "deploy/demo/dex-identity-migration-plan.md",
-        "last_commit_days": 79,
+        "last_commit_days": 80,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "deploy/demo/pg-migration-compatibility-report.md",
@@ -1492,7 +1571,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0008-defensive-testing-standards.md",
@@ -1501,7 +1581,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0012-lien-based-fund-reservation.md",
@@ -1510,7 +1591,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0024-internal-bank-account-service.md",
@@ -1519,7 +1601,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0026-canonical-ingestion-contract.md",
@@ -1528,7 +1611,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0027-market-information-management.md",
@@ -1537,7 +1621,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0032-vanguard-json-transcoding-gateway.md",
@@ -1546,7 +1631,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/authentication-integration.md",
@@ -1555,7 +1641,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/immutability-audit.md",
@@ -1564,7 +1651,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/rbac-testing-guide.md",
@@ -1573,7 +1661,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/task-8-service-integration.md",
@@ -1582,7 +1671,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/circuit-breaker-usage.md",
@@ -1591,7 +1681,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/financial-accounting-proto.md",
@@ -1600,7 +1691,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/manifest-design-patterns.md",
@@ -1609,7 +1701,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/repository-conventions.md",
@@ -1618,7 +1711,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/starlark-built-ins-reference.md",
@@ -1627,7 +1721,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/local-documentation.md",
@@ -1636,7 +1731,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/mapping-layer/README.md",
@@ -1645,7 +1741,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/operations/audit-monitoring.md",
@@ -1654,7 +1751,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/001-universal-asset-system.md",
@@ -1663,7 +1761,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/003-meridian-edge.md",
@@ -1672,7 +1771,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/004-market-information-management.md",
@@ -1681,7 +1781,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/005-durable-execution-engine.md",
@@ -1690,7 +1791,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/017-reconciliation-grpc-wiring.md",
@@ -1699,7 +1801,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/026-operations-console-ui.md",
@@ -1708,7 +1811,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/031-identity-access-management.md",
@@ -1717,7 +1821,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/034-frontend-service-alignment.md",
@@ -1726,7 +1831,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/041-economy-generator.md",
@@ -1735,7 +1841,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/042-economy-ide.md",
@@ -1744,7 +1851,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/046-economy-visualization-completeness.md",
@@ -1753,7 +1861,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/052-email-platform.md",
@@ -1762,7 +1871,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/053-auth-email-flows.md",
@@ -1771,7 +1881,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/054-billing-ui.md",
@@ -1780,7 +1891,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/055-tenant-branding.md",
@@ -1789,7 +1901,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/056-correspondence-service.md",
@@ -1798,7 +1911,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/reports/market-information-traceability.md",
@@ -1807,7 +1921,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/email-infrastructure.md",
@@ -1816,7 +1931,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/internal-account-operations.md",
@@ -1825,7 +1941,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/saga-validation-failure.md",
@@ -1834,7 +1951,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/generate-llm-blueprint.md",
@@ -1843,7 +1961,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/kustomize.md",
@@ -1852,7 +1971,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/security.md",
@@ -1861,7 +1981,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/starlark-saga.md",
@@ -1870,7 +1991,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/spec/saga-contract.md",
@@ -1879,7 +2001,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/testing/CHAOS_TESTING.md",
@@ -1888,7 +2011,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "docs/testing/COVERAGE_ANALYSIS.md",
@@ -1897,7 +2021,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "services/control-plane/internal/applier/testdata/tenant-saga-examples/README.md",
@@ -1906,7 +2031,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "services/event-router/k8s/README.md",
@@ -1915,7 +2041,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "shared/domain/money/PRECISION_GUARANTEES.md",
@@ -1924,7 +2051,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 4294.0
+        "ratio": 4294.0,
+        "confidence": "low"
       },
       {
         "path": "CLA.md",
@@ -1933,7 +2061,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "CODE_OF_CONDUCT.md",
@@ -1942,7 +2071,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "SECURITY.md",
@@ -1951,7 +2081,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "cookbook/docs/authoring-patterns.md",
@@ -1960,7 +2091,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0001-record-architecture-decisions.md",
@@ -1969,16 +2101,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0010-grpc-client-side-load-balancing.md",
-        "last_commit_days": 160,
+        "last_commit_days": 161,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0011-iso-20022-compliance-via-adapter-layer.md",
@@ -1987,7 +2121,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0015-standard-service-directory-structure.md",
@@ -1996,7 +2131,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0031-getbalance-nil-guard-retention.md",
@@ -2005,7 +2141,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/template.md",
@@ -2014,7 +2151,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/architecture/api-contracts/financial-accounting-contract.md",
@@ -2023,7 +2161,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/archive/README.md",
@@ -2032,7 +2171,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/demos/multi-organization-settlement.md",
@@ -2041,7 +2181,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/calling-meridian-apis.md",
@@ -2050,7 +2191,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/starlark-style-guide.md",
@@ -2059,7 +2201,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/002-internal-bank-account.md",
@@ -2068,7 +2211,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/006-starlark-saga-orchestration-core.md",
@@ -2077,7 +2221,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/008-starlark-service-bindings.md",
@@ -2086,7 +2231,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/009-production-readiness-review.md",
@@ -2095,7 +2241,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/011-valuation-service.md",
@@ -2104,7 +2251,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/014-control-plane.md",
@@ -2113,7 +2261,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/019-internal-bank-account-position-keeping-client.md",
@@ -2122,7 +2271,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/025-real-time-event-streaming.md",
@@ -2131,16 +2281,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/027-mcp-server.md",
-        "last_commit_days": 92,
+        "last_commit_days": 93,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/028-asset-agnostic-accounts.md",
@@ -2149,7 +2301,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/047-security-audit-status.md",
@@ -2158,7 +2311,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/reports/saga-handler-audit.md",
@@ -2167,7 +2321,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/saga-service-catalog.md",
@@ -2176,7 +2331,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/secrets-management.md",
@@ -2185,7 +2341,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/schema-evolution.md",
@@ -2194,7 +2351,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/tilt-fast-startup.md",
@@ -2203,7 +2361,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "http/README.md",
@@ -2212,7 +2371,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2862.67
+        "ratio": 2862.67,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0007-raw-yaml-over-helm-for-initial-development.md",
@@ -2221,7 +2381,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2147.0
+        "ratio": 2147.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0009-application-level-audit-logging.md",
@@ -2230,7 +2391,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2147.0
+        "ratio": 2147.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0014-financial-instrument-reference-data.md",
@@ -2239,7 +2401,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2147.0
+        "ratio": 2147.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0018-settlement-reconciliation.md",
@@ -2248,7 +2411,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2147.0
+        "ratio": 2147.0,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0025-clearing-purpose-specialization.md",
@@ -2257,7 +2421,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2147.0
+        "ratio": 2147.0,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/029-operational-gateway.md",
@@ -2266,7 +2431,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2147.0
+        "ratio": 2147.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/incident-response.md",
@@ -2275,7 +2441,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2147.0
+        "ratio": 2147.0,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/saga-failure-recovery.md",
@@ -2284,7 +2451,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 2147.0
+        "ratio": 2147.0,
+        "confidence": "low"
       },
       {
         "path": ".github/claude-review-instructions.md",
@@ -2293,7 +2461,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0013-generic-asset-quantity-types.md",
@@ -2302,7 +2471,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0017-temporal-quality-ladder.md",
@@ -2311,7 +2481,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0028-starlark-saga-cel-valuation.md",
@@ -2320,7 +2491,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "docs/architecture/api-contracts/position-keeping-contract.md",
@@ -2329,7 +2501,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/050-demo-sandbox.md",
@@ -2338,7 +2511,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/production-deployment.md",
@@ -2347,7 +2521,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/docker.md",
@@ -2356,7 +2531,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/tilt.md",
@@ -2365,7 +2541,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1717.6
+        "ratio": 1717.6,
+        "confidence": "low"
       },
       {
         "path": "frontend/README.md",
@@ -2374,7 +2551,8 @@
         "code_churn_in_window": 1487,
         "subject_code_count": 616,
         "subject_method": "nearest-ancestor",
-        "ratio": 1487.0
+        "ratio": 1487.0,
+        "confidence": "high"
       },
       {
         "path": "docs/adr/0004-event-schema-evolution.md",
@@ -2383,7 +2561,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1431.33
+        "ratio": 1431.33,
+        "confidence": "low"
       },
       {
         "path": "docs/architecture/api-contracts/current-account-contract.md",
@@ -2392,7 +2571,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1431.33
+        "ratio": 1431.33,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/testcontainers-usage.md",
@@ -2401,7 +2581,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1431.33
+        "ratio": 1431.33,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/README.md",
@@ -2410,16 +2591,18 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1431.33
+        "ratio": 1431.33,
+        "confidence": "low"
       },
       {
         "path": "docs/runbooks/disaster-recovery.md",
-        "last_commit_days": 160,
+        "last_commit_days": 161,
         "doc_churn_in_window": 6,
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1431.33
+        "ratio": 1431.33,
+        "confidence": "low"
       },
       {
         "path": "docs/claude-code-skills.md",
@@ -2428,7 +2611,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1226.86
+        "ratio": 1226.86,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/036-cookbook-browser.md",
@@ -2437,7 +2621,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1226.86
+        "ratio": 1226.86,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0005-adapter-pattern-layer-translation.md",
@@ -2446,7 +2631,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1073.5
+        "ratio": 1073.5,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/022-org-scoped-accounts.md",
@@ -2455,7 +2641,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 1073.5
+        "ratio": 1073.5,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/README.md",
@@ -2464,7 +2651,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 954.22
+        "ratio": 954.22,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0002-microservices-per-bian-domain.md",
@@ -2473,7 +2661,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 858.8
+        "ratio": 858.8,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/049-codebase-consistency.md",
@@ -2482,7 +2671,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 780.73
+        "ratio": 780.73,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0003-database-schema-migrations.md",
@@ -2491,7 +2681,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 715.67
+        "ratio": 715.67,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/024-structured-inbound-mapping.md",
@@ -2500,7 +2691,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 715.67
+        "ratio": 715.67,
+        "confidence": "low"
       },
       {
         "path": "docs/skills/README.md",
@@ -2509,7 +2701,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 715.67
+        "ratio": 715.67,
+        "confidence": "low"
       },
       {
         "path": "CONTRIBUTING.md",
@@ -2518,7 +2711,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 613.43
+        "ratio": 613.43,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/0006-tilt-local-development.md",
@@ -2527,7 +2721,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 613.43
+        "ratio": 613.43,
+        "confidence": "low"
       },
       {
         "path": "shared/README.md",
@@ -2536,7 +2731,8 @@
         "code_churn_in_window": 1113,
         "subject_code_count": 534,
         "subject_method": "nearest-ancestor",
-        "ratio": 556.5
+        "ratio": 556.5,
+        "confidence": "high"
       },
       {
         "path": "docs/prd/023-product-directory.md",
@@ -2545,7 +2741,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 536.75
+        "ratio": 536.75,
+        "confidence": "low"
       },
       {
         "path": "docs/guides/new-bian-service-checklist.md",
@@ -2554,7 +2751,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 429.4
+        "ratio": 429.4,
+        "confidence": "low"
       },
       {
         "path": "docs/adr/README.md",
@@ -2563,7 +2761,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 390.36
+        "ratio": 390.36,
+        "confidence": "low"
       },
       {
         "path": "docs/prd/README.md",
@@ -2572,7 +2771,8 @@
         "code_churn_in_window": 8588,
         "subject_code_count": 3463,
         "subject_method": "repo-baseline",
-        "ratio": 277.03
+        "ratio": 277.03,
+        "confidence": "low"
       },
       {
         "path": "services/control-plane/README.md",
@@ -2581,7 +2781,8 @@
         "code_churn_in_window": 541,
         "subject_code_count": 191,
         "subject_method": "nearest-ancestor",
-        "ratio": 180.33
+        "ratio": 180.33,
+        "confidence": "high"
       },
       {
         "path": "services/reconciliation/README.md",
@@ -2590,7 +2791,8 @@
         "code_churn_in_window": 280,
         "subject_code_count": 153,
         "subject_method": "nearest-ancestor",
-        "ratio": 140.0
+        "ratio": 140.0,
+        "confidence": "high"
       },
       {
         "path": "services/reference-data/README.md",
@@ -2599,7 +2801,8 @@
         "code_churn_in_window": 366,
         "subject_code_count": 151,
         "subject_method": "nearest-ancestor",
-        "ratio": 122.0
+        "ratio": 122.0,
+        "confidence": "high"
       },
       {
         "path": "services/tenant/README.md",
@@ -2608,7 +2811,8 @@
         "code_churn_in_window": 291,
         "subject_code_count": 75,
         "subject_method": "nearest-ancestor",
-        "ratio": 97.0
+        "ratio": 97.0,
+        "confidence": "high"
       },
       {
         "path": "services/party/README.md",
@@ -2617,7 +2821,8 @@
         "code_churn_in_window": 280,
         "subject_code_count": 103,
         "subject_method": "nearest-ancestor",
-        "ratio": 93.33
+        "ratio": 93.33,
+        "confidence": "high"
       },
       {
         "path": "scripts/README.md",
@@ -2626,7 +2831,8 @@
         "code_churn_in_window": 92,
         "subject_code_count": 39,
         "subject_method": "nearest-ancestor",
-        "ratio": 92.0
+        "ratio": 92.0,
+        "confidence": "high"
       },
       {
         "path": "services/financial-accounting/README.md",
@@ -2635,7 +2841,8 @@
         "code_churn_in_window": 356,
         "subject_code_count": 100,
         "subject_method": "nearest-ancestor",
-        "ratio": 89.0
+        "ratio": 89.0,
+        "confidence": "high"
       },
       {
         "path": "services/payment-order/README.md",
@@ -2644,7 +2851,8 @@
         "code_churn_in_window": 429,
         "subject_code_count": 159,
         "subject_method": "nearest-ancestor",
-        "ratio": 85.8
+        "ratio": 85.8,
+        "confidence": "high"
       },
       {
         "path": "services/position-keeping/README.md",
@@ -2653,7 +2861,8 @@
         "code_churn_in_window": 425,
         "subject_code_count": 161,
         "subject_method": "nearest-ancestor",
-        "ratio": 85.0
+        "ratio": 85.0,
+        "confidence": "high"
       },
       {
         "path": "services/api-gateway/README.md",
@@ -2662,7 +2871,8 @@
         "code_churn_in_window": 225,
         "subject_code_count": 110,
         "subject_method": "nearest-ancestor",
-        "ratio": 75.0
+        "ratio": 75.0,
+        "confidence": "high"
       },
       {
         "path": "services/current-account/README.md",
@@ -2671,7 +2881,8 @@
         "code_churn_in_window": 700,
         "subject_code_count": 136,
         "subject_method": "nearest-ancestor",
-        "ratio": 70.0
+        "ratio": 70.0,
+        "confidence": "high"
       },
       {
         "path": "services/operational-gateway/README.md",
@@ -2680,16 +2891,18 @@
         "code_churn_in_window": 124,
         "subject_code_count": 73,
         "subject_method": "nearest-ancestor",
-        "ratio": 62.0
+        "ratio": 62.0,
+        "confidence": "high"
       },
       {
         "path": "docs/audit/multi-asset-purity.md",
-        "last_commit_days": 82,
+        "last_commit_days": 83,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 55,
         "subject_code_count": 19,
         "subject_method": "parallel-docs-tree",
-        "ratio": 55.0
+        "ratio": 55.0,
+        "confidence": "high"
       },
       {
         "path": "services/mcp-server/README.md",
@@ -2698,7 +2911,8 @@
         "code_churn_in_window": 218,
         "subject_code_count": 67,
         "subject_method": "nearest-ancestor",
-        "ratio": 54.5
+        "ratio": 54.5,
+        "confidence": "high"
       },
       {
         "path": "docs/api/saga-validation.md",
@@ -2707,7 +2921,8 @@
         "code_churn_in_window": 104,
         "subject_code_count": 65,
         "subject_method": "parallel-docs-tree",
-        "ratio": 52.0
+        "ratio": 52.0,
+        "confidence": "high"
       },
       {
         "path": "services/identity/README.md",
@@ -2716,7 +2931,8 @@
         "code_churn_in_window": 156,
         "subject_code_count": 67,
         "subject_method": "nearest-ancestor",
-        "ratio": 52.0
+        "ratio": 52.0,
+        "confidence": "high"
       },
       {
         "path": "services/market-information/README.md",
@@ -2725,7 +2941,8 @@
         "code_churn_in_window": 201,
         "subject_code_count": 93,
         "subject_method": "nearest-ancestor",
-        "ratio": 50.25
+        "ratio": 50.25,
+        "confidence": "high"
       },
       {
         "path": "docs/archive/ARCHITECTURE.md",
@@ -2734,7 +2951,8 @@
         "code_churn_in_window": 44,
         "subject_code_count": 5,
         "subject_method": "parallel-docs-tree",
-        "ratio": 44.0
+        "ratio": 44.0,
+        "confidence": "high"
       },
       {
         "path": "services/internal-account/README.md",
@@ -2743,7 +2961,8 @@
         "code_churn_in_window": 188,
         "subject_code_count": 108,
         "subject_method": "nearest-ancestor",
-        "ratio": 37.6
+        "ratio": 37.6,
+        "confidence": "high"
       },
       {
         "path": "services/financial-gateway/README.md",
@@ -2752,7 +2971,8 @@
         "code_churn_in_window": 74,
         "subject_code_count": 42,
         "subject_method": "nearest-ancestor",
-        "ratio": 37.0
+        "ratio": 37.0,
+        "confidence": "high"
       },
       {
         "path": "services/forecasting/README.md",
@@ -2761,7 +2981,8 @@
         "code_churn_in_window": 70,
         "subject_code_count": 45,
         "subject_method": "nearest-ancestor",
-        "ratio": 35.0
+        "ratio": 35.0,
+        "confidence": "high"
       },
       {
         "path": "docs/audit/frontend-backend-gaps.md",
@@ -2770,7 +2991,8 @@
         "code_churn_in_window": 55,
         "subject_code_count": 19,
         "subject_method": "parallel-docs-tree",
-        "ratio": 27.5
+        "ratio": 27.5,
+        "confidence": "high"
       },
       {
         "path": "api/proto/README.md",
@@ -2779,7 +3001,8 @@
         "code_churn_in_window": 157,
         "subject_code_count": 84,
         "subject_method": "nearest-ancestor",
-        "ratio": 26.17
+        "ratio": 26.17,
+        "confidence": "high"
       },
       {
         "path": "docs/architecture/boundary-migration-plan.md",
@@ -2788,7 +3011,8 @@
         "code_churn_in_window": 44,
         "subject_code_count": 5,
         "subject_method": "parallel-docs-tree",
-        "ratio": 22.0
+        "ratio": 22.0,
+        "confidence": "high"
       },
       {
         "path": "docs/architecture/data-model.md",
@@ -2797,7 +3021,8 @@
         "code_churn_in_window": 44,
         "subject_code_count": 5,
         "subject_method": "parallel-docs-tree",
-        "ratio": 22.0
+        "ratio": 22.0,
+        "confidence": "high"
       },
       {
         "path": "docs/architecture/service-coupling-analysis.md",
@@ -2806,7 +3031,8 @@
         "code_churn_in_window": 44,
         "subject_code_count": 5,
         "subject_method": "parallel-docs-tree",
-        "ratio": 22.0
+        "ratio": 22.0,
+        "confidence": "high"
       },
       {
         "path": "docs/architecture/starlark-saga-architecture.md",
@@ -2815,25 +3041,28 @@
         "code_churn_in_window": 44,
         "subject_code_count": 5,
         "subject_method": "parallel-docs-tree",
-        "ratio": 22.0
+        "ratio": 22.0,
+        "confidence": "high"
       },
       {
         "path": "shared/platform/observability/README.md",
-        "last_commit_days": 129,
+        "last_commit_days": 130,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 43,
         "subject_code_count": 19,
         "subject_method": "nearest-ancestor",
-        "ratio": 21.5
+        "ratio": 21.5,
+        "confidence": "high"
       },
       {
         "path": "shared/platform/bootstrap/README.md",
-        "last_commit_days": 129,
+        "last_commit_days": 130,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 33,
         "subject_code_count": 18,
         "subject_method": "nearest-ancestor",
-        "ratio": 16.5
+        "ratio": 16.5,
+        "confidence": "high"
       },
       {
         "path": "docs/architecture/event-driven-architecture.md",
@@ -2842,7 +3071,8 @@
         "code_churn_in_window": 44,
         "subject_code_count": 5,
         "subject_method": "parallel-docs-tree",
-        "ratio": 14.67
+        "ratio": 14.67,
+        "confidence": "high"
       },
       {
         "path": "cookbook/README.md",
@@ -2851,7 +3081,8 @@
         "code_churn_in_window": 14,
         "subject_code_count": 6,
         "subject_method": "nearest-ancestor",
-        "ratio": 14.0
+        "ratio": 14.0,
+        "confidence": "high"
       },
       {
         "path": "services/event-router/README.md",
@@ -2860,7 +3091,8 @@
         "code_churn_in_window": 68,
         "subject_code_count": 48,
         "subject_method": "nearest-ancestor",
-        "ratio": 13.6
+        "ratio": 13.6,
+        "confidence": "high"
       },
       {
         "path": "README.md",
@@ -2869,16 +3101,18 @@
         "code_churn_in_window": 513,
         "subject_code_count": 198,
         "subject_method": "nearest-ancestor",
-        "ratio": 11.66
+        "ratio": 11.66,
+        "confidence": "high"
       },
       {
         "path": "shared/platform/audit/README.md",
-        "last_commit_days": 129,
+        "last_commit_days": 130,
         "doc_churn_in_window": 5,
         "code_churn_in_window": 55,
         "subject_code_count": 19,
         "subject_method": "nearest-ancestor",
-        "ratio": 11.0
+        "ratio": 11.0,
+        "confidence": "high"
       },
       {
         "path": "docs/adr/0019-resilient-client-patterns.md",
@@ -2887,7 +3121,8 @@
         "code_churn_in_window": 10,
         "subject_code_count": 5,
         "subject_method": "explicit-links",
-        "ratio": 10.0
+        "ratio": 10.0,
+        "confidence": "high"
       },
       {
         "path": "services/audit-worker/README.md",
@@ -2896,7 +3131,8 @@
         "code_churn_in_window": 50,
         "subject_code_count": 28,
         "subject_method": "nearest-ancestor",
-        "ratio": 8.33
+        "ratio": 8.33,
+        "confidence": "high"
       },
       {
         "path": "docs/mapping-layer/examples.md",
@@ -2905,7 +3141,8 @@
         "code_churn_in_window": 8,
         "subject_code_count": 6,
         "subject_method": "parallel-docs-tree",
-        "ratio": 8.0
+        "ratio": 8.0,
+        "confidence": "high"
       },
       {
         "path": "docs/patterns.md",
@@ -2914,7 +3151,8 @@
         "code_churn_in_window": 8,
         "subject_code_count": 1,
         "subject_method": "parallel-docs-tree",
-        "ratio": 8.0
+        "ratio": 8.0,
+        "confidence": "high"
       },
       {
         "path": "docs/adr/0034-position-compaction-strategy.md",
@@ -2923,7 +3161,8 @@
         "code_churn_in_window": 7,
         "subject_code_count": 3,
         "subject_method": "explicit-links",
-        "ratio": 7.0
+        "ratio": 7.0,
+        "confidence": "high"
       },
       {
         "path": "docs/architecture/bian-service-boundaries.md",
@@ -2932,7 +3171,8 @@
         "code_churn_in_window": 44,
         "subject_code_count": 5,
         "subject_method": "parallel-docs-tree",
-        "ratio": 6.29
+        "ratio": 6.29,
+        "confidence": "high"
       },
       {
         "path": "deploy/demo/README.md",
@@ -2941,7 +3181,8 @@
         "code_churn_in_window": 10,
         "subject_code_count": 3,
         "subject_method": "nearest-ancestor",
-        "ratio": 5.0
+        "ratio": 5.0,
+        "confidence": "high"
       },
       {
         "path": "services/internal-account/benchmarks/README.md",
@@ -2950,7 +3191,8 @@
         "code_churn_in_window": 10,
         "subject_code_count": 4,
         "subject_method": "nearest-ancestor",
-        "ratio": 5.0
+        "ratio": 5.0,
+        "confidence": "high"
       },
       {
         "path": "services/internal-account/examples/README.md",
@@ -2959,7 +3201,8 @@
         "code_churn_in_window": 8,
         "subject_code_count": 6,
         "subject_method": "nearest-ancestor",
-        "ratio": 4.0
+        "ratio": 4.0,
+        "confidence": "high"
       },
       {
         "path": "docs/guides/ai-native-codebase-architecture.md",
@@ -2968,7 +3211,8 @@
         "code_churn_in_window": 3,
         "subject_code_count": 1,
         "subject_method": "explicit-links",
-        "ratio": 3.0
+        "ratio": 3.0,
+        "confidence": "high"
       },
       {
         "path": "docs/adr/0020-per-service-audit-workers.md",
@@ -2977,7 +3221,8 @@
         "code_churn_in_window": 6,
         "subject_code_count": 1,
         "subject_method": "explicit-links",
-        "ratio": 2.0
+        "ratio": 2.0,
+        "confidence": "high"
       },
       {
         "path": "docs/adr/0035-multi-asset-purity.md",
@@ -2986,7 +3231,8 @@
         "code_churn_in_window": 2,
         "subject_code_count": 2,
         "subject_method": "explicit-links",
-        "ratio": 2.0
+        "ratio": 2.0,
+        "confidence": "high"
       },
       {
         "path": "tests/audit-e2e/README.md",
@@ -2995,7 +3241,8 @@
         "code_churn_in_window": 4,
         "subject_code_count": 2,
         "subject_method": "nearest-ancestor",
-        "ratio": 1.33
+        "ratio": 1.33,
+        "confidence": "high"
       },
       {
         "path": "deployments/k8s/policies/tests/README.md",
@@ -3004,7 +3251,8 @@
         "code_churn_in_window": 1,
         "subject_code_count": 1,
         "subject_method": "nearest-ancestor",
-        "ratio": 1.0
+        "ratio": 1.0,
+        "confidence": "high"
       },
       {
         "path": "docs/services/party/verification-guide.md",
@@ -3013,7 +3261,8 @@
         "code_churn_in_window": 1,
         "subject_code_count": 1,
         "subject_method": "parallel-docs-tree",
-        "ratio": 1.0
+        "ratio": 1.0,
+        "confidence": "high"
       },
       {
         "path": "docs/skills/testing.md",
@@ -3022,7 +3271,8 @@
         "code_churn_in_window": 1,
         "subject_code_count": 1,
         "subject_method": "explicit-links",
-        "ratio": 1.0
+        "ratio": 1.0,
+        "confidence": "high"
       },
       {
         "path": "scripts/kafka-tests/README.md",
@@ -3031,7 +3281,8 @@
         "code_churn_in_window": 3,
         "subject_code_count": 2,
         "subject_method": "nearest-ancestor",
-        "ratio": 1.0
+        "ratio": 1.0,
+        "confidence": "high"
       },
       {
         "path": ".githooks/README.md",
@@ -3040,7 +3291,8 @@
         "code_churn_in_window": 2,
         "subject_code_count": 1,
         "subject_method": "nearest-ancestor",
-        "ratio": 0.67
+        "ratio": 0.67,
+        "confidence": "high"
       },
       {
         "path": "services/README.md",
@@ -3049,7 +3301,8 @@
         "code_churn_in_window": 1,
         "subject_code_count": 1,
         "subject_method": "nearest-ancestor",
-        "ratio": 0.06
+        "ratio": 0.06,
+        "confidence": "high"
       }
     ],
     "association": {
@@ -3069,7 +3322,8 @@
     "modularity": {
       "module_dir_count": 535,
       "module_dirs_with_base_doc": 47,
-      "base_doc_coverage": 0.088,
+      "base_doc_coverage": 1.0,
+      "base_doc_dir_ratio": 0.088,
       "code_file_count": 3463,
       "large_repo": true
     }
@@ -3081,6 +3335,8 @@
       "last_commit_days": 59,
       "code_churn_in_window": 8588,
       "ratio": 1431.33,
+      "subject_method": "repo-baseline",
+      "confidence": "low",
       "priority": 87.454
     },
     {
@@ -3089,6 +3345,8 @@
       "last_commit_days": 59,
       "code_churn_in_window": 8588,
       "ratio": 1073.5,
+      "subject_method": "repo-baseline",
+      "confidence": "low",
       "priority": 70.529
     },
     {
@@ -3097,6 +3355,8 @@
       "last_commit_days": 88,
       "code_churn_in_window": 8588,
       "ratio": 2147.0,
+      "subject_method": "repo-baseline",
+      "confidence": "low",
       "priority": 45.731
     },
     {
@@ -3105,6 +3365,8 @@
       "last_commit_days": 53,
       "code_churn_in_window": 8588,
       "ratio": 858.8,
+      "subject_method": "repo-baseline",
+      "confidence": "low",
       "priority": 40.192
     },
     {
@@ -3113,6 +3375,8 @@
       "last_commit_days": 53,
       "code_churn_in_window": 8588,
       "ratio": 715.67,
+      "subject_method": "repo-baseline",
+      "confidence": "low",
       "priority": 39.076
     },
     {
@@ -3121,6 +3385,8 @@
       "last_commit_days": 111,
       "code_churn_in_window": 8588,
       "ratio": 1717.6,
+      "subject_method": "repo-baseline",
+      "confidence": "low",
       "priority": 34.696
     },
     {
@@ -3129,6 +3395,8 @@
       "last_commit_days": 59,
       "code_churn_in_window": 8588,
       "ratio": 1431.33,
+      "subject_method": "repo-baseline",
+      "confidence": "low",
       "priority": 27.625
     },
     {
@@ -3137,6 +3405,8 @@
       "last_commit_days": 146,
       "code_churn_in_window": 44,
       "ratio": 22.0,
+      "subject_method": "parallel-docs-tree",
+      "confidence": "high",
       "priority": 0.664
     },
     {
@@ -3145,6 +3415,8 @@
       "last_commit_days": 88,
       "code_churn_in_window": 44,
       "ratio": 14.67,
+      "subject_method": "parallel-docs-tree",
+      "confidence": "high",
       "priority": 0.364
     },
     {
@@ -3153,27 +3425,23 @@
       "last_commit_days": 88,
       "code_churn_in_window": 44,
       "ratio": 6.29,
+      "subject_method": "parallel-docs-tree",
+      "confidence": "high",
       "priority": 0.169
     }
   ],
   "untracked_instruction_files": [],
   "broken_instruction_refs": [],
   "dead_code": {
-    "available": false,
+    "available": true,
     "candidate_count": 0,
     "candidates": [],
     "tools": [
       {
         "language": "typescript",
         "tool": "ts-prune",
-        "status": "tool_absent",
-        "reason": "ts-prune not on PATH"
-      },
-      {
-        "language": "typescript",
-        "tool": "knip",
-        "status": "tool_absent",
-        "reason": "knip not on PATH"
+        "status": "ran",
+        "reason": "0 candidate(s)"
       },
       {
         "language": "go",
@@ -3184,8 +3452,8 @@
       {
         "language": "go",
         "tool": "staticcheck",
-        "status": "tool_absent",
-        "reason": "staticcheck not on PATH"
+        "status": "available_not_run",
+        "reason": "staticcheck would build the project (may write the module cache / hit the network); not run by a read-only assessment. Run `staticcheck -checks U1000 ./...` manually to cross-check."
       }
     ],
     "caveat": "Static reachability proves nothing in THIS repo references the symbol; it cannot prove no external consumer (a mobile app, another service) calls it. Cross-boundary liveness needs telemetry or a named human."
@@ -3279,6 +3547,6 @@
     },
     "boundary": "Scores what the repo makes agent-reachable; cannot observe the agent's live environment."
   },
-  "plugin_version": "1.10.0",
+  "plugin_version": "1.11.0",
   "anomalies": []
 }

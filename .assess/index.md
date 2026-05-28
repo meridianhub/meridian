@@ -11,7 +11,7 @@ Catalog of every hotspot ever flagged by `/assess` in this repo. Status reflects
 | `services/payment-order/service/grpc_service_test.go` | 2026-05-22 | 2026-05-28 | persistent | 204.0 | 2283 |
 | `services/position-keeping/domain/financial_position_log_test.go` | 2026-05-22 | 2026-05-28 | persistent | 336.0 | 1597 |
 | `services/current-account/service/grpc_service_test.go` | 2026-05-22 | 2026-05-28 | persistent | 138.0 | 1427 |
-| `frontend/src/features/manifests/components/manifest-graph.tsx` | 2026-05-22 | 2026-05-28 | regressed | 156.0 | 993 |
+| `frontend/src/features/manifests/components/manifest-graph.tsx` | 2026-05-22 | 2026-05-28 | persistent | 156.0 | 993 |
 | `services/mcp-server/internal/tools/economy_test.go` | 2026-05-22 | 2026-05-28 | persistent | 194.0 | 1023 |
 | `frontend/src/features/manifests/components/manifest-graph.test.tsx` | 2026-05-22 | 2026-05-28 | persistent | 152.0 | 696 |
 | `services/identity/service/grpc_service_test.go` | 2026-05-22 | 2026-05-28 | persistent | 161.0 | 1534 |

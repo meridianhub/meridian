@@ -25,5 +25,5 @@ Hotspot (persistent). 2889 LOC, max cyclomatic complexity 477.0, 0 commits in ch
 
 ## Suggested actions
 
-- Group cases by manifest section (services, sagas, accounts, instruments) and split into separate files
+- Group cases by manifest section (services, sagas, accounts, instruments) and split
 

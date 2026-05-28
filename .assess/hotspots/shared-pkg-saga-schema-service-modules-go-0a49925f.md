@@ -25,6 +25,6 @@ Hotspot (persistent). 474 LOC, max cyclomatic complexity 136.0, 0 commits in chu
 
 ## Suggested actions
 
-- Split the auto-derived Starlark client builders into one file per service module
+- Split auto-derived Starlark client builders into one file per service module
 - Consider whether some of this can be generated rather than hand-written
 
