@@ -1,6 +1,5 @@
 {
-  "run_date": "2026-05-22",
-  "repo_root": "/Users/ben/dev/github.com/meridianhub/meridian/worktree/assess-snapshot-2026-05-21",
+  "run_date": "2026-05-28",
   "prior_stats_exists": true,
   "stats_summary": {
     "files_scored": 3264,
@@ -11,8 +10,8 @@
       "total": 656693
     },
     "ccn": {
-      "p50": 18.0,
-      "p95": 81.84999999999991,
+      "p50": 18.5,
+      "p95": 82.0,
       "max": 477.0
     },
     "top_hotspots": [
@@ -54,7 +53,7 @@
       {
         "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
         "loc": 993,
-        "ccn": 155.0,
+        "ccn": 156.0,
         "churn": 15,
         "source": "lizard"
       },
@@ -88,17 +87,38 @@
       }
     ]
   },
-  "instruction_files": {},
-  "instructions_grade": "F",
+  "instruction_files": {
+    ".github/claude-review-instructions.md": {
+      "grade": "A",
+      "score": 100,
+      "subscores": {
+        "positive_directives": 31,
+        "tradeoff_phrases": 8,
+        "path_references": 30,
+        "verifiable_outcomes": 3
+      },
+      "freshness_days": 85,
+      "line_count": 795,
+      "present": true
+    }
+  },
+  "instructions_grade": "A",
   "diff": {
     "graduated": 0,
-    "regressed": 0,
+    "regressed": 1,
     "new": 0,
-    "persistent": 10
+    "persistent": 9
   },
   "diff_detail": {
     "graduated": [],
-    "regressed": [],
+    "regressed": [
+      {
+        "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
+        "ccn_delta": 1.0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      }
+    ],
     "new": [],
     "persistent": [
       {
@@ -132,12 +152,6 @@
         "loc_delta": 0
       },
       {
-        "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
-        "ccn_delta": 0.0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
         "path": "services/mcp-server/internal/tools/economy_test.go",
         "ccn_delta": 0.0,
         "commits_delta": 0,
@@ -163,5 +177,3108 @@
       }
     ]
   },
+  "doc_graph": {
+    "available": true,
+    "reason": "",
+    "doc_count": 254,
+    "edge_count": 622,
+    "hubs": [
+      {
+        "path": "docs/adr/0005-adapter-pattern-layer-translation.md",
+        "pagerank": 0.0657,
+        "out_degree": 2,
+        "in_degree": 22
+      },
+      {
+        "path": "docs/adr/0004-event-schema-evolution.md",
+        "pagerank": 0.0611,
+        "out_degree": 4,
+        "in_degree": 17
+      },
+      {
+        "path": "docs/adr/0003-database-schema-migrations.md",
+        "pagerank": 0.0546,
+        "out_degree": 5,
+        "in_degree": 10
+      },
+      {
+        "path": "docs/adr/0002-microservices-per-bian-domain.md",
+        "pagerank": 0.0468,
+        "out_degree": 8,
+        "in_degree": 29
+      },
+      {
+        "path": "docs/architecture/service-coupling-analysis.md",
+        "pagerank": 0.0302,
+        "out_degree": 4,
+        "in_degree": 13
+      },
+      {
+        "path": "docs/architecture/bian-service-boundaries.md",
+        "pagerank": 0.0269,
+        "out_degree": 5,
+        "in_degree": 11
+      },
+      {
+        "path": "docs/architecture/event-driven-architecture.md",
+        "pagerank": 0.0248,
+        "out_degree": 4,
+        "in_degree": 5
+      },
+      {
+        "path": "docs/adr/0014-financial-instrument-reference-data.md",
+        "pagerank": 0.0213,
+        "out_degree": 3,
+        "in_degree": 15
+      },
+      {
+        "path": "docs/adr/0013-generic-asset-quantity-types.md",
+        "pagerank": 0.0202,
+        "out_degree": 3,
+        "in_degree": 15
+      },
+      {
+        "path": "docs/architecture/api-contracts/current-account-contract.md",
+        "pagerank": 0.0193,
+        "out_degree": 4,
+        "in_degree": 2
+      }
+    ],
+    "orphans": [
+      ".github/claude-review-instructions.md",
+      "CHANGELOG.md",
+      "CODE_OF_CONDUCT.md",
+      "cookbook/docs/authoring-components.md",
+      "cookbook/docs/authoring-patterns.md",
+      "deploy/demo/README.md",
+      "deploy/demo/cloudflare-setup-checklist.md",
+      "deploy/demo/dex-identity-migration-plan.md",
+      "deploy/demo/pg-migration-compatibility-report.md",
+      "deployments/k8s/policies/tests/README.md",
+      "docs/adr/0029-settlement-scheduler-architecture.md",
+      "docs/adr/0030-kyc-aml-provider-selection.md",
+      "docs/adr/0034-position-compaction-strategy.md",
+      "docs/adr/0036-embedded-dex-identity.md",
+      "docs/adr/0037-scheduler-attribution-design.md",
+      "docs/analysis/cmd-coverage-assessment.md",
+      "docs/api/saga-validation.md",
+      "docs/architecture/api-contracts/financial-accounting-contract.md",
+      "docs/architecture/api-contracts/position-keeping-contract.md",
+      "docs/archive/README.md",
+      "docs/archive/audit-analysis-findings.md",
+      "docs/archive/authentication-integration.md",
+      "docs/archive/immutability-audit.md",
+      "docs/archive/panic-audit-inventory.md",
+      "docs/archive/rbac-testing-guide.md",
+      "docs/archive/task-8-service-integration.md",
+      "docs/audit/frontend-backend-gaps.md",
+      "docs/audit/multi-asset-purity.md",
+      "docs/coupling-visualization-example.md",
+      "docs/demos/multi-organization-settlement.md",
+      "docs/guides/README.md",
+      "docs/integrations/kyc-aml-providers.md",
+      "docs/mapping-layer/README.md",
+      "docs/mapping-layer/troubleshooting.md",
+      "docs/prd/047-security-audit-status.md",
+      "docs/prd/061-mcp-auth-session-unification.md",
+      "docs/prd/062-self-service-onboarding-readiness.md",
+      "docs/reports/market-information-go-live-readiness.md",
+      "docs/reports/market-information-integration.md",
+      "docs/reports/market-information-traceability.md",
+      "docs/reports/saga-handler-audit.md",
+      "docs/runbooks/README.md",
+      "docs/runbooks/email-infrastructure.md",
+      "docs/runbooks/party-kyc-verification.md",
+      "docs/secrets-management.md",
+      "docs/security/pgx-tenant-audit.md",
+      "docs/services/party/verification-guide.md",
+      "docs/testing/CHAOS_TESTING.md",
+      "docs/testing/COVERAGE_ANALYSIS.md",
+      "docs/tilt-fast-startup.md",
+      "frontend/README.md",
+      "frontend/docs/tenant-subdomain-routing.md",
+      "scripts/kafka-tests/README.md",
+      "services/event-router/k8s/README.md",
+      "services/internal-account/benchmarks/README.md",
+      "services/internal-account/examples/README.md",
+      "services/market-information/README.md",
+      "services/mcp-server/internal/resources/docs/cel-reference.md",
+      "services/mcp-server/internal/resources/docs/starlark-guide.md",
+      "services/payment-order/service/HANDLER_ARCHITECTURE.md",
+      "shared/domain/money/PRECISION_GUARANTEES.md",
+      "tests/audit-e2e/README.md"
+    ],
+    "orphan_rate": 0.244,
+    "island_count": 43,
+    "reachability_pct": 0.303,
+    "entry_points": [
+      "README.md"
+    ],
+    "unreachable": [
+      ".github/claude-review-instructions.md",
+      "CHANGELOG.md",
+      "CODE_OF_CONDUCT.md",
+      "SECURITY.md",
+      "cookbook/README.md",
+      "cookbook/docs/authoring-components.md",
+      "cookbook/docs/authoring-patterns.md",
+      "deploy/demo/README.md",
+      "deploy/demo/cloudflare-setup-checklist.md",
+      "deploy/demo/dex-identity-migration-plan.md",
+      "deploy/demo/pg-migration-compatibility-report.md",
+      "deployments/k8s/audit-consumer/README.md",
+      "deployments/k8s/policies/tests/README.md",
+      "docs/adr/0001-record-architecture-decisions.md",
+      "docs/adr/0006-tilt-local-development.md",
+      "docs/adr/0007-raw-yaml-over-helm-for-initial-development.md",
+      "docs/adr/0011-iso-20022-compliance-via-adapter-layer.md",
+      "docs/adr/0012-lien-based-fund-reservation.md",
+      "docs/adr/0015-standard-service-directory-structure.md",
+      "docs/adr/0020-per-service-audit-workers.md",
+      "docs/adr/0021-kyc-aml-verification-provider-architecture.md",
+      "docs/adr/0022-instrument-successor-lineage.md",
+      "docs/adr/0024-internal-bank-account-service.md",
+      "docs/adr/0025-clearing-purpose-specialization.md",
+      "docs/adr/0026-canonical-ingestion-contract.md",
+      "docs/adr/0027-market-information-management.md",
+      "docs/adr/0029-settlement-scheduler-architecture.md",
+      "docs/adr/0030-kyc-aml-provider-selection.md",
+      "docs/adr/0031-getbalance-nil-guard-retention.md",
+      "docs/adr/0034-position-compaction-strategy.md",
+      "docs/adr/0036-embedded-dex-identity.md",
+      "docs/adr/0037-scheduler-attribution-design.md",
+      "docs/adr/README.md",
+      "docs/adr/template.md",
+      "docs/analysis/cmd-coverage-assessment.md",
+      "docs/api/saga-validation.md",
+      "docs/architecture/api-contracts/financial-accounting-contract.md",
+      "docs/architecture/api-contracts/position-keeping-contract.md",
+      "docs/archive/ARCHITECTURE.md",
+      "docs/archive/DEMO_GUIDE.md",
+      "docs/archive/README.md",
+      "docs/archive/audit-analysis-findings.md",
+      "docs/archive/authentication-integration.md",
+      "docs/archive/immutability-audit.md",
+      "docs/archive/panic-audit-inventory.md",
+      "docs/archive/rbac-testing-guide.md",
+      "docs/archive/task-8-service-integration.md",
+      "docs/audit/frontend-backend-gaps.md",
+      "docs/audit/multi-asset-purity.md",
+      "docs/claude-code-skills.md",
+      "docs/coupling-visualization-example.md",
+      "docs/demos/multi-organization-settlement.md",
+      "docs/development/audit-adding-new-service.md",
+      "docs/guides/README.md",
+      "docs/guides/ai-native-codebase-architecture.md",
+      "docs/guides/calling-meridian-apis.md",
+      "docs/guides/circuit-breaker-usage.md",
+      "docs/guides/cli-tools.md",
+      "docs/guides/coupling-analysis.md",
+      "docs/guides/error-conventions.md",
+      "docs/guides/financial-accounting-proto.md",
+      "docs/guides/multi-asset-integration.md",
+      "docs/guides/new-bian-service-checklist.md",
+      "docs/guides/proto-conventions.md",
+      "docs/guides/repository-conventions.md",
+      "docs/guides/service-file-conventions.md",
+      "docs/guides/testcontainers-usage.md",
+      "docs/guides/value-types.md",
+      "docs/integrations/kyc-aml-providers.md",
+      "docs/mapping-layer/README.md",
+      "docs/mapping-layer/examples.md",
+      "docs/mapping-layer/troubleshooting.md",
+      "docs/operations/audit-monitoring.md",
+      "docs/prd/001-universal-asset-system.md",
+      "docs/prd/002-internal-bank-account.md",
+      "docs/prd/003-meridian-edge.md",
+      "docs/prd/004-market-information-management.md",
+      "docs/prd/009-production-readiness-review.md",
+      "docs/prd/010-starlark-testing-framework.md",
+      "docs/prd/011-valuation-service.md",
+      "docs/prd/012-codebase-health-audit.md",
+      "docs/prd/013-reconciliation-service.md",
+      "docs/prd/014-control-plane.md",
+      "docs/prd/015-stripe-connect.md",
+      "docs/prd/016-market-data-dynamic-pricing.md",
+      "docs/prd/017-reconciliation-grpc-wiring.md",
+      "docs/prd/018-current-account-withdrawal-persistence.md",
+      "docs/prd/019-internal-bank-account-position-keeping-client.md",
+      "docs/prd/020-party-kyc-aml-provider-integration.md",
+      "docs/prd/021-platform-scheduler.md",
+      "docs/prd/022-org-scoped-accounts.md",
+      "docs/prd/023-product-directory.md",
+      "docs/prd/024-structured-inbound-mapping.md",
+      "docs/prd/025-real-time-event-streaming.md",
+      "docs/prd/026-operations-console-ui.md",
+      "docs/prd/027-mcp-server.md",
+      "docs/prd/028-asset-agnostic-accounts.md",
+      "docs/prd/029-operational-gateway.md",
+      "docs/prd/030-asyncapi-specification.md",
+      "docs/prd/031-identity-access-management.md",
+      "docs/prd/032-event-driven-valuation-saga.md",
+      "docs/prd/033-gateway-architecture.md",
+      "docs/prd/034-frontend-service-alignment.md",
+      "docs/prd/035-economy-cookbook.md",
+      "docs/prd/036-cookbook-browser.md",
+      "docs/prd/037-multi-asset-purity.md",
+      "docs/prd/038-manifest-business-model-visualization.md",
+      "docs/prd/039-meridian-vm.md",
+      "docs/prd/040-handler-schema-alignment.md",
+      "docs/prd/041-economy-generator.md",
+      "docs/prd/042-economy-ide.md",
+      "docs/prd/043-mcp-manifest-tenant-isolation.md",
+      "docs/prd/044-auth-flow-architecture.md",
+      "docs/prd/045-manifest-as-sole-source-of-truth.md",
+      "docs/prd/046-economy-visualization-completeness.md",
+      "docs/prd/047-security-audit-status.md",
+      "docs/prd/047-security-audit.md",
+      "docs/prd/048-test-coverage-80.md",
+      "docs/prd/049-codebase-consistency.md",
+      "docs/prd/050-demo-sandbox.md",
+      "docs/prd/051-party-navigation.md",
+      "docs/prd/052-email-platform.md",
+      "docs/prd/053-auth-email-flows.md",
+      "docs/prd/054-billing-ui.md",
+      "docs/prd/055-tenant-branding.md",
+      "docs/prd/056-correspondence-service.md",
+      "docs/prd/057-convergent-manifest-apply.md",
+      "docs/prd/058-full-economy-visibility.md",
+      "docs/prd/059-asset-agnostic-posting-layer.md",
+      "docs/prd/060-per-tenant-scheduled-execution.md",
+      "docs/prd/061-mcp-auth-session-unification.md",
+      "docs/prd/062-self-service-onboarding-readiness.md",
+      "docs/prd/README.md",
+      "docs/reports/market-information-go-live-readiness.md",
+      "docs/reports/market-information-integration.md",
+      "docs/reports/market-information-traceability.md",
+      "docs/reports/saga-handler-audit.md",
+      "docs/runbooks/README.md",
+      "docs/runbooks/email-infrastructure.md",
+      "docs/runbooks/internal-account-operations.md",
+      "docs/runbooks/market-information-operations.md",
+      "docs/runbooks/party-kyc-verification.md",
+      "docs/runbooks/production-deployment.md",
+      "docs/saga-handler-loading.md",
+      "docs/secrets-management.md",
+      "docs/security/pgx-tenant-audit.md",
+      "docs/services/party/verification-guide.md",
+      "docs/skills/README.md",
+      "docs/skills/generate-llm-blueprint.md",
+      "docs/skills/testing.md",
+      "docs/testing/CHAOS_TESTING.md",
+      "docs/testing/COVERAGE_ANALYSIS.md",
+      "docs/tilt-fast-startup.md",
+      "frontend/README.md",
+      "frontend/docs/tenant-subdomain-routing.md",
+      "http/README.md",
+      "scripts/README.md",
+      "scripts/kafka-tests/README.md",
+      "services/audit-worker/README.md",
+      "services/event-router/k8s/README.md",
+      "services/financial-accounting/README.md",
+      "services/internal-account/benchmarks/README.md",
+      "services/internal-account/examples/README.md",
+      "services/market-information/README.md",
+      "services/mcp-server/internal/resources/docs/cel-reference.md",
+      "services/mcp-server/internal/resources/docs/starlark-guide.md",
+      "services/party/README.md",
+      "services/payment-order/README.md",
+      "services/payment-order/service/HANDLER_ARCHITECTURE.md",
+      "services/tenant/README.md",
+      "shared/README.md",
+      "shared/domain/money/PRECISION_GUARANTEES.md",
+      "shared/platform/audit/README.md",
+      "shared/platform/bootstrap/README.md",
+      "shared/platform/bootstrap/SHUTDOWN_USAGE.md",
+      "shared/platform/observability/README.md",
+      "tests/audit-e2e/README.md"
+    ],
+    "declared_mocs": [],
+    "moc_named_but_not_wired": [],
+    "doc_to_code_edges": [
+      {
+        "doc": "docs/adr/0019-resilient-client-patterns.md",
+        "code": "shared/pkg/clients/circuitbreaker.go"
+      },
+      {
+        "doc": "docs/adr/0019-resilient-client-patterns.md",
+        "code": "shared/pkg/clients/retry.go"
+      },
+      {
+        "doc": "docs/adr/0019-resilient-client-patterns.md",
+        "code": "shared/pkg/clients/resilient.go"
+      },
+      {
+        "doc": "docs/adr/0019-resilient-client-patterns.md",
+        "code": "shared/pkg/clients/saga.go"
+      },
+      {
+        "doc": "docs/adr/0019-resilient-client-patterns.md",
+        "code": "shared/pkg/clients/doc.go"
+      },
+      {
+        "doc": "docs/adr/0020-per-service-audit-workers.md",
+        "code": "shared/platform/audit/worker.go"
+      },
+      {
+        "doc": "docs/adr/0034-position-compaction-strategy.md",
+        "code": "services/position-keeping/worker/compaction_worker.go"
+      },
+      {
+        "doc": "docs/adr/0034-position-compaction-strategy.md",
+        "code": "services/position-keeping/worker/metrics.go"
+      },
+      {
+        "doc": "docs/adr/0034-position-compaction-strategy.md",
+        "code": "services/position-keeping/worker/compaction_worker_test.go"
+      },
+      {
+        "doc": "docs/adr/0035-multi-asset-purity.md",
+        "code": "scripts/lint-multi-asset-purity.sh"
+      },
+      {
+        "doc": "docs/adr/0035-multi-asset-purity.md",
+        "code": "shared/platform/quantity/instrument.go"
+      },
+      {
+        "doc": "docs/guides/ai-native-codebase-architecture.md",
+        "code": "scripts/verify-service-conventions.sh"
+      },
+      {
+        "doc": "docs/skills/testing.md",
+        "code": "shared/platform/await/await.go"
+      },
+      {
+        "doc": "services/api-gateway/README.md",
+        "code": "services/mcp-server/internal/clients/clients.go"
+      },
+      {
+        "doc": "services/api-gateway/README.md",
+        "code": "services/mcp-server/cmd/main.go"
+      },
+      {
+        "doc": "services/financial-gateway/README.md",
+        "code": "services/payment-order/adapters/gateway/financial_gateway_client.go"
+      },
+      {
+        "doc": "services/financial-gateway/README.md",
+        "code": "services/control-plane/cmd/validate/main.go"
+      },
+      {
+        "doc": "services/forecasting/README.md",
+        "code": "shared/platform/sandbox/config.go"
+      },
+      {
+        "doc": "services/identity/README.md",
+        "code": "cmd/meridian/wire_identity.go"
+      },
+      {
+        "doc": "services/mcp-server/README.md",
+        "code": "services/mcp-server/internal/clients/clients.go"
+      },
+      {
+        "doc": "services/mcp-server/README.md",
+        "code": "services/api-gateway/mcp_consent_handler.go"
+      },
+      {
+        "doc": "services/operational-gateway/README.md",
+        "code": "services/control-plane/internal/applier/operational_gateway_client.go"
+      },
+      {
+        "doc": "services/operational-gateway/README.md",
+        "code": "services/control-plane/cmd/validate/main.go"
+      },
+      {
+        "doc": "services/operational-gateway/README.md",
+        "code": "services/control-plane/internal/differ/grpc_live_state_adapters.go"
+      },
+      {
+        "doc": "services/operational-gateway/README.md",
+        "code": "services/mcp-server/internal/clients/clients.go"
+      },
+      {
+        "doc": "services/operational-gateway/README.md",
+        "code": "services/mcp-server/cmd/wire.go"
+      }
+    ],
+    "dangling_links": 15,
+    "broken_links": [
+      {
+        "from": "docs/adr/0002-microservices-per-bian-domain.md",
+        "target": "../../../bian/bian-public-main/release14.0.0/semantic-apis/",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/adr/0014-financial-instrument-reference-data.md",
+        "target": "maxEntries",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/architecture/bian-service-boundaries.md",
+        "target": "$violations -gt 0",
+        "kind": "wikilink"
+      },
+      {
+        "from": "docs/guides/value-types.md",
+        "target": "decimal.NewFromInt(100",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/guides/value-types.md",
+        "target": "items []quantity.Qty[D]",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/prd/001-universal-asset-system.md",
+        "target": "decimal.NewFromInt(100",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/prd/001-universal-asset-system.md",
+        "target": "amount decimal.Decimal, inst Instrument",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/prd/001-universal-asset-system.md",
+        "target": "row.Amount, inst",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/prd/026-operations-console-ui.md",
+        "target": "'booking-logs', e.tenantSlug",
+        "kind": "wikilink"
+      },
+      {
+        "from": "docs/prd/026-operations-console-ui.md",
+        "target": "'reconciliations', e.tenantSlug",
+        "kind": "wikilink"
+      },
+      {
+        "from": "docs/prd/026-operations-console-ui.md",
+        "target": "'reconciliations', e.tenantSlug, { reconciliationId: e.reconciliationId }",
+        "kind": "wikilink"
+      },
+      {
+        "from": "docs/runbooks/saga-failure-recovery.md",
+        "target": "../../internal/current-account/service/grpc_service.go",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/runbooks/saga-failure-recovery.md",
+        "target": "../../internal/current-account/service/grpc_service_integration_test.go",
+        "kind": "mdlink"
+      },
+      {
+        "from": "docs/skills/kustomize.md",
+        "target": "../docs/adr/",
+        "kind": "mdlink"
+      },
+      {
+        "from": "shared/platform/audit/README.md",
+        "target": "tx *gorm.DB, entity T",
+        "kind": "mdlink"
+      }
+    ],
+    "missing_xrefs": [
+      {
+        "from": "cookbook/README.md",
+        "to": "cookbook/docs/authoring-patterns.md"
+      },
+      {
+        "from": "cookbook/README.md",
+        "to": "cookbook/docs/authoring-components.md"
+      },
+      {
+        "from": "docs/adr/0015-standard-service-directory-structure.md",
+        "to": "docs/guides/circuit-breaker-usage.md"
+      },
+      {
+        "from": "docs/adr/0015-standard-service-directory-structure.md",
+        "to": "docs/runbooks/incident-response.md"
+      },
+      {
+        "from": "docs/adr/0015-standard-service-directory-structure.md",
+        "to": "docs/architecture/service-coupling-analysis.md"
+      },
+      {
+        "from": "docs/adr/0015-standard-service-directory-structure.md",
+        "to": "docs/testing/COVERAGE_ANALYSIS.md"
+      },
+      {
+        "from": "docs/archive/README.md",
+        "to": "docs/archive/task-8-service-integration.md"
+      },
+      {
+        "from": "docs/archive/README.md",
+        "to": "docs/archive/immutability-audit.md"
+      },
+      {
+        "from": "docs/archive/README.md",
+        "to": "docs/archive/rbac-testing-guide.md"
+      },
+      {
+        "from": "docs/archive/README.md",
+        "to": "docs/archive/audit-analysis-findings.md"
+      },
+      {
+        "from": "docs/archive/README.md",
+        "to": "docs/archive/panic-audit-inventory.md"
+      },
+      {
+        "from": "docs/archive/README.md",
+        "to": "docs/archive/ARCHITECTURE.md"
+      },
+      {
+        "from": "docs/archive/README.md",
+        "to": "docs/archive/DEMO_GUIDE.md"
+      },
+      {
+        "from": "docs/archive/README.md",
+        "to": "docs/archive/authentication-integration.md"
+      },
+      {
+        "from": "docs/prd/049-codebase-consistency.md",
+        "to": "docs/guides/new-bian-service-checklist.md"
+      },
+      {
+        "from": "docs/prd/049-codebase-consistency.md",
+        "to": "docs/guides/error-conventions.md"
+      },
+      {
+        "from": "docs/prd/049-codebase-consistency.md",
+        "to": "docs/guides/repository-conventions.md"
+      },
+      {
+        "from": "docs/prd/049-codebase-consistency.md",
+        "to": "docs/guides/value-types.md"
+      },
+      {
+        "from": "docs/prd/README.md",
+        "to": "docs/archive/panic-audit-inventory.md"
+      }
+    ],
+    "ambiguous_wikilinks": 0,
+    "vault_detected": false,
+    "obsidiantools_available": false
+  },
+  "doc_staleness": {
+    "available": true,
+    "churn_window": "commits (last 12mo)",
+    "docs": [
+      {
+        "path": "CHANGELOG.md",
+        "last_commit_days": 113,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "deploy/demo/cloudflare-setup-checklist.md",
+        "last_commit_days": 93,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "deployments/k8s/audit-consumer/README.md",
+        "last_commit_days": 156,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0016-tenant-id-naming-strategy.md",
+        "last_commit_days": 165,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0021-kyc-aml-verification-provider-architecture.md",
+        "last_commit_days": 147,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0022-instrument-successor-lineage.md",
+        "last_commit_days": 143,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0023-balance-delegation-to-position-keeping.md",
+        "last_commit_days": 139,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0029-settlement-scheduler-architecture.md",
+        "last_commit_days": 107,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0030-kyc-aml-provider-selection.md",
+        "last_commit_days": 104,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0033-event-triggered-sagas.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0036-embedded-dex-identity.md",
+        "last_commit_days": 75,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/adr/0037-scheduler-attribution-design.md",
+        "last_commit_days": 51,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/analysis/cmd-coverage-assessment.md",
+        "last_commit_days": 71,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/architecture-layers.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/archive/DEMO_GUIDE.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/archive/audit-analysis-findings.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/archive/database-per-service-migration.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/archive/panic-audit-inventory.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/audits/tenant-isolation-audit-2026-04-04.md",
+        "last_commit_days": 54,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/coupling-visualization-example.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/data-flows.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/development/audit-adding-new-service.md",
+        "last_commit_days": 154,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/adding-starlark-service-bindings.md",
+        "last_commit_days": 113,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/cli-tools.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/coupling-analysis.md",
+        "last_commit_days": 171,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/error-conventions.md",
+        "last_commit_days": 70,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/multi-asset-integration.md",
+        "last_commit_days": 143,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/proto-conventions.md",
+        "last_commit_days": 70,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/saga-validation.md",
+        "last_commit_days": 110,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/service-file-conventions.md",
+        "last_commit_days": 70,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/guides/value-types.md",
+        "last_commit_days": 70,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/integrations/kyc-aml-providers.md",
+        "last_commit_days": 147,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/mapping-layer/troubleshooting.md",
+        "last_commit_days": 95,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/007-starlark-typed-service-clients.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/010-starlark-testing-framework.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/012-codebase-health-audit.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/013-reconciliation-service.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/015-stripe-connect.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/016-market-data-dynamic-pricing.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/018-current-account-withdrawal-persistence.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/020-party-kyc-aml-provider-integration.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/021-platform-scheduler.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/030-asyncapi-specification.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/032-event-driven-valuation-saga.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/033-gateway-architecture.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/035-economy-cookbook.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/037-multi-asset-purity.md",
+        "last_commit_days": 83,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/038-manifest-business-model-visualization.md",
+        "last_commit_days": 82,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/039-meridian-vm.md",
+        "last_commit_days": 81,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/040-handler-schema-alignment.md",
+        "last_commit_days": 80,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/043-mcp-manifest-tenant-isolation.md",
+        "last_commit_days": 77,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/044-auth-flow-architecture.md",
+        "last_commit_days": 74,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/045-manifest-as-sole-source-of-truth.md",
+        "last_commit_days": 73,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/047-security-audit.md",
+        "last_commit_days": 72,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/048-test-coverage-80.md",
+        "last_commit_days": 71,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/051-party-navigation.md",
+        "last_commit_days": 65,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/057-convergent-manifest-apply.md",
+        "last_commit_days": 57,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/058-full-economy-visibility.md",
+        "last_commit_days": 57,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/059-asset-agnostic-posting-layer.md",
+        "last_commit_days": 55,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/060-per-tenant-scheduled-execution.md",
+        "last_commit_days": 52,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/061-mcp-auth-session-unification.md",
+        "last_commit_days": 52,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/prd/062-self-service-onboarding-readiness.md",
+        "last_commit_days": 33,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/reports/cockroachdb-migration-audit.md",
+        "last_commit_days": 93,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/reports/market-information-go-live-readiness.md",
+        "last_commit_days": 127,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/reports/market-information-integration.md",
+        "last_commit_days": 127,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/runbooks/event-router.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/runbooks/market-information-operations.md",
+        "last_commit_days": 128,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/runbooks/party-kyc-verification.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/runbooks/troubleshooting-saga-handlers.md",
+        "last_commit_days": 113,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/saga-handler-loading.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/security/pgx-tenant-audit.md",
+        "last_commit_days": 72,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/service-readme-template.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "docs/skills/event-triggered-sagas.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "frontend/docs/tenant-subdomain-routing.md",
+        "last_commit_days": 79,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "services/mcp-server/internal/resources/docs/cel-reference.md",
+        "last_commit_days": 92,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "services/mcp-server/internal/resources/docs/starlark-guide.md",
+        "last_commit_days": 92,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "services/payment-order/service/HANDLER_ARCHITECTURE.md",
+        "last_commit_days": 119,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "shared/platform/bootstrap/SHUTDOWN_USAGE.md",
+        "last_commit_days": 147,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 8588.0
+      },
+      {
+        "path": "cookbook/docs/authoring-components.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "deploy/demo/dex-identity-migration-plan.md",
+        "last_commit_days": 79,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "deploy/demo/pg-migration-compatibility-report.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/adr/0008-defensive-testing-standards.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/adr/0012-lien-based-fund-reservation.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/adr/0024-internal-bank-account-service.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/adr/0026-canonical-ingestion-contract.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/adr/0027-market-information-management.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/adr/0032-vanguard-json-transcoding-gateway.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/archive/authentication-integration.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/archive/immutability-audit.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/archive/rbac-testing-guide.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/archive/task-8-service-integration.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/guides/circuit-breaker-usage.md",
+        "last_commit_days": 146,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/guides/financial-accounting-proto.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/guides/manifest-design-patterns.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/guides/repository-conventions.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/guides/starlark-built-ins-reference.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/local-documentation.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/mapping-layer/README.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/operations/audit-monitoring.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/001-universal-asset-system.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/003-meridian-edge.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/004-market-information-management.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/005-durable-execution-engine.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/017-reconciliation-grpc-wiring.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/026-operations-console-ui.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/031-identity-access-management.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/034-frontend-service-alignment.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/041-economy-generator.md",
+        "last_commit_days": 79,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/042-economy-ide.md",
+        "last_commit_days": 79,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/046-economy-visualization-completeness.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/052-email-platform.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/053-auth-email-flows.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/054-billing-ui.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/055-tenant-branding.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/prd/056-correspondence-service.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/reports/market-information-traceability.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/runbooks/email-infrastructure.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/runbooks/internal-account-operations.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/runbooks/saga-validation-failure.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/skills/generate-llm-blueprint.md",
+        "last_commit_days": 98,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/skills/kustomize.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/skills/security.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/skills/starlark-saga.md",
+        "last_commit_days": 58,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/spec/saga-contract.md",
+        "last_commit_days": 56,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/testing/CHAOS_TESTING.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "docs/testing/COVERAGE_ANALYSIS.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "services/control-plane/internal/applier/testdata/tenant-saga-examples/README.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "services/event-router/k8s/README.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "shared/domain/money/PRECISION_GUARANTEES.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 4294.0
+      },
+      {
+        "path": "CLA.md",
+        "last_commit_days": 105,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "CODE_OF_CONDUCT.md",
+        "last_commit_days": 189,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "SECURITY.md",
+        "last_commit_days": 111,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "cookbook/docs/authoring-patterns.md",
+        "last_commit_days": 77,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/adr/0001-record-architecture-decisions.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/adr/0010-grpc-client-side-load-balancing.md",
+        "last_commit_days": 160,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/adr/0011-iso-20022-compliance-via-adapter-layer.md",
+        "last_commit_days": 83,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/adr/0015-standard-service-directory-structure.md",
+        "last_commit_days": 146,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/adr/0031-getbalance-nil-guard-retention.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/adr/template.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/architecture/api-contracts/financial-accounting-contract.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/archive/README.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/demos/multi-organization-settlement.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/guides/calling-meridian-apis.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/guides/starlark-style-guide.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/002-internal-bank-account.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/006-starlark-saga-orchestration-core.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/008-starlark-service-bindings.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/009-production-readiness-review.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/011-valuation-service.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/014-control-plane.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/019-internal-bank-account-position-keeping-client.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/025-real-time-event-streaming.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/027-mcp-server.md",
+        "last_commit_days": 92,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/028-asset-agnostic-accounts.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/prd/047-security-audit-status.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/reports/saga-handler-audit.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/saga-service-catalog.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/secrets-management.md",
+        "last_commit_days": 162,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/skills/schema-evolution.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/tilt-fast-startup.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "http/README.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2862.67
+      },
+      {
+        "path": "docs/adr/0007-raw-yaml-over-helm-for-initial-development.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2147.0
+      },
+      {
+        "path": "docs/adr/0009-application-level-audit-logging.md",
+        "last_commit_days": 155,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2147.0
+      },
+      {
+        "path": "docs/adr/0014-financial-instrument-reference-data.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2147.0
+      },
+      {
+        "path": "docs/adr/0018-settlement-reconciliation.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2147.0
+      },
+      {
+        "path": "docs/adr/0025-clearing-purpose-specialization.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2147.0
+      },
+      {
+        "path": "docs/prd/029-operational-gateway.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2147.0
+      },
+      {
+        "path": "docs/runbooks/incident-response.md",
+        "last_commit_days": 189,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2147.0
+      },
+      {
+        "path": "docs/runbooks/saga-failure-recovery.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 2147.0
+      },
+      {
+        "path": ".github/claude-review-instructions.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "docs/adr/0013-generic-asset-quantity-types.md",
+        "last_commit_days": 111,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "docs/adr/0017-temporal-quality-ladder.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "docs/adr/0028-starlark-saga-cel-valuation.md",
+        "last_commit_days": 83,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "docs/architecture/api-contracts/position-keeping-contract.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "docs/prd/050-demo-sandbox.md",
+        "last_commit_days": 66,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "docs/runbooks/production-deployment.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "docs/skills/docker.md",
+        "last_commit_days": 50,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "docs/skills/tilt.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1717.6
+      },
+      {
+        "path": "frontend/README.md",
+        "last_commit_days": 95,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 1487,
+        "subject_code_count": 616,
+        "subject_method": "nearest-ancestor",
+        "ratio": 1487.0
+      },
+      {
+        "path": "docs/adr/0004-event-schema-evolution.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 6,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1431.33
+      },
+      {
+        "path": "docs/architecture/api-contracts/current-account-contract.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 6,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1431.33
+      },
+      {
+        "path": "docs/guides/testcontainers-usage.md",
+        "last_commit_days": 83,
+        "doc_churn_in_window": 6,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1431.33
+      },
+      {
+        "path": "docs/runbooks/README.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 6,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1431.33
+      },
+      {
+        "path": "docs/runbooks/disaster-recovery.md",
+        "last_commit_days": 160,
+        "doc_churn_in_window": 6,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1431.33
+      },
+      {
+        "path": "docs/claude-code-skills.md",
+        "last_commit_days": 14,
+        "doc_churn_in_window": 7,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1226.86
+      },
+      {
+        "path": "docs/prd/036-cookbook-browser.md",
+        "last_commit_days": 83,
+        "doc_churn_in_window": 7,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1226.86
+      },
+      {
+        "path": "docs/adr/0005-adapter-pattern-layer-translation.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 8,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1073.5
+      },
+      {
+        "path": "docs/prd/022-org-scoped-accounts.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 8,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 1073.5
+      },
+      {
+        "path": "docs/guides/README.md",
+        "last_commit_days": 69,
+        "doc_churn_in_window": 9,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 954.22
+      },
+      {
+        "path": "docs/adr/0002-microservices-per-bian-domain.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 10,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 858.8
+      },
+      {
+        "path": "docs/prd/049-codebase-consistency.md",
+        "last_commit_days": 70,
+        "doc_churn_in_window": 11,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 780.73
+      },
+      {
+        "path": "docs/adr/0003-database-schema-migrations.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 12,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 715.67
+      },
+      {
+        "path": "docs/prd/024-structured-inbound-mapping.md",
+        "last_commit_days": 85,
+        "doc_churn_in_window": 12,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 715.67
+      },
+      {
+        "path": "docs/skills/README.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 12,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 715.67
+      },
+      {
+        "path": "CONTRIBUTING.md",
+        "last_commit_days": 111,
+        "doc_churn_in_window": 14,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 613.43
+      },
+      {
+        "path": "docs/adr/0006-tilt-local-development.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 14,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 613.43
+      },
+      {
+        "path": "shared/README.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 1113,
+        "subject_code_count": 534,
+        "subject_method": "nearest-ancestor",
+        "ratio": 556.5
+      },
+      {
+        "path": "docs/prd/023-product-directory.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 16,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 536.75
+      },
+      {
+        "path": "docs/guides/new-bian-service-checklist.md",
+        "last_commit_days": 50,
+        "doc_churn_in_window": 20,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 429.4
+      },
+      {
+        "path": "docs/adr/README.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 22,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 390.36
+      },
+      {
+        "path": "docs/prd/README.md",
+        "last_commit_days": 52,
+        "doc_churn_in_window": 31,
+        "code_churn_in_window": 8588,
+        "subject_code_count": 3463,
+        "subject_method": "repo-baseline",
+        "ratio": 277.03
+      },
+      {
+        "path": "services/control-plane/README.md",
+        "last_commit_days": 14,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 541,
+        "subject_code_count": 191,
+        "subject_method": "nearest-ancestor",
+        "ratio": 180.33
+      },
+      {
+        "path": "services/reconciliation/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 280,
+        "subject_code_count": 153,
+        "subject_method": "nearest-ancestor",
+        "ratio": 140.0
+      },
+      {
+        "path": "services/reference-data/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 366,
+        "subject_code_count": 151,
+        "subject_method": "nearest-ancestor",
+        "ratio": 122.0
+      },
+      {
+        "path": "services/tenant/README.md",
+        "last_commit_days": 14,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 291,
+        "subject_code_count": 75,
+        "subject_method": "nearest-ancestor",
+        "ratio": 97.0
+      },
+      {
+        "path": "services/party/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 280,
+        "subject_code_count": 103,
+        "subject_method": "nearest-ancestor",
+        "ratio": 93.33
+      },
+      {
+        "path": "scripts/README.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 92,
+        "subject_code_count": 39,
+        "subject_method": "nearest-ancestor",
+        "ratio": 92.0
+      },
+      {
+        "path": "services/financial-accounting/README.md",
+        "last_commit_days": 14,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 356,
+        "subject_code_count": 100,
+        "subject_method": "nearest-ancestor",
+        "ratio": 89.0
+      },
+      {
+        "path": "services/payment-order/README.md",
+        "last_commit_days": 14,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 429,
+        "subject_code_count": 159,
+        "subject_method": "nearest-ancestor",
+        "ratio": 85.8
+      },
+      {
+        "path": "services/position-keeping/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 425,
+        "subject_code_count": 161,
+        "subject_method": "nearest-ancestor",
+        "ratio": 85.0
+      },
+      {
+        "path": "services/api-gateway/README.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 225,
+        "subject_code_count": 110,
+        "subject_method": "nearest-ancestor",
+        "ratio": 75.0
+      },
+      {
+        "path": "services/current-account/README.md",
+        "last_commit_days": 14,
+        "doc_churn_in_window": 10,
+        "code_churn_in_window": 700,
+        "subject_code_count": 136,
+        "subject_method": "nearest-ancestor",
+        "ratio": 70.0
+      },
+      {
+        "path": "services/operational-gateway/README.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 124,
+        "subject_code_count": 73,
+        "subject_method": "nearest-ancestor",
+        "ratio": 62.0
+      },
+      {
+        "path": "docs/audit/multi-asset-purity.md",
+        "last_commit_days": 82,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 55,
+        "subject_code_count": 19,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 55.0
+      },
+      {
+        "path": "services/mcp-server/README.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 218,
+        "subject_code_count": 67,
+        "subject_method": "nearest-ancestor",
+        "ratio": 54.5
+      },
+      {
+        "path": "docs/api/saga-validation.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 104,
+        "subject_code_count": 65,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 52.0
+      },
+      {
+        "path": "services/identity/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 156,
+        "subject_code_count": 67,
+        "subject_method": "nearest-ancestor",
+        "ratio": 52.0
+      },
+      {
+        "path": "services/market-information/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 4,
+        "code_churn_in_window": 201,
+        "subject_code_count": 93,
+        "subject_method": "nearest-ancestor",
+        "ratio": 50.25
+      },
+      {
+        "path": "docs/archive/ARCHITECTURE.md",
+        "last_commit_days": 84,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 44,
+        "subject_code_count": 5,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 44.0
+      },
+      {
+        "path": "services/internal-account/README.md",
+        "last_commit_days": 14,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 188,
+        "subject_code_count": 108,
+        "subject_method": "nearest-ancestor",
+        "ratio": 37.6
+      },
+      {
+        "path": "services/financial-gateway/README.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 74,
+        "subject_code_count": 42,
+        "subject_method": "nearest-ancestor",
+        "ratio": 37.0
+      },
+      {
+        "path": "services/forecasting/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 70,
+        "subject_code_count": 45,
+        "subject_method": "nearest-ancestor",
+        "ratio": 35.0
+      },
+      {
+        "path": "docs/audit/frontend-backend-gaps.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 55,
+        "subject_code_count": 19,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 27.5
+      },
+      {
+        "path": "api/proto/README.md",
+        "last_commit_days": 167,
+        "doc_churn_in_window": 6,
+        "code_churn_in_window": 157,
+        "subject_code_count": 84,
+        "subject_method": "nearest-ancestor",
+        "ratio": 26.17
+      },
+      {
+        "path": "docs/architecture/boundary-migration-plan.md",
+        "last_commit_days": 163,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 44,
+        "subject_code_count": 5,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 22.0
+      },
+      {
+        "path": "docs/architecture/data-model.md",
+        "last_commit_days": 53,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 44,
+        "subject_code_count": 5,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 22.0
+      },
+      {
+        "path": "docs/architecture/service-coupling-analysis.md",
+        "last_commit_days": 146,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 44,
+        "subject_code_count": 5,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 22.0
+      },
+      {
+        "path": "docs/architecture/starlark-saga-architecture.md",
+        "last_commit_days": 58,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 44,
+        "subject_code_count": 5,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 22.0
+      },
+      {
+        "path": "shared/platform/observability/README.md",
+        "last_commit_days": 129,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 43,
+        "subject_code_count": 19,
+        "subject_method": "nearest-ancestor",
+        "ratio": 21.5
+      },
+      {
+        "path": "shared/platform/bootstrap/README.md",
+        "last_commit_days": 129,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 33,
+        "subject_code_count": 18,
+        "subject_method": "nearest-ancestor",
+        "ratio": 16.5
+      },
+      {
+        "path": "docs/architecture/event-driven-architecture.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 44,
+        "subject_code_count": 5,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 14.67
+      },
+      {
+        "path": "cookbook/README.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 14,
+        "subject_code_count": 6,
+        "subject_method": "nearest-ancestor",
+        "ratio": 14.0
+      },
+      {
+        "path": "services/event-router/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 68,
+        "subject_code_count": 48,
+        "subject_method": "nearest-ancestor",
+        "ratio": 13.6
+      },
+      {
+        "path": "README.md",
+        "last_commit_days": 55,
+        "doc_churn_in_window": 44,
+        "code_churn_in_window": 513,
+        "subject_code_count": 198,
+        "subject_method": "nearest-ancestor",
+        "ratio": 11.66
+      },
+      {
+        "path": "shared/platform/audit/README.md",
+        "last_commit_days": 129,
+        "doc_churn_in_window": 5,
+        "code_churn_in_window": 55,
+        "subject_code_count": 19,
+        "subject_method": "nearest-ancestor",
+        "ratio": 11.0
+      },
+      {
+        "path": "docs/adr/0019-resilient-client-patterns.md",
+        "last_commit_days": 162,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 10,
+        "subject_code_count": 5,
+        "subject_method": "explicit-links",
+        "ratio": 10.0
+      },
+      {
+        "path": "services/audit-worker/README.md",
+        "last_commit_days": 16,
+        "doc_churn_in_window": 6,
+        "code_churn_in_window": 50,
+        "subject_code_count": 28,
+        "subject_method": "nearest-ancestor",
+        "ratio": 8.33
+      },
+      {
+        "path": "docs/mapping-layer/examples.md",
+        "last_commit_days": 95,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8,
+        "subject_code_count": 6,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 8.0
+      },
+      {
+        "path": "docs/patterns.md",
+        "last_commit_days": 17,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 8,
+        "subject_code_count": 1,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 8.0
+      },
+      {
+        "path": "docs/adr/0034-position-compaction-strategy.md",
+        "last_commit_days": 83,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 7,
+        "subject_code_count": 3,
+        "subject_method": "explicit-links",
+        "ratio": 7.0
+      },
+      {
+        "path": "docs/architecture/bian-service-boundaries.md",
+        "last_commit_days": 88,
+        "doc_churn_in_window": 7,
+        "code_churn_in_window": 44,
+        "subject_code_count": 5,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 6.29
+      },
+      {
+        "path": "deploy/demo/README.md",
+        "last_commit_days": 72,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 10,
+        "subject_code_count": 3,
+        "subject_method": "nearest-ancestor",
+        "ratio": 5.0
+      },
+      {
+        "path": "services/internal-account/benchmarks/README.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 10,
+        "subject_code_count": 4,
+        "subject_method": "nearest-ancestor",
+        "ratio": 5.0
+      },
+      {
+        "path": "services/internal-account/examples/README.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 8,
+        "subject_code_count": 6,
+        "subject_method": "nearest-ancestor",
+        "ratio": 4.0
+      },
+      {
+        "path": "docs/guides/ai-native-codebase-architecture.md",
+        "last_commit_days": 69,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 3,
+        "subject_code_count": 1,
+        "subject_method": "explicit-links",
+        "ratio": 3.0
+      },
+      {
+        "path": "docs/adr/0020-per-service-audit-workers.md",
+        "last_commit_days": 83,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 6,
+        "subject_code_count": 1,
+        "subject_method": "explicit-links",
+        "ratio": 2.0
+      },
+      {
+        "path": "docs/adr/0035-multi-asset-purity.md",
+        "last_commit_days": 82,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 2,
+        "subject_code_count": 2,
+        "subject_method": "explicit-links",
+        "ratio": 2.0
+      },
+      {
+        "path": "tests/audit-e2e/README.md",
+        "last_commit_days": 91,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 4,
+        "subject_code_count": 2,
+        "subject_method": "nearest-ancestor",
+        "ratio": 1.33
+      },
+      {
+        "path": "deployments/k8s/policies/tests/README.md",
+        "last_commit_days": 148,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 1,
+        "subject_code_count": 1,
+        "subject_method": "nearest-ancestor",
+        "ratio": 1.0
+      },
+      {
+        "path": "docs/services/party/verification-guide.md",
+        "last_commit_days": 103,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 1,
+        "subject_code_count": 1,
+        "subject_method": "parallel-docs-tree",
+        "ratio": 1.0
+      },
+      {
+        "path": "docs/skills/testing.md",
+        "last_commit_days": 156,
+        "doc_churn_in_window": 1,
+        "code_churn_in_window": 1,
+        "subject_code_count": 1,
+        "subject_method": "explicit-links",
+        "ratio": 1.0
+      },
+      {
+        "path": "scripts/kafka-tests/README.md",
+        "last_commit_days": 59,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 3,
+        "subject_code_count": 2,
+        "subject_method": "nearest-ancestor",
+        "ratio": 1.0
+      },
+      {
+        "path": ".githooks/README.md",
+        "last_commit_days": 190,
+        "doc_churn_in_window": 3,
+        "code_churn_in_window": 2,
+        "subject_code_count": 1,
+        "subject_method": "nearest-ancestor",
+        "ratio": 0.67
+      },
+      {
+        "path": "services/README.md",
+        "last_commit_days": 72,
+        "doc_churn_in_window": 17,
+        "code_churn_in_window": 1,
+        "subject_code_count": 1,
+        "subject_method": "nearest-ancestor",
+        "ratio": 0.06
+      }
+    ],
+    "association": {
+      "code_file_count": 3463,
+      "doc_count": 254,
+      "code_under_base_doc": 3463,
+      "pct_code_under_base_doc": 1.0,
+      "docs_mapping_to_code": 55,
+      "pct_docs_mapping_to_code": 0.217,
+      "methods": {
+        "nearest-ancestor": 36,
+        "repo-baseline": 199,
+        "explicit-links": 6,
+        "parallel-docs-tree": 13
+      }
+    },
+    "modularity": {
+      "module_dir_count": 535,
+      "module_dirs_with_base_doc": 47,
+      "base_doc_coverage": 0.088,
+      "code_file_count": 3463,
+      "large_repo": true
+    }
+  },
+  "stale_hubs": [
+    {
+      "path": "docs/adr/0004-event-schema-evolution.md",
+      "pagerank": 0.0611,
+      "last_commit_days": 59,
+      "code_churn_in_window": 8588,
+      "ratio": 1431.33,
+      "priority": 87.454
+    },
+    {
+      "path": "docs/adr/0005-adapter-pattern-layer-translation.md",
+      "pagerank": 0.0657,
+      "last_commit_days": 59,
+      "code_churn_in_window": 8588,
+      "ratio": 1073.5,
+      "priority": 70.529
+    },
+    {
+      "path": "docs/adr/0014-financial-instrument-reference-data.md",
+      "pagerank": 0.0213,
+      "last_commit_days": 88,
+      "code_churn_in_window": 8588,
+      "ratio": 2147.0,
+      "priority": 45.731
+    },
+    {
+      "path": "docs/adr/0002-microservices-per-bian-domain.md",
+      "pagerank": 0.0468,
+      "last_commit_days": 53,
+      "code_churn_in_window": 8588,
+      "ratio": 858.8,
+      "priority": 40.192
+    },
+    {
+      "path": "docs/adr/0003-database-schema-migrations.md",
+      "pagerank": 0.0546,
+      "last_commit_days": 53,
+      "code_churn_in_window": 8588,
+      "ratio": 715.67,
+      "priority": 39.076
+    },
+    {
+      "path": "docs/adr/0013-generic-asset-quantity-types.md",
+      "pagerank": 0.0202,
+      "last_commit_days": 111,
+      "code_churn_in_window": 8588,
+      "ratio": 1717.6,
+      "priority": 34.696
+    },
+    {
+      "path": "docs/architecture/api-contracts/current-account-contract.md",
+      "pagerank": 0.0193,
+      "last_commit_days": 59,
+      "code_churn_in_window": 8588,
+      "ratio": 1431.33,
+      "priority": 27.625
+    },
+    {
+      "path": "docs/architecture/service-coupling-analysis.md",
+      "pagerank": 0.0302,
+      "last_commit_days": 146,
+      "code_churn_in_window": 44,
+      "ratio": 22.0,
+      "priority": 0.664
+    },
+    {
+      "path": "docs/architecture/event-driven-architecture.md",
+      "pagerank": 0.0248,
+      "last_commit_days": 88,
+      "code_churn_in_window": 44,
+      "ratio": 14.67,
+      "priority": 0.364
+    },
+    {
+      "path": "docs/architecture/bian-service-boundaries.md",
+      "pagerank": 0.0269,
+      "last_commit_days": 88,
+      "code_churn_in_window": 44,
+      "ratio": 6.29,
+      "priority": 0.169
+    }
+  ],
+  "untracked_instruction_files": [],
+  "broken_instruction_refs": [],
+  "dead_code": {
+    "available": false,
+    "candidate_count": 0,
+    "candidates": [],
+    "tools": [
+      {
+        "language": "typescript",
+        "tool": "ts-prune",
+        "status": "tool_absent",
+        "reason": "ts-prune not on PATH"
+      },
+      {
+        "language": "typescript",
+        "tool": "knip",
+        "status": "tool_absent",
+        "reason": "knip not on PATH"
+      },
+      {
+        "language": "go",
+        "tool": "deadcode",
+        "status": "tool_absent",
+        "reason": "deadcode not on PATH"
+      },
+      {
+        "language": "go",
+        "tool": "staticcheck",
+        "status": "tool_absent",
+        "reason": "staticcheck not on PATH"
+      }
+    ],
+    "caveat": "Static reachability proves nothing in THIS repo references the symbol; it cannot prove no external consumer (a mobile app, another service) calls it. Cross-boundary liveness needs telemetry or a named human."
+  },
+  "observability": {
+    "rung": 3,
+    "instrumented": {
+      "present": true,
+      "signals": [
+        "OpenTelemetry",
+        "Prometheus",
+        "structured logging (logrus)"
+      ]
+    },
+    "discoverable": {
+      "present": true,
+      "signals": [
+        "observability content (alerting, datadog, observability, on-call, runbook): docs/skills/security.md",
+        "observability content (alerting, grafana, observability, prometheus, runbook): docs/architecture/event-driven-architecture.md",
+        "observability content (alerting, observability): docs/guides/circuit-breaker-usage.md",
+        "observability content (alerting, observability): docs/prd/009-production-readiness-review.md",
+        "observability content (alerting, observability): docs/prd/011-valuation-service.md",
+        "observability content (alerting, observability): docs/testing/CHAOS_TESTING.md",
+        "observability content (alerting, observability, on-call): docs/adr/0018-settlement-reconciliation.md",
+        "observability content (alerting, observability, on-call, runbook): docs/reports/market-information-go-live-readiness.md",
+        "observability content (alerting, observability, prometheus): docs/prd/013-reconciliation-service.md",
+        "observability content (alerting, observability, prometheus): docs/prd/052-email-platform.md",
+        "observability content (alerting, observability, prometheus, runbook): docs/prd/029-operational-gateway.md",
+        "observability content (alerting, observability, runbook): docs/prd/005-durable-execution-engine.md",
+        "observability content (alerting, prometheus): docs/adr/0009-application-level-audit-logging.md",
+        "observability content (alerting, prometheus): docs/adr/0034-position-compaction-strategy.md",
+        "observability content (alerting, prometheus): docs/archive/audit-analysis-findings.md",
+        "observability content (alerting, prometheus, runbook): shared/platform/audit/README.md",
+        "observability content (datadog, observability, prometheus, runbook): docs/prd/025-real-time-event-streaming.md",
+        "observability content (grafana, observability, prometheus): README.md",
+        "observability content (grafana, observability, prometheus): docs/adr/0006-tilt-local-development.md",
+        "observability content (grafana, observability, prometheus): docs/archive/ARCHITECTURE.md",
+        "observability content (grafana, observability, prometheus): docs/demos/multi-organization-settlement.md",
+        "observability content (grafana, observability, prometheus): docs/prd/039-meridian-vm.md",
+        "observability content (grafana, prometheus, runbook): docs/operations/audit-monitoring.md",
+        "observability content (observability, on-call): docs/guides/new-bian-service-checklist.md",
+        "observability content (observability, prometheus): deployments/k8s/audit-consumer/README.md",
+        "observability content (observability, prometheus): docs/adr/0015-standard-service-directory-structure.md",
+        "observability content (observability, prometheus): docs/prd/019-internal-bank-account-position-keeping-client.md",
+        "observability content (observability, prometheus): services/README.md",
+        "observability content (observability, prometheus): services/audit-worker/README.md",
+        "observability content (observability, prometheus): services/event-router/README.md",
+        "observability content (observability, prometheus): services/forecasting/README.md",
+        "observability content (observability, prometheus): shared/README.md",
+        "observability content (observability, prometheus, runbook): docs/adr/0033-event-triggered-sagas.md",
+        "observability content (observability, runbook): CHANGELOG.md",
+        "observability content (observability, runbook): docs/adr/0002-microservices-per-bian-domain.md",
+        "observability content (observability, runbook): docs/prd/002-internal-bank-account.md",
+        "observability content (observability, runbook): docs/prd/004-market-information-management.md",
+        "observability content (observability, runbook): docs/prd/008-starlark-service-bindings.md",
+        "observability content (prometheus, runbook): docs/guides/saga-validation.md",
+        "observability content (prometheus, runbook): docs/skills/event-triggered-sagas.md",
+        "runbook/observability doc: docs/runbooks/README.md",
+        "runbook/observability doc: docs/runbooks/disaster-recovery.md",
+        "runbook/observability doc: docs/runbooks/email-infrastructure.md",
+        "runbook/observability doc: docs/runbooks/event-router.md",
+        "runbook/observability doc: docs/runbooks/incident-response.md",
+        "runbook/observability doc: docs/runbooks/internal-account-operations.md",
+        "runbook/observability doc: docs/runbooks/market-information-operations.md",
+        "runbook/observability doc: docs/runbooks/party-kyc-verification.md",
+        "runbook/observability doc: docs/runbooks/production-deployment.md",
+        "runbook/observability doc: docs/runbooks/saga-failure-recovery.md",
+        "runbook/observability doc: docs/runbooks/saga-validation-failure.md",
+        "runbook/observability doc: docs/runbooks/troubleshooting-saga-handlers.md",
+        "runbook/observability doc: shared/platform/observability/README.md"
+      ]
+    },
+    "reachable": {
+      "present": true,
+      "signals": [
+        "runbook with runnable queries: deployments/k8s/audit-consumer/README.md",
+        "runbook with runnable queries: docs/adr/0006-tilt-local-development.md",
+        "runbook with runnable queries: docs/demos/multi-organization-settlement.md",
+        "runbook with runnable queries: docs/operations/audit-monitoring.md",
+        "runbook with runnable queries: docs/runbooks/disaster-recovery.md",
+        "runbook with runnable queries: docs/runbooks/event-router.md",
+        "runbook with runnable queries: docs/runbooks/incident-response.md",
+        "runbook with runnable queries: docs/runbooks/internal-account-operations.md",
+        "runbook with runnable queries: docs/runbooks/market-information-operations.md",
+        "runbook with runnable queries: docs/runbooks/production-deployment.md",
+        "runbook with runnable queries: docs/runbooks/saga-failure-recovery.md",
+        "runbook with runnable queries: docs/runbooks/saga-validation-failure.md",
+        "runbook with runnable queries: docs/runbooks/troubleshooting-saga-handlers.md",
+        "runbook with runnable queries: docs/skills/event-triggered-sagas.md"
+      ]
+    },
+    "boundary": "Scores what the repo makes agent-reachable; cannot observe the agent's live environment."
+  },
+  "plugin_version": "1.10.0",
   "anomalies": []
 }

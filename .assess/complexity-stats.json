@@ -12,8 +12,8 @@
     "total": 656693
   },
   "ccn": {
-    "p50": 18.0,
-    "p95": 81.84999999999991,
+    "p50": 18.5,
+    "p95": 82.0,
     "max": 477.0
   },
   "churn": {
@@ -60,7 +60,7 @@
     {
       "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
       "loc": 993,
-      "ccn": 155.0,
+      "ccn": 156.0,
       "churn": 15,
       "source": "lizard"
     },
@@ -146,7 +146,7 @@
     {
       "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
       "loc": 993,
-      "ccn": 155.0,
+      "ccn": 156.0,
       "churn": 15,
       "source": "lizard"
     },
