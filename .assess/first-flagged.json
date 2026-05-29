@@ -8,5 +8,12 @@
   "services/mcp-server/internal/tools/economy_test.go": "2026-05-22",
   "frontend/src/features/manifests/components/manifest-graph.test.tsx": "2026-05-22",
   "services/identity/service/grpc_service_test.go": "2026-05-22",
-  "shared/pkg/saga/schema/service_modules.go": "2026-05-22"
+  "shared/pkg/saga/schema/service_modules.go": "2026-05-22",
+  "frontend/src/App.tsx": "2026-05-29",
+  "cmd/meridian/main.go": "2026-05-29",
+  "services/current-account/service/grpc_service_integration_test.go": "2026-05-29",
+  "services/payment-order/cmd/main.go": "2026-05-29",
+  "Makefile": "2026-05-29",
+  "services/current-account/adapters/persistence/repository.go": "2026-05-29",
+  "services/api-gateway/server.go": "2026-05-29"
 }

@@ -92,3 +92,6 @@ deploy/demo/certs/*.pem
 
 # Compiled binary
 /meridian
+
+# /assess transient rotation file (next run overwrites it)
+.assess/complexity-stats.prior.json
