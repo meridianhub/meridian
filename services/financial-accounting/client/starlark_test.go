@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/stretchr/testify/assert"
@@ -114,7 +115,8 @@ func TestInitiateBookingLogHandler_Success(t *testing.T) {
 		InitiateFinancialBookingLogFunc: func(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
 			return &financialaccountingv1.InitiateFinancialBookingLogResponse{
 				FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
-					Id: "booking-log-123",
+					Id:     "booking-log-123",
+					Status: commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 				},
 			}, nil
 		},
@@ -139,7 +141,7 @@ func TestInitiateBookingLogHandler_Success(t *testing.T) {
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "booking-log-123", resultMap["log_id"])
-	assert.Equal(t, "INITIATED", resultMap["status"])
+	assert.Equal(t, "TRANSACTION_STATUS_PENDING", resultMap["status"])
 }
 
 // TestInitiateBookingLogHandler_MissingParam tests error handling for missing required parameters.
@@ -168,7 +170,8 @@ func TestCapturePostingHandler_Success(t *testing.T) {
 		CaptureLedgerPostingFunc: func(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest, _ ...grpc.CallOption) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
 			return &financialaccountingv1.CaptureLedgerPostingResponse{
 				LedgerPosting: &financialaccountingv1.LedgerPosting{
-					Id: "posting-123",
+					Id:     "posting-123",
+					Status: commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 				},
 			}, nil
 		},
@@ -195,7 +198,7 @@ func TestCapturePostingHandler_Success(t *testing.T) {
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "posting-123", resultMap["posting_id"])
-	assert.Equal(t, "POSTED", resultMap["status"])
+	assert.Equal(t, "TRANSACTION_STATUS_PENDING", resultMap["status"])
 }
 
 // TestCompensatePostingHandler_Success tests compensation handler.
@@ -204,7 +207,8 @@ func TestCompensatePostingHandler_Success(t *testing.T) {
 		UpdateLedgerPostingFunc: func(_ context.Context, req *financialaccountingv1.UpdateLedgerPostingRequest, _ ...grpc.CallOption) (*financialaccountingv1.UpdateLedgerPostingResponse, error) {
 			return &financialaccountingv1.UpdateLedgerPostingResponse{
 				LedgerPosting: &financialaccountingv1.LedgerPosting{
-					Id: req.Id,
+					Id:     req.Id,
+					Status: req.Status,
 				},
 			}, nil
 		},
@@ -227,7 +231,10 @@ func TestCompensatePostingHandler_Success(t *testing.T) {
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "posting-123", resultMap["posting_id"])
-	assert.Equal(t, "COMPENSATED", resultMap["status"])
+	// Server transitions a compensated posting to CANCELLED; the handler must
+	// report that real status rather than the legacy "COMPENSATED" literal
+	// (which was never a valid TransactionStatus enum value).
+	assert.Equal(t, "TRANSACTION_STATUS_CANCELLED", resultMap["status"])
 }
 
 // TestPostEntriesHandler_Success tests posting multiple GL entries.
@@ -236,7 +243,8 @@ func TestPostEntriesHandler_Success(t *testing.T) {
 		CaptureLedgerPostingFunc: func(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest, _ ...grpc.CallOption) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
 			return &financialaccountingv1.CaptureLedgerPostingResponse{
 				LedgerPosting: &financialaccountingv1.LedgerPosting{
-					Id: "posting-batch-123",
+					Id:     "posting-batch-123",
+					Status: commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 				},
 			}, nil
 		},
@@ -272,8 +280,11 @@ func TestPostEntriesHandler_Success(t *testing.T) {
 
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "POSTED", resultMap["status"])
-	assert.NotEmpty(t, resultMap["posting_ids"])
+	// Both entries report PENDING from the server, so the aggregate status is PENDING
+	// and the per-entry statuses array mirrors that, parallel to posting_ids.
+	assert.Equal(t, "TRANSACTION_STATUS_PENDING", resultMap["status"])
+	assert.Equal(t, []string{"posting-batch-123", "posting-batch-123"}, resultMap["posting_ids"])
+	assert.Equal(t, []string{"TRANSACTION_STATUS_PENDING", "TRANSACTION_STATUS_PENDING"}, resultMap["statuses"])
 }
 
 // TestPostEntriesHandler_UnbalancedEntries tests validation of balanced journal entries.
@@ -335,7 +346,8 @@ func TestReverseEntriesHandler_Success(t *testing.T) {
 		UpdateFinancialBookingLogFunc: func(_ context.Context, req *financialaccountingv1.UpdateFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
 			return &financialaccountingv1.UpdateFinancialBookingLogResponse{
 				FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
-					Id: req.Id,
+					Id:     req.Id,
+					Status: req.Status,
 				},
 			}, nil
 		},
@@ -358,7 +370,9 @@ func TestReverseEntriesHandler_Success(t *testing.T) {
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "log-123", resultMap["log_id"])
-	assert.Equal(t, "REVERSED", resultMap["status"])
+	// Reversal cancels the booking log; the handler reports the server's real
+	// CANCELLED status, not the legacy "REVERSED" literal.
+	assert.Equal(t, "TRANSACTION_STATUS_CANCELLED", resultMap["status"])
 }
 
 // TestUpdateBookingLogHandler_Success tests updating a booking log.
@@ -367,7 +381,8 @@ func TestUpdateBookingLogHandler_Success(t *testing.T) {
 		UpdateFinancialBookingLogFunc: func(_ context.Context, req *financialaccountingv1.UpdateFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
 			return &financialaccountingv1.UpdateFinancialBookingLogResponse{
 				FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
-					Id: req.Id,
+					Id:     req.Id,
+					Status: req.Status,
 				},
 			}, nil
 		},
@@ -391,7 +406,9 @@ func TestUpdateBookingLogHandler_Success(t *testing.T) {
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "log-123", resultMap["log_id"])
-	assert.Equal(t, "UPDATED", resultMap["status"])
+	// The handler propagates the server's real status (here echoing the requested
+	// POSTED transition) rather than the legacy "UPDATED" literal.
+	assert.Equal(t, "TRANSACTION_STATUS_POSTED", resultMap["status"])
 }
 
 // TestCreateBookingHandler_Success tests creating a booking log (alias for initiate).
@@ -400,7 +417,8 @@ func TestCreateBookingHandler_Success(t *testing.T) {
 		InitiateFinancialBookingLogFunc: func(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
 			return &financialaccountingv1.InitiateFinancialBookingLogResponse{
 				FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
-					Id: "booking-log-456",
+					Id:     "booking-log-456",
+					Status: commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
 				},
 			}, nil
 		},
@@ -425,7 +443,8 @@ func TestCreateBookingHandler_Success(t *testing.T) {
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "booking-log-456", resultMap["booking_id"])
-	assert.Equal(t, "CREATED", resultMap["status"])
+	// createBooking aliases initiate_booking_log and must propagate its real status.
+	assert.Equal(t, "TRANSACTION_STATUS_PENDING", resultMap["status"])
 }
 
 // TestHandlerErrorPropagation verifies that gRPC errors are properly propagated.
@@ -454,4 +473,99 @@ func TestHandlerErrorPropagation(t *testing.T) {
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "financial_accounting.initiate_booking_log")
 	assert.Contains(t, err.Error(), "database connection failed")
+}
+
+// TestCapturePostingHandler_PropagatesServerStatus is a regression guard against
+// hardcoded status literals. Distinct server-reported statuses must yield distinct
+// handler outputs - if the handler hardcoded a status, every row would collapse to
+// the same value and the table would fail.
+func TestCapturePostingHandler_PropagatesServerStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		serverSays commonv1.TransactionStatus
+		want       string
+	}{
+		{"pending", commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING, "TRANSACTION_STATUS_PENDING"},
+		{"posted", commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED, "TRANSACTION_STATUS_POSTED"},
+		{"cancelled", commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED, "TRANSACTION_STATUS_CANCELLED"},
+	}
+
+	seen := make(map[string]struct{})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &mockFinancialAccountingClient{
+				CaptureLedgerPostingFunc: func(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest, _ ...grpc.CallOption) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+					return &financialaccountingv1.CaptureLedgerPostingResponse{
+						LedgerPosting: &financialaccountingv1.LedgerPosting{
+							Id:     "posting-123",
+							Status: tt.serverSays,
+						},
+					}, nil
+				},
+			}
+
+			client := &Client{financialAccounting: mockClient}
+			handler := capturePostingHandler(client)
+			ctx := &saga.StarlarkContext{Context: context.Background()}
+			params := map[string]any{
+				"booking_log_id": "log-123",
+				"account_id":     "account-456",
+				"amount":         "100.00",
+				"currency":       "USD",
+				"direction":      "DEBIT",
+			}
+
+			result, err := handler(ctx, params)
+			require.NoError(t, err)
+			resultMap, ok := result.(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, tt.want, resultMap["status"])
+			seen[resultMap["status"].(string)] = struct{}{}
+		})
+	}
+
+	// Proves no hardcoding: three distinct server statuses produced three distinct outputs.
+	assert.Len(t, seen, len(tests), "each server status must map to a distinct handler output")
+}
+
+// TestPostEntriesHandler_AggregateStatusDivergence verifies the aggregate status
+// falls back to UNSPECIFIED when per-entry statuses diverge, while the parallel
+// statuses array preserves each entry's real status.
+func TestPostEntriesHandler_AggregateStatusDivergence(t *testing.T) {
+	// First entry (DEBIT) reports PENDING, second (CREDIT) reports POSTED.
+	call := 0
+	statusesByCall := []commonv1.TransactionStatus{
+		commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING,
+		commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED,
+	}
+	mockClient := &mockFinancialAccountingClient{
+		CaptureLedgerPostingFunc: func(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest, _ ...grpc.CallOption) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+			st := statusesByCall[call]
+			call++
+			return &financialaccountingv1.CaptureLedgerPostingResponse{
+				LedgerPosting: &financialaccountingv1.LedgerPosting{
+					Id:     "posting-x",
+					Status: st,
+				},
+			}, nil
+		},
+	}
+
+	client := &Client{financialAccounting: mockClient}
+	handler := postEntriesHandler(client)
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	params := map[string]any{
+		"booking_log_id": "log-123",
+		"entries": []any{
+			map[string]any{"account_id": "cash", "amount": "100.00", "currency": "USD", "direction": "DEBIT"},
+			map[string]any{"account_id": "revenue", "amount": "100.00", "currency": "USD", "direction": "CREDIT"},
+		},
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []string{"TRANSACTION_STATUS_PENDING", "TRANSACTION_STATUS_POSTED"}, resultMap["statuses"])
+	assert.Equal(t, "TRANSACTION_STATUS_UNSPECIFIED", resultMap["status"])
 }

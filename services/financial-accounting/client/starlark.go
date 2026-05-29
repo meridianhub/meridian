@@ -43,8 +43,17 @@ var (
 	// ErrInvalidPostingIDType is returned when posting_id has unexpected type.
 	ErrInvalidPostingIDType = errors.New("invalid posting_id type")
 
+	// ErrInvalidStatusType is returned when a handler result status has unexpected type.
+	ErrInvalidStatusType = errors.New("invalid status type")
+
 	// ErrInvalidStatus is returned when an unknown status value is provided.
 	ErrInvalidStatus = errors.New("invalid status")
+
+	// ErrEmptyLedgerPosting is returned when a gRPC response omits the ledger posting payload.
+	ErrEmptyLedgerPosting = errors.New("empty ledger posting in response")
+
+	// ErrEmptyBookingLog is returned when a gRPC response omits the financial booking log payload.
+	ErrEmptyBookingLog = errors.New("empty financial booking log in response")
 )
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for Financial Accounting.
@@ -137,7 +146,7 @@ func registerBookingLogHandlers(registry *saga.HandlerRegistry, client *Client) 
 //
 // Returns a map containing:
 //   - log_id: The unique booking log identifier
-//   - status: Always "INITIATED" for newly created logs
+//   - status: The server-reported status of the booking log (e.g. TRANSACTION_STATUS_PENDING)
 func initiateBookingLogHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		// 1. Parse Starlark params using helper functions from shared/pkg/saga
@@ -177,9 +186,12 @@ func initiateBookingLogHandler(client *Client) saga.Handler {
 
 		// 5. Convert response to Starlark format (map[string]any)
 		log := resp.GetFinancialBookingLog()
+		if log == nil {
+			return nil, fmt.Errorf("financial_accounting.initiate_booking_log: %w", ErrEmptyBookingLog)
+		}
 		return map[string]any{
 			"log_id": log.GetId(),
-			"status": "INITIATED",
+			"status": log.GetStatus().String(),
 		}, nil
 	}
 }
@@ -193,7 +205,7 @@ func initiateBookingLogHandler(client *Client) saga.Handler {
 //
 // Returns a map containing:
 //   - log_id: The booking log identifier
-//   - status: Always "UPDATED"
+//   - status: The server-reported status of the booking log after the update
 func updateBookingLogHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		logID, err := saga.RequireStringParam(params, "log_id")
@@ -201,15 +213,19 @@ func updateBookingLogHandler(client *Client) saga.Handler {
 			return nil, err
 		}
 
-		// Parse optional status parameter
+		// Parse optional status parameter. Both the short form ("POSTED") and the
+		// full proto enum form ("TRANSACTION_STATUS_POSTED") are accepted so a saga
+		// author can feed a handler's status output (now the full enum name) back
+		// into update_booking_log without translation. The accepted value set is
+		// unchanged - only the spelling is widened.
 		status := commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING
 		if statusStr, ok := params["status"].(string); ok {
 			switch statusStr {
-			case "POSTED":
+			case "POSTED", "TRANSACTION_STATUS_POSTED":
 				status = commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED
-			case "CANCELLED":
+			case "CANCELLED", "TRANSACTION_STATUS_CANCELLED":
 				status = commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED
-			case "PENDING":
+			case "PENDING", "TRANSACTION_STATUS_PENDING":
 				status = commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING
 			default:
 				return nil, fmt.Errorf("%w: %s", ErrInvalidStatus, statusStr)
@@ -229,9 +245,12 @@ func updateBookingLogHandler(client *Client) saga.Handler {
 		}
 
 		log := resp.GetFinancialBookingLog()
+		if log == nil {
+			return nil, fmt.Errorf("financial_accounting.update_booking_log: %w", ErrEmptyBookingLog)
+		}
 		return map[string]any{
 			"log_id": log.GetId(),
-			"status": "UPDATED",
+			"status": log.GetStatus().String(),
 		}, nil
 	}
 }
