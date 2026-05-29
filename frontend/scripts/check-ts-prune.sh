@@ -26,7 +26,12 @@ BASELINE=233
 cd "$(dirname "$0")/.." || exit 1
 
 echo "Running ts-prune unused-export analysis..."
-findings="$(npx ts-prune -p tsconfig.app.json -i 'src/api/gen' | grep -v '(used in module)' || true)"
+# Run ts-prune in its own command substitution (not piped into grep) so that a
+# genuine ts-prune failure aborts the script under "set -e" instead of being
+# masked by the pipeline. The "|| true" on the grep filters only guards the
+# benign "no matching lines" exit code (grep returns 1), not tool errors.
+raw_findings="$(npx ts-prune -p tsconfig.app.json -i 'src/api/gen')"
+findings="$(printf '%s\n' "$raw_findings" | grep -v '(used in module)' || true)"
 count="$(printf '%s\n' "$findings" | grep -cE ' - ' || true)"
 
 echo "----------------------------------------------------------------------"

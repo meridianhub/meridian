@@ -22,7 +22,11 @@ BASELINE=87
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 echo "Running deadcode reachability analysis (deadcode -test ./...)..."
-findings="$(deadcode -test ./... || true)"
+# No "|| true" here: deadcode exits 0 even when it finds dead code, so a
+# non-zero exit means a genuine analysis error (e.g. a build failure). With
+# "set -e" that aborts the script rather than silently producing an empty
+# result that would pass the gate.
+findings="$(deadcode -test ./...)"
 count="$(printf '%s\n' "$findings" | grep -c 'unreachable func:' || true)"
 
 echo "----------------------------------------------------------------------"
