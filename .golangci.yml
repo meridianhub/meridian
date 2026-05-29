@@ -69,7 +69,6 @@ linters:
       - tests/audit-e2e  # E2E tests require //go:build integration tag
       - services/internal-account/e2e  # E2E tests require //go:build integration tag
       - services/reference-data/e2e  # E2E tests require //go:build integration tag
-      - tests/integration  # Integration tests have stale references to refactored domain types
     rules:
       # Exclude some linters for test files
       - path: _test\.go
