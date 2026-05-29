@@ -20,6 +20,11 @@ This directory contains how-to guides and usage documentation for Meridian devel
 | [Starlark Built-ins Reference](starlark-built-ins-reference.md) | Available functions, types, and DSL built-ins |
 | [Service File Conventions](service-file-conventions.md) | When and how to split server.go into separate gRPC handler endpoint files |
 | [AI-Native Codebase Architecture](ai-native-codebase-architecture.md) | Patterns and implementation checklist for making a codebase safe for AI agent contributors |
+| [Adding Starlark Service Bindings](adding-starlark-service-bindings.md) | Exposing a service's handlers to Starlark sagas via schema-driven bindings |
+| [Error Conventions](error-conventions.md) | Standard error wrapping, codes, and propagation across services |
+| [Manifest Design Patterns](manifest-design-patterns.md) | Patterns for declaring instruments, accounts, and settlement flows in manifests |
+| [Repository Conventions](repository-conventions.md) | GORM repository structure, query patterns, and tenant scoping |
+| [Value Types](value-types.md) | Qty, Money, Asset, and Amount — when to use each and how they compose |
 
 ## Documentation Organization
 

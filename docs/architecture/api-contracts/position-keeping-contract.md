@@ -1554,8 +1554,8 @@ For high-traffic accounts, consider:
 - **Event Schema**: `api/proto/meridian/events/v1/position_keeping_events.proto`
 - **Service Boundaries**: `docs/architecture/bian-service-boundaries.md`
 - **Coupling Analysis**: `docs/architecture/service-coupling-analysis.md`
-- **Current Account Contract**: `docs/architecture/api-contracts/current-account-contract.md`
-- **Financial Accounting Contract**: `docs/architecture/api-contracts/financial-accounting-contract.md`
+- **Current Account Contract**: [current-account-contract.md](current-account-contract.md)
+- **Financial Accounting Contract**: [financial-accounting-contract.md](financial-accounting-contract.md)
 - **ADR-0002**: Microservices Per BIAN Domain
 - **ADR-0004**: Event Schema Evolution
 - **ADR-0023**: Balance Delegation to Position Keeping

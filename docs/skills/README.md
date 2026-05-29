@@ -212,4 +212,4 @@ Content starts here...
 
 ## Related Documentation
 
-- Claude Code skills system: `../claude-code-skills.md` - How the skills system works
+- Claude Code skills system: [../claude-code-skills.md](../claude-code-skills.md) - How the skills system works
