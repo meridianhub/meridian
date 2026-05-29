@@ -48,6 +48,12 @@ var (
 
 	// ErrInvalidStatus is returned when an unknown status value is provided.
 	ErrInvalidStatus = errors.New("invalid status")
+
+	// ErrEmptyLedgerPosting is returned when a gRPC response omits the ledger posting payload.
+	ErrEmptyLedgerPosting = errors.New("empty ledger posting in response")
+
+	// ErrEmptyBookingLog is returned when a gRPC response omits the financial booking log payload.
+	ErrEmptyBookingLog = errors.New("empty financial booking log in response")
 )
 
 // RegisterStarlarkHandlers registers all Starlark service bindings for Financial Accounting.
@@ -180,6 +186,9 @@ func initiateBookingLogHandler(client *Client) saga.Handler {
 
 		// 5. Convert response to Starlark format (map[string]any)
 		log := resp.GetFinancialBookingLog()
+		if log == nil {
+			return nil, fmt.Errorf("financial_accounting.initiate_booking_log: %w", ErrEmptyBookingLog)
+		}
 		return map[string]any{
 			"log_id": log.GetId(),
 			"status": log.GetStatus().String(),
@@ -232,6 +241,9 @@ func updateBookingLogHandler(client *Client) saga.Handler {
 		}
 
 		log := resp.GetFinancialBookingLog()
+		if log == nil {
+			return nil, fmt.Errorf("financial_accounting.update_booking_log: %w", ErrEmptyBookingLog)
+		}
 		return map[string]any{
 			"log_id": log.GetId(),
 			"status": log.GetStatus().String(),

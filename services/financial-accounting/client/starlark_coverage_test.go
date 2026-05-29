@@ -221,6 +221,105 @@ func TestReverseEntriesHandler_MissingParam(t *testing.T) {
 	require.Error(t, err)
 }
 
+// --- nil gRPC payload guards ---
+// These verify handlers fail fast (rather than returning a misleading success
+// with empty IDs and an UNSPECIFIED status) when the server omits the payload.
+
+func TestCapturePostingHandler_NilPayload(t *testing.T) {
+	mockClient := &mockFinancialAccountingClient{
+		CaptureLedgerPostingFunc: func(_ context.Context, _ *financialaccountingv1.CaptureLedgerPostingRequest, _ ...grpc.CallOption) (*financialaccountingv1.CaptureLedgerPostingResponse, error) {
+			return &financialaccountingv1.CaptureLedgerPostingResponse{}, nil // no LedgerPosting
+		},
+	}
+	client := &Client{financialAccounting: mockClient}
+	handler := capturePostingHandler(client)
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	params := map[string]any{
+		"booking_log_id": "log-123",
+		"account_id":     "account-456",
+		"amount":         "100.00",
+		"currency":       "USD",
+		"direction":      "DEBIT",
+	}
+
+	result, err := handler(ctx, params)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrEmptyLedgerPosting)
+}
+
+func TestCompensatePostingHandler_NilPayload(t *testing.T) {
+	mockClient := &mockFinancialAccountingClient{
+		UpdateLedgerPostingFunc: func(_ context.Context, _ *financialaccountingv1.UpdateLedgerPostingRequest, _ ...grpc.CallOption) (*financialaccountingv1.UpdateLedgerPostingResponse, error) {
+			return &financialaccountingv1.UpdateLedgerPostingResponse{}, nil // no LedgerPosting
+		},
+	}
+	client := &Client{financialAccounting: mockClient}
+	handler := compensatePostingHandler(client)
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	params := map[string]any{"posting_id": "posting-123"}
+
+	result, err := handler(ctx, params)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrEmptyLedgerPosting)
+}
+
+func TestReverseEntriesHandler_NilPayload(t *testing.T) {
+	mockClient := &mockFinancialAccountingClient{
+		UpdateFinancialBookingLogFunc: func(_ context.Context, _ *financialaccountingv1.UpdateFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+			return &financialaccountingv1.UpdateFinancialBookingLogResponse{}, nil // no FinancialBookingLog
+		},
+	}
+	client := &Client{financialAccounting: mockClient}
+	handler := reverseEntriesHandler(client)
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	params := map[string]any{"booking_log_id": "log-123"}
+
+	result, err := handler(ctx, params)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrEmptyBookingLog)
+}
+
+func TestInitiateBookingLogHandler_NilPayload(t *testing.T) {
+	mockClient := &mockFinancialAccountingClient{
+		InitiateFinancialBookingLogFunc: func(_ context.Context, _ *financialaccountingv1.InitiateFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.InitiateFinancialBookingLogResponse, error) {
+			return &financialaccountingv1.InitiateFinancialBookingLogResponse{}, nil // no FinancialBookingLog
+		},
+	}
+	client := &Client{financialAccounting: mockClient}
+	handler := initiateBookingLogHandler(client)
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	params := map[string]any{
+		"product_service_reference": "product-123",
+		"business_unit_reference":   "bu-456",
+		"chart_of_accounts_rules":   "standard",
+	}
+
+	result, err := handler(ctx, params)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrEmptyBookingLog)
+}
+
+func TestUpdateBookingLogHandler_NilPayload(t *testing.T) {
+	mockClient := &mockFinancialAccountingClient{
+		UpdateFinancialBookingLogFunc: func(_ context.Context, _ *financialaccountingv1.UpdateFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+			return &financialaccountingv1.UpdateFinancialBookingLogResponse{}, nil // no FinancialBookingLog
+		},
+	}
+	client := &Client{financialAccounting: mockClient}
+	handler := updateBookingLogHandler(client)
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	params := map[string]any{"log_id": "log-123", "status": "POSTED"}
+
+	result, err := handler(ctx, params)
+	require.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrEmptyBookingLog)
+}
+
 // --- compensatePostingHandler missing param ---
 
 func TestCompensatePostingHandler_MissingPostingID(t *testing.T) {

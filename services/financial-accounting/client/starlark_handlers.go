@@ -96,6 +96,9 @@ func capturePostingHandler(client *Client) saga.Handler {
 		}
 
 		posting := resp.GetLedgerPosting()
+		if posting == nil {
+			return nil, fmt.Errorf("financial_accounting.capture_posting: %w", ErrEmptyLedgerPosting)
+		}
 		return map[string]any{
 			"posting_id": posting.GetId(),
 			"status":     posting.GetStatus().String(),
@@ -195,6 +198,9 @@ func compensatePostingHandler(client *Client) saga.Handler {
 		}
 
 		posting := resp.GetLedgerPosting()
+		if posting == nil {
+			return nil, fmt.Errorf("financial_accounting.compensate_posting: %w", ErrEmptyLedgerPosting)
+		}
 		return map[string]any{
 			"posting_id": posting.GetId(),
 			"status":     posting.GetStatus().String(),
@@ -454,6 +460,9 @@ func reverseEntriesHandler(client *Client) saga.Handler {
 		}
 
 		log := resp.GetFinancialBookingLog()
+		if log == nil {
+			return nil, fmt.Errorf("financial_accounting.reverse_entries: %w", ErrEmptyBookingLog)
+		}
 		return map[string]any{
 			"log_id": log.GetId(),
 			"status": log.GetStatus().String(),
