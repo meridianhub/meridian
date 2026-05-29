@@ -97,10 +97,6 @@ type Checkpoint struct {
 	// Status is the current status of the import.
 	Status Status
 
-	// LastProcessedLine is the last line number processed (1-indexed, for resume).
-	// This allows resumption from the exact line where import was interrupted.
-	LastProcessedLine int
-
 	// RollbackSQL contains SQL statements to undo the import (for partial rollback).
 	// Typically DELETE statements with the IDs of imported records.
 	RollbackSQL []string
