@@ -34,7 +34,7 @@ Deprecate Centralized) are all CANCELLED in favor of the Kafka-based dual-path a
 
 ## Context
 
-ADR-0009 established the transactional outbox pattern for application-level audit logging. The current implementation (`services/audit-worker/main.go`) deploys a centralized audit-worker service that connects to a single database and processes audit_outbox entries.
+ADR-0009 established the transactional outbox pattern for application-level audit logging. The current implementation (`services/audit-worker/cmd/main.go`) deploys a centralized audit-worker service that connects to a single database and processes audit_outbox entries.
 
 As the platform grows to 6 services with separate database schemas (current-account, position-keeping, financial-accounting, party, payment-order, tenant), we must decide how to scale audit processing:
 

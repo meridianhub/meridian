@@ -26,7 +26,7 @@ Date: 2026-01-05
 
 ## Status
 
-Proposed
+Accepted (Implemented)
 
 ## Context
 
