@@ -69,7 +69,6 @@ func (m *PostgresManager) scanCheckpoint(ctx context.Context, query string, args
 
 	cp.Status = Status(statusStr)
 	cp.RollbackSQL = decodeRollbackSQL(rollbackSQL)
-	cp.LastProcessedLine = cp.ProcessedRows // Use processed_rows as last line marker
 
 	return &cp, nil
 }
@@ -100,7 +99,6 @@ func scanCheckpointRow(rows pgx.Rows) (*Checkpoint, error) {
 
 	cp.Status = Status(statusStr)
 	cp.RollbackSQL = decodeRollbackSQL(rollbackSQL)
-	cp.LastProcessedLine = cp.ProcessedRows
 
 	return &cp, nil
 }
@@ -162,14 +160,25 @@ func (c *Checkpoint) AddRollbackStatement(sql string) {
 func (c *Checkpoint) IncrementSuccess(count int) {
 	c.SuccessCount += count
 	c.ProcessedRows += count
-	c.LastProcessedLine = c.ProcessedRows
 }
 
 // IncrementFailure increments the failure count and processed rows.
 func (c *Checkpoint) IncrementFailure(count int) {
 	c.FailureCount += count
 	c.ProcessedRows += count
-	c.LastProcessedLine = c.ProcessedRows
+}
+
+// ShouldSkipResumedLine reports whether a row at the given 1-indexed source
+// CSV line number was already processed in a prior run and must be skipped
+// when resuming an interrupted import.
+//
+// ProcessedRows counts data rows only. The source file carries a header on
+// line 1, so the first data row is line 2 and M processed data rows occupy
+// lines 2..M+1. The resume guard therefore skips up to and including line
+// ProcessedRows+1; using ProcessedRows alone would reprocess the last
+// committed data row and duplicate its ledger position.
+func (c *Checkpoint) ShouldSkipResumedLine(lineNumber int) bool {
+	return c.ProcessedRows > 0 && lineNumber <= c.ProcessedRows+1
 }
 
 // SetTotalRows sets the total row count (usually after file parsing).

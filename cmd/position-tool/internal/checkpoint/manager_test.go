@@ -62,12 +62,10 @@ func TestCheckpoint_IncrementSuccess(t *testing.T) {
 	cp.IncrementSuccess(5)
 	assert.Equal(t, 5, cp.SuccessCount)
 	assert.Equal(t, 5, cp.ProcessedRows)
-	assert.Equal(t, 5, cp.LastProcessedLine)
 
 	cp.IncrementSuccess(3)
 	assert.Equal(t, 8, cp.SuccessCount)
 	assert.Equal(t, 8, cp.ProcessedRows)
-	assert.Equal(t, 8, cp.LastProcessedLine)
 }
 
 func TestCheckpoint_IncrementFailure(t *testing.T) {
@@ -76,12 +74,48 @@ func TestCheckpoint_IncrementFailure(t *testing.T) {
 	cp.IncrementFailure(2)
 	assert.Equal(t, 2, cp.FailureCount)
 	assert.Equal(t, 2, cp.ProcessedRows)
-	assert.Equal(t, 2, cp.LastProcessedLine)
 
 	cp.IncrementFailure(1)
 	assert.Equal(t, 3, cp.FailureCount)
 	assert.Equal(t, 3, cp.ProcessedRows)
-	assert.Equal(t, 3, cp.LastProcessedLine)
+}
+
+// TestCheckpoint_ShouldSkipResumedLine pins the resume off-by-one boundary.
+//
+// ProcessedRows counts data rows; the source CSV has a header on line 1, so M
+// processed data rows occupy lines 2..M+1. On resume the guard must skip
+// exactly those lines and no more. The boundary case (M processed, line M+1)
+// is the last committed data row: a guard of `<= ProcessedRows` would NOT skip
+// it, reprocessing it and duplicating its ledger position.
+func TestCheckpoint_ShouldSkipResumedLine(t *testing.T) {
+	tests := []struct {
+		name          string
+		processedRows int
+		lineNumber    int
+		wantSkip      bool
+	}{
+		// Fresh import (nothing processed): never skip, even the header-adjacent line.
+		{name: "no rows processed, first data row", processedRows: 0, lineNumber: 2, wantSkip: false},
+		{name: "no rows processed, header line", processedRows: 0, lineNumber: 1, wantSkip: false},
+
+		// 5 data rows processed -> they occupy lines 2..6.
+		{name: "5 processed, header line skipped", processedRows: 5, lineNumber: 1, wantSkip: true},
+		{name: "5 processed, first committed data row", processedRows: 5, lineNumber: 2, wantSkip: true},
+		{name: "5 processed, boundary last committed data row", processedRows: 5, lineNumber: 6, wantSkip: true},
+		{name: "5 processed, first new data row", processedRows: 5, lineNumber: 7, wantSkip: false},
+		{name: "5 processed, later new data row", processedRows: 5, lineNumber: 11, wantSkip: false},
+
+		// 1 data row processed -> it occupies line 2.
+		{name: "1 processed, committed data row", processedRows: 1, lineNumber: 2, wantSkip: true},
+		{name: "1 processed, next data row", processedRows: 1, lineNumber: 3, wantSkip: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cp := &Checkpoint{ProcessedRows: tt.processedRows}
+			assert.Equal(t, tt.wantSkip, cp.ShouldSkipResumedLine(tt.lineNumber))
+		})
+	}
 }
 
 func TestCheckpoint_SetTotalRows(t *testing.T) {
@@ -174,7 +208,6 @@ func TestCheckpoint_MixedIncrements(t *testing.T) {
 	assert.Equal(t, 15, cp.SuccessCount)
 	assert.Equal(t, 3, cp.FailureCount)
 	assert.Equal(t, 18, cp.ProcessedRows)
-	assert.Equal(t, 18, cp.LastProcessedLine)
 }
 
 func TestCalculateFileChecksum(t *testing.T) {
@@ -393,7 +426,6 @@ func TestCheckpoint_InitialState(t *testing.T) {
 	assert.Equal(t, 0, cp.SuccessCount)
 	assert.Equal(t, 0, cp.FailureCount)
 	assert.Equal(t, Status(""), cp.Status)
-	assert.Equal(t, 0, cp.LastProcessedLine)
 	assert.Nil(t, cp.RollbackSQL)
 	assert.Empty(t, cp.ErrorMessage)
 	assert.True(t, cp.CreatedAt.IsZero())
