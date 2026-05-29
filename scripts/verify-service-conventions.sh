@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # verify-service-conventions.sh - Check Meridian service conventions
 #
-# Scans the codebase for convention violations across five areas:
-#   1. File size limits (error >800 lines for non-test, non-pb Go files)
-#   2. time.Sleep in test files (should use shared/platform/await instead)
-#   3. Proto freshness (generated .pb.go and *_pb.ts files match .proto sources)
-#   4. Stale or incomplete //nolint directives
+# Scans the codebase for convention violations across these areas:
+#   1.  File size limits (error >800 lines for non-test, non-pb Go files)
+#   1b. Test file size limits (error >1500 lines for _test.go files)
+#   2.  time.Sleep in test files (should use shared/platform/await instead)
+#   3.  Proto freshness (generated .pb.go and *_pb.ts files match .proto sources)
+#   4.  Stale or incomplete //nolint directives
 #
 # Note: doc.go presence and service/server.go naming are enforced by
 # tests/architecture/structure_test.go and are not duplicated here.
@@ -20,8 +21,9 @@
 #
 # Escape hatches:
 #   //meridian:large-file  Add anywhere in a file (gofmt may place it after
-#                           the package doc block) to exempt it from the
-#                           800-line limit. Use sparingly.
+#                           the package doc block) to exempt it from the file
+#                           size limits (both the 800-line non-test limit and
+#                           the 1500-line test limit). Use sparingly.
 
 set -euo pipefail
 
@@ -118,6 +120,123 @@ check_file_size() {
 
     if [ "$found" -eq 0 ]; then
         log_ok "No files exceed 800 lines"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Check 1b: Test file size (error >1500 lines for _test.go files)
+#
+# Test files are excluded from the 800-line non-test limit (Check 1), so they
+# grew unchecked — the largest reached 7000+ lines, which the /assess hotspot
+# report flagged as a top AI-navigability risk. A 1500-line cap is deliberately
+# more generous than the 800-line code limit (table-driven suites and fixtures
+# are legitimately verbose) while still preventing the multi-thousand-line
+# monsters that are impossible to navigate.
+#
+# Grandfathering: pre-existing offenders are listed in KNOWN_OVERSIZED_TEST_FILES
+# (mirroring tests/architecture/size_test.go's knownOversizedFiles). This errors
+# on NEW violations while allowing the existing backlog to be split down over
+# time. Do NOT add new entries — split the test file instead. Remove an entry
+# once its file drops below the cap.
+#
+# Escape hatch: //meridian:large-file (same as Check 1) exempts a single file.
+# ---------------------------------------------------------------------------
+
+TEST_FILE_SIZE_LIMIT=1500
+
+# Pre-existing test files over TEST_FILE_SIZE_LIMIT, grandfathered in. Paths are
+# relative to the repo root. Split these to comply, then remove the entry.
+# Do NOT add new entries.
+#
+# Plain indexed array (not an associative array) so the script still runs under
+# bash 3.2, the default on macOS, for local invocations.
+KNOWN_OVERSIZED_TEST_FILES=(
+    "services/current-account/e2e/saga_compensation_test.go"
+    "services/current-account/service/grpc_service_integration_test.go"
+    "services/current-account/service/grpc_service_test.go"
+    "services/current-account/service/lien_service_test.go"
+    "services/financial-accounting/service/financial_accounting_service_test.go"
+    "services/financial-accounting/service/grpc_integration_test.go"
+    "services/identity/service/grpc_service_test.go"
+    "services/internal-account/adapters/persistence/repository_integration_test.go"
+    "services/internal-account/e2e/e2e_test.go"
+    "services/internal-account/service/server_test.go"
+    "services/market-information/e2e/e2e_test.go"
+    "services/payment-order/service/grpc_service_test.go"
+    "services/payment-order/service/integration_test.go"
+    "services/position-keeping/domain/financial_position_log_test.go"
+    "services/position-keeping/service/record_measurement_test.go"
+    "services/reference-data/e2e/e2e_test.go"
+    "services/tenant/provisioner/postgres_provisioner_test.go"
+    "services/tenant/service/grpc_service_test.go"
+    "services/tenant/worker/provisioning_worker_test.go"
+    "shared/platform/gateway/tenant_resolver_test.go"
+)
+
+# Returns true (0) if $1 is listed in KNOWN_OVERSIZED_TEST_FILES. Uses a plain
+# loop rather than an associative array so the script runs under bash 3.2.
+is_known_oversized_test() {
+    local target=$1 entry
+    for entry in "${KNOWN_OVERSIZED_TEST_FILES[@]}"; do
+        [ "$entry" = "$target" ] && return 0
+    done
+    return 1
+}
+
+check_test_file_size() {
+    log_section "Test File Size Limits (>${TEST_FILE_SIZE_LIMIT} lines)"
+
+    local found=0
+    local stale=0
+
+    # Process substitution keeps the loop body in the current shell, so updates
+    # to "found" persist after the loop.
+    while IFS= read -r file; do
+        skip_service "$file" && continue
+
+        # Honour escape hatch: //meridian:large-file anywhere in the file.
+        if grep -q "//meridian:large-file" "${REPO_ROOT}/${file}" 2>/dev/null; then
+            continue
+        fi
+
+        local lines
+        lines=$(wc -l < "${REPO_ROOT}/${file}")
+
+        if [ "$lines" -gt "$TEST_FILE_SIZE_LIMIT" ]; then
+            # Grandfathered pre-existing offenders are allowed but not silenced
+            # forever — the stale check below nags once they drop below the cap.
+            is_known_oversized_test "$file" && continue
+
+            log_error "${file} has ${lines} lines (limit: ${TEST_FILE_SIZE_LIMIT})"
+            echo "       Fix: split into smaller _test.go files in the same package"
+            echo "       Exempt: add '//meridian:large-file' comment anywhere in the file"
+            found=1
+        fi
+    done < <(
+        cd "$REPO_ROOT"
+        find services shared cmd tests -name "*_test.go" -type f 2>/dev/null | sort
+    )
+
+    # Flag allowlist entries that no longer need grandfathering (file removed or
+    # now under the cap) so the allowlist keeps reflecting real debt. Recomputing
+    # line counts here is cheap and avoids tracking state through the loop above.
+    local p plines
+    for p in "${KNOWN_OVERSIZED_TEST_FILES[@]}"; do
+        skip_service "$p" && continue
+        if [ ! -f "${REPO_ROOT}/${p}" ]; then
+            echo -e "       ${YELLOW}STALE${NC}  allowlist entry no longer exists — remove: ${p}"
+            stale=1
+            continue
+        fi
+        plines=$(wc -l < "${REPO_ROOT}/${p}")
+        if [ "$plines" -le "$TEST_FILE_SIZE_LIMIT" ]; then
+            echo -e "       ${YELLOW}STALE${NC}  allowlist entry no longer over limit — remove: ${p}"
+            stale=1
+        fi
+    done
+
+    if [ "$found" -eq 0 ] && [ "$stale" -eq 0 ]; then
+        log_ok "No new test files exceed ${TEST_FILE_SIZE_LIMIT} lines (${#KNOWN_OVERSIZED_TEST_FILES[@]} grandfathered)"
     fi
 }
 
@@ -336,6 +455,7 @@ fi
 echo ""
 
 check_file_size
+check_test_file_size
 check_time_sleep
 check_proto_freshness
 check_frontend_proto_freshness
