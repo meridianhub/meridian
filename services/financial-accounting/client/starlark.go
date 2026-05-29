@@ -213,15 +213,19 @@ func updateBookingLogHandler(client *Client) saga.Handler {
 			return nil, err
 		}
 
-		// Parse optional status parameter
+		// Parse optional status parameter. Both the short form ("POSTED") and the
+		// full proto enum form ("TRANSACTION_STATUS_POSTED") are accepted so a saga
+		// author can feed a handler's status output (now the full enum name) back
+		// into update_booking_log without translation. The accepted value set is
+		// unchanged - only the spelling is widened.
 		status := commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING
 		if statusStr, ok := params["status"].(string); ok {
 			switch statusStr {
-			case "POSTED":
+			case "POSTED", "TRANSACTION_STATUS_POSTED":
 				status = commonv1.TransactionStatus_TRANSACTION_STATUS_POSTED
-			case "CANCELLED":
+			case "CANCELLED", "TRANSACTION_STATUS_CANCELLED":
 				status = commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED
-			case "PENDING":
+			case "PENDING", "TRANSACTION_STATUS_PENDING":
 				status = commonv1.TransactionStatus_TRANSACTION_STATUS_PENDING
 			default:
 				return nil, fmt.Errorf("%w: %s", ErrInvalidStatus, statusStr)

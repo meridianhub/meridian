@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	financialaccountingv1 "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
 	"github.com/meridianhub/meridian/shared/pkg/saga"
 	"github.com/stretchr/testify/assert"
@@ -204,6 +205,39 @@ func TestUpdateBookingLogHandler_PendingStatus(t *testing.T) {
 	resultMap, ok := result.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "log-101", resultMap["log_id"])
+}
+
+// TestUpdateBookingLogHandler_AcceptsFullEnumStatus verifies the input switch
+// accepts the full proto enum spelling that handlers now emit, preserving the
+// round-trip: a status produced by one handler can be fed straight back in.
+func TestUpdateBookingLogHandler_AcceptsFullEnumStatus(t *testing.T) {
+	var gotStatus commonv1.TransactionStatus
+	mockClient := &mockFinancialAccountingClient{
+		UpdateFinancialBookingLogFunc: func(_ context.Context, req *financialaccountingv1.UpdateFinancialBookingLogRequest, _ ...grpc.CallOption) (*financialaccountingv1.UpdateFinancialBookingLogResponse, error) {
+			gotStatus = req.Status
+			return &financialaccountingv1.UpdateFinancialBookingLogResponse{
+				FinancialBookingLog: &financialaccountingv1.FinancialBookingLog{
+					Id:     req.Id,
+					Status: req.Status,
+				},
+			}, nil
+		},
+	}
+
+	client := &Client{financialAccounting: mockClient}
+	handler := updateBookingLogHandler(client)
+	ctx := &saga.StarlarkContext{Context: context.Background()}
+	params := map[string]any{
+		"log_id": "log-123",
+		"status": "TRANSACTION_STATUS_CANCELLED", // full enum form, as emitted by handlers
+	}
+
+	result, err := handler(ctx, params)
+	require.NoError(t, err)
+	assert.Equal(t, commonv1.TransactionStatus_TRANSACTION_STATUS_CANCELLED, gotStatus)
+	resultMap, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "TRANSACTION_STATUS_CANCELLED", resultMap["status"])
 }
 
 // --- reverseEntriesHandler missing param ---
