@@ -57,7 +57,8 @@
   "overrides": {
     "hono": "^4.12.12",
     "@hono/node-server": "^1.19.13",
-    "flatted": "^3.4.2"
+    "flatted": "^3.4.2",
+    "qs": "^6.15.2"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.65.0",
