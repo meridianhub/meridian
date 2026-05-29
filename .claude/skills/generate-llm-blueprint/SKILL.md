@@ -24,7 +24,7 @@ Run from the `meridian-main` directory:
 ```bash
 repomix --style markdown \
   --include "docs/prd/**/*.md,docs/adr/**/*.md,docs/architecture/**/*.md,docs/guides/**/*.md,api/proto/**/*.proto,**/atlas.hcl,**/openapi.json,go.mod,CLAUDE.md,CONTRIBUTING.md,README.md" \
-  --ignore "node_modules/**,**/CHANGELOG.md,docs/architecture/api-contracts/**,docs/skills/**,services/**/*.md" \
+  --ignore "node_modules/**,**/CHANGELOG.md,docs/architecture/api-contracts/**,.claude/skills/**,services/**/*.md" \
   --remove-empty-lines \
   -o ../meridian-blueprint.md
 ```
