@@ -474,7 +474,7 @@ task-master set-status --id=1 --status=done  # Might execute on wrong tag!
 `time.Sleep` creates flaky tests - sleeping too short causes failures, sleeping too long wastes CI time. The `await` package polls conditions until they're met or timeout, making tests both reliable and fast.
 
 ```go
-import "meridian/shared/platform/await"
+import "github.com/meridianhub/meridian/shared/platform/await"
 
 // BAD - arbitrary sleep, flaky and slow
 time.Sleep(2 * time.Second)
@@ -604,64 +604,6 @@ See `shared/platform/events/outbox.go` for the outbox pattern implementation.
 
 ---
 
-## Demo Environment
-
-### Server Access
-
-| Detail | Value |
-|--------|-------|
-| Provider | DigitalOcean Droplet |
-| IP | `68.183.40.239` |
-| SSH Key | `~/.ssh/` (standard SSH agent) |
-| User | `root` (default DO) |
-
-```bash
-# Connect to demo server
-ssh root@68.183.40.239
-```
-
-### Deployment
-
-Deploying to demo is triggered by pushing to the `demo` branch. CI builds the `ghcr.io/meridianhub/meridian:demo` Docker image.
-
-```bash
-# 1. Fast-forward demo branch to develop (from meridian-main/)
-git push origin develop:demo
-
-# 2. Wait for CI to build the Docker image (~5 min)
-gh run list --branch demo --limit 3
-
-# 3. Pull and restart on the droplet
-ssh root@68.183.40.239 "cd /opt/meridian && docker compose pull && docker compose up -d"
-
-# 4. Run migrations (required after schema changes)
-ssh root@68.183.40.239 "docker exec meridian-meridian-1 /meridian --migrate"
-
-# 5. Verify
-ssh root@68.183.40.239 "docker logs meridian-meridian-1 --tail 5"
-```
-
-### Stack
-
-| Container | Image | Purpose |
-|-----------|-------|---------|
-| `meridian-meridian-1` | `ghcr.io/meridianhub/meridian:demo` | Unified binary (gRPC :50051, HTTP :8090) |
-| `meridian-postgres-1` | `postgres:16-alpine` | Database (internal only) |
-| `meridian-caddy-1` | `caddy:2-alpine` | Reverse proxy (ports 80/443, Cloudflare origin cert) |
-| `meridian-dex-1` | `dex:v2.41.1-alpine` | OIDC identity provider |
-
-Config files: `/opt/meridian/` (docker-compose.yml, Caddyfile, dex.yaml, .env, certs/)
-
-**Rules:**
-
-- Treat demo as a shared environment - confirm with user before destructive operations
-- Do not store secrets or credentials on the droplet in plain text
-- Use `ssh` commands via Bash tool when user requests remote operations
-- Migrations are NOT automatic - must run `--migrate` after deploying schema changes
-- **NEVER create GitHub issues** - use Task Master (`/tm`) for all task tracking
-
----
-
 ## Marathon Configuration
 
 Project-specific settings for `/tm` marathon mode. The generic `/tm` template reads these.
@@ -700,6 +642,6 @@ Project-specific settings for `/tm` marathon mode. The generic `/tm` template re
 
 ### Retrospective
 
-- **Retro log**: `~/.claude/projects/-Users-ben-dev-github-com-meridianhub-meridian/memory/marathon-retros.md`
+- **Retro log**: `marathon-retros.md` in your local Task Master project memory directory
 - Append each marathon's retrospective to this log after completion
 - Update the Template Changes validation column for any "Pending" items that were exercised
