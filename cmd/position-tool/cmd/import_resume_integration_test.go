@@ -36,13 +36,18 @@ const (
 // setupResumeTestPool returns a pgx pool on a CockroachDB testcontainer with a
 // minimal position table.
 //
-// It uses testdb.NewCockroachTestPool for production parity: the BatchInserter
-// requires a *pgxpool.Pool, so SetupCockroachDB (which returns a *gorm.DB) does
-// not fit, and NewTestPool is Postgres-backed. Migrations are applied manually
-// rather than via WithMigrations because the production position-keeping
-// migrations include plpgsql triggers, which CockroachDB does not support; this
-// test only INSERTs (never UPDATEs) positions, so the append-only trigger and
-// the rest of the schema are unnecessary.
+// It uses testdb.NewCockroachTestPool (which wraps the shared
+// StartCockroachContainer + CockroachDSN helpers for production parity) rather
+// than testdb.SetupCockroachDB because the position-tool is pgx-based, not gorm:
+// the BatchInserter and tenant helpers operate on a *pgxpool.Pool, whereas
+// SetupCockroachDB returns a *gorm.DB and cannot satisfy them. This mirrors the
+// established pgxpool pattern in cmd/position-tool/integration_test.go.
+//
+// Migrations are applied manually rather than via WithMigrations because the
+// production position-keeping migrations include plpgsql triggers, which
+// CockroachDB does not support; this test only INSERTs (never UPDATEs)
+// positions, so the append-only trigger and the rest of the schema are
+// unnecessary.
 func setupResumeTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
