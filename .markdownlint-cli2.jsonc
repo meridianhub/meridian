@@ -51,6 +51,7 @@
     "**/.git/**",
     ".taskmaster/**",
     ".claude/**",
+    ".assess/**",
     "docs/architecture/**",
     "docs/adr/**",
     "docs/analysis/**",
