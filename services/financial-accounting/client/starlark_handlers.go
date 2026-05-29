@@ -81,7 +81,7 @@ func registerPostingHandlers(registry *saga.HandlerRegistry, client *Client) err
 //
 // Returns a map containing:
 //   - posting_id: The unique posting identifier
-//   - status: Always "POSTED" for newly created postings
+//   - status: The server-reported status of the posting (e.g. TRANSACTION_STATUS_PENDING)
 func capturePostingHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		req, err := buildCapturePostingRequest(ctx, params)
@@ -98,7 +98,7 @@ func capturePostingHandler(client *Client) saga.Handler {
 		posting := resp.GetLedgerPosting()
 		return map[string]any{
 			"posting_id": posting.GetId(),
-			"status":     "POSTED",
+			"status":     posting.GetStatus().String(),
 		}, nil
 	}
 }
@@ -172,7 +172,7 @@ func parsePostingDirection(directionStr string) (commonv1.PostingDirection, erro
 //
 // Returns a map containing:
 //   - posting_id: The posting identifier
-//   - status: Always "COMPENSATED"
+//   - status: The server-reported status after compensation (e.g. TRANSACTION_STATUS_CANCELLED)
 func compensatePostingHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		postingID, err := saga.RequireStringParam(params, "posting_id")
@@ -197,7 +197,7 @@ func compensatePostingHandler(client *Client) saga.Handler {
 		posting := resp.GetLedgerPosting()
 		return map[string]any{
 			"posting_id": posting.GetId(),
-			"status":     "COMPENSATED",
+			"status":     posting.GetStatus().String(),
 		}, nil
 	}
 }
@@ -209,7 +209,7 @@ func compensatePostingHandler(client *Client) saga.Handler {
 //
 // Returns a map containing:
 //   - booking_id: The unique booking log identifier (alias for log_id)
-//   - status: Always "CREATED"
+//   - status: The server-reported status propagated from initiate_booking_log
 func createBookingHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		// Reuse initiate logic
@@ -225,7 +225,7 @@ func createBookingHandler(client *Client) saga.Handler {
 		}
 		return map[string]any{
 			"booking_id": resultMap["log_id"],
-			"status":     "CREATED",
+			"status":     resultMap["status"],
 		}, nil
 	}
 }
@@ -244,7 +244,9 @@ func createBookingHandler(client *Client) saga.Handler {
 //
 // Returns a map containing:
 //   - posting_ids: Array of created posting identifiers
-//   - status: Always "POSTED" for successful operations
+//   - statuses: Array of server-reported posting statuses, parallel to posting_ids
+//   - status: Aggregate status - the common posting status when all entries agree,
+//     otherwise TRANSACTION_STATUS_UNSPECIFIED (callers should inspect `statuses`)
 func postEntriesHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		bookingLogID, err := saga.RequireStringParam(params, "booking_log_id")
@@ -264,16 +266,34 @@ func postEntriesHandler(client *Client) saga.Handler {
 		}
 
 		// Post each entry
-		postingIDs, err := postEntries(ctx, client, bookingLogID, entriesArray)
+		postingIDs, statuses, err := postEntries(ctx, client, bookingLogID, entriesArray)
 		if err != nil {
 			return nil, err
 		}
 
 		return map[string]any{
 			"posting_ids": postingIDs,
-			"status":      "POSTED",
+			"statuses":    statuses,
+			"status":      aggregatePostingStatus(statuses),
 		}, nil
 	}
+}
+
+// aggregatePostingStatus returns the common status across all postings when they
+// agree. An empty batch or divergent statuses yield TRANSACTION_STATUS_UNSPECIFIED,
+// signaling that callers should inspect the per-entry `statuses` array. The value
+// is always derived from real server-reported statuses - never a hardcoded literal.
+func aggregatePostingStatus(statuses []string) string {
+	if len(statuses) == 0 {
+		return commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED.String()
+	}
+	first := statuses[0]
+	for _, s := range statuses[1:] {
+		if s != first {
+			return commonv1.TransactionStatus_TRANSACTION_STATUS_UNSPECIFIED.String()
+		}
+	}
+	return first
 }
 
 // parseEntriesArray extracts and validates the entries array from params.
@@ -334,14 +354,16 @@ func validateBalancedEntries(entriesArray []any) error {
 	return nil
 }
 
-// postEntries posts all entries and returns their posting IDs.
-func postEntries(ctx *saga.StarlarkContext, client *Client, bookingLogID string, entriesArray []any) ([]string, error) {
+// postEntries posts all entries and returns their posting IDs together with the
+// server-reported status for each posting (parallel slices).
+func postEntries(ctx *saga.StarlarkContext, client *Client, bookingLogID string, entriesArray []any) ([]string, []string, error) {
 	postingIDs := make([]string, 0, len(entriesArray))
+	statuses := make([]string, 0, len(entriesArray))
 
 	for i, entryRaw := range entriesArray {
 		entryMap, ok := entryRaw.(map[string]any)
 		if !ok {
-			return nil, ErrEntryMustBeObject
+			return nil, nil, ErrEntryMustBeObject
 		}
 
 		// Create posting params
@@ -370,23 +392,29 @@ func postEntries(ctx *saga.StarlarkContext, client *Client, bookingLogID string,
 		// Call capture_posting handler
 		result, err := capturePostingHandler(client)(entryCtx, postingParams)
 		if err != nil {
-			return nil, fmt.Errorf("failed to post entry: %w", err)
+			return nil, nil, fmt.Errorf("failed to post entry: %w", err)
 		}
 
 		resultMap, ok := result.(map[string]any)
 		if !ok {
-			return nil, ErrInvalidResultType
+			return nil, nil, ErrInvalidResultType
 		}
 
 		postingID, ok := resultMap["posting_id"].(string)
 		if !ok {
-			return nil, ErrInvalidPostingIDType
+			return nil, nil, ErrInvalidPostingIDType
+		}
+
+		postingStatus, ok := resultMap["status"].(string)
+		if !ok {
+			return nil, nil, ErrInvalidStatusType
 		}
 
 		postingIDs = append(postingIDs, postingID)
+		statuses = append(statuses, postingStatus)
 	}
 
-	return postingIDs, nil
+	return postingIDs, statuses, nil
 }
 
 // reverseEntriesHandler reverses posted GL entries during saga compensation.
@@ -403,7 +431,7 @@ func postEntries(ctx *saga.StarlarkContext, client *Client, bookingLogID string,
 //
 // Returns a map containing:
 //   - log_id: The booking log identifier
-//   - status: Always "REVERSED"
+//   - status: The server-reported status after reversal (e.g. TRANSACTION_STATUS_CANCELLED)
 func reverseEntriesHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		bookingLogID, err := saga.RequireStringParam(params, "booking_log_id")
@@ -428,7 +456,7 @@ func reverseEntriesHandler(client *Client) saga.Handler {
 		log := resp.GetFinancialBookingLog()
 		return map[string]any{
 			"log_id": log.GetId(),
-			"status": "REVERSED",
+			"status": log.GetStatus().String(),
 		}, nil
 	}
 }

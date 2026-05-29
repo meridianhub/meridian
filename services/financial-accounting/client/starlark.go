@@ -43,6 +43,9 @@ var (
 	// ErrInvalidPostingIDType is returned when posting_id has unexpected type.
 	ErrInvalidPostingIDType = errors.New("invalid posting_id type")
 
+	// ErrInvalidStatusType is returned when a handler result status has unexpected type.
+	ErrInvalidStatusType = errors.New("invalid status type")
+
 	// ErrInvalidStatus is returned when an unknown status value is provided.
 	ErrInvalidStatus = errors.New("invalid status")
 )
@@ -137,7 +140,7 @@ func registerBookingLogHandlers(registry *saga.HandlerRegistry, client *Client) 
 //
 // Returns a map containing:
 //   - log_id: The unique booking log identifier
-//   - status: Always "INITIATED" for newly created logs
+//   - status: The server-reported status of the booking log (e.g. TRANSACTION_STATUS_PENDING)
 func initiateBookingLogHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		// 1. Parse Starlark params using helper functions from shared/pkg/saga
@@ -179,7 +182,7 @@ func initiateBookingLogHandler(client *Client) saga.Handler {
 		log := resp.GetFinancialBookingLog()
 		return map[string]any{
 			"log_id": log.GetId(),
-			"status": "INITIATED",
+			"status": log.GetStatus().String(),
 		}, nil
 	}
 }
@@ -193,7 +196,7 @@ func initiateBookingLogHandler(client *Client) saga.Handler {
 //
 // Returns a map containing:
 //   - log_id: The booking log identifier
-//   - status: Always "UPDATED"
+//   - status: The server-reported status of the booking log after the update
 func updateBookingLogHandler(client *Client) saga.Handler {
 	return func(ctx *saga.StarlarkContext, params map[string]any) (any, error) {
 		logID, err := saga.RequireStringParam(params, "log_id")
@@ -231,7 +234,7 @@ func updateBookingLogHandler(client *Client) saga.Handler {
 		log := resp.GetFinancialBookingLog()
 		return map[string]any{
 			"log_id": log.GetId(),
-			"status": "UPDATED",
+			"status": log.GetStatus().String(),
 		}, nil
 	}
 }
