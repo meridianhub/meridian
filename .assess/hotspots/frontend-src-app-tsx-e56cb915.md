@@ -27,5 +27,5 @@ Hotspot (new). 289 LOC, max cyclomatic complexity 91.0, 66 commits in churn wind
 
 - Promote frontend eslint complexity rules from warn to error so they ratchet (currently App.tsx ccn 91 is only flagged advisorily)
 - Decompose App.tsx: extract routing and provider wiring into separate modules
-- Add as a first target for the new CI mutation-testing pass
+- Add as a first target for the new CI mutation-testing pass, using a JS/TS mutation framework (Stryker, `@stryker-mutator/core`) — not the Go `gremlins`/`ooze` path used for Go hotspots
 

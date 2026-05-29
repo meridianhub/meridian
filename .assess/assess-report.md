@@ -89,7 +89,7 @@ A codebase with no detected lying artefacts is rare and is the strongest read-si
 
 | # | Action | Layer | Effort | Command / First Step | Hotspot files this addresses | Issue |
 |---|--------|-------|--------|---------------------|------------------------------|-------|
-| 1 | Add mutation testing to CI to verify test truth-pressure (don't raise the coverage threshold) | 6 | medium | Add a Go mutation pass (e.g. `gremlins`/`ooze`) scoped to high-churn production files first; wire into `quality.yml` as a tracked metric | `cmd/meridian/main.go`, `frontend/src/App.tsx` | TM `assess-2026-05-29` #1 |
+| 1 | Add mutation testing to CI to verify test truth-pressure (don't raise the coverage threshold) | 6 | medium | Per-language passes: Go via `gremlins`/`ooze` for `cmd/meridian/main.go`; TS/JS via Stryker (`@stryker-mutator/core`) for `frontend/src/App.tsx`. Scope to high-churn files first; wire into `quality.yml` as a tracked metric | `cmd/meridian/main.go` (Go), `frontend/src/App.tsx` (TS) | TM `assess-2026-05-29` #1 |
 | 2 | Add a maintained base README per service module (8.8% → target the highest-churn services first) | 0 | medium | Follow `docs/service-readme-template.md`; extend `service-readme-lint.yml` to require one per service dir | `services/control-plane/`, `services/current-account/`, `services/payment-order/` | TM `assess-2026-05-29` #2 |
 | 3 | Promote frontend complexity rules from `warn` to `error` so they ratchet like the Go side, then decompose `App.tsx` | 3 | small | In `frontend/eslint.config.js` set `complexity`, `max-lines-per-function`, `max-statements` to `error`; extract routing/providers from `App.tsx` | `frontend/src/App.tsx` (ccn 91, 66 commits) | TM `assess-2026-05-29` #3 |
 
