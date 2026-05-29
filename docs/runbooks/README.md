@@ -32,6 +32,10 @@ scenarios.
   scripts, handler errors, and execution failures
 - **[event-router.md](event-router.md)** - Event-router service operations: dispatching Kafka events
   to tenant sagas, CEL filter troubleshooting, chain depth incidents
+- **[email-infrastructure.md](email-infrastructure.md)** - Email delivery infrastructure operations,
+  provider configuration, and bounce handling
+- **[party-kyc-verification.md](party-kyc-verification.md)** - Party KYC/AML verification operations,
+  provider failover, and manual review procedures
 
 ## Runbook Structure
 
