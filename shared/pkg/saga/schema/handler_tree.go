@@ -35,6 +35,12 @@ func parseHandlerTree(handlerNames []string) *handlerTree {
 			// Invalid handler name, skip
 			continue
 		}
+		// Skip names with empty segments (e.g. "service..action",
+		// ".service.action", "service.action.") which would otherwise
+		// create empty keys in the tree.
+		if hasEmptySegment(parts) {
+			continue
+		}
 
 		current := root
 
@@ -53,6 +59,16 @@ func parseHandlerTree(handlerNames []string) *handlerTree {
 	}
 
 	return root
+}
+
+// hasEmptySegment reports whether any of the dot-separated parts is empty.
+func hasEmptySegment(parts []string) bool {
+	for _, part := range parts {
+		if part == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // findNode finds a node at the given dot-separated path.
