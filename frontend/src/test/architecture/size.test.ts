@@ -28,7 +28,6 @@ const FILE_LINE_LIMIT = 500 // any .ts / .tsx file
 
 const knownOversizedFiles: Record<string, number> = {
   // .tsx files exceeding 300-line component limit (and some also >500 overall)
-  'src/features/manifests/components/manifest-graph.tsx': 1124,
   'src/features/manifests/components/manifest-diff-graph.tsx': 657,
   'src/features/reconciliation/pages/detail.tsx': 638,
   'src/features/cookbook/components/saga-flow.tsx': 611,

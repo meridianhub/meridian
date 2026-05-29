@@ -32,8 +32,7 @@ const ALLOWED_CROSS_FEATURE_IMPORTS: Record<string, string[]> = {
     'src/features/economy/pages/economy-overview-page.tsx',
   ],
   'manifests -> economy': [
-    'src/features/manifests/components/manifest-graph.test.tsx',
-    'src/features/manifests/components/manifest-graph.tsx',
+    'src/features/manifests/components/manifest-graph/index.tsx',
   ],
   'mappings -> sagas': ['src/features/mappings/pages/[mappingId].test.tsx'],
   'payments -> accounts': [

@@ -27,6 +27,25 @@ export default defineConfig([
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': 'error',
+      // Complexity guardrails mirroring the Go side's discipline. All `warn`
+      // so pre-existing files do not break CI; they act as a ratchet on new
+      // code. Existing violators carry inline disables with an explanation.
+      complexity: ['warn', 15],
+      'max-lines': ['warn', { max: 500, skipBlankLines: true, skipComments: true }],
+      'max-lines-per-function': ['warn', { max: 80, skipBlankLines: true, skipComments: true }],
+      'max-statements': ['warn', 25],
+    },
+  },
+  // Test and E2E files: per-function size/statement/complexity limits add noise
+  // here because a single `describe`/`it` callback legitimately wraps the whole
+  // suite. Keep `max-lines` (it still encourages splitting oversized suites) but
+  // relax the per-function rules.
+  {
+    files: ['**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}', 'e2e/**/*.{ts,tsx}'],
+    rules: {
+      'max-lines-per-function': 'off',
+      'max-statements': 'off',
+      complexity: 'off',
     },
   },
   // E2E test files are not React code - disable React-specific rules

@@ -704,7 +704,7 @@ architecture).
 erDiagram
     %% ════════════════════════════════════
     %% TENANT MANAGEMENT SERVICE
-    %% DB: meridian_tenant
+    %% DB: meridian_platform
     %% ════════════════════════════════════
     tenant {
         varchar id PK "slug e.g. acme_bank"

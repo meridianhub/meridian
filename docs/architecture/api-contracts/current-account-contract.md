@@ -855,8 +855,8 @@ facility.CurrentBalance = mapBalancesToResponse(balances)
 - **Proto Schema**: `api/proto/meridian/current_account/v1/current_account.proto`
 - **Service Boundaries**: `docs/architecture/bian-service-boundaries.md`
 - **Coupling Analysis**: `docs/architecture/service-coupling-analysis.md`
-- **Position Keeping Contract**: `docs/architecture/api-contracts/position-keeping-contract.md`
-- **Financial Accounting Contract**: `docs/architecture/api-contracts/financial-accounting-contract.md`
+- **Position Keeping Contract**: [position-keeping-contract.md](position-keeping-contract.md)
+- **Financial Accounting Contract**: [financial-accounting-contract.md](financial-accounting-contract.md)
 - **ADR-0002**: Microservices Per BIAN Domain
 - **ADR-0005**: Adapter Pattern Layer Translation
 - **ADR-0023**: Balance Delegation to Position Keeping

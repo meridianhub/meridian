@@ -15,11 +15,17 @@ instructions: |
 
 # 28. Starlark Saga Orchestration with CEL Valuation
 
-Date: 2025-01-20
+Date: 2026-01-20
 
 ## Status
 
 Accepted (PRD approved for baseline)
+
+Supersedes the hand-written Go saga orchestration approach in
+[ADR-0002](0002-microservices-per-bian-domain.md#amendment-saga-orchestration-pattern-2025-11-19) and
+[ADR-0012](0012-lien-based-fund-reservation.md): saga step sequencing and LIFO compensation are now defined as
+Starlark scripts (stored as saga definitions in reference-data) and executed by `shared/pkg/saga.StarlarkSagaRunner`,
+rather than hardcoded in each service's Go domain layer.
 
 ## Context
 
