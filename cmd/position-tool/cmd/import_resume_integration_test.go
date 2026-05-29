@@ -33,22 +33,23 @@ const (
 	resumeTestFungibilityExpr = `attributes["registry"]`
 )
 
-// setupResumeTestPool starts a CockroachDB container and returns a connection
-// pool with a minimal position table. The append-only plpgsql trigger from the
-// production migration is intentionally omitted: CockroachDB does not support
-// plpgsql triggers, and these tests only INSERT (never UPDATE) positions.
+// setupResumeTestPool returns a pgx pool on a CockroachDB testcontainer with a
+// minimal position table.
+//
+// It uses testdb.NewCockroachTestPool for production parity: the BatchInserter
+// requires a *pgxpool.Pool, so SetupCockroachDB (which returns a *gorm.DB) does
+// not fit, and NewTestPool is Postgres-backed. Migrations are applied manually
+// rather than via WithMigrations because the production position-keeping
+// migrations include plpgsql triggers, which CockroachDB does not support; this
+// test only INSERTs (never UPDATEs) positions, so the append-only trigger and
+// the rest of the schema are unnecessary.
 func setupResumeTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	container, _ := testdb.StartCockroachContainer(t, "test_position_tool")
-	dsn := testdb.CockroachDSN(t, container)
+	pool := testdb.NewCockroachTestPool(t)
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err, "failed to create connection pool")
-	t.Cleanup(pool.Close)
-
-	_, err = pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, `
 		CREATE TABLE "position" (
 			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
 			"created_at" timestamptz NOT NULL DEFAULT now(),

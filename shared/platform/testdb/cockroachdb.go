@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/cockroachdb"
 	gormpg "gorm.io/driver/postgres"
@@ -103,6 +104,44 @@ func CockroachDSN(t *testing.T, container *cockroachdb.CockroachDBContainer) str
 
 	return fmt.Sprintf("postgres://%s@%s:%d/%s?sslmode=disable",
 		connConfig.User, connConfig.Host, connConfig.Port, connConfig.Database)
+}
+
+// NewCockroachTestPool starts a CockroachDB testcontainer and returns a
+// pgxpool.Pool connected to it, for pgx-based repositories that need
+// CockroachDB production parity.
+//
+// Use this instead of NewTestPool (which is Postgres-backed) when the code
+// under test talks to CockroachDB, and instead of SetupCockroachDB (which
+// returns a *gorm.DB) when the code under test requires a *pgxpool.Pool.
+//
+// The pool and container are cleaned up automatically via t.Cleanup. The
+// optional WithMigrations option applies a service's SQL migrations; omit it
+// to manage schema setup directly in the test.
+func NewCockroachTestPool(t *testing.T, opts ...PoolOption) *pgxpool.Pool {
+	t.Helper()
+
+	cfg := &poolConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	container, _ := StartCockroachContainer(t, "test_db")
+	dsn := CockroachDSN(t, container)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Failed to create CockroachDB connection pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	if cfg.migrations != "" {
+		applyMigrationsWithPgx(t, pool, cfg.migrations)
+	}
+
+	return pool
 }
 
 // SetupCockroachDB creates a CockroachDB testcontainer for integration testing.
