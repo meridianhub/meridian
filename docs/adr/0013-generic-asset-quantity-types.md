@@ -19,7 +19,7 @@ Date: 2025-12-03
 
 ## Status
 
-Proposed
+Accepted (Implemented)
 
 ## Context
 

@@ -75,7 +75,7 @@ Use **protobuf's native versioning** with **BIAN-aligned semantic event types** 
 For minor additions that don't change semantic meaning:
 
 ```protobuf
-// api/proto/events/current_account/v1/events.proto
+// api/proto/meridian/events/v1/current_account_events.proto
 
 // Before
 message AccountUpdated {
@@ -105,7 +105,7 @@ message AccountUpdated {
 For new BIAN operations with distinct semantics:
 
 ```protobuf
-// api/proto/events/current_account/v1/events.proto
+// api/proto/meridian/events/v1/current_account_events.proto
 
 // Existing event
 message AccountUpdated {
@@ -133,8 +133,14 @@ to distinct event types rather than overloading a single event schema.
 
 ### Topic Naming Strategy
 
-- **One topic per event type:** `account-updated`, `account-suspended`, `booking-created`
-- **No version suffixes:** Use semantic names, not `account-updated-v2`
+> **Superseded by the 2025-11-19 amendment below.** The flat, unversioned names in this original section
+> (`account-updated`, `account-suspended`) are NOT what the code uses. The implemented convention is
+> **`<service>.<event-name>.<version>`** with an explicit `.v1` suffix on every topic, e.g.
+> `current-account.account-frozen.v1`, `position-keeping.transaction-captured.v1`, `audit.events.v1`. The canonical
+> topic constants live in `shared/platform/events/topics/topics.go` (with a `topics.yaml` registry and
+> `topics_test.go` enforcing the convention). See the "Event Topic Naming Convention" amendment for rationale.
+
+- **One topic per event type** (illustrative names only; see the amendment for the real `.v1` convention)
 - **BIAN alignment:** Topic names reflect BIAN behavior qualifiers
 - **Retention policy:** 7 days (events are coordination, not system of record)
 
@@ -144,7 +150,7 @@ to distinct event types rather than overloading a single event schema.
 
 ```yaml
 
-# .github/workflows/proto-validation.yml
+# .github/workflows/proto.yml
 
 - name: Lint protobuf schemas
 
@@ -152,7 +158,7 @@ to distinct event types rather than overloading a single event schema.
 
 - name: Check for breaking changes
 
-  run: buf breaking --against '.git#branch=main'
+  run: buf breaking --against '.git#branch=develop'
 ```
 
 **Breaking changes fail the build**, forcing developers to either:
@@ -187,7 +193,7 @@ Question: Is "Suspend" semantically different from "Update"?
 ### Step 2: Define New Event
 
 ```protobuf
-// api/proto/events/current_account/v1/events.proto
+// api/proto/meridian/events/v1/current_account_events.proto
 
 message AccountSuspended {
   // Event metadata
@@ -214,7 +220,7 @@ buf generate
 
 ```bash
 buf lint
-buf breaking --against main
+buf breaking --against '.git#branch=develop'
 
 # ✅ No breaking changes - new file, no modifications to existing schemas
 
@@ -448,7 +454,7 @@ Maintain a living document of all event types:
 ### AccountUpdated
 
 - **Topic:** account-updated
-- **Schema:** api/proto/events/current_account/v1/events.proto
+- **Schema:** api/proto/meridian/events/v1/current_account_events.proto
 - **Producers:** current-account-service
 - **Consumers:** position-keeping-service, financial-accounting-service
 - **BIAN Qualifier:** Update
@@ -456,7 +462,7 @@ Maintain a living document of all event types:
 ### AccountSuspended
 
 - **Topic:** account-suspended
-- **Schema:** api/proto/events/current_account/v1/events.proto
+- **Schema:** api/proto/meridian/events/v1/current_account_events.proto
 - **Producers:** current-account-service
 - **Consumers:** position-keeping-service, risk-management-service
 - **BIAN Qualifier:** Control (Suspend)
@@ -664,21 +670,28 @@ Use **transactional outbox pattern** for at-least-once event delivery guarantees
 3. Mark event as published after successful Kafka acknowledgment
 4. Consumers use idempotency keys to handle duplicates
 
-**Implementation:**
+**Implementation:** The real outbox lives at `shared/platform/events/` (`outbox.go`, `outbox_pgx.go`, `worker.go`,
+`publisher.go`); the schema is in `shared/platform/events/schema.sql`. The table is named **`event_outbox`** and tracks
+state with a **`status`** column (`pending`/`processing`/`completed`/`failed`) rather than a nullable `published_at`.
+This deliberately avoids the partial-index-on-`published_at IS NULL` pattern, which is awkward on CockroachDB; instead
+a plain compound index on `(status, service_name, created_at)` drives polling. The payload is stored as `BYTEA`
+(serialized protobuf), not JSONB.
 
 ```sql
--- Outbox table (per service database)
-CREATE TABLE outbox (
-    id UUID PRIMARY KEY,
-    aggregate_type VARCHAR(100) NOT NULL,
-    aggregate_id VARCHAR(100) NOT NULL,
-    event_type VARCHAR(100) NOT NULL,
-    event_payload JSONB NOT NULL,
-    topic_name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    published_at TIMESTAMP,
-    retry_count INT NOT NULL DEFAULT 0,
-    INDEX idx_unpublished (published_at, created_at) WHERE published_at IS NULL
+-- shared/platform/events/schema.sql (simplified)
+CREATE TABLE event_outbox (
+    id              UUID PRIMARY KEY,
+    aggregate_type  VARCHAR(100) NOT NULL,
+    aggregate_id    VARCHAR(100) NOT NULL,
+    event_type      VARCHAR(100) NOT NULL,
+    event_payload   BYTEA NOT NULL,          -- serialized protobuf
+    topic_name      VARCHAR(255) NOT NULL,
+    service_name    VARCHAR(100) NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending|processing|completed|failed
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at    TIMESTAMPTZ,
+    retry_count     INT NOT NULL DEFAULT 0,
+    INDEX idx_event_outbox_polling (status, service_name, created_at)
 );
 ```
 
@@ -712,7 +725,8 @@ func (s *AccountService) CreateAccount(ctx context.Context, req *pb.CreateAccoun
 
 ```go
 func (p *OutboxPublisher) Run(ctx context.Context) {
-    ticker := time.NewTicker(100 * time.Millisecond)
+    // Real default poll interval is 5s (worker.go), configurable via PollInterval.
+    ticker := time.NewTicker(5 * time.Second)
     for {
         select {
         case <-ticker.C:
@@ -790,7 +804,7 @@ func (p *OutboxPublisher) Run(ctx context.Context) {
 
 **Polling strategy:**
 
-- Frequency: 100ms (10 events/sec per service minimum)
+- Frequency: 5s default poll interval (configurable via `PollInterval`)
 - Batch size: 100 events per poll
 - Retry: Exponential backoff (1s, 2s, 4s, 8s, max 60s)
 - Dead letter: Move to DLQ after 10 retries
@@ -819,13 +833,13 @@ func (p *OutboxPublisher) Run(ctx context.Context) {
 **Negative:**
 
 - ❌ Additional table: Outbox table adds storage overhead
-- ❌ Latency: 100ms delay before event published (vs direct publish)
+- ❌ Latency: up to one poll interval (5s default) before event published (vs direct publish)
 - ❌ Duplicates: Consumers must handle at-least-once semantics
 
 **Mitigations:**
 
 - **Storage**: Outbox cleanup after 7 days (auto-vacuuming)
-- **Latency**: 100ms acceptable for event-driven coordination
+- **Latency**: a few-second poll interval is acceptable for event-driven coordination (tune `PollInterval` if lower latency is required)
 - **Duplicates**: Idempotency pattern (see next amendment)
 
 ### References
@@ -860,18 +874,25 @@ func HandleAccountCreated(event *events.AccountCreatedEvent) {
 
 Implement **event_id-based idempotency** for all event consumers using Redis or database deduplication.
 
+> **Implementation note:** This is implemented generically in `shared/pkg/idempotency/` with two interchangeable
+> backends - `redis_service.go` (preferred; keys are `idempotency:result:<key>` plus a lock key) and
+> `postgres_service.go` (a single `_idempotency_keys` table indexed on `expires_at`, used when Redis is unavailable).
+> A noop backend exists for dev, with `ErrRedisRequiredInProduction` guarding production. TTL is **per-operation and
+> configurable** (the executor default is 1h), not a fixed 7 days. The key strings (`event:processed:*`) and table
+> (`processed_events`) shown below are illustrative only - the real key/table names are as stated above.
+
 **Pattern:**
 
-1. Check if `event_id` already processed before handling event
-2. Process event only if `event_id` not seen
-3. Store `event_id` with TTL matching event retention (7 days)
+1. Check if the operation key (derived from `event_id`) was already processed before handling the event
+2. Process event only if the key has not been seen
+3. Store the key with a configurable TTL
 
 **Implementation (Redis):**
 
 ```go
 func (c *EventConsumer) HandleAccountCreated(ctx context.Context, event *events.AccountCreatedEvent) error {
-    // Step 1: Check if already processed
-    key := fmt.Sprintf("event:processed:%s", event.EventId)
+    // Step 1: Check if already processed (real keys: idempotency:result:<key>)
+    key := fmt.Sprintf("idempotency:result:%s", event.EventId)
     exists, err := c.redis.Exists(ctx, key).Result()
     if err != nil {
         return fmt.Errorf("redis check failed: %w", err)
@@ -886,8 +907,8 @@ func (c *EventConsumer) HandleAccountCreated(ctx context.Context, event *events.
         return fmt.Errorf("failed to create account: %w", err)
     }
 
-    // Step 3: Mark as processed (TTL = 7 days)
-    if err := c.redis.Set(ctx, key, "1", 7*24*time.Hour).Err(); err != nil {
+    // Step 3: Mark as processed (configurable TTL; executor default 1h)
+    if err := c.redis.Set(ctx, key, "1", time.Hour).Err(); err != nil {
         return fmt.Errorf("failed to mark processed: %w", err)
     }
 
@@ -895,18 +916,20 @@ func (c *EventConsumer) HandleAccountCreated(ctx context.Context, event *events.
 }
 ```
 
-**Implementation (Database):**
+**Implementation (Database):** the real Postgres backend uses a single `_idempotency_keys` table (serving both
+dedup and locking) indexed on `expires_at`; rows expire by their stored TTL. The illustrative shape:
 
 ```sql
-CREATE TABLE processed_events (
-    event_id UUID PRIMARY KEY,
-    event_type VARCHAR(100) NOT NULL,
-    processed_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    INDEX idx_processed_at (processed_at)
+-- Real table: _idempotency_keys (shared/pkg/idempotency/postgres_service.go)
+CREATE TABLE _idempotency_keys (
+    key         VARCHAR PRIMARY KEY,
+    result      BYTEA,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    INDEX idx_idempotency_expires_at (expires_at)
 );
 
--- Cleanup old events (daily cron)
-DELETE FROM processed_events WHERE processed_at < NOW() - INTERVAL '7 days';
+-- Cleanup expired keys
+DELETE FROM _idempotency_keys WHERE expires_at < NOW();
 ```
 
 ### Alternatives Considered
@@ -972,8 +995,10 @@ DELETE FROM processed_events WHERE processed_at < NOW() - INTERVAL '7 days';
 
 **TTL strategy:**
 
-- Match Kafka retention: 7 days
-- Rationale: Event won't be replayed after 7 days (purged from Kafka)
+- Per-operation and configurable (executor default 1h). Set it at least as long as the window in which a duplicate
+  could plausibly be redelivered for that operation.
+- For long-lived dedup, size the TTL toward Kafka retention (7 days); for short-lived request idempotency the 1h
+  default is typical.
 
 **Error handling:**
 
