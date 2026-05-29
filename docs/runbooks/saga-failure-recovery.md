@@ -523,8 +523,8 @@ After resolving a saga failure:
 ## References
 
 - [ADR-0005: Adapter Pattern for Layer Translation](../adr/0005-adapter-pattern-layer-translation.md)
-- [CurrentAccount Service Implementation](../../internal/current-account/service/grpc_service.go)
-- [Saga Orchestration Tests](../../internal/current-account/service/grpc_service_integration_test.go)
+- [CurrentAccount Service Implementation](../../services/current-account/service/)
+- [Saga Orchestration Tests](../../services/current-account/service/grpc_service_integration_test.go)
 - [PR #86: Service Integration](https://github.com/meridianhub/meridian/pull/86)
 
 ## Contact Information

@@ -106,6 +106,9 @@ stateDiagram-v2
 | [Full Economy Visibility](058-full-economy-visibility.md) | Surface platform defaults and economy capabilities in UI |
 | [Asset-Agnostic Posting Layer](059-asset-agnostic-posting-layer.md) | Replace hardcoded ISO 4217 currency validation for non-fiat assets |
 | [Per-Tenant Scheduled Execution](060-per-tenant-scheduled-execution.md) | Phased scheduling identity: attribution, manifest bridge, deferred JWT auth |
+| [Security Audit Status](047-security-audit-status.md) | Current status of security audit findings and remediation tracking |
+| [MCP Auth Session Unification](061-mcp-auth-session-unification.md) | Unify MCP authentication and session handling across transports |
+| [Self-Service Onboarding Readiness](062-self-service-onboarding-readiness.md) | Readiness assessment for self-service tenant onboarding |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 

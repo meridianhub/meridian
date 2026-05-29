@@ -148,6 +148,12 @@ All services compile into a single binary for simplified deployment, organized i
 See [services/README.md](services/README.md) for the full architecture diagram
 and [docs/adr/](docs/adr/) for architectural decisions.
 
+## Documentation
+
+Browse the full technical documentation index at [docs/README.md](docs/README.md),
+covering architecture, developer guides, runbooks, integrations, API reference,
+product requirements, and architecture decision records.
+
 ## Technology
 
 | Layer | Stack |

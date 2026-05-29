@@ -143,3 +143,8 @@ See `services/reference-data/e2e/mapping_dry_run_test.go` for usage examples.
 ## Reference Examples
 
 See [examples.md](./examples.md) for annotated walkthroughs of each reference definition.
+
+## Troubleshooting
+
+See [troubleshooting.md](./troubleshooting.md) for diagnosing common mapping failures,
+CEL evaluation errors, and field-correspondence issues.
