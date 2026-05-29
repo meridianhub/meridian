@@ -34,6 +34,6 @@ Documents should be archived when:
 Keep documents active when:
 
 - They describe current architecture (use ADRs in `docs/adr/` instead)
-- They provide operational guidance (use runbooks in `docs/runbooks/` or skills in `docs/skills/`)
+- They provide operational guidance (use runbooks in `docs/runbooks/` or skills in `.claude/skills/`)
 - They explain how to use the system (keep in root docs like README.md, CONTRIBUTING.md, or `docs/`)
 - They are referenced by active code or other documentation

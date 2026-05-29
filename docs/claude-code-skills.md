@@ -9,7 +9,7 @@ discoverable as "skills" - focused pieces of context that Claude Code can load j
 
 **Context efficiency**: Load only relevant documentation based on conversation context, rather than loading everything.
 
-For detailed information about creating and using skills, see [docs/skills/README.md](skills/README.md).
+For detailed information about creating and using skills, see [.claude/skills/README.md](../.claude/skills/README.md).
 
 ## AI Navigability Docs
 
@@ -36,7 +36,7 @@ comes up, read that service's README first.
 - ADR-0006: Tilt for local development
 - [See complete list](adr/README.md)
 
-**Operational Skills** (in `docs/skills/`):
+**Operational Skills** (in `.claude/skills/`):
 
 - Docker configuration
 - Tilt and Kubernetes development
@@ -44,7 +44,7 @@ comes up, read that service's README first.
 - Kustomize deployments
 - Security scanning
 - Testing standards (await, testcontainers, defensive testing)
-- [See complete list](skills/README.md)
+- [See complete list](../.claude/skills/README.md)
 
 **Runbooks** (in `docs/runbooks/`):
 
@@ -83,7 +83,7 @@ instructions: |
 ---
 ```
 
-See [docs/skills/README.md](skills/README.md) for:
+See [.claude/skills/README.md](../.claude/skills/README.md) for:
 
 - Detailed metadata format guide
 - How to create new skills

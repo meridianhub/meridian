@@ -327,7 +327,7 @@ event.instrument_code != 'GBP' && chain_depth < 3
 
 * [Event Router Service](../../services/event-router/README.md) — Kafka consumer and dispatch service
 * Event Router Runbook — `docs/runbooks/event-router.md`
-* Event-Triggered Sagas Skill — `docs/skills/event-triggered-sagas.md`
+* [Event-Triggered Sagas Skill](../../.claude/skills/event-triggered-sagas/SKILL.md) — Configuration guide
 
 ### Related ADRs
 

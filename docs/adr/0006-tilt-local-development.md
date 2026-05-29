@@ -89,7 +89,7 @@ Chosen option: **"Tilt"**, because:
 **Mitigation:**
 
 * Use **Kind + ctlptl** for fast, reproducible local clusters
-* Provide comprehensive onboarding docs ([docs/skills/tilt.md](../skills/tilt.md))
+* Provide comprehensive onboarding docs ([.claude/skills/tilt/SKILL.md](../../.claude/skills/tilt/SKILL.md))
 * Include setup automation script (`scripts/doctor.sh`)
 * Single command cluster creation with local registry: `ctlptl create cluster kind --registry=ctlptl-registry
 --name=kind-meridian-local`
@@ -455,7 +455,7 @@ Only rebuild when relevant directories change.
 
 ### Troubleshooting
 
-See comprehensive troubleshooting guide in [docs/skills/tilt.md](../skills/tilt.md):
+See comprehensive troubleshooting guide in [.claude/skills/tilt/SKILL.md](../../.claude/skills/tilt/SKILL.md):
 
 * Resources not starting → Check K8s cluster
 * Slow builds → Clear Tilt cache
@@ -512,7 +512,7 @@ Useful for pre-merge integration tests in GitHub Actions.
 
 1. Read [CONTRIBUTING.md](../../CONTRIBUTING.md) - Prerequisites section
 2. Run `./scripts/doctor.sh` - Verify environment
-3. Follow [docs/skills/tilt.md](../skills/tilt.md) - Quick start guide
+3. Follow [.claude/skills/tilt/SKILL.md](../../.claude/skills/tilt/SKILL.md) - Quick start guide
 4. Watch Tilt UI to understand resource dependencies
 5. Learn basic kubectl commands (`get pods`, `logs`, `describe`)
 
@@ -741,7 +741,7 @@ Both are valid choices; Tilt won on developer experience.
 * [Tiltfile API Reference](https://docs.tilt.dev/api.html)
 * [Why Tilt? (Blog)](https://blog.tilt.dev/2019/04/09/designing-a-better-interface-for-microservices-development.html)
 * [Tilt vs Skaffold Comparison](https://docs.tilt.dev/choosing_a_local_dev_solution.html)
-* [Local Kubernetes Guide](../skills/tilt.md)
+* [Local Kubernetes Guide](../../.claude/skills/tilt/SKILL.md)
 * [ADR-0001: Record Architecture Decisions](./0001-record-architecture-decisions.md)
 
 ## Notes

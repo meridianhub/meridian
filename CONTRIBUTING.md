@@ -273,7 +273,7 @@ tilt up
 tilt down
 ```
 
-See [docs/skills/tilt.md](docs/skills/tilt.md) for detailed Tilt usage.
+See [.claude/skills/tilt/SKILL.md](.claude/skills/tilt/SKILL.md) for detailed Tilt usage.
 
 ### Working with Protocol Buffers
 

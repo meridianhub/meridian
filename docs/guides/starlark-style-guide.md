@@ -993,6 +993,6 @@ def execute():
     conversion_method = account_type.default_conversion_method_id
 ```
 
-For complete event-triggered saga documentation, see **[Event-Triggered Sagas](../skills/event-triggered-sagas.md)**.
+For complete event-triggered saga documentation, see **[Event-Triggered Sagas](../../.claude/skills/event-triggered-sagas/SKILL.md)**.
 
 - **[ADR-0028: Starlark Saga & CEL Valuation](../adr/0028-starlark-saga-cel-valuation.md)** - Architecture decision
