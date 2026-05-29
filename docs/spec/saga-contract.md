@@ -46,7 +46,7 @@ in imperative code.
 
 For implementation details, see:
 - [Starlark Saga Architecture](../architecture/starlark-saga-architecture.md) - component diagrams, data flow, dependency injection
-- [Starlark Saga Skill](../skills/starlark-saga.md) - development guide and operational reference
+- [Starlark Saga Skill](../../.claude/skills/starlark-saga/SKILL.md) - development guide and operational reference
 
 ## 1. Design Principles
 

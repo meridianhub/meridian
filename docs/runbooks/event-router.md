@@ -457,7 +457,7 @@ After resolving an incident:
 ## Related Documentation
 
 - [ADR-0033: Event-Triggered Sagas](../adr/0033-event-triggered-sagas.md) — Architecture decisions
-- [Event-Triggered Sagas Skill](../skills/event-triggered-sagas.md) — Configuration guide
+- [Event-Triggered Sagas Skill](../../.claude/skills/event-triggered-sagas/SKILL.md) — Configuration guide
 - [Saga Failure Recovery Runbook](saga-failure-recovery.md) — Recovering from saga execution failures
 - [Event Router Service README](../../services/event-router/README.md) — Service documentation
 - [Starlark Style Guide](../guides/starlark-style-guide.md) — Saga authoring conventions

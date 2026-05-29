@@ -139,7 +139,7 @@ verify-command
 
 ## Related Documentation
 
-- [Skills](../skills/README.md) - Development and operational skills documentation
+- [Skills](../../.claude/skills/README.md) - Development and operational skills documentation
 - [ADRs](../adr/README.md) - Architectural decisions that inform these procedures
 - [PRDs](../prd/README.md) - Feature specifications and designs
 - [Architecture](../architecture/) - System architecture documentation

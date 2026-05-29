@@ -637,4 +637,4 @@ saga_definitions:
   at-least-once redelivery.
 
 **See also:** [ADR-0033: Event-Triggered Sagas](../adr/0033-event-triggered-sagas.md) and
-[Event-Triggered Sagas Skill](../skills/event-triggered-sagas.md).
+[Event-Triggered Sagas Skill](../../.claude/skills/event-triggered-sagas/SKILL.md).

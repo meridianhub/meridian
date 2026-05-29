@@ -41,7 +41,7 @@ documentation.
 - [Adding Audit to a New Service](development/audit-adding-new-service.md)
 - [Claude Code Skills Integration](claude-code-skills.md)
 - [Local Go Documentation Server](local-documentation.md)
-- [Skills Documentation](skills/README.md) - task-specific runbook-style skills for AI contributors
+- [Skills Documentation](../.claude/skills/README.md) - task-specific runbook-style skills for AI contributors
 
 ## Operations
 

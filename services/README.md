@@ -1272,4 +1272,4 @@ services connect to the core engine through thin references
 - [ADR-0002: Microservices per BIAN Domain](../docs/adr/0002-microservices-per-bian-domain.md)
 - [ADR-0004: Event Schema Evolution](../docs/adr/0004-event-schema-evolution.md)
 - [ADR-0009: Application-Level Audit Logging](../docs/adr/0009-application-level-audit-logging.md)
-- [Tilt Development Guide](../docs/skills/tilt.md) - Local development
+- [Tilt Development Guide](../.claude/skills/tilt/SKILL.md) - Local development

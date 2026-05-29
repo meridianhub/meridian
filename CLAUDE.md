@@ -432,7 +432,7 @@ comes up, read that service's README first.
 
 ## Skills
 
-For all available skills, ADRs, runbooks, and PRDs, see `docs/skills/README.md`.
+For all available skills, ADRs, runbooks, and PRDs, see `.claude/skills/README.md`.
 
 ---
 
