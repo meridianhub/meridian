@@ -1332,8 +1332,8 @@ Net Income = Revenue - Expenses
 - **Event Schema (Publications)**: `api/proto/meridian/events/v1/financial_accounting_events.proto`
 - **Service Boundaries**: `docs/architecture/bian-service-boundaries.md`
 - **Coupling Analysis**: `docs/architecture/service-coupling-analysis.md`
-- **Current Account Contract**: `docs/architecture/api-contracts/current-account-contract.md`
-- **Position Keeping Contract**: `docs/architecture/api-contracts/position-keeping-contract.md`
+- **Current Account Contract**: [current-account-contract.md](current-account-contract.md)
+- **Position Keeping Contract**: [position-keeping-contract.md](position-keeping-contract.md)
 - **ADR-0002**: Microservices Per BIAN Domain
 - **ADR-0004**: Event Schema Evolution
 - **ADR-0005**: Adapter Pattern Layer Translation
