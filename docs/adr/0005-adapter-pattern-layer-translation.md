@@ -81,12 +81,29 @@ prevent drift.
 
 ## Implementation
 
+> **Path/package note (refreshed 2026):** The adapter pattern below is still the live architecture, but the code no
+> longer lives under `internal/`. The current layout per service is:
+>
+> | Concern | Current location | Package |
+> |---------|------------------|---------|
+> | Domain models + ports | `services/<svc>/domain/` | `domain` |
+> | Persistence adapters | `services/<svc>/adapters/persistence/` | `persistence` |
+> | Event publishers | `services/<svc>/adapters/messaging/` | `messaging` |
+> | gRPC handlers | `services/<svc>/service/` | `service` |
+>
+> The single Go module is `github.com/meridianhub/meridian`, so imports are
+> `github.com/meridianhub/meridian/services/<svc>/domain`, etc. The `toEntity`/`toDomain` translators are typically
+> package-level functions (e.g. `toBookingLogEntity`/`toBookingLogDomain`) rather than repository methods. Event
+> publishing goes through the **transactional outbox** (`shared/platform/events`) rather than a direct
+> `producer.Publish(...)`; see [ADR-0004](0004-event-schema-evolution.md). The code samples below are illustrative of
+> the pattern; field lists are simplified and may not match current structs exactly.
+
 ### Repository Port (Domain Interface)
 
 The domain defines what it needs, not how it's implemented:
 
 ```go
-// internal/domain/booking_log_repository.go
+// services/financial-accounting/domain/booking_log_repository.go
 package domain
 
 import (
@@ -122,12 +139,12 @@ func (s *BookingLogService) CreateBooking(ctx context.Context, booking *Financia
 The adapter implements the port and handles translation:
 
 ```go
-// internal/adapters/persistence/booking_log_repository.go
+// services/financial-accounting/adapters/persistence/booking_log_repository.go
 package persistence
 
 import (
     "context"
-    "github.com/meridianhub/meridian/internal/domain"
+    "github.com/meridianhub/meridian/services/financial-accounting/domain"
     "github.com/google/uuid"
     "gorm.io/gorm"
 )
@@ -216,13 +233,13 @@ func (r *BookingLogRepository) toDomain(e *BookingLogEntity) *domain.FinancialBo
 ### Event Publisher Adapter
 
 ```go
-// internal/adapters/events/booking_log_publisher.go
-package events
+// services/financial-accounting/adapters/messaging/booking_log_publisher.go
+package messaging
 
 import (
     "context"
-    "github.com/meridianhub/meridian/internal/domain"
-    eventspb "github.com/meridianhub/meridian/api/proto/events/financial_accounting/v1"
+    "github.com/meridianhub/meridian/services/financial-accounting/domain"
+    eventspb "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
     "github.com/google/uuid"
     "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -281,13 +298,13 @@ func getCausationID(ctx context.Context) string {
 ### gRPC Service Adapter
 
 ```go
-// internal/adapters/grpc/booking_log_service.go
-package grpc
+// services/financial-accounting/service/booking_log_service.go
+package service
 
 import (
     "context"
-    "github.com/meridianhub/meridian/internal/domain"
-    pb "github.com/meridianhub/meridian/api/proto/financial_accounting/v1"
+    "github.com/meridianhub/meridian/services/financial-accounting/domain"
+    pb "github.com/meridianhub/meridian/api/proto/meridian/financial_accounting/v1"
     "google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -355,7 +372,9 @@ changes.
 #### Step 1: Update domain model (business logic)
 
 ```go
-// internal/domain/current_account.go
+// services/current-account/domain/current_account.go
+// (Illustrative BIAN-evolution example. The real current-account domain models a "Frozen"
+//  status rather than "Suspended"; the mechanics are identical.)
 
 // Updated for BIAN 15.0
 type CurrentAccount struct {
@@ -394,7 +413,7 @@ func (a *CurrentAccount) Suspend(reason string, until time.Time, by string) erro
 #### Step 2: Update persistence adapter (database mapping)
 
 ```go
-// internal/adapters/persistence/current_account_repository.go
+// services/current-account/adapters/persistence/current_account_repository.go
 
 // Add new fields to entity
 type CurrentAccountEntity struct {
@@ -449,7 +468,7 @@ func (r *CurrentAccountRepository) toDomain(e *CurrentAccountEntity) *domain.Cur
 #### Step 3: Update event adapter (new event type per ADR-0004)
 
 ```go
-// internal/adapters/events/current_account_publisher.go
+// services/current-account/adapters/messaging/current_account_publisher.go
 
 // New method for BIAN 15.0 behavior qualifier
 func (p *CurrentAccountPublisher) PublishSuspended(
@@ -514,7 +533,7 @@ disruption.
 Ensure adapters don't lose data:
 
 ```go
-// internal/adapters/persistence/booking_log_repository_test.go
+// services/financial-accounting/adapters/persistence/booking_log_repository_test.go
 package persistence_test
 
 import (
@@ -522,8 +541,8 @@ import (
     "testing"
     "time"
 
-    "github.com/meridianhub/meridian/internal/adapters/persistence"
-    "github.com/meridianhub/meridian/internal/domain"
+    "github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
+    "github.com/meridianhub/meridian/services/financial-accounting/domain"
     "github.com/google/uuid"
     "github.com/stretchr/testify/assert"
 )

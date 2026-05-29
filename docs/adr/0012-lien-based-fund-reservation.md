@@ -21,6 +21,12 @@ Date: 2025-11-25
 
 Accepted
 
+> **Orchestration mechanism superseded by [ADR-0028](0028-starlark-saga-cel-valuation.md) (2026-01).** The lien-based
+> fund-reservation *decision* (reserve funds via a lien, then confirm or compensate) still holds. The Go-coded
+> `PaymentOrderSaga.Execute` shown below is no longer the orchestration mechanism: saga step sequencing and LIFO
+> compensation are now expressed as Starlark saga definitions executed by `shared/pkg/saga.StarlarkSagaRunner`. Read the
+> Go saga below for the lien/compensation semantics, not as the current control flow.
+
 ## Context
 
 The Payment Order service domain orchestrates multi-step payment flows that involve:
