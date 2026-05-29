@@ -9,9 +9,11 @@ triggers:
   - Discussing BIAN domain implementation
 
 instructions: |
-  Create one service per BIAN domain (FinancialAccounting, PositionKeeping, CurrentAccount).
-  Each service independently deployable with own database. Use gRPC for sync communication,
-  Kafka for async events. Services are "lego blocks" for composability.
+  Create one service per BIAN domain (the codebase has grown to ~19 services such as
+  FinancialAccounting, PositionKeeping, CurrentAccount, PaymentOrder, ReferenceData, Tenant).
+  Each service owns its database/schema. Use gRPC for sync communication, Kafka for async
+  events. Services are "lego blocks" but ship today as one unified binary (cmd/meridian)
+  wired in dependency-tier order. See ADR-0015 for the canonical service directory layout.
 ---
 
 # 2. Microservices Architecture with One Service per BIAN Domain
@@ -26,12 +28,20 @@ Amended: 2025-11-19 - Added saga orchestration pattern and service coupling enfo
 
 ## Context
 
-Meridian implements multiple BIAN (Banking Industry Architecture Network) service domains: FinancialAccounting,
-PositionKeeping, and CurrentAccount. We need to decide whether to build a modular monolith with all domains in one
-deployable or separate microservices with one service per BIAN domain.
+Meridian implements multiple BIAN (Banking Industry Architecture Network) service domains. We need to decide whether
+to build a modular monolith with all domains in one deployable or separate microservices with one service per BIAN
+domain.
 
 BIAN service domains already define clear bounded contexts with well-defined interfaces, making them natural candidates
 for service boundaries.
+
+> **2026 status note:** This decision still holds, and the codebase has grown well beyond the original three domains.
+> There are now ~19 service packages under `services/` (current-account, financial-accounting, position-keeping,
+> payment-order, party, internal-account, market-information, reconciliation, reference-data, tenant, control-plane,
+> identity, forecasting, plus gateway/worker/router services). Each owns its own database/schema and exposes a gRPC
+> surface, but they are compiled and deployed as a **single unified binary** (`cmd/meridian`) rather than as separately
+> deployed pods today. The bounded-context boundaries described here are enforced at the package/coupling level (see the
+> Service Coupling Enforcement amendment) even though deployment is currently unified.
 
 ## Decision Drivers
 
@@ -70,7 +80,7 @@ Chosen option: "Microservices - One service per BIAN domain", because:
 
 ### Negative Consequences
 
-* Increased operational complexity (6+ services to deploy and monitor)
+* Increased architectural complexity (~19 service packages to reason about; mitigated by shipping them as one unified binary today)
 * Distributed transactions require Saga pattern or 2PC where needed
 * Network latency between services (though all communication is gRPC)
 * Service mesh or API gateway required for cross-cutting concerns
@@ -129,37 +139,48 @@ Core domains (FinancialAccounting, PositionKeeping) in monolith, customer-facing
 
 ### Service Structure
 
-Each BIAN domain service will follow this structure:
+> The original draft of this section proposed a per-service `internal/{domain,repository,grpc,kafka}` layout, per-service
+> `go.mod` files, and Flyway migrations. The implemented layout differs and is documented canonically in
+> [ADR-0015](0015-standard-service-directory-structure.md). The actual structure is:
 
 ```text
 services/
-├── financial-accounting-service/
-│   ├── cmd/server/main.go
-│   ├── internal/
-│   │   ├── domain/          # BIAN domain model
-│   │   ├── repository/      # Database persistence
-│   │   ├── grpc/           # gRPC service implementation
-│   │   └── kafka/          # Event publishing
-│   ├── migrations/          # Flyway database migrations
-│   ├── Dockerfile
-│   └── go.mod
-├── position-keeping-service/
+├── financial-accounting/
+│   ├── cmd/main.go              # service entry point (also wired into cmd/meridian unified binary)
+│   ├── domain/                  # BIAN domain model (pure, no infrastructure tags)
+│   ├── adapters/
+│   │   ├── persistence/         # GORM entities + repository adapters
+│   │   └── messaging/           # Kafka event publishers (outbox-backed)
+│   ├── service/                 # gRPC handlers (server.go + grpc_*_endpoints.go)
+│   ├── atlas/atlas.hcl          # Atlas migration config (NOT Flyway)
+│   └── migrations/              # Atlas SQL migrations
+├── position-keeping/
 │   └── ...
-└── current-account-service/
+└── current-account/
     └── ...
 ```
 
+Notes vs the original draft:
+
+- Migrations use **Atlas**, not Flyway (see [ADR-0003](0003-database-schema-migrations.md)).
+- There is a **single Go module** (`github.com/meridianhub/meridian`), not per-service `go.mod` files.
+- Service directories are not `-service`-suffixed.
+- gRPC handlers live in `service/`; event publishers in `adapters/messaging/`; persistence in `adapters/persistence/`.
+
 ### Shared Platform Services
 
-Common platform services (database, Kafka, auth, observability) will be in:
+Common platform utilities (database, Kafka, auth, observability, idempotency) live under `shared/`:
 
 ```text
-platform/
-├── database/        # Connection pooling, transaction management
-├── kafka/           # Producer/consumer utilities with protobuf serialization
-├── auth/            # JWT validation, authorization
-├── observability/   # OpenTelemetry, logging, metrics
-└── idempotency/     # Redis-based idempotency keys
+shared/
+├── platform/
+│   ├── db/              # Connection pooling, tenant search_path scoping
+│   ├── kafka/           # Producer/consumer utilities with protobuf serialization
+│   ├── events/          # Transactional outbox + Kafka publisher/worker
+│   └── observability/   # OpenTelemetry, logging, metrics
+└── pkg/
+    ├── idempotency/     # Redis or Postgres-backed idempotency keys
+    └── saga/            # Starlark saga runner (see ADR-0028)
 ```
 
 ### Inter-Service Communication
@@ -177,6 +198,15 @@ platform/
 * Re-evaluate if distributed transaction complexity becomes unmanageable
 
 ## Amendment: Saga Orchestration Pattern (2025-11-19)
+
+> **Superseded by [ADR-0028](0028-starlark-saga-cel-valuation.md) (2026-01).** The hand-written Go orchestrator pattern
+> described below was the implementation as of 2025-11. It has since been replaced by **Starlark saga orchestration**:
+> saga step sequences and LIFO compensation are now defined as Starlark scripts (stored as saga definitions in the
+> reference-data service) and executed by `shared/pkg/saga.StarlarkSagaRunner`. For example, current-account's
+> `ExecuteDeposit` still exists but delegates to a `DepositOrchestrator` that resolves and runs a Starlark deposit saga
+> rather than calling downstream services inline. The orchestration *principle* (an orchestrator owns the sequence and
+> compensation; gRPC for sync steps) still holds; the *mechanism* moved from Go code to Starlark. The Go example below
+> is retained for historical context.
 
 ### Context
 
@@ -377,40 +407,45 @@ import "github.com/meridianhub/meridian/api/proto/financial_accounting/v1"
 **Forbidden:**
 
 ```go
-import "github.com/meridianhub/meridian/internal/financial-accounting/domain"
+import "github.com/meridianhub/meridian/services/financial-accounting/domain"
 ```
 
 **Enforcement:**
 
-* Linter: Custom rule to detect `internal/<other-service>/` imports
+* Linter: Custom rule to detect cross-service `services/<other-service>/` imports
 * CI: Automated coupling analysis (see `scripts/analyze-coupling.sh`)
 * Code review: Reject PRs with cross-service internal imports
 
 **Rationale:** Proto contracts are the public API. Internal packages can change without breaking other services.
 
-#### Rule 2: Platform Code in pkg/, Not internal/
+#### Rule 2: Shared Platform Code in shared/, Not Inside a Service
 
-**Rule:** Shared platform utilities (observability, Kafka, database) MUST be in `pkg/platform/`, not `internal/platform/`.
+**Rule:** Shared platform utilities (observability, Kafka, database, events) MUST live under `shared/` (`shared/platform/`
+and `shared/pkg/`), not inside any individual service package.
 
 **Allowed:**
 
 ```go
-import "github.com/meridianhub/meridian/pkg/platform/observability"
+import "github.com/meridianhub/meridian/shared/platform/observability"
 ```
 
 **Forbidden:**
 
 ```go
-import "github.com/meridianhub/meridian/internal/platform/observability"
+import "github.com/meridianhub/meridian/services/current-account/observability" // service-private, do not share
 ```
 
 **Enforcement:**
 
-* Migration: Move `internal/platform/` → `pkg/platform/` (see [Boundary Migration Plan](../architecture/boundary-migration-plan.md))
-* Linter: Warn on `internal/platform/` imports from services
-* CI: Track platform coupling metrics
+* Linter: warn when one service imports another service's package (see Rule 1)
+* CI: track platform coupling metrics
 
-**Rationale:** `internal/` signals "private to this service." Platform code shared across services must be in `pkg/`.
+**Rationale:** Code shared across services belongs in `shared/`; a service package signals "private to this service."
+
+> **Note (2026):** The original draft of this rule proposed a `pkg/platform/` → migrated-from-`internal/platform/`
+> location. Neither path exists in the current tree. Shared platform code settled at `shared/platform/` (e.g.
+> `shared/platform/observability`, `shared/platform/events`) and `shared/pkg/` (e.g. `shared/pkg/idempotency`,
+> `shared/pkg/saga`).
 
 #### Rule 3: Own Your Domain Entities
 
@@ -426,7 +461,7 @@ import "github.com/meridianhub/meridian/internal/platform/observability"
 
 ```go
 // In FinancialAccounting service
-import "github.com/meridianhub/meridian/internal/current-account/domain"
+import "github.com/meridianhub/meridian/services/current-account/domain"
 
 func PostToLedger(account *domain.Account) { ... } // ❌ Using another service's domain model
 ```
@@ -587,7 +622,10 @@ ADR-002 specified database-per-service in Rule 4, but didn't detail the actual d
 
 Each microservice has its own CockroachDB database with tenant isolation via schemas:
 
-**Database naming:**
+**Database naming (representative - the table below lists the original six; more service databases have since been
+added, e.g. `meridian_control_plane`, `meridian_reference_data`, `meridian_market_information`,
+`meridian_reconciliation`, `meridian_internal_account`, `meridian_identity`). See
+[data-model.md](../architecture/data-model.md) for the current, authoritative topology.):**
 
 | Service | Database |
 |---------|----------|
