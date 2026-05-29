@@ -14,11 +14,41 @@ instructions: |
 
 # 14. Financial Instrument Reference Data
 
-Date: 2025-12-04
+Date: 2025-12-04 (Revised: 2026-05 to match shipped implementation)
 
 ## Status
 
-Proposed
+Accepted (Implemented)
+
+The `reference-data` service is shipped (`services/reference-data/`), with the instrument registry, CEL compiler,
+per-tenant caching, and gRPC API all live. The core decision below - a BIAN Financial Instrument Reference Data
+service using CEL for validation and fungibility - holds. Several specifics evolved during implementation; the
+revision note captures the deltas.
+
+> **Implementation drift (what shipped vs the original 2025-12-04 draft):**
+>
+> - **Table is `instrument_definition` (singular), with no `tenant_id` column.** Multi-tenancy is schema-per-tenant
+>   (each tenant's `org_<id>` schema holds its own `instrument_definition` table), so the unique key is
+>   `UNIQUE(code, version)`, not `UNIQUE(tenant_id, code, version)`. Migration:
+>   `services/reference-data/migrations/20260104000001_initial.sql`.
+> - **Fungibility is a bucket-key model, not a pairwise boolean.** The column is `fungibility_key_expression` and the
+>   CEL returns a **string** bucket key for a single position; two positions are fungible iff they produce the same
+>   key. There is no dual-input `a`/`b` `a == b` comparison. CEL validation env variable is `attributes`, not `attrs`.
+> - **Instruments have a DRAFT → ACTIVE → DEPRECATED lifecycle.** The draft's "no `deprecated_at`, versions immutable"
+>   decision did not ship; `status`, `activated_at`, `deprecated_at`, and `successor_id` columns exist, and the API has
+>   `UpdateInstrument`, `ActivateInstrument`, and `DeprecateInstrument`. (Published versions are still treated as
+>   immutable in spirit; lifecycle transitions are how change is managed.)
+> - **CEL and JSON Schema coexist.** `attribute_schema` (JSON Schema, JSONB) was retained alongside the CEL
+>   expressions rather than replaced by them.
+> - **No `SystemTenantID` constant or cross-tenant fallback.** Platform instruments (GBP/USD/EUR) are seeded into each
+>   tenant's own schema via `registry/seeder.go` with an `is_system = true` flag.
+> - **CEL compiler is shared** at `shared/pkg/cel/` (the `services/reference-data/cel` package re-exports it); it
+>   manages bucket-key / eligibility / event-filter environments.
+> - **Caching is a per-tenant map of LRU caches** (`cache/instrument_cache.go`), still using `hashicorp/golang-lru/v2`.
+> - The service is `ReferenceDataService`; proto at `api/proto/meridian/reference_data/v1/instrument.proto`. Domain
+>   type lives in `services/reference-data/registry/` (there is no `domain/` package).
+>
+> The sections below have been updated to reflect the above. Older illustrative snippets are marked where retained.
 
 ## Context
 
@@ -103,82 +133,112 @@ Chosen option: **BIAN Financial Instrument Reference Data Management Service**.
 
 ### Directory Entry Schema
 
+The shipped DDL (`services/reference-data/migrations/20260104000001_initial.sql`, plus later migrations that add
+`is_system` and `successor_id`). Note: the table lives in each tenant's `org_<id>` schema, so there is no `tenant_id`
+column.
+
 ```sql
--- BIAN: FinancialInstrumentDirectoryEntry
-CREATE TABLE instrument_definitions (
+-- BIAN: FinancialInstrumentDirectoryEntry (created in each tenant's org_<id> schema)
+CREATE TABLE instrument_definition (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
 
     -- BIAN: FinancialInstrumentIdentification
-    code VARCHAR(32) NOT NULL,
+    code VARCHAR(50) NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,
 
     -- Dimension (derived from instrument_type in ADR-0013)
-    dimension VARCHAR(32) NOT NULL,         -- "Monetary" or "Commodity"
+    dimension VARCHAR(32) NOT NULL,
 
     -- Instrument Properties
     precision INTEGER NOT NULL,             -- Decimal places (2, 4, 8)
 
-    -- CEL Expressions (replaces JSON Schema)
-    validation_expression TEXT NOT NULL DEFAULT 'true',     -- Ingestion gatekeeper
-    fungibility_expression TEXT NOT NULL DEFAULT 'a == b',  -- Position merge arbiter
+    -- CEL Expressions
+    validation_expression       TEXT,                       -- Ingestion gatekeeper (nullable)
+    fungibility_key_expression  TEXT NOT NULL DEFAULT '',    -- Returns a STRING bucket key
+    error_message_expression    TEXT,                        -- Optional custom validation error
+
+    -- JSON Schema (retained alongside CEL)
+    attribute_schema            JSONB,
 
     -- BIAN: FinancialInstrumentName
     display_name VARCHAR(128),
-    description TEXT,
+    description  TEXT,
 
-    -- Lifecycle
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Lifecycle (DRAFT -> ACTIVE -> DEPRECATED)
+    status        VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+    is_system     BOOLEAN NOT NULL DEFAULT FALSE,           -- platform-seeded instrument
+    successor_id  UUID,                                     -- lineage to replacement version
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    activated_at  TIMESTAMPTZ,
+    deprecated_at TIMESTAMPTZ,
 
-    UNIQUE(tenant_id, code, version),
+    UNIQUE(code, version),
     CHECK (precision >= 0 AND precision <= 18),
-    CHECK (dimension IN ('Monetary', 'Commodity')),
-    CHECK (validation_expression <> ''),
-    CHECK (fungibility_expression <> '')
+    CHECK (dimension IN ('MONETARY','ENERGY','QUANTITY','COMPUTE','TIME','MASS','VOLUME'))
 );
 
-CREATE INDEX idx_instrument_definitions_lookup
-    ON instrument_definitions(tenant_id, code, version);
+CREATE INDEX idx_instrument_definition_lookup
+    ON instrument_definition(code, version);
 ```
 
 **Key design decisions:**
 
-1. **CEL instead of JSON Schema**: `validation_expression` and `fungibility_expression`
-   replace the JSONB schema field. CEL compiles to bytecode (~100ns) vs JSON Schema (~1ms).
+1. **CEL alongside JSON Schema**: `validation_expression` and `fungibility_key_expression` carry the CEL logic. The
+   `attribute_schema` JSON Schema column was retained (not replaced) for structural validation and tooling. CEL
+   compiles to bytecode (~100ns) for hot-path checks.
 
-2. **No `deprecated_at`**: Simplified lifecycle - versions are immutable once created.
-   New requirements = new version.
+2. **Bucket-key fungibility**: `fungibility_key_expression` is a single-input CEL that returns a **string** bucket key
+   for one position. Two positions are fungible iff their keys match - no pairwise `a == b` comparison. Default `''`
+   means "all positions of this instrument share one bucket" (fully fungible).
 
-3. **Dimension stored explicitly**: Required for `ParseQuantity()` factory
-   (see ADR-0013 Generic Bridge section).
+3. **Lifecycle, not pure immutability**: instruments move DRAFT → ACTIVE → DEPRECATED (`status`), with
+   `activated_at`/`deprecated_at` timestamps and `successor_id` lineage. Published versions are not edited in place;
+   change is managed via new versions and deprecation (see ADR-0022 for successor lineage).
+
+4. **Dimension stored explicitly** using the `MONETARY/ENERGY/QUANTITY/COMPUTE/TIME/MASS/VOLUME` enum, required for the
+   `ParseQuantity()` factory (see ADR-0013 Generic Bridge section).
+
+5. **Schema-per-tenant**: no `tenant_id` column; isolation is by the tenant's `org_<id>` schema. Platform instruments
+   are seeded per tenant with `is_system = true`.
 
 ### Domain Types
 
 ```go
-// InstrumentDefinition is the domain type for instrument reference data.
-// Maps to BIAN FinancialInstrumentDirectoryEntry.
+// InstrumentDefinition is the domain type for instrument reference data
+// (package: services/reference-data/registry). Maps to BIAN
+// FinancialInstrumentDirectoryEntry. No TenantID field - tenancy is the schema.
 type InstrumentDefinition struct {
-    ID        uuid.UUID
-    TenantID  uuid.UUID
+    ID uuid.UUID
 
     // Identification
     Code      string  // "USD", "KWH", "RICE-VOUCHER"
     Version   uint32  // Schema version (1, 2, 3...)
-    Dimension string  // "Monetary" or "Commodity"
+    Dimension string  // "MONETARY", "ENERGY", "QUANTITY", "COMPUTE", "TIME", "MASS", "VOLUME"
 
     // Properties
     Precision int     // Decimal places
 
     // CEL Expressions (compiled at load time)
-    ValidationExpression  string  // Ingestion gatekeeper
-    FungibilityExpression string  // Position merge arbiter
+    ValidationExpression     string  // Ingestion gatekeeper (single input: attributes)
+    FungibilityKeyExpression string  // Returns a string bucket key for one position
+    ErrorMessageExpression   string  // Optional custom validation-failure message
+
+    // JSON Schema (retained alongside CEL)
+    AttributeSchema []byte
 
     // Display
     DisplayName string
     Description string
 
     // Lifecycle
-    CreatedAt time.Time
+    Status       string     // DRAFT | ACTIVE | DEPRECATED
+    IsSystem     bool       // platform-seeded instrument
+    SuccessorID  *uuid.UUID // lineage to replacement version (ADR-0022)
+    CreatedAt    time.Time
+    UpdatedAt    time.Time
+    ActivatedAt  *time.Time
+    DeprecatedAt *time.Time
 }
 
 // ToFinancialInstrument converts to the ADR-0013 domain type.
@@ -194,91 +254,78 @@ func (d InstrumentDefinition) ToFinancialInstrument() FinancialInstrument {
 
 ### CEL Expression Definitions
 
-Each instrument defines two CEL expressions:
+Each instrument defines two CEL expressions. Both take a **single** position's attributes (variable named
+`attributes`); the validation env also exposes `amount`, `valid_from`, `valid_to`, and `source`.
 
-**1. Validation Expression** - Ingestion gatekeeper (single input: `attrs`)
+**1. Validation Expression** - Ingestion gatekeeper. Returns a bool (single input: `attributes`)
 
 ```cel
 // Simple: require expiry_date exists
-has(attrs.expiry_date)
+has(attributes.expiry_date)
 
 // With type validation
-has(attrs.expiry_date) && has(attrs.quality_grade) &&
-  attrs.quality_grade in ["A", "B", "C"]
+has(attributes.expiry_date) && has(attributes.quality_grade) &&
+  attributes.quality_grade in ["A", "B", "C"]
 
 // Temporal: expiry must be in the future
-has(attrs.expiry_date) &&
-  timestamp(attrs.expiry_date) > now()
+has(attributes.expiry_date) &&
+  timestamp(attributes.expiry_date) > now()
 
 // Energy with time-of-use period
-has(attrs.tou_period) &&
-  int(attrs.tou_period) >= 0 && int(attrs.tou_period) <= 47
+has(attributes.tou_period) &&
+  int(attributes.tou_period) >= 0 && int(attributes.tou_period) <= 47
 ```
 
-**2. Fungibility Expression** - Position merge arbiter (two inputs: `a`, `b`)
+**2. Fungibility Key Expression** - Position bucketing. Returns a **string** key (single input: `attributes`).
+Two positions are fungible iff they evaluate to the same key. There is no pairwise `a`/`b` comparison.
 
 ```cel
-// Simple equality (default)
-a == b
+// Default ('' empty expression): all positions of this instrument share one bucket (fully fungible)
 
-// Same expiry date required for merge
-a.expiry_date == b.expiry_date
+// Bucket by expiry date
+attributes.expiry_date
 
-// Same day and quality grade
-a.expiry_date == b.expiry_date && a.quality_grade == b.quality_grade
+// Bucket by expiry date AND quality grade
+attributes.expiry_date + "|" + attributes.quality_grade
 
-// Time-bound: same period required
-a.tou_period == b.tou_period
+// Energy: bucket by time-of-use period and tariff zone
+attributes.tou_period + "|" + attributes.tariff_zone
 ```
 
 ### CEL Compiler
 
-The service pre-compiles CEL expressions at load time for ~100ns validation:
+The shared compiler at `shared/pkg/cel/compiler.go` pre-compiles CEL expressions at load time for ~100ns evaluation.
+The `services/reference-data/cel` package is a thin re-export shim over it. The compiler maintains several
+single-input environments (the variable is `attributes`, a `map<string,string>`), notably:
+
+- a **validation** env (`attributes` plus `amount`, `valid_from`, `valid_to`, `source`) - the program returns a bool
+- a **bucket-key** env (`attributes`) - the program must return a **string**; a non-string result is an error
+  (`ErrBucketKeyNotString`)
+- additional envs for eligibility and event-filter expressions used elsewhere in the platform
 
 ```go
-import (
-    "github.com/google/cel-go/cel"
-    lru "github.com/hashicorp/golang-lru/v2"
-)
+import "github.com/google/cel-go/cel"
 
-// CELCompiler manages two CEL environments for different expression types.
-type CELCompiler struct {
-    validationEnv  *cel.Env  // Single input: attrs map
-    fungibilityEnv *cel.Env  // Two inputs: a, b maps
+// Bucket-key environment: single attributes map, expression MUST return a string.
+func createBucketKeyEnv() (*cel.Env, error) {
+    return cel.NewEnv(
+        cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+    )
 }
 
-// NewCELCompiler creates a compiler with pre-configured environments.
-func NewCELCompiler() (*CELCompiler, error) {
-    // Validation: single attrs map
-    valEnv, err := cel.NewEnv(
-        cel.Variable("attrs", cel.MapType(cel.StringType, cel.StringType)),
+// Validation environment: attributes + position metadata, expression returns a bool.
+func createValidationEnv() (*cel.Env, error) {
+    return cel.NewEnv(
+        cel.Variable("attributes", cel.MapType(cel.StringType, cel.StringType)),
+        cel.Variable("amount", cel.StringType),
+        cel.Variable("valid_from", cel.TimestampType),
+        cel.Variable("valid_to", cel.TimestampType),
+        cel.Variable("source", cel.StringType),
     )
-    if err != nil {
-        return nil, err
-    }
-
-    // Fungibility: two attribute maps (a and b)
-    fungEnv, err := cel.NewEnv(
-        cel.Variable("a", cel.MapType(cel.StringType, cel.StringType)),
-        cel.Variable("b", cel.MapType(cel.StringType, cel.StringType)),
-    )
-    if err != nil {
-        return nil, err
-    }
-
-    return &CELCompiler{
-        validationEnv:  valEnv,
-        fungibilityEnv: fungEnv,
-    }, nil
-}
-
-// CompiledInstrument holds pre-compiled CEL programs for an instrument.
-type CompiledInstrument struct {
-    Definition          InstrumentDefinition
-    ValidationProgram   cel.Program
-    FungibilityProgram  cel.Program
 }
 ```
+
+There is no dual-input `a`/`b` fungibility environment; fungibility is the single-input bucket-key program above.
 
 ### Schema-on-Write Validation
 
@@ -306,67 +353,61 @@ flowchart LR
 
 ### Service Interface (BIAN Operations)
 
+The registry interface is tenant-scoped by the request's `org_<id>` schema (resolved from context), so lookups take no
+`tenantID` parameter. Validation returns a bool; fungibility returns a bucket-key string.
+
 ```go
-// InstrumentReferenceDataService implements BIAN service operations.
-type InstrumentReferenceDataService interface {
-    // Register creates a new instrument definition (BIAN: Register)
+// Registry implements BIAN Financial Instrument Reference Data operations.
+// (services/reference-data/registry)
+type Registry interface {
+    // Register creates a new instrument definition (status DRAFT).
     // Validates CEL expressions compile before persisting.
     Register(ctx context.Context, def InstrumentDefinition) error
 
-    // Retrieve loads an instrument by code and version (BIAN: Retrieve)
-    // Pass version=0 to retrieve the latest version.
-    // Returns compiled CEL programs alongside the definition.
-    Retrieve(ctx context.Context, tenantID uuid.UUID, code string, version uint32) (CompiledInstrument, error)
+    // Retrieve loads an instrument by code and version. version=0 => latest.
+    Retrieve(ctx context.Context, code string, version uint32) (CachedInstrument, error)
 
-    // RetrieveLatest loads the latest version (convenience wrapper)
-    RetrieveLatest(ctx context.Context, tenantID uuid.UUID, code string) (CompiledInstrument, error)
+    // RetrieveLatest loads the latest version (convenience wrapper).
+    RetrieveLatest(ctx context.Context, code string) (CachedInstrument, error)
 
-    // ValidateAttributes executes the validation CEL program
-    ValidateAttributes(ctx context.Context, inst CompiledInstrument, attrs map[string]string) error
+    // Lifecycle transitions.
+    Activate(ctx context.Context, code string, version uint32) error
+    Deprecate(ctx context.Context, code string, version uint32, successorID *uuid.UUID) error
 
-    // AreFungible executes the fungibility CEL program
-    AreFungible(ctx context.Context, inst CompiledInstrument, a, b map[string]string) (bool, error)
+    // ValidateAttributes runs the compiled validation program (returns nil if valid).
+    ValidateAttributes(ctx context.Context, inst CachedInstrument, attributes map[string]string) error
+
+    // FungibilityKey runs the compiled bucket-key program for one position.
+    // Two positions are fungible iff their keys are equal.
+    FungibilityKey(ctx context.Context, inst CachedInstrument, attributes map[string]string) (string, error)
 }
 ```
 
-### System Tenant Inheritance
+### Platform Instruments (per-tenant seeding)
 
-Platform-wide instruments (USD, EUR, GBP) use the System Tenant ID:
-
-```go
-const SystemTenantID = "00000000-0000-0000-0000-000000000000"
-```
-
-**Lookup falls back to System Tenant:**
+There is no system-tenant UUID or cross-tenant fallback. Platform-wide instruments (GBP, USD, EUR) are seeded into
+**each tenant's own schema** at provisioning time via `registry/seeder.go`, flagged `is_system = true`:
 
 ```go
-func (s *service) Retrieve(
-    ctx context.Context,
-    tenantID uuid.UUID,
-    code string,
-    version uint32,
-) (CompiledInstrument, error) {
-    // 1. Try tenant-specific instrument first
-    inst, err := s.cache.Get(tenantID, code, version)
-    if err == nil {
-        return inst, nil
+// services/reference-data/registry/seeder.go (sketch)
+func (s *Seeder) SeedTenant(ctx context.Context, tenantID tenant.TenantID) error {
+    for _, def := range systemInstruments() { // GBP, USD, EUR ...
+        def.IsSystem = true
+        if err := s.registry.Register(ctx, def); err != nil { // writes into the tenant's org_<id> schema
+            return err
+        }
     }
-    if !errors.Is(err, ErrNotFound) {
-        return CompiledInstrument{}, err
-    }
-
-    // 2. Fall back to System Tenant
-    inst, err = s.cache.Get(SystemTenantID, code, version)
-    if err != nil {
-        return CompiledInstrument{}, fmt.Errorf("instrument %s (v%d) not found", code, version)
-    }
-    return inst, nil
+    return nil
 }
 ```
+
+Tenants can register their own instruments alongside the seeded `is_system` ones; lookups resolve within the tenant's
+schema, so no fallback chain is needed.
 
 ### Version Lifecycle
 
-Instrument versions are **immutable once created**. New requirements = new version:
+Published instrument versions are not edited in place; change is managed by registering new versions and using the
+DRAFT → ACTIVE → DEPRECATED lifecycle (with `successor_id` lineage). Old positions keep their version:
 
 ```mermaid
 stateDiagram-v2
@@ -387,65 +428,42 @@ stateDiagram-v2
 
 ### Caching Strategy
 
-Instrument definitions are read frequently, written rarely. Use **bounded LRU cache**
-to prevent memory leaks from temporary or abandoned instruments:
+Instrument definitions are read frequently, written rarely. The cache (`cache/instrument_cache.go`) uses bounded LRU
+(`hashicorp/golang-lru/v2`) but is structured as a **per-tenant map of LRU caches** - one LRU per tenant, lazily
+created - so a busy tenant cannot evict another tenant's hot entries. The per-tenant key is a struct of `{code,
+version}` and the value is a `*CachedInstrument` (definition + compiled CEL programs):
 
 ```go
 import lru "github.com/hashicorp/golang-lru/v2"
 
-type CachedReferenceData struct {
-    db       *sql.DB
-    cache    *lru.Cache[string, CompiledInstrument]  // Bounded LRU
-    compiler *CELCompiler
+type InstrumentCache struct {
+    mu           sync.RWMutex
+    tenantCaches map[tenant.TenantID]*lru.Cache[Key, *CachedInstrument] // one LRU per tenant
+    maxPerTenant int
+    compiler     *cel.Compiler
 }
 
-func NewCachedReferenceData(db *sql.DB, maxEntries int) (*CachedReferenceData, error) {
-    cache, err := lru.New[string, CompiledInstrument](maxEntries)
-    if err != nil {
-        return nil, err
-    }
-    compiler, err := NewCELCompiler()
-    if err != nil {
-        return nil, err
-    }
-    return &CachedReferenceData{
-        db:       db,
-        cache:    cache,
-        compiler: compiler,
-    }, nil
+type Key struct {
+    Code    string
+    Version uint32
 }
 
-func (r *CachedReferenceData) Get(
-    tenantID uuid.UUID,
-    code string,
-    version uint32,
-) (CompiledInstrument, error) {
-    key := fmt.Sprintf("%s:%s:%d", tenantID, code, version)
-
-    if cached, ok := r.cache.Get(key); ok {
-        return cached, nil
+func (c *InstrumentCache) tenantCache(t tenant.TenantID) *lru.Cache[Key, *CachedInstrument] {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    cache, ok := c.tenantCaches[t]
+    if !ok {
+        cache, _ = lru.New[Key, *CachedInstrument](c.maxPerTenant) // created on first use
+        c.tenantCaches[t] = cache
     }
-
-    // Load from DB and compile CEL expressions
-    def, err := r.loadFromDB(tenantID, code, version)
-    if err != nil {
-        return CompiledInstrument{}, err
-    }
-
-    compiled, err := r.compiler.Compile(def)
-    if err != nil {
-        return CompiledInstrument{}, fmt.Errorf("compile CEL: %w", err)
-    }
-
-    r.cache.Add(key, compiled)  // LRU evicts oldest if full
-    return compiled, nil
+    return cache
 }
 ```
 
-**Why bounded LRU:**
-- `sync.Map` grows unbounded → memory leak risk with temporary instruments
-- LRU evicts least-recently-used when capacity reached
-- Recommended capacity: 10,000 entries (typical: ~100 active instruments per tenant)
+**Why per-tenant bounded LRU:**
+- A single flat cache lets one noisy tenant evict others' entries; per-tenant LRUs isolate eviction.
+- `sync.Map` grows unbounded → memory leak risk with temporary instruments.
+- LRU evicts least-recently-used when a tenant's cache reaches capacity.
 
 ## Positive Consequences
 
@@ -453,9 +471,9 @@ func (r *CachedReferenceData) Get(
 * **Tenant autonomy**: New instruments via configuration, no code deployment
 * **CEL performance**: ~100ns validation vs ~1ms JSON Schema
 * **Fungibility rules**: Tenant-defined position merge logic without code changes
-* **Version clarity**: Different versions are explicitly distinct, immutable
-* **Cache-friendly**: Compiled CEL programs cached in bounded LRU
-* **System Tenant**: Platform instruments (USD, EUR) inherited by all tenants
+* **Version clarity**: Different versions are explicitly distinct, with a DRAFT/ACTIVE/DEPRECATED lifecycle
+* **Cache-friendly**: Compiled CEL programs cached in per-tenant bounded LRUs
+* **Platform instruments**: GBP/USD/EUR seeded per tenant (`is_system = true`) so every tenant has base currencies
 
 ## Negative Consequences
 
@@ -478,10 +496,11 @@ func (r *CachedReferenceData) Get(
 
 ### Tenant Isolation
 
-Instrument definitions are tenant-scoped. The `tenant_id` column ensures:
-- Tenants cannot see or use other tenants' custom instruments
-- Platform-wide instruments (USD, EUR) use a special system tenant ID
-- Queries always filter by tenant
+Instrument definitions are tenant-scoped **by schema** (each tenant's `org_<id>` schema has its own
+`instrument_definition` table); there is no `tenant_id` column:
+- Tenants cannot see or use other tenants' custom instruments (different schemas)
+- Platform-wide instruments (GBP, USD, EUR) are seeded into each tenant's schema with `is_system = true`
+- Queries run within the tenant's `search_path`; no per-row tenant filter is needed
 
 ### Instrument Type Mapping Guidance
 
@@ -516,26 +535,29 @@ instrument types.
 
 ### Built-in Instruments
 
-Platform provides standard instruments via System Tenant that all tenants inherit:
+The platform seeds standard currencies into **each tenant's schema** (via `registry/seeder.go`), flagged
+`is_system = true`. There is no system-tenant row. Conceptually, per tenant:
 
 ```sql
--- System tenant for platform-wide instruments
-INSERT INTO instrument_definitions
-    (tenant_id, code, version, dimension, precision,
-     validation_expression, fungibility_expression, display_name)
+-- Seeded into each tenant's org_<id> schema at provisioning time
+INSERT INTO instrument_definition
+    (code, version, dimension, precision,
+     validation_expression, fungibility_key_expression, display_name, status, is_system)
 VALUES
-    ('00000000-0000-0000-0000-000000000000', 'USD', 1, 'Monetary', 2,
-     'true', 'a == b', 'US Dollar'),
-    ('00000000-0000-0000-0000-000000000000', 'EUR', 1, 'Monetary', 2,
-     'true', 'a == b', 'Euro'),
-    ('00000000-0000-0000-0000-000000000000', 'GBP', 1, 'Monetary', 2,
-     'true', 'a == b', 'British Pound');
+    ('USD', 1, 'MONETARY', 2, NULL, '', 'US Dollar',     'ACTIVE', TRUE),
+    ('EUR', 1, 'MONETARY', 2, NULL, '', 'Euro',          'ACTIVE', TRUE),
+    ('GBP', 1, 'MONETARY', 2, NULL, '', 'British Pound', 'ACTIVE', TRUE);
 ```
 
-**Note**: Fiat currencies use `'true'` for validation (no attributes required) and
-`'a == b'` for fungibility (all positions of same currency are fungible).
+**Note**: Fiat currencies need no validation (NULL) and an empty `fungibility_key_expression` (`''`), meaning all
+positions of the same currency fall into one bucket (fully fungible).
 
 ### Multi-Asset Instrument Examples
+
+> **Note:** The example INSERTs below predate the bucket-key fungibility model and the singular table name. Read them
+> for the CEL validation logic. In current code: the table is `instrument_definition` (singular, no `tenant_id`); the
+> fungibility column is `fungibility_key_expression` and must return a **string** key for one position (e.g.
+> `attributes.tou_period + "|" + attributes.tariff_zone`) rather than a pairwise `a.x == b.x` boolean.
 
 The following examples demonstrate CEL expressions for real-world commodity instruments.
 See [ADR-0013](0013-generic-asset-quantity-types.md) for corresponding Go usage examples.
@@ -629,39 +651,33 @@ package ngo
 import (
     "context"
 
-    "github.com/google/uuid"
-    "meridian/services/reference-data/domain"
+    "github.com/meridianhub/meridian/services/reference-data/registry"
 )
 
 // RegisterRiceVoucher creates a custom instrument for an NGO food distribution program.
 // Vouchers are redeemable for 1kg of rice at distribution centers.
-func RegisterRiceVoucher(
-    ctx context.Context,
-    referenceData InstrumentReferenceDataService,
-    ngoTenantID uuid.UUID,
-) error {
-    def := domain.InstrumentDefinition{
-        TenantID:  ngoTenantID,
+// The tenant is resolved from ctx (org_<id> schema), so there is no TenantID field.
+func RegisterRiceVoucher(ctx context.Context, reg registry.Registry) error {
+    def := registry.InstrumentDefinition{
         Code:      "RICE-VOUCHER",
         Version:   1,
-        Dimension: "Commodity",
+        Dimension: "QUANTITY",
         Precision: 0, // Whole vouchers only
 
         // Validation: expiry must be in the future, quality grade must be valid
-        ValidationExpression: `has(attrs.expiry_date) &&
-            timestamp(attrs.expiry_date) > now() &&
-            has(attrs.quality_grade) &&
-            attrs.quality_grade in ["A", "B", "C"]`,
+        ValidationExpression: `has(attributes.expiry_date) &&
+            timestamp(attributes.expiry_date) > now() &&
+            has(attributes.quality_grade) &&
+            attributes.quality_grade in ["A", "B", "C"]`,
 
-        // Fungibility: same expiry date AND quality grade can merge
-        FungibilityExpression: `a.expiry_date == b.expiry_date &&
-            a.quality_grade == b.quality_grade`,
+        // Fungibility key: bucket by expiry date + quality grade (same key => fungible)
+        FungibilityKeyExpression: `attributes.expiry_date + "|" + attributes.quality_grade`,
 
         DisplayName: "Rice Voucher",
         Description: "Redeemable voucher for 1kg of rice at distribution centers",
     }
 
-    return referenceData.Register(ctx, def)
+    return reg.Register(ctx, def)
 }
 ```
 
@@ -745,35 +761,43 @@ newPosition := Position{
 
 ### gRPC API (BIAN Operations)
 
+The real service is `ReferenceDataService` (`api/proto/meridian/reference_data/v1/instrument.proto`). It exposes the
+full lifecycle, and carries **both** the CEL expressions and the JSON Schema (`attribute_schema`) - they coexist.
+
 ```protobuf
-service FinancialInstrumentReferenceDataManagement {
-    // BIAN: Register
-    rpc Register(RegisterInstrumentRequest) returns (FinancialInstrumentDirectoryEntry);
-
-    // BIAN: Retrieve
-    rpc Retrieve(RetrieveInstrumentRequest) returns (FinancialInstrumentDirectoryEntry);
-
-    // BIAN: Retrieve (list)
-    rpc List(ListInstrumentsRequest) returns (ListInstrumentsResponse);
-
-    // BIAN: Update (deprecate)
-    rpc Deprecate(DeprecateInstrumentRequest) returns (FinancialInstrumentDirectoryEntry);
+service ReferenceDataService {
+    rpc RegisterInstrument(RegisterInstrumentRequest) returns (Instrument);
+    rpc RetrieveInstrument(RetrieveInstrumentRequest) returns (Instrument);
+    rpc ListInstruments(ListInstrumentsRequest) returns (ListInstrumentsResponse);
+    rpc UpdateInstrument(UpdateInstrumentRequest) returns (Instrument);   // DRAFT edits
+    rpc ActivateInstrument(ActivateInstrumentRequest) returns (Instrument);
+    rpc DeprecateInstrument(DeprecateInstrumentRequest) returns (Instrument);
+    rpc EvaluateInstrument(EvaluateInstrumentRequest) returns (EvaluateInstrumentResponse); // CEL playground
+    rpc GetAttributeSchema(GetAttributeSchemaRequest) returns (GetAttributeSchemaResponse);
+    // (plus account-type and node RPCs on the same service)
 }
 
 message RegisterInstrumentRequest {
-    string instrument_code = 1;
-    string instrument_type = 2;     // Currency, Debt, Equity, Derivative, Commodity
-    string instrument_name = 3;
-    int32 precision = 4;
-    string attribute_schema = 5;    // JSON Schema as string
-    string description = 6;
+    string instrument_code            = 1;
+    string instrument_type            = 2;  // maps to dimension
+    string instrument_name            = 3;
+    int32  precision                  = 4;
+    string validation_expression      = 5;  // CEL (bool)
+    string fungibility_key_expression = 6;  // CEL (returns string bucket key)
+    string error_message_expression   = 7;  // CEL (optional)
+    string attribute_schema           = 8;  // JSON Schema (coexists with CEL)
+    string description                = 9;
 }
 
 message RetrieveInstrumentRequest {
     string instrument_code = 1;
-    uint32 version = 2;             // 0 = latest non-deprecated
+    uint32 version         = 2;  // 0 = latest
 }
 ```
+
+> Note: the field numbers above mirror the proto's mix of CEL and JSON-Schema fields; consult the proto for the exact
+> wire numbers. The point is that lifecycle RPCs (`Update`/`Activate`/`Deprecate`) and JSON Schema both exist - the
+> earlier draft's "no deprecate, CEL replaces JSON Schema" framing did not ship.
 
 ### Consumer Guidance: Partition Routing
 
@@ -781,7 +805,7 @@ Consumers of this service (e.g., Position Keeping, Ledger) may partition storage
 dimension for regulatory segregation. The dimension is derived from `instrument_type`:
 
 ```go
-dimension := instrument.InstrumentType.Dimension()  // "Monetary" or "Commodity"
+dimension := instrument.Dimension  // "MONETARY", "ENERGY", "QUANTITY", "COMPUTE", "TIME", "MASS", "VOLUME"
 ```
 
 This keeps the Reference Data service focused on its BIAN responsibility (instrument
