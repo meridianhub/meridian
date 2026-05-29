@@ -78,7 +78,7 @@ jobs:
             - Service-specific README.md files for local conventions
 
           # Customize Claude's behavior
-          # Using Opus 4.5 for higher quality responses
+          # Using the latest Opus for higher quality responses (alias tracks newest snapshot)
           claude_args: |
             --max-input-tokens 50000
-            --model claude-opus-4-5-20251101
+            --model opus
