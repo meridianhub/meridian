@@ -72,8 +72,9 @@
 //	    return err
 //	}
 //
-//	// Skip already-processed lines
-//	startLine := cp.LastProcessedLine + 1
+//	// Skip already-processed lines (header on line 1, so M processed
+//	// data rows occupy lines 2..M+1; the next line to process is M+2).
+//	startLine := cp.ProcessedRows + 2
 //
 // # Rollback
 //

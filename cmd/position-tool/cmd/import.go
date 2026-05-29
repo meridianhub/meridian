@@ -343,8 +343,8 @@ type importProcessor struct {
 // processRow handles validation and insertion of a single CSV row.
 // Returns an error only for fatal errors that should stop processing.
 func (p *importProcessor) processRow(ctx context.Context, csvRow *csvadapter.ImportRow) error {
-	// Skip rows before the resume point
-	if p.cp.ProcessedRows > 0 && csvRow.LineNumber <= p.cp.LastProcessedLine {
+	// Skip rows already committed in a prior run when resuming.
+	if p.cp.ShouldSkipResumedLine(csvRow.LineNumber) {
 		return nil
 	}
 
