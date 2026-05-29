@@ -73,6 +73,7 @@ stateDiagram-v2
 |-----|-------------|
 | [Economy Visualization Completeness](046-economy-visualization-completeness.md) | Complete operations console economy visualization |
 | [Security Audit](047-security-audit.md) | Security findings and remediation from Six Hats audit |
+| [Security Audit Status](047-security-audit-status.md) | Current status of security audit findings and remediation tracking |
 | [Codebase Consistency & AI Navigability](049-codebase-consistency.md) | Standardize naming, patterns, and documentation across services |
 | [Asset-Agnostic Accounts](028-asset-agnostic-accounts.md) | Generalize account fields for non-fiat asset classes |
 | [Identity and Access Management](031-identity-access-management.md) | Bridge Party service identity to authentication with dynamic user management and RBAC |
@@ -106,6 +107,8 @@ stateDiagram-v2
 | [Full Economy Visibility](058-full-economy-visibility.md) | Surface platform defaults and economy capabilities in UI |
 | [Asset-Agnostic Posting Layer](059-asset-agnostic-posting-layer.md) | Replace hardcoded ISO 4217 currency validation for non-fiat assets |
 | [Per-Tenant Scheduled Execution](060-per-tenant-scheduled-execution.md) | Phased scheduling identity: attribution, manifest bridge, deferred JWT auth |
+| [MCP Auth Session Unification](061-mcp-auth-session-unification.md) | Unify MCP authentication and session handling across transports |
+| [Self-Service Onboarding Readiness](062-self-service-onboarding-readiness.md) | Readiness assessment for self-service tenant onboarding |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 

@@ -375,4 +375,4 @@ configMapGenerator:
 - [Kustomize Documentation](https://kustomize.io/)
 - [Kubernetes Kustomize](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/)
 - [JSON Patch RFC 6902](https://tools.ietf.org/html/rfc6902)
-- [Meridian Architecture Decision Records](../docs/adr/)
+- [Meridian Architecture Decision Records](../adr/)

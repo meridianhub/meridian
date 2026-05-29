@@ -9,9 +9,11 @@ triggers:
   - Handling schema drift
 
 instructions: |
-  Use Atlas for declarative schema migrations. Each service has own migrations directory.
-  Migrations run automatically on service startup. Atlas generates SQL from desired state,
-  ensuring safe schema evolution without manual SQL.
+  Use Atlas for declarative schema migrations. Each service has its own
+  services/<service>/migrations/ directory and services/<service>/atlas/atlas.hcl config.
+  Migrations do NOT run automatically on startup - apply them explicitly via the unified
+  binary's `--migrate` flag (or `atlas migrate apply` in CI). Atlas generates SQL by diffing
+  the GORM models loaded through utilities/atlas-loader against the live schema.
 ---
 
 # 3. Database Schema Migrations with Atlas
@@ -210,7 +212,7 @@ project-root/
 
 ### Database Entity as Source of Truth for Persistence
 
-**internal/adapters/persistence/booking_log_entity.go:**
+**services/financial-accounting/adapters/persistence/booking_log_entity.go:**
 
 ```go
 package persistence
@@ -254,7 +256,7 @@ func (BookingLogEntity) TableName() string {
 }
 ```
 
-**Corresponding domain model (internal/domain/booking_log.go) - NO persistence tags:**
+**Corresponding domain model (services/financial-accounting/domain/booking_log.go) - NO persistence tags:**
 
 ```go
 package domain
@@ -300,10 +302,11 @@ func (b *FinancialBookingLog) Post() error {
 
 ### Atlas Configuration
 
-Configuration files are located in the `atlas/` directory, organized by schema. Each service domain has its own
-subdirectory with an `atlas.hcl` configuration file (e.g., `atlas/financial_accounting/atlas.hcl`):
+Each service owns its Atlas config at `services/<service>/atlas/atlas.hcl`, and its migrations at
+`services/<service>/migrations/`. The config invokes the shared GORM loader at `utilities/atlas-loader` to derive the
+desired schema:
 
-**atlas/financial_accounting/atlas.hcl:**
+**services/financial-accounting/atlas/atlas.hcl:**
 
 ```hcl
 data "external_schema" "gorm" {
@@ -311,14 +314,14 @@ data "external_schema" "gorm" {
     "go",
     "run",
     "-mod=mod",
-    "./cmd/atlas-loader",
+    "./utilities/atlas-loader",
     "--schema=financial_accounting"
   ]
 }
 
 env "local" {
   migration {
-    dir = "file://migrations/financial_accounting"
+    dir = "file://services/financial-accounting/migrations"
   }
 
   dev = "docker://postgres/16/dev"
@@ -340,7 +343,7 @@ env "local" {
 
 env "ci" {
   migration {
-    dir = "file://migrations/financial_accounting"
+    dir = "file://services/financial-accounting/migrations"
   }
 
   dev = "docker://postgres/16/dev"
@@ -379,7 +382,7 @@ type BookingLogEntity struct {
 # Atlas inspects database entities and generates migration
 atlas migrate diff add_narrative \
   --env local \
-  --config atlas/financial_accounting/atlas.hcl
+  --config file://services/financial-accounting/atlas/atlas.hcl
 ```
 
 **Generated migration (services/financial-accounting/migrations/20250125120000_add_narrative.sql):**
@@ -399,7 +402,7 @@ ALTER TABLE "financial_booking_log"
 # Catch dangerous changes before deployment
 atlas migrate lint \
   --env local \
-  --config atlas/financial_accounting/atlas.hcl \
+  --config file://services/financial-accounting/atlas/atlas.hcl \
   --latest 1
 ```
 
@@ -409,7 +412,7 @@ atlas migrate lint \
 # Verify migration checksums
 atlas migrate hash \
   --env local \
-  --config atlas/financial_accounting/atlas.hcl
+  --config file://services/financial-accounting/atlas/atlas.hcl
 ```
 
 **5. Apply Migration:**
@@ -418,9 +421,13 @@ atlas migrate hash \
 # Deploy to target environment
 atlas migrate apply \
   --env local \
-  --config atlas/financial_accounting/atlas.hcl \
+  --config file://services/financial-accounting/atlas/atlas.hcl \
   --url "$DATABASE_URL"
 ```
+
+> **Runtime note:** Meridian does **not** auto-run migrations on service startup. In production/demo, migrations are
+> applied by the unified binary's `--migrate` flag (`cmd/meridian/main.go`, which applies the embedded SQL and exits),
+> and in CI via `atlas migrate apply`. There is no implicit migration-on-boot.
 
 ### CI/CD Integration
 
@@ -430,18 +437,20 @@ See `.github/workflows/migrations.yml` for the actual implementation. Key path t
 on:
   pull_request:
     paths:
-      - 'migrations/**'
-      - 'atlas/**'
-      - 'cmd/atlas-loader/**'
-      - 'internal/domain/models/**'
+      - 'services/*/migrations/**'
+      - 'services/*/atlas/**'
+      - 'shared/atlas/**'
+      - 'utilities/atlas-loader/**'
+      - 'shared/domain/models/**'
+      - 'scripts/migrate-all-orgs.sh'
 ```
 
-Migration verification uses the schema-specific configs:
+Migration verification uses the per-service configs:
 
 ```bash
-# Verify checksums for each schema
-atlas migrate hash --env ci --config file://atlas/current_account/atlas.hcl
-atlas migrate hash --env ci --config file://atlas/position_keeping/atlas.hcl
+# Verify checksums for each service
+atlas migrate hash --env ci --config file://services/current-account/atlas/atlas.hcl
+atlas migrate hash --env ci --config file://services/position-keeping/atlas/atlas.hcl
 ```
 
 ### Immutability Principle
@@ -461,7 +470,8 @@ For complex changes, write SQL manually:
 
 # Create empty migration file
 
-atlas migrate new complex_data_migration --env gorm
+atlas migrate new complex_data_migration \
+  --config file://services/financial-accounting/atlas/atlas.hcl --env local
 ```
 
 Edit the generated file with custom SQL, then Atlas manages it like any other migration.
