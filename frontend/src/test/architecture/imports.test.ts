@@ -245,8 +245,8 @@ const RATCHET_ALLOWLIST = new Set([
   'features/accounts/pages/[accountId].tsx:16:@/features/reference-data/components/create-valuation-feature-dialog',
 
   // cross-feature: manifests -> economy
-  'features/manifests/components/manifest-graph.tsx:49:@/features/economy/components/apply-resource-modal',
-  'features/manifests/components/manifest-graph.tsx:50:@/features/economy/lib/resource-schema-registry',
+  'features/manifests/components/manifest-graph/index.tsx:10:@/features/economy/components/apply-resource-modal',
+  'features/manifests/components/manifest-graph/index.tsx:11:@/features/economy/lib/resource-schema-registry',
 
   // cross-feature: reference-data -> manifests, sagas
   'features/reference-data/components/execution-context-tab.tsx:3:@/features/manifests/hooks/use-manifest-graph',

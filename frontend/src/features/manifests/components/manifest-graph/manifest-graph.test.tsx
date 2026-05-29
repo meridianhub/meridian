@@ -1,8 +1,12 @@
+/* eslint-disable max-lines -- Integration suite for the whole ManifestGraph
+ * component. ~180 lines are an irreducible React Flow / ELK / router mock
+ * harness that must be co-located (vi.mock factories are per-file). Pure logic
+ * is unit-tested separately in node-navigation.test.ts and graph-layout.test.ts. */
 import { describe, it, expect, vi } from 'vitest'
 import { useState } from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { ManifestGraph } from './manifest-graph'
+import { ManifestGraph } from './index'
 import type { Manifest } from '@/api/gen/meridian/control_plane/v1/manifest_pb'
 
 vi.mock('@/api/transport', () => ({
@@ -635,115 +639,6 @@ describe('ManifestGraph', () => {
       renderGraph(fullManifest)
       const sagaNode = await screen.findByTestId('node-saga:test_saga')
       expect(sagaNode).toBeInTheDocument()
-    })
-  })
-
-  describe('additional double-click navigation', () => {
-    const navManifest = createMockManifest({
-      instruments: [
-        { code: 'GBP', name: 'British Pound', type: 1, dimensions: { unit: 'GBP', precision: 2 } },
-        { code: 'KWH', name: 'Kilowatt Hour', type: 2, dimensions: { unit: 'kWh', precision: 4 } },
-      ],
-      valuationRules: [
-        { fromInstrument: 'KWH', toInstrument: 'GBP', method: 1, source: 'spot' },
-      ],
-      paymentRails: [
-        { provider: 'stripe', name: 'Stripe Rail' },
-      ],
-      partyTypes: [
-        { partyType: 'CUSTOMER' },
-      ],
-      mappings: [
-        { name: 'stripe_inbound' },
-      ],
-      operationalGateway: {
-        providerConnections: [
-          { connectionId: 'conn-1', providerName: 'Stripe' },
-        ],
-        instructionRoutes: [
-          { instructionType: 'payment', connectionId: 'conn-1' },
-        ],
-      },
-      marketData: {
-        sources: [{ code: 'SPOT', name: 'Spot Price' }],
-        datasets: [],
-      },
-      organizations: [
-        { code: 'ACME', name: 'Acme Corp' },
-      ],
-      internalAccounts: [
-        { code: 'OPS_GBP', name: 'Operating GBP', accountType: 'CURRENT' },
-      ],
-    })
-
-    it('navigates to valuation rules page', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-valuation_rule:KWH:GBP:0')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/reference-data/valuation-rules')
-    })
-
-    it('navigates to reference-data for payment rails', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-payment_rail:stripe')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
-    })
-
-    it('navigates to parties page for party types', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-party_type:CUSTOMER')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/parties')
-    })
-
-    it('navigates to gateway-mappings for mapping nodes', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-mapping:stripe_inbound')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/gateway-mappings')
-    })
-
-    it('navigates to reference-data for operational gateway', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-operational_gateway:default')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
-    })
-
-    it('navigates to reference-data for provider connection', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-provider_connection:conn-1')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
-    })
-
-    it('navigates to reference-data for instruction route', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-instruction_route:payment')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/reference-data')
-    })
-
-    it('navigates to market-data page for market data nodes', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-market_data:SPOT')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/market-data/SPOT')
-    })
-
-    it('navigates to reference-data/nodes for organization nodes', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-organization:ACME')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/reference-data/nodes')
-    })
-
-    it('navigates to internal-accounts for internal account nodes', async () => {
-      renderGraph(navManifest)
-      const node = await screen.findByTestId('node-internal_account:OPS_GBP')
-      fireEvent.doubleClick(node)
-      expect(mockNavigate).toHaveBeenCalledWith('/internal-accounts')
     })
   })
 
