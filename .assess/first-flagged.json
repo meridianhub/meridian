@@ -1,0 +1,12 @@
+{
+  "services/control-plane/internal/validator/manifest_validator_test.go": "2026-05-22",
+  "services/current-account/service/coverage_unit_test.go": "2026-05-22",
+  "services/payment-order/service/grpc_service_test.go": "2026-05-22",
+  "services/position-keeping/domain/financial_position_log_test.go": "2026-05-22",
+  "services/current-account/service/grpc_service_test.go": "2026-05-22",
+  "frontend/src/features/manifests/components/manifest-graph.tsx": "2026-05-22",
+  "services/mcp-server/internal/tools/economy_test.go": "2026-05-22",
+  "frontend/src/features/manifests/components/manifest-graph.test.tsx": "2026-05-22",
+  "services/identity/service/grpc_service_test.go": "2026-05-22",
+  "shared/pkg/saga/schema/service_modules.go": "2026-05-22"
+}
