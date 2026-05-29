@@ -30,8 +30,12 @@ node_modules/
 .taskmaster/*
 !.taskmaster/templates/
 !.taskmaster/templates/**
-CLAUDE.md
 .mcp.json
+
+# Root canonical AI-contributor instruction file (CLAUDE.md) and its AGENTS.md
+# alias are tracked. Any other CLAUDE.md elsewhere in the tree stays ignored.
+**/CLAUDE.md
+!/CLAUDE.md
 
 # Go specific
 vendor/

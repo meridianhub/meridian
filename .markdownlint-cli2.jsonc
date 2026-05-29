@@ -49,6 +49,10 @@
   "ignores": [
     "**/node_modules/**",
     "**/.git/**",
+    // Canonical AI-contributor instruction doc, maintained as the project
+    // source of truth. Excluded so it stays faithful to upstream rather than
+    // being reflowed for line-length/code-fence rules.
+    "CLAUDE.md",
     ".taskmaster/**",
     ".claude/**",
     ".assess/**",
