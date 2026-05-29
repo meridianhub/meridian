@@ -109,7 +109,7 @@ function GraphChrome({
         <EventChainSidePanel
           chain={c.eventChain}
           startNodeLabel={selected.label}
-          onSagaClick={(sagaId) => navigate(`/starlark-config/${sagaId.replace(/^saga:/, '')}`)}
+          onSagaClick={(sagaId) => navigate(`/starlark-config/${encodeURIComponent(sagaId.replace(/^saga:/, ''))}`)}
           onClose={c.clearSelection}
         />
       )}

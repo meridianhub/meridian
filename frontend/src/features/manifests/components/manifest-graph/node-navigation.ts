@@ -25,10 +25,10 @@ const STATIC_ROUTES: Partial<Record<ManifestNode['type'], string>> = {
  * node data); everything else is a static or reference-data route.
  */
 export function getNodeNavigationPath(node: ManifestNode): string | null {
-  if (node.type === 'saga') return `/starlark-config/${node.label}`
+  if (node.type === 'saga') return `/starlark-config/${encodeURIComponent(node.label)}`
   if (node.type === 'market_data') {
     const code = node.data.code as string | undefined
-    return code ? `/market-data/${code}` : '/market-data'
+    return code ? `/market-data/${encodeURIComponent(code)}` : '/market-data'
   }
   if (REFERENCE_DATA_TYPES.has(node.type)) return '/reference-data'
   return STATIC_ROUTES[node.type] ?? null

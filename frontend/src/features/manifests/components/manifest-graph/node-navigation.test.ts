@@ -42,6 +42,15 @@ describe('getNodeNavigationPath', () => {
     expect(getNodeNavigationPath(node('market_data'))).toBe('/market-data')
   })
 
+  it('URL-encodes dynamic segments containing reserved characters', () => {
+    expect(getNodeNavigationPath(node('saga', { label: 'usage to/value' }))).toBe(
+      '/starlark-config/usage%20to%2Fvalue',
+    )
+    expect(getNodeNavigationPath(node('market_data', { data: { code: 'A/B C' } }))).toBe(
+      '/market-data/A%2FB%20C',
+    )
+  })
+
   it('returns null for node types with no destination', () => {
     expect(getNodeNavigationPath(node('event_channel'))).toBeNull()
   })

@@ -57,7 +57,7 @@ export function useGraphHighlight({
     setEdges((eds) => {
       let changed = false
       const next = eds.map((e) => {
-        const animated = hoveredNode ? e.source === hoveredNode || e.target === hoveredNode : false
+        const animated = activeNode ? e.source === activeNode || e.target === activeNode : false
         if (e.animated === animated) return e
         changed = true
         return { ...e, animated }
