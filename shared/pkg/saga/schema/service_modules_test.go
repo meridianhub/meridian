@@ -1161,6 +1161,21 @@ func TestParseHandlerTree_SinglePart(t *testing.T) {
 	assert.Contains(t, tree.children, "valid")
 }
 
+func TestParseHandlerTree_EmptySegments(t *testing.T) {
+	tree := parseHandlerTree([]string{
+		"service..action", // empty middle segment - skipped
+		".service.action", // empty leading segment - skipped
+		"service.action.", // empty trailing segment - skipped
+		"valid.handler",
+	})
+
+	// Only the well-formed name should produce a node; no empty keys.
+	assert.Len(t, tree.children, 1)
+	assert.Contains(t, tree.children, "valid")
+	assert.NotContains(t, tree.children, "")
+	assert.NotContains(t, tree.children, "service")
+}
+
 func TestAuthorizeHandlerInvocation(t *testing.T) {
 	t.Run("allows handler without RBAC metadata (backward compat)", func(t *testing.T) {
 		ctx := &saga.StarlarkContext{}
