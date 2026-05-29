@@ -398,7 +398,7 @@ func validateExpressionConstraints(expression string) error {
 // measureExpressionDepth estimates the nesting depth of an expression.
 // This is a heuristic based on parentheses and bracket nesting.
 // It ignores brackets inside string literals to avoid false positives.
-func measureExpressionDepth(expression string) int {
+func measureExpressionDepth(expression string) int { //nolint:gocognit // pre-existing, tracked in assess-2026-05-22
 	maxDepth := 0
 	currentDepth := 0
 	inString := false

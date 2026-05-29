@@ -25,7 +25,7 @@ import (
 // with party context, attributes are validated against the JSON Schema, and ValuationFeatures
 // are seeded from the product type templates.
 // When product_type_code is empty, backwards-compatible behavior is used (legacy path).
-func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCurrentAccountRequest) (*pb.InitiateCurrentAccountResponse, error) {
+func (s *Service) InitiateCurrentAccount(ctx context.Context, req *pb.InitiateCurrentAccountRequest) (*pb.InitiateCurrentAccountResponse, error) { //nolint:gocyclo,cyclop,funlen // pre-existing, tracked in assess-2026-05-22
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {

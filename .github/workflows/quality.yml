@@ -86,6 +86,36 @@ jobs:
           version: v2.11.4
           args: --timeout=5m --config=.golangci.yml
 
+  deadcode:
+    name: Dead Code (Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.3'
+          cache: true
+
+      - name: Set up buf
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        run: buf generate
+
+      - name: Install deadcode
+        run: go install golang.org/x/tools/cmd/deadcode@v0.45.0
+
+      - name: Run dead-code reachability check
+        run: ./scripts/check-deadcode.sh
+
   proto-freshness:
     name: Proto Freshness
     runs-on: ubuntu-latest

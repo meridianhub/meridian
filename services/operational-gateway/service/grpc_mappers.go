@@ -66,7 +66,7 @@ func mapToStruct(m map[string]any) *structpb.Struct {
 }
 
 // anyToProtoValue converts a Go value to a structpb.Value.
-func anyToProtoValue(v any) *structpb.Value {
+func anyToProtoValue(v any) *structpb.Value { //nolint:cyclop // pre-existing, tracked in assess-2026-05-22
 	if v == nil {
 		return structpb.NewNullValue()
 	}
