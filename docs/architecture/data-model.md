@@ -37,10 +37,15 @@ This document is the single reference for how Meridian stores relational data. I
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                       meridian_platform (DB)                        │
-│  public schema: tenant, tenant_provisioning, manifest_version,      │
-│                 manifest_apply_job, platform_saga_definition,       │
-│                 staff_user, api_key                                 │
+│                       meridian_platform (DB)  — tenant service       │
+│  public schema: tenant, tenant_provisioning,                        │
+│                 tenant_provisioning_status                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                  meridian_control_plane (DB)  — control-plane service│
+│  public schema: manifest_version, manifest_apply_job,               │
+│                 platform_saga_definition, staff_user, api_key       │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -59,7 +64,7 @@ This document is the single reference for how Meridian stores relational data. I
 - **Database-per-service** — each BIAN domain service owns a distinct database (`meridian_current_account`, `meridian_party`, ...). No service reads another's database; cross-service communication is gRPC or Kafka.
 - **Schema-per-tenant** — within each service database, each tenant has its own schema named `org_<tenant_id>`. All tenant-owned tables are replicated into every tenant schema.
 
-Platform-level services (`control-plane`, `tenant`) share a single `meridian_platform` database and store their data in the `public` schema because their concerns span all tenants.
+Platform-level services own dedicated platform databases and store their data in the `public` schema because their concerns span all tenants: `tenant` uses `meridian_platform` (the tenant registry and provisioning status), and `control-plane` uses `meridian_control_plane` (manifests, staff users, platform saga definitions).
 
 ## Tenant Isolation Mechanism
 
@@ -109,7 +114,7 @@ Each service owns one database. The schema location column indicates whether tab
 |---|---|---|---|
 | api-gateway | _(stateless)_ | — | _infrastructure_ |
 | audit-worker | _(stateless, consumes outboxes)_ | — | _infrastructure_ |
-| control-plane | `meridian_platform` | `public` | _infrastructure_ |
+| control-plane | `meridian_control_plane` | `public` | _infrastructure_ |
 | current-account | `meridian_current_account` | `org_<id>` | Current Account |
 | event-router | _(stateless)_ | — | _infrastructure_ |
 | financial-accounting | `meridian_financial_accounting` | `org_<id>` | Financial Accounting |
@@ -131,16 +136,16 @@ Each service owns one database. The schema location column indicates whether tab
 
 Tables listed below live in the `org_<tenant_id>` schema of the service database unless explicitly marked **[public]**. Audit infrastructure tables (`audit_log`, `audit_outbox`, `event_outbox`) exist in most services and are omitted from each entry for brevity — assume they are present unless noted otherwise.
 
-### Platform Tier (meridian_platform, public schema)
+### Platform Tier (public schema)
 
-**control-plane** — manifest lifecycle and staff identity
+**control-plane** (`meridian_control_plane`) — manifest lifecycle and staff identity
 - `staff_user` — platform admin console users (distinct from `party`)
 - `api_key` — platform API keys scoped to `staff_user`
 - `manifest_version` — immutable manifest snapshots with extracted `relationship_graph` JSONB
 - `manifest_apply_job` — apply orchestration state, links to saga executions
 - `platform_saga_definition` — shared saga definitions used by `apply_manifest`
 
-**tenant** — multi-tenant registry and provisioning
+**tenant** (`meridian_platform`) — multi-tenant registry and provisioning
 - `tenant` — tenant id (VARCHAR), display name, settlement asset, status
 - `tenant_provisioning` — provisioning state machine with per-service schema map (JSONB)
 - `tenant_provisioning_status` — per (tenant, service) provisioning row
@@ -233,7 +238,12 @@ The diagrams below show intra-service relationships (enforced by foreign keys in
 
 Audit tables (`audit_log`, `audit_outbox`, `event_outbox`) and outbox tables are present in most services but omitted from these diagrams for readability. Attribute blocks show the most meaningful ~8-10 columns per table; housekeeping columns (`created_at`, `updated_at`, `created_by`, `updated_by`, `deleted_at`, `version`) are omitted unless they carry domain meaning. Column names and types are taken from the canonical Atlas migrations in `services/<service>/migrations/` (the source of truth for `develop` and `demo`).
 
-### Platform Tier (`meridian_platform`)
+### Platform Tier (`meridian_platform` and `meridian_control_plane`)
+
+The `TENANT*` tables live in `meridian_platform` (tenant service); the
+`MANIFEST_*`, `STAFF_USER`, and `API_KEY` tables live in `meridian_control_plane`
+(control-plane service). They are shown together here as the platform tier but
+are separate databases with no cross-database foreign keys.
 
 ```mermaid
 erDiagram

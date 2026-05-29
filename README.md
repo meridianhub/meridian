@@ -131,6 +131,7 @@ All services compile into a single binary for simplified deployment, organized i
 | **Party** | Customer registration, KYC verification, payment methods |
 | **ReferenceData** | Instrument registry, account types, CEL validation, saga definitions |
 | **MarketInformation** | Bi-temporal market data, quality ladder, delta engine |
+| **InternalAccount** | Counterparty and operational accounts (clearing, nostro, vostro, inventory), multi-asset, lien-based reservation |
 | **Reconciliation** | Settlement runs, variance detection, dispute management |
 | **Forecasting** | Forward curves and forecast generation |
 
@@ -139,10 +140,13 @@ All services compile into a single binary for simplified deployment, organized i
 | Service | Purpose |
 |---------|---------|
 | **ControlPlane** | Manifest system, tenant management, Stripe billing |
+| **Tenant** | Multi-tenancy registry, tenant lifecycle, schema-per-tenant provisioning |
 | **EventRouter** | CEL-filtered event routing, saga triggering, utilization metering |
 | **FinancialGateway** | Stripe payment intent adapter, webhook handling |
 | **OperationalGateway** | Non-financial outbound dispatch (IoT, regulatory, partner) |
+| **APIGateway** | HTTP/JSON transcoding, JWT/API-key authentication, request routing |
 | **Identity** | Embedded Dex OIDC, SSO, JWT/API-key authentication |
+| **AuditWorker** | Kafka/outbox consumer maintaining the per-tenant audit log; ListAuditEntries read API |
 | **MCP Server** | AI assistant integration via Model Context Protocol |
 
 See [services/README.md](services/README.md) for the full architecture diagram
