@@ -147,6 +147,9 @@ TEST_FILE_SIZE_LIMIT=1500
 # Pre-existing test files over TEST_FILE_SIZE_LIMIT, grandfathered in. Paths are
 # relative to the repo root. Split these to comply, then remove the entry.
 # Do NOT add new entries.
+#
+# Plain indexed array (not an associative array) so the script still runs under
+# bash 3.2, the default on macOS, for local invocations.
 KNOWN_OVERSIZED_TEST_FILES=(
     "services/current-account/e2e/saga_compensation_test.go"
     "services/current-account/service/grpc_service_integration_test.go"
@@ -170,22 +173,24 @@ KNOWN_OVERSIZED_TEST_FILES=(
     "shared/platform/gateway/tenant_resolver_test.go"
 )
 
+# Returns true (0) if $1 is listed in KNOWN_OVERSIZED_TEST_FILES. Uses a plain
+# loop rather than an associative array so the script runs under bash 3.2.
+is_known_oversized_test() {
+    local target=$1 entry
+    for entry in "${KNOWN_OVERSIZED_TEST_FILES[@]}"; do
+        [ "$entry" = "$target" ] && return 0
+    done
+    return 1
+}
+
 check_test_file_size() {
     log_section "Test File Size Limits (>${TEST_FILE_SIZE_LIMIT} lines)"
 
     local found=0
     local stale=0
 
-    # Build a lookup of allowlisted paths. Value 1 = listed, 2 = listed and
-    # confirmed still over the limit (used for stale-entry detection).
-    declare -A allow=()
-    local p
-    for p in "${KNOWN_OVERSIZED_TEST_FILES[@]}"; do
-        allow["$p"]=1
-    done
-
     # Process substitution keeps the loop body in the current shell, so updates
-    # to "found" and "allow" persist after the loop.
+    # to "found" persist after the loop.
     while IFS= read -r file; do
         skip_service "$file" && continue
 
@@ -198,10 +203,10 @@ check_test_file_size() {
         lines=$(wc -l < "${REPO_ROOT}/${file}")
 
         if [ "$lines" -gt "$TEST_FILE_SIZE_LIMIT" ]; then
-            if [ -n "${allow[$file]:-}" ]; then
-                allow["$file"]=2
-                continue
-            fi
+            # Grandfathered pre-existing offenders are allowed but not silenced
+            # forever — the stale check below nags once they drop below the cap.
+            is_known_oversized_test "$file" && continue
+
             log_error "${file} has ${lines} lines (limit: ${TEST_FILE_SIZE_LIMIT})"
             echo "       Fix: split into smaller _test.go files in the same package"
             echo "       Exempt: add '//meridian:large-file' comment anywhere in the file"
@@ -212,11 +217,19 @@ check_test_file_size() {
         find services shared cmd tests -name "*_test.go" -type f 2>/dev/null | sort
     )
 
-    # Flag allowlist entries that are no longer over the limit (or were split /
-    # removed) so the allowlist keeps reflecting real debt.
+    # Flag allowlist entries that no longer need grandfathering (file removed or
+    # now under the cap) so the allowlist keeps reflecting real debt. Recomputing
+    # line counts here is cheap and avoids tracking state through the loop above.
+    local p plines
     for p in "${KNOWN_OVERSIZED_TEST_FILES[@]}"; do
         skip_service "$p" && continue
-        if [ "${allow[$p]:-1}" != "2" ]; then
+        if [ ! -f "${REPO_ROOT}/${p}" ]; then
+            echo -e "       ${YELLOW}STALE${NC}  allowlist entry no longer exists — remove: ${p}"
+            stale=1
+            continue
+        fi
+        plines=$(wc -l < "${REPO_ROOT}/${p}")
+        if [ "$plines" -le "$TEST_FILE_SIZE_LIMIT" ]; then
             echo -e "       ${YELLOW}STALE${NC}  allowlist entry no longer over limit — remove: ${p}"
             stale=1
         fi
