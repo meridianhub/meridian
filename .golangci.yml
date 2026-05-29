@@ -104,15 +104,6 @@ linters:
           - funlen
           - cyclop
 
-      # Exclude complexity linters for gRPC service implementations
-      # These have inherently complex request handling with validation, conversion, and persistence
-      - path: services/.*/service/.*\.go
-        linters:
-          - gocyclo
-          - gocognit
-          - funlen
-          - cyclop
-
       # Exclude complexity linters for repository implementations (complex query building)
       - path: services/.*/repository/.*\.go
         linters:

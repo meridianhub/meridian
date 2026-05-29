@@ -421,7 +421,7 @@ func (s *Service) buildExecuteLienFinalResponse(ctx context.Context, lien *domai
 }
 
 // TerminateLien releases a reservation without executing
-func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienRequest) (*pb.TerminateLienResponse, error) {
+func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienRequest) (*pb.TerminateLienResponse, error) { //nolint:gocyclo,cyclop,gocognit,funlen // pre-existing, tracked in assess-2026-05-22
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {

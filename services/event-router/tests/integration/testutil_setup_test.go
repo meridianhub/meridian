@@ -184,7 +184,7 @@ func publishEvent(t *testing.T, broker, topic string, event map[string]any, head
 		t.Fatalf("proto.Marshal: %v", err)
 	}
 
-	var kgoHeaders []kgo.RecordHeader
+	kgoHeaders := make([]kgo.RecordHeader, 0, len(headers))
 	for k, v := range headers {
 		kgoHeaders = append(kgoHeaders, kgo.RecordHeader{Key: k, Value: []byte(v)})
 	}

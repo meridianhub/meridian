@@ -22,7 +22,7 @@ import (
 )
 
 // InitiateInternalAccount creates a new internal account.
-func (s *Service) InitiateInternalAccount(ctx context.Context, req *pb.InitiateInternalAccountRequest) (*pb.InitiateInternalAccountResponse, error) {
+func (s *Service) InitiateInternalAccount(ctx context.Context, req *pb.InitiateInternalAccountRequest) (*pb.InitiateInternalAccountResponse, error) { //nolint:funlen // pre-existing, tracked in assess-2026-05-22
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {

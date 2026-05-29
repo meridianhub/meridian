@@ -372,7 +372,7 @@ func toProtoMoney(m domain.Money) *money.Money {
 }
 
 // applyPostingStatusTransition applies a status transition to a ledger posting using domain methods.
-func applyPostingStatusTransition(posting *domain.LedgerPosting, newStatus domain.TransactionStatus, postingResult string) error {
+func applyPostingStatusTransition(posting *domain.LedgerPosting, newStatus domain.TransactionStatus, postingResult string) error { //nolint:gocyclo,cyclop,gocognit // pre-existing, tracked in assess-2026-05-22
 	switch newStatus {
 	case domain.TransactionStatusPosted:
 		if err := posting.Post(postingResult); err != nil {

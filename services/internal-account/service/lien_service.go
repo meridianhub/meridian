@@ -131,7 +131,7 @@ func (s *Service) InitiateLien(ctx context.Context, req *pb.InitiateLienRequest)
 
 // ExecuteLien converts a lien reservation to an actual debit.
 // Transitions the lien from ACTIVE to EXECUTED (terminal state, idempotent).
-func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (*pb.ExecuteLienResponse, error) {
+func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (*pb.ExecuteLienResponse, error) { //nolint:gocyclo,cyclop,gocognit,funlen // pre-existing, tracked in assess-2026-05-22
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
@@ -270,7 +270,7 @@ func (s *Service) ExecuteLien(ctx context.Context, req *pb.ExecuteLienRequest) (
 
 // TerminateLien releases reserved funds without executing.
 // Transitions the lien from ACTIVE to TERMINATED (terminal state, idempotent).
-func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienRequest) (*pb.TerminateLienResponse, error) {
+func (s *Service) TerminateLien(ctx context.Context, req *pb.TerminateLienRequest) (*pb.TerminateLienResponse, error) { //nolint:gocyclo,cyclop,gocognit,funlen // pre-existing, tracked in assess-2026-05-22
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {

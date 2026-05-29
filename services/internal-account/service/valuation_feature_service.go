@@ -133,7 +133,7 @@ func buildNewValuationFeature(accountUUID uuid.UUID, req *pb.CreateValuationFeat
 }
 
 // UpdateValuationFeature performs lifecycle transitions on a valuation feature.
-func (s *Service) UpdateValuationFeature(ctx context.Context, req *pb.UpdateValuationFeatureRequest) (*pb.UpdateValuationFeatureResponse, error) {
+func (s *Service) UpdateValuationFeature(ctx context.Context, req *pb.UpdateValuationFeatureRequest) (*pb.UpdateValuationFeatureResponse, error) { //nolint:gocyclo,cyclop,gocognit // pre-existing, tracked in assess-2026-05-22
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {
@@ -210,7 +210,7 @@ func (s *Service) UpdateValuationFeature(ctx context.Context, req *pb.UpdateValu
 }
 
 // GetValuationFeature retrieves a valuation feature by ID or by account+instrument with bi-temporal query.
-func (s *Service) GetValuationFeature(ctx context.Context, req *pb.GetValuationFeatureRequest) (*pb.GetValuationFeatureResponse, error) {
+func (s *Service) GetValuationFeature(ctx context.Context, req *pb.GetValuationFeatureRequest) (*pb.GetValuationFeatureResponse, error) { //nolint:gocognit // pre-existing, tracked in assess-2026-05-22
 	start := time.Now()
 	operationStatus := operationStatusSuccess
 	defer func() {

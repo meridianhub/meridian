@@ -352,7 +352,7 @@ func extractIPAddress(ctx context.Context) string {
 
 // extractSystemContext extracts service metadata from gRPC context.
 // Includes service name, correlation ID, and tenant ID for multi-tenant tracking.
-func extractSystemContext(ctx context.Context) map[string]string {
+func extractSystemContext(ctx context.Context) map[string]string { //nolint:gocognit // pre-existing, tracked in assess-2026-05-22
 	systemCtx := map[string]string{
 		"service": "position-keeping",
 	}

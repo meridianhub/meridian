@@ -112,7 +112,7 @@ type valuateInternalResult struct {
 //
 // Key difference from Current Account: Internal accounts may use wholesale pricing methods
 // and regulatory accounts require full audit trail in ValuationAnalysis.
-func (s *Service) valuateInternal(ctx context.Context, accountID string, inputAmount decimal.Decimal, inputCode string, knowledgeAt time.Time) (*valuateInternalResult, error) {
+func (s *Service) valuateInternal(ctx context.Context, accountID string, inputAmount decimal.Decimal, inputCode string, knowledgeAt time.Time) (*valuateInternalResult, error) { //nolint:funlen // pre-existing, tracked in assess-2026-05-22
 	start := time.Now()
 
 	// Validate valuation feature repository is configured
