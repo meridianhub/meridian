@@ -76,7 +76,7 @@ if [ -n "$STAGED_PROTO_FILES" ]; then
     else
         echo -e "${RED}✗${NC} buf lint failed"
         echo -e "${RED}Please fix proto style issues above before committing${NC}"
-        echo -e "${YELLOW}Tip:${NC} See docs/skills/schema-evolution.md for proto guidelines"
+        echo -e "${YELLOW}Tip:${NC} See .claude/skills/schema-evolution/SKILL.md for proto guidelines"
         exit 1
     fi
 
@@ -89,7 +89,7 @@ if [ -n "$STAGED_PROTO_FILES" ]; then
         else
             echo -e "${RED}✗${NC} Breaking proto changes detected"
             echo -e "${RED}Please review proto compatibility issues above${NC}"
-            echo -e "${YELLOW}Tip:${NC} See docs/skills/schema-evolution.md for safe evolution patterns"
+            echo -e "${YELLOW}Tip:${NC} See .claude/skills/schema-evolution/SKILL.md for safe evolution patterns"
             echo -e "${YELLOW}Tip:${NC} Consider adding optional fields or creating new event types"
             exit 1
         fi

@@ -742,7 +742,8 @@ local correctness.
 
 **Directories:**
 
-- `docs/skills/` - Operational guides (testing, starlark sagas, docker)
+- `.claude/skills/` - Operational guides (testing, starlark sagas, docker);
+  each skill is a subdirectory containing a `SKILL.md` entrypoint
 - `docs/adr/` - Architecture Decision Records (temporal quality ladder,
   asset types, saga orchestration)
 - `docs/prd/` - Product Requirements Documents (feature specs, BIAN
@@ -761,12 +762,15 @@ local correctness.
       "repos/{REPO}/contents/docs/prd?ref={HEAD_SHA}" \
       --jq '.[].name'
     gh api \
-      "repos/{REPO}/contents/docs/skills?ref={HEAD_SHA}" \
+      "repos/{REPO}/contents/.claude/skills?ref={HEAD_SHA}" \
       --jq '.[].name'
     gh api \
       "repos/{REPO}/contents/docs/runbooks?ref={HEAD_SHA}" \
       --jq '.[].name'
     ```
+
+    Note: `.claude/skills/` entries are directories - the doc to read is
+    `.claude/skills/{name}/SKILL.md` (the others are flat `.md` files).
 
 2. Pick the 1-3 files whose names relate to the PR's changed services
    or features. Read their YAML frontmatter (first 20 lines) to confirm

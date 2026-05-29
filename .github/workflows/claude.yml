@@ -74,7 +74,7 @@ jobs:
             - CONTRIBUTING.md - development guidelines and conventions
             - docs/adr/ - Architecture Decision Records for design context
             - docs/prd/ - Product Requirements for feature context
-            - docs/skills/ - available automation skills
+            - .claude/skills/ - available automation skills
             - Service-specific README.md files for local conventions
 
           # Customize Claude's behavior

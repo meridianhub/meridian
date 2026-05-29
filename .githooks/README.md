@@ -34,7 +34,7 @@ Runs before each commit to ensure code quality:
 
 If any check fails, the commit will be blocked. Fix the issues and try again.
 
-**Proto Evolution**: For guidance on safe schema changes, see `docs/skills/schema-evolution.md`
+**Proto Evolution**: For guidance on safe schema changes, see `.claude/skills/schema-evolution/SKILL.md`
 
 ## Automatic Tool Installation
 
@@ -104,4 +104,4 @@ When modifying proto files, the hook will:
 3. Block commit if breaking changes detected
 4. Provide helpful tips for safe evolution patterns
 
-For detailed guidance, see `docs/skills/schema-evolution.md`
+For detailed guidance, see `.claude/skills/schema-evolution/SKILL.md`
