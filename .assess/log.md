@@ -33,3 +33,14 @@
 [Full report](./assess-report.md)
 
 ---
+## 2026-05-29 (v1.15.0)
+
+- **Files scored:** 4030
+- **AI Readiness:** 7.5 / 8 (AI-Native)
+- **Instructions grade:** A
+- **Hotspot transitions:** 7 graduated, 0 regressed, 7 new, 3 persistent
+- **Top action:** Add mutation testing to CI to verify test truth-pressure (don't raise the coverage threshold)
+
+[Full report](./assess-report.md)
+
+---

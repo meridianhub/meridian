@@ -1,239 +1,240 @@
 {
-  "files_scored": 3264,
+  "plugin_version": "1.15.0",
+  "files_scored": 4030,
   "scoring_coverage": {
-    "lizard": 3264,
-    "scc": 0
+    "lizard": 3303,
+    "scc": 727
   },
   "churn_window": "commits (last 12mo)",
   "loc": {
-    "p50": 141.0,
-    "p95": 575.0,
-    "max": 5753.0,
-    "total": 656693
+    "p50": 134.0,
+    "p95": 598.0,
+    "max": 3144.0,
+    "total": 800888
   },
   "ccn": {
-    "p50": 18.5,
-    "p95": 82.0,
-    "max": 477.0
+    "p50": 14.0,
+    "p95": 75.0,
+    "max": 336.0
   },
   "churn": {
     "p50": 1.0,
-    "p95": 7.0,
+    "p95": 8.0,
     "max": 66.0
   },
   "top_hotspots": [
     {
+      "path": "frontend/src/App.tsx",
+      "loc": 289,
+      "ccn": 91.0,
+      "commits": 66,
+      "source": "lizard"
+    },
+    {
+      "path": "cmd/meridian/main.go",
+      "loc": 431,
+      "ccn": 69.0,
+      "commits": 64,
+      "source": "lizard"
+    },
+    {
       "path": "services/control-plane/internal/validator/manifest_validator_test.go",
-      "loc": 2889,
-      "ccn": 477.0,
-      "churn": 16,
-      "source": "lizard"
-    },
-    {
-      "path": "services/current-account/service/coverage_unit_test.go",
-      "loc": 5753,
-      "ccn": 423.0,
-      "churn": 6,
-      "source": "lizard"
-    },
-    {
-      "path": "services/payment-order/service/grpc_service_test.go",
-      "loc": 2283,
-      "ccn": 204.0,
-      "churn": 17,
-      "source": "lizard"
-    },
-    {
-      "path": "services/position-keeping/domain/financial_position_log_test.go",
-      "loc": 1597,
-      "ccn": 336.0,
-      "churn": 2,
+      "loc": 1054,
+      "ccn": 218.0,
+      "commits": 17,
       "source": "lizard"
     },
     {
       "path": "services/current-account/service/grpc_service_test.go",
       "loc": 1427,
       "ccn": 138.0,
-      "churn": 27,
-      "source": "lizard"
-    },
-    {
-      "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
-      "loc": 993,
-      "ccn": 156.0,
-      "churn": 15,
-      "source": "lizard"
-    },
-    {
-      "path": "services/mcp-server/internal/tools/economy_test.go",
-      "loc": 1023,
-      "ccn": 194.0,
-      "churn": 6,
-      "source": "lizard"
-    },
-    {
-      "path": "frontend/src/features/manifests/components/manifest-graph.test.tsx",
-      "loc": 696,
-      "ccn": 152.0,
-      "churn": 11,
-      "source": "lizard"
-    },
-    {
-      "path": "services/identity/service/grpc_service_test.go",
-      "loc": 1534,
-      "ccn": 161.0,
-      "churn": 7,
-      "source": "lizard"
-    },
-    {
-      "path": "shared/pkg/saga/schema/service_modules.go",
-      "loc": 474,
-      "ccn": 136.0,
-      "churn": 11,
-      "source": "lizard"
-    }
-  ],
-  "top_complex": [
-    {
-      "path": "services/control-plane/internal/validator/manifest_validator_test.go",
-      "loc": 2889,
-      "ccn": 477.0,
-      "churn": 16,
-      "source": "lizard"
-    },
-    {
-      "path": "services/current-account/service/coverage_unit_test.go",
-      "loc": 5753,
-      "ccn": 423.0,
-      "churn": 6,
-      "source": "lizard"
-    },
-    {
-      "path": "services/position-keeping/domain/financial_position_log_test.go",
-      "loc": 1597,
-      "ccn": 336.0,
-      "churn": 2,
+      "commits": 27,
       "source": "lizard"
     },
     {
       "path": "services/payment-order/service/grpc_service_test.go",
       "loc": 2283,
       "ccn": 204.0,
-      "churn": 17,
+      "commits": 17,
+      "source": "lizard"
+    },
+    {
+      "path": "services/current-account/service/grpc_service_integration_test.go",
+      "loc": 1069,
+      "ccn": 98.0,
+      "commits": 33,
+      "source": "lizard"
+    },
+    {
+      "path": "services/payment-order/cmd/main.go",
+      "loc": 306,
+      "ccn": 57.0,
+      "commits": 44,
+      "source": "lizard"
+    },
+    {
+      "path": "Makefile",
+      "loc": 463,
+      "ccn": 72.0,
+      "commits": 31,
+      "source": "scc"
+    },
+    {
+      "path": "services/current-account/adapters/persistence/repository.go",
+      "loc": 408,
+      "ccn": 92.0,
+      "commits": 24,
+      "source": "lizard"
+    },
+    {
+      "path": "services/api-gateway/server.go",
+      "loc": 421,
+      "ccn": 100.0,
+      "commits": 21,
+      "source": "lizard"
+    }
+  ],
+  "top_complex": [
+    {
+      "path": "services/position-keeping/domain/financial_position_log_test.go",
+      "loc": 1597,
+      "ccn": 336.0,
+      "commits": 2,
+      "source": "lizard"
+    },
+    {
+      "path": "services/control-plane/internal/validator/manifest_validator_test.go",
+      "loc": 1054,
+      "ccn": 218.0,
+      "commits": 17,
+      "source": "lizard"
+    },
+    {
+      "path": "services/payment-order/service/grpc_service_test.go",
+      "loc": 2283,
+      "ccn": 204.0,
+      "commits": 17,
       "source": "lizard"
     },
     {
       "path": "services/mcp-server/internal/tools/economy_test.go",
       "loc": 1023,
       "ccn": 194.0,
-      "churn": 6,
+      "commits": 6,
       "source": "lizard"
     },
     {
       "path": "services/identity/service/grpc_service_test.go",
       "loc": 1534,
       "ccn": 161.0,
-      "churn": 7,
+      "commits": 7,
       "source": "lizard"
     },
     {
       "path": "services/internal-account/e2e/e2e_test.go",
       "loc": 1443,
       "ccn": 159.0,
-      "churn": 4,
-      "source": "lizard"
-    },
-    {
-      "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
-      "loc": 993,
-      "ccn": 156.0,
-      "churn": 15,
+      "commits": 4,
       "source": "lizard"
     },
     {
       "path": "shared/platform/scheduler/cron_test.go",
       "loc": 1164,
       "ccn": 154.0,
-      "churn": 5,
+      "commits": 5,
       "source": "lizard"
     },
     {
-      "path": "frontend/src/features/manifests/components/manifest-graph.test.tsx",
-      "loc": 696,
-      "ccn": 152.0,
-      "churn": 11,
+      "path": "services/current-account/e2e/saga_compensation_test.go",
+      "loc": 1376,
+      "ccn": 150.0,
+      "commits": 5,
+      "source": "lizard"
+    },
+    {
+      "path": "services/position-keeping/app/config_test.go",
+      "loc": 804,
+      "ccn": 149.0,
+      "commits": 6,
+      "source": "lizard"
+    },
+    {
+      "path": "frontend/src/features/reconciliation/pages/detail.test.tsx",
+      "loc": 507,
+      "ccn": 145.0,
+      "commits": 2,
       "source": "lizard"
     }
   ],
   "top_large": [
     {
-      "path": "services/current-account/service/coverage_unit_test.go",
-      "loc": 5753,
-      "ccn": 423.0,
-      "churn": 6,
-      "source": "lizard"
+      "path": "docs/prd/001-universal-asset-system.md",
+      "loc": 3144,
+      "ccn": 0.0,
+      "commits": 2,
+      "source": "scc"
     },
     {
-      "path": "services/control-plane/internal/validator/manifest_validator_test.go",
-      "loc": 2889,
-      "ccn": 477.0,
-      "churn": 16,
-      "source": "lizard"
+      "path": "docs/prd/011-valuation-service.md",
+      "loc": 2361,
+      "ccn": 0.0,
+      "commits": 3,
+      "source": "scc"
     },
     {
       "path": "services/payment-order/service/grpc_service_test.go",
       "loc": 2283,
       "ccn": 204.0,
-      "churn": 17,
+      "commits": 17,
       "source": "lizard"
+    },
+    {
+      "path": "docs/prd/026-operations-console-ui.md",
+      "loc": 2076,
+      "ccn": 0.0,
+      "commits": 2,
+      "source": "scc"
     },
     {
       "path": "services/financial-accounting/service/financial_accounting_service_test.go",
       "loc": 1943,
       "ccn": 116.0,
-      "churn": 11,
+      "commits": 11,
       "source": "lizard"
+    },
+    {
+      "path": "docs/prd/006-starlark-saga-orchestration-core.md",
+      "loc": 1704,
+      "ccn": 0.0,
+      "commits": 3,
+      "source": "scc"
     },
     {
       "path": "services/position-keeping/service/record_measurement_test.go",
       "loc": 1695,
       "ccn": 51.0,
-      "churn": 5,
+      "commits": 5,
       "source": "lizard"
     },
     {
       "path": "services/position-keeping/domain/financial_position_log_test.go",
       "loc": 1597,
       "ccn": 336.0,
-      "churn": 2,
+      "commits": 2,
       "source": "lizard"
+    },
+    {
+      "path": "api/jsonschema/manifest.v1.schema.json",
+      "loc": 1594,
+      "ccn": 0.0,
+      "commits": 9,
+      "source": "scc"
     },
     {
       "path": "services/current-account/service/lien_service_test.go",
       "loc": 1538,
       "ccn": 90.0,
-      "churn": 22,
-      "source": "lizard"
-    },
-    {
-      "path": "services/identity/service/grpc_service_test.go",
-      "loc": 1534,
-      "ccn": 161.0,
-      "churn": 7,
-      "source": "lizard"
-    },
-    {
-      "path": "services/tenant/service/grpc_service_test.go",
-      "loc": 1508,
-      "ccn": 99.0,
-      "churn": 15,
-      "source": "lizard"
-    },
-    {
-      "path": "shared/platform/gateway/tenant_resolver_test.go",
-      "loc": 1506,
-      "ccn": 87.0,
-      "churn": 11,
+      "commits": 22,
       "source": "lizard"
     }
   ]

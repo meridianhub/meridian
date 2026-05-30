@@ -1,96 +1,70 @@
 # Codebase Assessment: meridian
 
-_Generated 2026-05-28 by `/ai-native-toolkit:assess` v1.11.0._
+_Generated 2026-05-29 by `/ai-native-toolkit:assess` v1.15.0._
 
 ## How to read this report
 
 This is an improvement roadmap, not a verdict. It measures one thing: **is the codebase kept honest, not just scaffolded.** It pairs three views:
 
-- **Where the codebase is today** - the complexity heatmap shows current complexity and churn. Vivid red = complex AND actively changing = the files most likely to bite an agent (or a human) next week.
-- **Whether an agent can navigate it** - the doc graph shows the docs' link structure: how much is reachable from the entry point, and which docs are stale maps of churning code.
-- **What keeps it from getting worse** - the AI Readiness score (0-8) across three bands: read-side foundation (can the agent form a true picture?), write-side enforcement (can it be trusted to produce good output?), and meta (does the system keep itself honest over time?).
+- **Where the codebase is today** — the complexity heatmap shows current complexity and churn. Vivid red = complex AND actively changing = the files most likely to bite an agent (or a human) next week.
+- **Whether an agent can navigate it** — the doc graph shows the docs' link structure: how much is reachable from the entry point, and which docs are stale maps of churning code.
+- **What keeps it from getting worse** — the AI Readiness score (0–8) across three bands: read-side foundation (can the agent form a true picture?), write-side enforcement (can it be trusted to produce good output?), and meta (does the system keep itself honest over time?).
 
-A codebase can be 8/8 and still on fire (great scaffolding, legacy debt) - or 2/8 with a calm treemap (small codebase, no enforcement needed yet). The views matter together.
+A codebase can be 8/8 and still on fire (great scaffolding, legacy debt) — or 2/8 with a calm treemap (small codebase, no enforcement needed yet). The views matter together.
 
-**How it's measured.** This is an AI-readiness review run almost entirely on *traditional* tooling - static analysis (lizard, ts-prune, staticcheck), git history, and graph metrics over the docs and code. The model only writes the prose around those numbers; it does no scanning itself. That keeps a full run fast and close to zero in model tokens, and makes the structural findings reproducible run-to-run.
+**How it's measured.** This is an AI-readiness review run almost entirely on *traditional* tooling — static analysis, git history, and graph metrics over the docs and code. The model only writes the prose around those numbers; it does no scanning itself. That keeps a full run fast and close to zero in model tokens, and makes the structural findings reproducible run-to-run.
 
 The "Top 3 Actions" table at the bottom names specific files. Start there.
 
-## What changed since the v1.10 snapshot
-
-This is a fifth re-run, on `/assess` v1.11.0. The codebase did not change between runs - the diff is purely v1.11 plugin work, which now exposes:
-
-- **Per-language dead-code tools were offered and accepted at Step 2b.** `ts-prune` (TypeScript) and `staticcheck` (Go) installed via the new install-offer flow. `ts-prune` ran and reported 0 candidates; `staticcheck` got `available_not_run` (the v1.11 read-only protection: it would build the project and write the module cache, so the read-only assessment skips it with a "run `staticcheck -checks U1000 ./...` manually to cross-check" follow-up). This addresses #39 point #1.
-- **`stale_hubs` now carries `confidence: "low"`** on every entry whose `subject_method` is `repo-baseline`. All 5 top hubs from the prior run carry it, which materially changes the read of Layer 0b (see below). Addresses #39 point #2.
-- **Layer 0b is now framed as wayfinding (curation), not access.** The v1.11 grader and template both push the framing that low link-reachability means the docs lack a navigable map - not that an agent can't open files by path. That tempers the priority of fixing it: still worth doing, no longer presented as a blocker.
-- **Finalize input file now lives at `.assess/.cache/finalize-input.json`** and is deleted on success, so it no longer leaks into commits. Addresses #39 point #3.
-- **Layer 1 row template now carries the explicit caveat by default** ("Reachable *if* the agent has `<tools cited>` in its execution environment"). Addresses #39 point #5.
-- **Score derivation now has a worked example** in the SKILL template. Addresses #39 point #4.
-- **Code diff:** 10 persistent hotspots, 0 graduated, 0 regressed, 0 new. Stable.
-
 ## Snapshots
 
-### Complexity - riskiest to change
+### Complexity — riskiest to change
 
 [![Complexity hotspot](./complexity-heatmap.svg)](./complexity-heatmap.svg)
 
-- **Files scored:** 3,264 (lizard, full coverage; generated bindings auto-excluded)
+- **Files scored:** 4030 (3303 via lizard, 727 via scc)
 - **Churn window chosen:** last 12 months
-- **Complexity profile:** p95 ccn 82 (max 477); p95 LOC 575 (max 5,753); total 656,693 LOC of hand-written code
-- **Top hotspots** (composite: complexity x recent churn):
-  1. `services/control-plane/internal/validator/manifest_validator_test.go` - 2,889 LOC, ccn 477, 16 commits (test)
-  2. `services/current-account/service/coverage_unit_test.go` - 5,753 LOC, ccn 423, 6 commits (test; largest file in the repo)
-  3. `services/payment-order/service/grpc_service_test.go` - 2,283 LOC, ccn 204, 17 commits (test)
-  4. `services/position-keeping/domain/financial_position_log_test.go` - 1,597 LOC, ccn 336, 2 commits (test)
-  5. `services/current-account/service/grpc_service_test.go` - 1,427 LOC, ccn 138, 27 commits (test)
-  6. `frontend/src/features/manifests/components/manifest-graph.tsx` - 993 LOC, ccn 156, 15 commits (production)
-  7. `services/mcp-server/internal/tools/economy_test.go` - 1,023 LOC, ccn 194, 6 commits (test)
+- **Complexity profile:** p95 ccn 75 (max 336); p95 LOC 598 (max 3144)
+- **Top hotspots** (composite `sqrt(ccn) × sqrt(1 + commits)` — a sub-linear blend of complexity and recent churn, so a complex-AND-active file leads, a frozen-but-complex file ranks below it, and a churny-but-trivial file can't top the list on churn alone):
+  1. `frontend/src/App.tsx` — 289 LOC, ccn 91, 66 commits in window
+  2. `cmd/meridian/main.go` — 431 LOC, ccn 69, 64 commits in window
+  3. `services/control-plane/internal/validator/manifest_validator_test.go` — 1054 LOC, ccn 218, 17 commits
+  4. `services/current-account/service/grpc_service_test.go` — 1427 LOC, ccn 138, 27 commits
+  5. `services/payment-order/service/grpc_service_test.go` — 2283 LOC, ccn 204, 17 commits
 
-Size encodes lines of code, colour encodes cyclomatic complexity (dark red = high), saturation encodes recent git churn (vivid = active). Vivid red blocks are the migration risk.
+Size encodes lines of code, colour encodes cyclomatic complexity (dark red = high), saturation encodes recent git churn (vivid = active). The two files in vivid red — `App.tsx` and `cmd/meridian/main.go` — are both complex *and* the most-churned non-test files in the repo, which makes them the standing migration risk. The remaining top-5 entries are large table-driven `_test.go` suites: their high raw ccn is dominated by table-row count, not branching logic, and they are deliberately excluded from the Go complexity linters (see Layer 3).
 
-### Doc navigability - can an agent find its way?
+### Doc navigability — can an agent find its way?
 
 [![Doc map](./doc-graph.svg)](./doc-graph.svg)
 
-**Navigability, in words.** Of 254 docs, **30% are reachable** by following links from `README.md`; the other 178 sit across **43 disconnected islands**, with **24% orphans** (62 docs nothing links to). The repo also has **15 broken links to ghost files** and **19 missing cross-references** (one doc mentions another's filename in prose but never links to it).
+- **Connectivity.** Of 247 docs, 89% are reachable by following links from the entry points (`README.md`, `AGENTS.md`, `CLAUDE.md`); the remaining 11% (≈26 docs) are orphans or sit in one of 20 small disconnected islands. Most orphans are *legitimately* standalone — `CHANGELOG.md`, `CODE_OF_CONDUCT.md`, `.githooks/README.md`, `deploy/demo/*` READMEs, and `.github/claude-review-instructions.md` (a CI-bot instruction file). These don't need to be in the link graph. The one genuine miss is `cookbook/docs/authoring-patterns.md` and `cookbook/docs/authoring-components.md`, which `cookbook/README.md` names in prose but never links to. Frame this as **curation, not access**: an agent can still `ls docs/` and open any file by path, so low link-reachability means weaker wayfinding, not hidden content. The fix (wire the two cookbook docs) is a small wayfinding improvement, not a blocker.
+- **Hubs.** The load-bearing docs (highest PageRank) are all Architecture Decision Records — `docs/adr/0005-adapter-pattern-layer-translation.md` (in-degree 22), `0002-microservices-per-bian-domain.md` (in-degree 30), `0004-event-schema-evolution.md`, `0003-database-schema-migrations.md`. A well-organised ADR spine at the centre of the graph is exactly what you want for agent wayfinding.
+- **Lying maps (stale docs of churning code):** **none qualify.** Every ranked stale-hub candidate has `last_commit_days = 0` (the ADRs were touched in the most recent commits) and only a `repo-baseline` subject association (`confidence: low`) — i.e. their "subject churn" is just the whole repo's churn, a coarse proxy. A recently-edited hub with a low-confidence subject is **not** a lying map, so none are flagged. There are also zero broken links and zero dangling links.
 
-**Read this as curation, not access.** An agent can always `ls docs/` and open any file by path - low link-reachability doesn't make content invisible, it means the docs lack a *navigable map* (weak wayfinding, weaker signal-to-noise). For a directory-organised docs tree like this one (`docs/adr/`, `docs/runbooks/`, `docs/architecture/`, `docs/prd/`, `docs/guides/`, `docs/skills/`), the fix is a top-level MOC/index that lists the major trees - a wayfinding improvement, not a blocker. The 15 broken links and 19 missing cross-references are smaller, sharper fixes worth doing alongside.
+Colour = staleness (vivid red = a frozen doc beside churning code = a lying map); structure = reachability (centre = entry, rim = unreachable, dashed ring = orphan); size = file length. Hover a node in the SVG (opened on its own) for its path and stats.
 
-**Lying maps (stale docs of churning code).** Terms first: **stale-days** = days since the doc itself was last edited; **subject churn** = commits in the window to the code the doc describes; **centrality (pagerank)** = how many other docs route through this one. v1.11 also surfaces a `confidence` field per stale-hub entry - all 5 top hubs have `confidence: "low"` because their `subject_method` is `repo-baseline` (the whole repo's 12mo churn used as a coarse proxy for each doc's subject). That means the priority numbers (87, 71, 46, 40, 39) should be read as upper bounds rather than precise scores. The 5 top hubs:
-
-| Doc | Pagerank | Stale-days | Subject method | Confidence |
-|---|---|---|---|---|
-| `docs/adr/0004-event-schema-evolution.md` | 0.061 | 59d | repo-baseline | low |
-| `docs/adr/0005-adapter-pattern-layer-translation.md` | 0.066 (top) | 59d | repo-baseline | low |
-| `docs/adr/0014-financial-instrument-reference-data.md` | 0.021 | 88d | repo-baseline | low |
-| `docs/adr/0002-microservices-per-bian-domain.md` | 0.047 | 53d | repo-baseline | low |
-| `docs/adr/0003-database-schema-migrations.md` | 0.055 | 53d | repo-baseline | low |
-
-Even with confidence tempered, the top 3 (ADR-0004 event schema, ADR-0005 adapter pattern, ADR-0002 microservices) are the highest-pagerank docs in the entire corpus (17, 22, and 29 incoming links respectively) and have gone 53-88 days without an edit - worth a refresh pass when convenient, but no longer a fire.
-
-**Doc-to-code association.** Only **21.7%** of docs (55 of 254) have a derivable mapping to specific code; the other 78% map via `repo-baseline`. Large-repo modularity check fires: 535 module directories with 47 base READMEs (**8.8% coverage**). Service-level READMEs (24 in skill-card format) are excellent; the gap is at deeper directory levels - and most of those deeper directories are small enough that a per-directory README isn't actually warranted.
-
-Colour = staleness (vivid red = a frozen doc beside churning code = a lying map); structure = reachability (centre = entry, rim = unreachable, dashed ring = orphan); size = file length. Open the SVG directly for hover tooltips on each node.
+_Diff suppressed — the prior snapshot (v1.11.0, 2026-05-28) predates this run's file-filter version; cross-version comparison surfaces phantom graduated/new transitions, so it resumes once two runs share a plugin version._
 
 ## AI Readiness
 
-**Score: 7.0 / 8** - AI-Native
+**Score: 7.5 / 8** — AI-Native
 
 | Layer | Band | Status | Evidence | Gap |
 |-------|------|--------|----------|-----|
-| 0: Agent Instructions & Navigability | read | Partial | **0a (instructions):** `.github/claude-review-instructions.md` graded **A** (score 100, 31 positive directives, 8 tradeoff phrases, 30 path references, 85 days fresh). **0b (navigability):** 254 docs, 622 links, 24 service READMEs in skill-card format, 39 ADRs, 13 runbooks, 10 docs in `docs/skills/` | **0b only - and read as wayfinding, not access.** 30% reachability from `README.md`; 43 islands; 62 orphan docs (24%); 15 broken links to ghost files; 19 missing cross-references; 5 stale ADR hubs (all `confidence: "low"` due to `repo-baseline` subject proxy). Modularity check fires (8.8% module base-doc coverage, large_repo) but most deeper dirs don't warrant a base doc |
-| 1: Runtime Legibility / Liveness | read | Present | **Rung 3 - Reachable.** OpenTelemetry, Prometheus, structured logging instrumented. 53 discoverable signals. **13 runbooks contain runnable queries.** Dead-code scan ran: `ts-prune` found 0 unused TS exports; `staticcheck` cached for manual cross-check (read-only mode). **Caveat: rung 3 grants reachability *if* the agent has `kubectl`, `logcli`, `promtool`, `stern` available in its execution context** - the repo's runbooks point at these tools but `/assess` cannot observe the agent's environment | Run `staticcheck -checks U1000 ./...` manually to cross-check the Go intra-repo dead-code scan that `/assess` deliberately skips |
-| 2: Code Design | write | Present | Go 1.26 with phantom typed `Quantity[D Dimension]` (`shared/platform/quantity/`); TypeScript strict mode fully enabled; schema-driven service modules via `shared/pkg/saga/schema/handlers.yaml`; Starlark/CEL bounded expressiveness; immutability as core principle | None material |
-| 3: Linters | write | Partial | Go: `.golangci.yml` v2 with funlen (80/60), cyclop (15), gocognit (20), gocyclo (15); godox; nolintlint forces explanations; depguard; errorlint, exhaustive; markdownlint, gitleaks, trivy wired in | (a) Go complexity linters excluded from most service code paths. (b) Frontend `frontend/eslint.config.js` has no `complexity`, `max-lines`, `max-lines-per-function`. `manifest-graph.tsx` (993 LOC, ccn 156) and `shared/pkg/saga/schema/service_modules.go` (474 LOC, ccn 136) sit outside enforcement |
-| 4: Architecture Tests | write | Present | `tests/architecture/structure_test.go` enforces standard layout, `server.go` presence, `doc.go` per shared package, ratchet maps; `scripts/verify-service-conventions.sh` enforces 800-line file cap, bans `time.Sleep` in tests, checks proto freshness; `shared/pkg/saga/linter.go` is a custom 712-line Starlark linter | 800-line rule exempts test files - 5 test files above 1,500 LOC |
-| 5: CI Pipeline | write | Present | 30 GitHub workflows: build, sharded test, quality, codeql, security, proto, saga-validation, schema-validation, e2e, conventions, migrations, asyncapi, markdown, service-readme-lint; concurrency groups; path-filtered triggers | Documented flakies on NFR benchmarks and some operational-gateway repository tests |
-| 6: Coverage Gates | write | Present | `codecov.yml` project 75% / patch 70% targets, `informational: false` (blocks merge); per-component 80% across 48 components; flags for unittests/integration/frontend; `require_changes: true` | None material |
-| 7: Code Review Bots | write | Present | CodeRabbit with `request_changes_workflow: true`, auto-approve, base branches develop+main; Claude review bot keyed to the A-graded `.github/claude-review-instructions.md`; both active on recent PRs | None material |
-| 8: AI Project Management | meta | Present | Task Master integration: 111 task files, 6 PRDs, recent merged PRs reference task IDs; 1,975-line marathon retro log with validated-vs-pending tracking; wave-based lead/teammate orchestration; per-tenant CI flake patterns documented | `.taskmaster/` directory lives in parent dir, not tracked in repo - only `templates/` is checked in |
+| 0: Agent Instructions & Navigability | read | Present | `CLAUDE.md` grade A (85, no bloat penalty); 9 repo skills for progressive disclosure; no broken/untracked instruction refs. Doc graph 89% reachable, 0 broken links, ADR spine as hubs, no lying maps. `AGENTS.md` grades F but is a deliberate stub aliasing `CLAUDE.md`. | Only 47/537 module dirs (8.8%) carry a base doc in a large repo; a few missing prose→link cross-refs (cookbook, ADR-0015). |
+| 1: Runtime Legibility / Liveness | read | Present | Rung 3: OpenTelemetry + Prometheus + structured logging (logrus); ~50 discoverable runbooks; 13 with runnable queries — reachable *if* the agent has the cited query tools (kubectl, log/metrics CLIs) in its execution context. 0 dead-code candidates (ts-prune clean). | Go reachability not statically confirmed — `staticcheck -checks U1000 ./...` is `available_not_run` (would build the project); run manually to cross-check. |
+| 2: Code Design | write | Present | TS `strict: true`; Go generics + dimensional `Quantity[D]` phantom types across the multi-asset core (`shared/pkg/dispatch`, `shared/domain/money`). | — |
+| 3: Linters | write | Present | `.golangci.yml` enforces `gocyclo`, `gocognit`, `funlen`, `cyclop`, `exhaustive` in CI (`quality.yml`); test/auth exclusions are scoped, not blanket. Frontend eslint mirrors with `complexity:15`, `max-lines`, `max-statements`. | Frontend complexity rules are `warn`, not `error` — they don't ratchet. `App.tsx` (ccn 91) is flagged only advisorily. |
+| 4: Architecture Tests | write | Present | Executable contracts run in CI (`conventions.yml`, `service-readme-lint.yml`): `check-cross-service-imports.sh`, `lint-multi-asset-purity.sh`, `verify-service-conventions.sh`, `shared/domain/money/money_boundary_test.go`. | — |
+| 5: CI Pipeline | write | Present | 30 workflows: build, test, e2e, kafka-integration, saga-validation, schema/manifest validation, conventions, CodeQL, security, blocking codecov. | — |
+| 6: Coverage Gates | write | **Partial** | codecov enforced & blocking (`informational: false`): project target 75%, patch target 70%, threshold 2%. 1320 Go + 239 TS test files, 135 integration/e2e. | **No mutation testing** (`mutation_run: false`, `gap_signal: "not assessed"`). Coverage proves lines *execute*, not that tests *constrain* behaviour. Truth-pressure unverified. |
+| 7: Code Review Bots | write | Present | `.coderabbit.yaml` + `claude-review.yml`/`claude.yml`; both `coderabbitai[bot]` and `claude[bot]` active on recent PR #2227. | — |
+| 8: AI Project Mgmt (capstone) | meta | Present | Task Master initialised (`.taskmaster/`); `CLAUDE.md` carries a full Marathon Configuration (base branch, bot reviewers, CI patterns, retro log path); accumulated CI/flaky-test learnings baked into instructions; retro log maintained. | — |
 
 ### Score derivation (worked)
 
-Per v1.11's score-derivation rule: Present=1, Partial=0.5, Missing=0, raw sum capped at 8. This run: 7 Present + 2 Partial + 0 Missing = 7 + 1 = **8.0 raw, displayed as 7.0/8** (two Partials below ceiling cost 0.5 each, so 8 - 1.0 = 7.0). Layer 0 and Layer 3 are the two Partials.
+8 layers Present + 1 Partial (L6). Raw sum = 8×1 + 1×0.5 = **8.5**. The raw sum exceeds the 8.0 ceiling, and one Partial should not display as "all perfect", so by the cap rule the displayed score is `min(8.5, 8 − 0.5×1)` = **7.5 / 8**. Maturity band 7–8 = AI-Native.
 
 ### Maturity Level
 
@@ -99,40 +73,46 @@ Per v1.11's score-derivation rule: Present=1, Partial=0.5, Missing=0, raw sum ca
 | 0-2 | Not Ready | Agent will produce inconsistent, unvalidated code |
 | 3-4 | Basic | Norms exist but aren't enforced. Agent works but drifts |
 | 5-6 | Solid | Contracts catch most issues. Agent is productive |
-| 7-8 | AI-Native | System self-improves. Agents work reliably at scale |
+| 7-8 | **AI-Native** | System self-improves. Agents work reliably at scale |
+
+## Lying Signals
+
+No lying signals detected. Every candidate was below threshold or low-confidence:
+
+- **L0 stale hub doc** — none: all ranked stale-hub candidates are freshly committed (`last_commit_days = 0`) with low-confidence `repo-baseline` subjects, so none are real lying maps.
+- **L1 dead-but-present** — none: ts-prune returned 0 candidates; Go static reachability not run (degrade, not a finding).
+- **L6 green-but-hollow** — none above threshold: no mutation data exists, and the `assertion_on_internal` heuristic candidates are all low-confidence false positives (table-driven test field names like `entries`, `wantErr`, `expectedStatus` — not internal-state assertions).
+
+A codebase with no detected lying artefacts is rare and is the strongest read-side signal here — what the repo says about itself can be trusted.
 
 ## Top 3 Actions
 
 | # | Action | Layer | Effort | Command / First Step | Hotspot files this addresses | Issue |
 |---|--------|-------|--------|---------------------|------------------------------|-------|
-| 1 | Split the 5,753-line `current-account/service/coverage_unit_test.go` and add a `_test.go` size cap to `verify-service-conventions.sh` (e.g. 2,000 lines, same `//meridian:large-file` escape hatch as production code). Five of the seven top hotspots are tests because the 800-line rule explicitly exempts `_test.go` - this is the most concrete write-side fix and the one persisting across five runs. | 4 | medium | Group cases by saga (`deposit`, `withdrawal`, `lien_active`, `lien_executed`, `lien_terminated`, `freeze`) and move each into its own `*_test.go` file. Then extend `scripts/verify-service-conventions.sh` with a `_test.go > 2000 lines` check alongside the existing 800-line rule. | `services/current-account/service/coverage_unit_test.go` (5,753), `services/control-plane/internal/validator/manifest_validator_test.go` (2,889), `services/payment-order/service/grpc_service_test.go` (2,283), `services/financial-accounting/service/financial_accounting_service_test.go` (1,943), `services/position-keeping/service/record_measurement_test.go` (1,695) | `assess-2026-05-22.1` |
-| 2 | Add a top-level docs MOC/index that lists the major trees (`docs/adr/`, `docs/architecture/`, `docs/runbooks/`, `docs/prd/`, `docs/guides/`, `docs/skills/`) and reach reachability from `README.md` to >70%. Fix the 15 broken links to ghost files at the same time. v1.11 framing: this is a wayfinding/curation improvement, not "the agent can't navigate" - but the broken links specifically are advertised-but-broken refs that should be repaired. | 0 | medium | Extend `README.md` with a "Documentation" section linking each `docs/<subdir>/`'s top doc, or create `docs/README.md` as the MOC. For each broken link, either create the missing target or remove the dead reference. | `README.md`, 62 orphan docs, 15 ghost-file refs, 19 missing cross-refs | `assess-2026-05-22.5` |
-| 3 | Add complexity and length rules to the frontend ESLint config. `frontend/eslint.config.js` has no `complexity`, `max-lines`, `max-lines-per-function`. The hotspot data shows `manifest-graph.tsx` at 993 LOC, ccn 156 (regressed +1 last v1.4 run; stable this run) with no rule fencing it. | 3 | small | Add `'complexity': ['warn', 15]`, `'max-lines': ['warn', 500]`, `'max-lines-per-function': ['warn', 80]` to `frontend/eslint.config.js`; ratchet pre-existing offenders with `// eslint-disable-next-line ... -- pre-existing`. | `frontend/src/features/manifests/components/manifest-graph.tsx` (993, ccn 156), `frontend/src/features/manifests/components/manifest-graph.test.tsx` (696, ccn 152) | `assess-2026-05-22.2` |
+| 1 | Add mutation testing to CI to verify test truth-pressure (don't raise the coverage threshold) | 6 | medium | Per-language passes: Go via `gremlins`/`ooze` for `cmd/meridian/main.go`; TS/JS via Stryker (`@stryker-mutator/core`) for `frontend/src/App.tsx`. Scope to high-churn files first; wire into `quality.yml` as a tracked metric | `cmd/meridian/main.go` (Go), `frontend/src/App.tsx` (TS) | TM `assess-2026-05-29` #1 |
+| 2 | Add a maintained base README per service module (8.8% → target the highest-churn services first) | 0 | medium | Follow `docs/service-readme-template.md`; extend `service-readme-lint.yml` to require one per service dir | `services/control-plane/`, `services/current-account/`, `services/payment-order/` | TM `assess-2026-05-29` #2 |
+| 3 | Promote frontend complexity rules from `warn` to `error` so they ratchet like the Go side, then decompose `App.tsx` | 3 | small | In `frontend/eslint.config.js` set `complexity`, `max-lines-per-function`, `max-statements` to `error`; extract routing/providers from `App.tsx` | `frontend/src/App.tsx` (ccn 91, 66 commits) | TM `assess-2026-05-29` #3 |
 
 ### Why these three?
 
-Action 1 stays at #1 because it's the most concrete code-side fix, persisting across five runs, and unaffected by any framing change in the plugin. Action 2 is unchanged in substance from prior runs but reframed per v1.11: it's a wayfinding improvement, not an emergency - still worth doing because the 15 broken links are real advertised-but-missing refs and the top-level MOC closes the curation gap. Action 3 stays for the same reason it did last run: the frontend has no Layer 3 complexity enforcement and `manifest-graph.tsx` is the persistent hotspot that would flag immediately.
-
-The previous Top-3 #2 from v1.10 ("Refresh the 5 stale ADR hubs", tracked as `assess-2026-05-22.6`) is demoted in v1.11. The v1.11 stale-hub data now carries `confidence: "low"` on all 5 entries because their `subject_method` is `repo-baseline` (whole-repo proxy). They're still worth a refresh when convenient, but the v1.11 confidence flag explicitly tempers the urgency. Leaving the task open per the rotation rule.
+Layer 6 is the only sub-Present write-side layer and the truth-pressure model weights it heavily: 75%-blocking coverage with no mutation testing is the canonical "green but hollow" risk — the gate says *tested* while behaviour may be unpinned. Layer 0's module base-doc gap is the one navigability weakness in an otherwise excellent doc set, and it compounds as the service count grows. Action 3 closes the single place complexity discipline is merely advisory and directly tames `App.tsx`, the vivid-red hotspot most likely to bite the next contributor.
 
 ## Additional Opportunities
 
-- **Refresh top stale ADR hubs** (`assess-2026-05-22.6`): now flagged `confidence: low` by v1.11 due to the `repo-baseline` subject proxy. Worth doing when convenient (ADR-0004 event schema, ADR-0005 adapter pattern, ADR-0002 microservices are the highest-pagerank docs in the repo), but no longer urgent.
-- **`assess-2026-05-22.4` (Move CLAUDE.md into repo root)**: still moot - v1.10 grader recognises `.github/claude-review-instructions.md` and grades it A. Recommend closing.
-- **Un-exclude `services/*/service/*.go` in `.golangci.yml`** with a ratchet (Layer 3). Tracked as `assess-2026-05-22.3`.
-- **Install `deadcode`** (the other Go dead-code tool that wasn't installed at Step 2b). The new install-offer flow caught `staticcheck`; `deadcode` isn't installed and would give a complementary intra-repo reachability check.
-- **Run `staticcheck -checks U1000 ./...` manually** to cross-check the Go intra-repo dead-code scan that v1.11 deliberately skips for build safety.
-- **Run a contradictions sweep over `docs/`** with an LLM - the v1.11 skill explicitly notes contradictions between pages are out of deterministic scope.
-- Audit the 16 production Go files in the 600-800 LOC range before they hit the cap.
-- Re-enable `unparam` once the upstream golangci-lint generics panic is fixed.
+- Wire `cookbook/README.md` to `cookbook/docs/authoring-patterns.md` and `authoring-components.md` (named in prose, not linked).
+- Add the missing cross-references from `docs/adr/0015-standard-service-directory-structure.md` (circuit-breaker-usage, incident-response, service-coupling-analysis).
+- Run `staticcheck -checks U1000 ./...` manually to cross-check Go dead code — the read-only assessment skips it because it would build the project.
+- Consider extracting `cmd/meridian/main.go`'s wiring (ccn 69, 64 commits) into smaller init functions.
+- Have an LLM read `docs/` for contradictions between pages — structural scans can't detect those, and the ADR/PRD set is large enough to drift.
 
 ## Strengths
 
-- **`.github/claude-review-instructions.md` is grade-A** under v1.11 too (score 100, 31 positive directives, 8 tradeoff phrases, 30 path references).
-- **Runtime liveness at rung 3** with the new dead-code scan running cleanly - `ts-prune` found 0 unused TS exports. That's a real signal, not just absence of evidence.
-- **Schema-driven everything**: `handlers.yaml` → auto-generated Starlark clients → AI-constrained saga DSL. The custom 712-line Starlark linter in `shared/pkg/saga/linter.go` keeps it honest.
-- **Marathon retro log is rare** - 1,975 lines of structured "this template change was validated / pending / removed" with a status column.
-- **Architecture tests use a ratchet pattern with explicit allowlists** - exactly how you migrate a system without freezing it.
+- **No lying signals** — no stale hub maps, no dead code, no hollow-gate survivors. The repo's self-descriptions can be trusted, which is the rarest and most valuable read-side property.
+- **Rung-3 liveness** — OpenTelemetry + Prometheus + structured logging, with 13 runbooks carrying runnable queries, so an agent has an invokable path to runtime truth rather than just knowing telemetry exists.
+- **Architecture as executable contracts** — `check-cross-service-imports.sh`, `lint-multi-asset-purity.sh`, `verify-service-conventions.sh`, the money-boundary test, and service-README linting all run in CI, not just in prose.
+- **Enforced Go complexity discipline** — `gocyclo`/`gocognit`/`funlen`/`cyclop`/`exhaustive` block merges, with thoughtfully scoped (not blanket) test/auth exclusions.
+- **Deep CI surface** — 30 workflows including CodeQL, security defaults, schema/manifest validation, and blocking codecov gates.
+- **Grade-A instruction surface** — a 647-line `CLAUDE.md` (no bloat penalty) plus 9 on-demand skills for progressive disclosure, anchoring a doc graph that's 89% reachable with an ADR spine at its centre.
 
 **Wiki:** see `.assess/index.md` for the full hotspot catalog across all runs, `.assess/log.md` for run history, and `.assess/hotspots/<file>.md` for per-file briefings.
 
