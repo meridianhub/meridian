@@ -44,3 +44,14 @@
 [Full report](./assess-report.md)
 
 ---
+## 2026-06-04 (v1.37.0)
+
+- **Files scored:** 4030
+- **AI Readiness:** 7.5 / 8 (AI-Native (Exemplary))
+- **Instructions grade:** A
+- **Hotspot transitions:** 0 graduated, 0 regressed, 10 new, 0 persistent
+- **Top action:** Reconcile frontend/README.md against current frontend/ code and wire it into the doc graph (it is an orphan)
+
+[Full report](./assess-report.md)
+
+---

@@ -1,6 +1,16 @@
 {
-  "run_date": "2026-05-29",
-  "prior_stats_exists": true,
+  "run_date": "2026-06-04",
+  "measured_commit": {
+    "available": true,
+    "head_sha": "1b28b180933a5e8a9e5c88f3b601540ddb67302c",
+    "head_short": "1b28b180933a",
+    "committed_date": "2026-06-04",
+    "subject": "fix: Bump react-router-dom to 7.15.0 to patch HIGH-severity CVEs (#2233)",
+    "dirty": true,
+    "upstream": null,
+    "behind": null
+  },
+  "prior_stats_exists": false,
   "stats_summary": {
     "files_scored": 4030,
     "loc": {
@@ -9,80 +19,151 @@
       "max": 3144.0,
       "total": 800888
     },
+    "est_tokens": {
+      "p50": 1409.5,
+      "p95": 6298.099999999999,
+      "max": 38671.0,
+      "total": 8657937,
+      "budget": {
+        "total": 8657937,
+        "budget": 200000,
+        "budget_basis": "estimate (~4 chars/token, documented default)",
+        "chars_per_token": 4,
+        "files_over_budget": 0,
+        "subtrees_over_budget": 6,
+        "over_budget_subtrees": [
+          {
+            "path": "services",
+            "est_tokens": 4690012
+          },
+          {
+            "path": "shared",
+            "est_tokens": 1109049
+          },
+          {
+            "path": "docs",
+            "est_tokens": 1026138
+          },
+          {
+            "path": "frontend",
+            "est_tokens": 775752
+          },
+          {
+            "path": "api",
+            "est_tokens": 284411
+          },
+          {
+            "path": "cmd",
+            "est_tokens": 227411
+          }
+        ]
+      }
+    },
     "ccn": {
+      "basis": "file-aggregate",
       "p50": 14.0,
       "p95": 75.0,
       "max": 336.0
     },
     "top_hotspots": [
       {
+        "path": "services/current-account/service/grpc_service_integration_test.go",
+        "loc": 1069,
+        "est_tokens": 15362,
+        "ccn": 98.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": 21.0,
+        "commits": 33,
+        "source": "lizard"
+      },
+      {
+        "path": "Makefile",
+        "loc": 463,
+        "est_tokens": 6458,
+        "ccn": 72.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": null,
+        "commits": 31,
+        "source": "scc"
+      },
+      {
+        "path": "scripts/demo.sh",
+        "loc": 1113,
+        "est_tokens": 14489,
+        "ccn": 118.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": null,
+        "commits": 6,
+        "source": "scc"
+      },
+      {
+        "path": "services/payment-order/service/grpc_service_test.go",
+        "loc": 2283,
+        "est_tokens": 24924,
+        "ccn": 204.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": 11.0,
+        "commits": 17,
+        "source": "lizard"
+      },
+      {
+        "path": "services/financial-accounting/service/financial_accounting_service_test.go",
+        "loc": 1943,
+        "est_tokens": 20755,
+        "ccn": 116.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": 20.0,
+        "commits": 11,
+        "source": "lizard"
+      },
+      {
+        "path": "services/current-account/service/grpc_service_test.go",
+        "loc": 1427,
+        "est_tokens": 14089,
+        "ccn": 138.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": 8.0,
+        "commits": 27,
+        "source": "lizard"
+      },
+      {
         "path": "frontend/src/App.tsx",
         "loc": 289,
+        "est_tokens": 5349,
         "ccn": 91.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": 8.0,
         "commits": 66,
         "source": "lizard"
       },
       {
         "path": "cmd/meridian/main.go",
         "loc": 431,
+        "est_tokens": 4702,
         "ccn": 69.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": 10.0,
         "commits": 64,
         "source": "lizard"
       },
       {
-        "path": "services/control-plane/internal/validator/manifest_validator_test.go",
-        "loc": 1054,
-        "ccn": 218.0,
-        "commits": 17,
-        "source": "lizard"
-      },
-      {
-        "path": "services/current-account/service/grpc_service_test.go",
-        "loc": 1427,
-        "ccn": 138.0,
-        "commits": 27,
-        "source": "lizard"
-      },
-      {
-        "path": "services/payment-order/service/grpc_service_test.go",
-        "loc": 2283,
-        "ccn": 204.0,
-        "commits": 17,
-        "source": "lizard"
-      },
-      {
-        "path": "services/current-account/service/grpc_service_integration_test.go",
-        "loc": 1069,
-        "ccn": 98.0,
-        "commits": 33,
-        "source": "lizard"
-      },
-      {
-        "path": "services/payment-order/cmd/main.go",
-        "loc": 306,
-        "ccn": 57.0,
-        "commits": 44,
-        "source": "lizard"
-      },
-      {
-        "path": "Makefile",
-        "loc": 463,
-        "ccn": 72.0,
-        "commits": 31,
+        "path": "scripts/doctor.sh",
+        "loc": 709,
+        "est_tokens": 6670,
+        "ccn": 73.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": null,
+        "commits": 8,
         "source": "scc"
       },
       {
-        "path": "services/current-account/adapters/persistence/repository.go",
-        "loc": 408,
-        "ccn": 92.0,
-        "commits": 24,
-        "source": "lizard"
-      },
-      {
-        "path": "services/api-gateway/server.go",
-        "loc": 421,
-        "ccn": 100.0,
-        "commits": 21,
+        "path": "services/current-account/service/lien_service_test.go",
+        "loc": 1538,
+        "est_tokens": 17620,
+        "ccn": 90.0,
+        "ccn_basis": "file-aggregate",
+        "max_fn_ccn": 4.0,
+        "commits": 22,
         "source": "lizard"
       }
     ]
@@ -100,13 +181,13 @@
         "word_count": 3822,
         "bloat_penalty": 0
       },
-      "freshness_days": 0,
+      "freshness_days": 6,
       "line_count": 647,
       "present": true
     },
     "AGENTS.md": {
-      "grade": "F",
-      "score": 10,
+      "grade": "A",
+      "score": 85,
       "subscores": {
         "positive_directives": 0,
         "tradeoff_phrases": 0,
@@ -116,9 +197,11 @@
         "word_count": 52,
         "bloat_penalty": 0
       },
-      "freshness_days": 0,
+      "freshness_days": 6,
       "line_count": 9,
-      "present": true
+      "present": true,
+      "is_alias": true,
+      "alias_target": "CLAUDE.md"
     },
     ".github/claude-review-instructions.md": {
       "grade": "A",
@@ -132,68 +215,61 @@
         "word_count": 3881,
         "bloat_penalty": 0
       },
-      "freshness_days": 0,
+      "freshness_days": 6,
       "line_count": 799,
       "present": true
     }
   },
   "instructions_grade": "A",
   "diff": {
-    "graduated": 7,
+    "graduated": 0,
     "regressed": 0,
-    "new": 7,
-    "persistent": 3
+    "new": 10,
+    "persistent": 0
   },
-  "diff_reliable": false,
-  "diff_version_note": "prior stats from plugin unknown, current 1.15.0; file-filter differences across versions may surface phantom graduated/new transitions",
+  "diff_reliable": true,
+  "diff_version_note": null,
   "prior_plugin_version": null,
   "diff_detail": {
-    "graduated": [
-      {
-        "path": "services/current-account/service/coverage_unit_test.go",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "services/position-keeping/domain/financial_position_log_test.go",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "frontend/src/features/manifests/components/manifest-graph.tsx",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "services/mcp-server/internal/tools/economy_test.go",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "frontend/src/features/manifests/components/manifest-graph.test.tsx",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "services/identity/service/grpc_service_test.go",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "shared/pkg/saga/schema/service_modules.go",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      }
-    ],
+    "graduated": [],
     "regressed": [],
     "new": [
+      {
+        "path": "services/current-account/service/grpc_service_integration_test.go",
+        "ccn_delta": 0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "Makefile",
+        "ccn_delta": 0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "scripts/demo.sh",
+        "ccn_delta": 0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/payment-order/service/grpc_service_test.go",
+        "ccn_delta": 0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/financial-accounting/service/financial_accounting_service_test.go",
+        "ccn_delta": 0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
+      {
+        "path": "services/current-account/service/grpc_service_test.go",
+        "ccn_delta": 0,
+        "commits_delta": 0,
+        "loc_delta": 0
+      },
       {
         "path": "frontend/src/App.tsx",
         "ccn_delta": 0,
@@ -207,56 +283,19 @@
         "loc_delta": 0
       },
       {
-        "path": "services/current-account/service/grpc_service_integration_test.go",
+        "path": "scripts/doctor.sh",
         "ccn_delta": 0,
         "commits_delta": 0,
         "loc_delta": 0
       },
       {
-        "path": "services/payment-order/cmd/main.go",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "Makefile",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "services/current-account/adapters/persistence/repository.go",
-        "ccn_delta": 0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "services/api-gateway/server.go",
+        "path": "services/current-account/service/lien_service_test.go",
         "ccn_delta": 0,
         "commits_delta": 0,
         "loc_delta": 0
       }
     ],
-    "persistent": [
-      {
-        "path": "services/control-plane/internal/validator/manifest_validator_test.go",
-        "ccn_delta": -259.0,
-        "commits_delta": 1,
-        "loc_delta": -1835
-      },
-      {
-        "path": "services/current-account/service/grpc_service_test.go",
-        "ccn_delta": 0.0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      },
-      {
-        "path": "services/payment-order/service/grpc_service_test.go",
-        "ccn_delta": 0.0,
-        "commits_delta": 0,
-        "loc_delta": 0
-      }
-    ]
+    "persistent": []
   },
   "doc_graph": {
     "available": true,
@@ -557,1677 +596,1677 @@
     "docs": [
       {
         "path": "AGENTS.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "CHANGELOG.md",
-        "last_commit_days": 114,
+        "last_commit_days": 120,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "deploy/demo/cloudflare-setup-checklist.md",
-        "last_commit_days": 94,
+        "last_commit_days": 100,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "deployments/k8s/audit-consumer/README.md",
-        "last_commit_days": 157,
+        "last_commit_days": 163,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0016-tenant-id-naming-strategy.md",
-        "last_commit_days": 166,
+        "last_commit_days": 173,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0021-kyc-aml-verification-provider-architecture.md",
-        "last_commit_days": 148,
+        "last_commit_days": 155,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0023-balance-delegation-to-position-keeping.md",
-        "last_commit_days": 140,
+        "last_commit_days": 146,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0029-settlement-scheduler-architecture.md",
-        "last_commit_days": 108,
+        "last_commit_days": 115,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0030-kyc-aml-provider-selection.md",
-        "last_commit_days": 105,
+        "last_commit_days": 112,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0036-embedded-dex-identity.md",
-        "last_commit_days": 76,
+        "last_commit_days": 83,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0037-scheduler-attribution-design.md",
-        "last_commit_days": 52,
+        "last_commit_days": 58,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/analysis/cmd-coverage-assessment.md",
-        "last_commit_days": 72,
+        "last_commit_days": 78,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/architecture-layers.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/archive/DEMO_GUIDE.md",
-        "last_commit_days": 85,
+        "last_commit_days": 91,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/archive/audit-analysis-findings.md",
-        "last_commit_days": 85,
+        "last_commit_days": 91,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/archive/database-per-service-migration.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/archive/panic-audit-inventory.md",
-        "last_commit_days": 85,
+        "last_commit_days": 91,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/audits/tenant-isolation-audit-2026-04-04.md",
-        "last_commit_days": 55,
+        "last_commit_days": 61,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/coupling-visualization-example.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/data-flows.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/development/audit-adding-new-service.md",
-        "last_commit_days": 155,
+        "last_commit_days": 161,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/adding-starlark-service-bindings.md",
-        "last_commit_days": 114,
+        "last_commit_days": 120,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/cli-tools.md",
-        "last_commit_days": 92,
+        "last_commit_days": 98,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/coupling-analysis.md",
-        "last_commit_days": 172,
+        "last_commit_days": 179,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/error-conventions.md",
-        "last_commit_days": 71,
+        "last_commit_days": 77,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/multi-asset-integration.md",
-        "last_commit_days": 144,
+        "last_commit_days": 150,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/proto-conventions.md",
-        "last_commit_days": 71,
+        "last_commit_days": 77,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/saga-validation.md",
-        "last_commit_days": 111,
+        "last_commit_days": 118,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/service-file-conventions.md",
-        "last_commit_days": 71,
+        "last_commit_days": 77,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/guides/value-types.md",
-        "last_commit_days": 71,
+        "last_commit_days": 77,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/integrations/kyc-aml-providers.md",
-        "last_commit_days": 148,
+        "last_commit_days": 155,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/mapping-layer/troubleshooting.md",
-        "last_commit_days": 96,
+        "last_commit_days": 102,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/007-starlark-typed-service-clients.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/010-starlark-testing-framework.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/012-codebase-health-audit.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/013-reconciliation-service.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/015-stripe-connect.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/016-market-data-dynamic-pricing.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/018-current-account-withdrawal-persistence.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/020-party-kyc-aml-provider-integration.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/021-platform-scheduler.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/030-asyncapi-specification.md",
-        "last_commit_days": 89,
+        "last_commit_days": 95,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/032-event-driven-valuation-saga.md",
-        "last_commit_days": 87,
+        "last_commit_days": 93,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/033-gateway-architecture.md",
-        "last_commit_days": 87,
+        "last_commit_days": 93,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/035-economy-cookbook.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/037-multi-asset-purity.md",
-        "last_commit_days": 84,
+        "last_commit_days": 90,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/038-manifest-business-model-visualization.md",
-        "last_commit_days": 83,
+        "last_commit_days": 90,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/039-meridian-vm.md",
-        "last_commit_days": 82,
+        "last_commit_days": 88,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/040-handler-schema-alignment.md",
-        "last_commit_days": 81,
+        "last_commit_days": 87,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/043-mcp-manifest-tenant-isolation.md",
-        "last_commit_days": 78,
+        "last_commit_days": 84,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/044-auth-flow-architecture.md",
-        "last_commit_days": 75,
+        "last_commit_days": 81,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/045-manifest-as-sole-source-of-truth.md",
-        "last_commit_days": 74,
+        "last_commit_days": 80,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/047-security-audit.md",
-        "last_commit_days": 73,
+        "last_commit_days": 80,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/048-test-coverage-80.md",
-        "last_commit_days": 72,
+        "last_commit_days": 78,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/051-party-navigation.md",
-        "last_commit_days": 67,
+        "last_commit_days": 73,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/057-convergent-manifest-apply.md",
-        "last_commit_days": 58,
+        "last_commit_days": 64,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/058-full-economy-visibility.md",
-        "last_commit_days": 58,
+        "last_commit_days": 64,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/059-asset-agnostic-posting-layer.md",
-        "last_commit_days": 56,
+        "last_commit_days": 62,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/060-per-tenant-scheduled-execution.md",
-        "last_commit_days": 53,
+        "last_commit_days": 59,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/061-mcp-auth-session-unification.md",
-        "last_commit_days": 53,
+        "last_commit_days": 59,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/prd/062-self-service-onboarding-readiness.md",
-        "last_commit_days": 34,
+        "last_commit_days": 40,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/reports/cockroachdb-migration-audit.md",
-        "last_commit_days": 94,
+        "last_commit_days": 101,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/reports/market-information-go-live-readiness.md",
-        "last_commit_days": 128,
+        "last_commit_days": 135,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/reports/market-information-integration.md",
-        "last_commit_days": 128,
+        "last_commit_days": 135,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/market-information-operations.md",
-        "last_commit_days": 129,
+        "last_commit_days": 135,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/party-kyc-verification.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/troubleshooting-saga-handlers.md",
-        "last_commit_days": 114,
+        "last_commit_days": 120,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/saga-handler-loading.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/security/pgx-tenant-audit.md",
-        "last_commit_days": 73,
+        "last_commit_days": 79,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "docs/service-readme-template.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "frontend/docs/tenant-subdomain-routing.md",
-        "last_commit_days": 80,
+        "last_commit_days": 86,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "services/mcp-server/internal/resources/docs/cel-reference.md",
-        "last_commit_days": 93,
+        "last_commit_days": 99,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "services/mcp-server/internal/resources/docs/starlark-guide.md",
-        "last_commit_days": 93,
+        "last_commit_days": 99,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "services/payment-order/service/HANDLER_ARCHITECTURE.md",
-        "last_commit_days": 120,
+        "last_commit_days": 127,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "shared/platform/bootstrap/SHUTDOWN_USAGE.md",
-        "last_commit_days": 148,
+        "last_commit_days": 154,
         "doc_churn_in_window": 1,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 8647.0,
+        "ratio": 8651.0,
         "confidence": "low"
       },
       {
         "path": "CLAUDE.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "cookbook/docs/authoring-components.md",
-        "last_commit_days": 85,
+        "last_commit_days": 91,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "deploy/demo/dex-identity-migration-plan.md",
-        "last_commit_days": 81,
+        "last_commit_days": 87,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "deploy/demo/pg-migration-compatibility-report.md",
-        "last_commit_days": 92,
+        "last_commit_days": 99,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0008-defensive-testing-standards.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0022-instrument-successor-lineage.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0024-internal-bank-account-service.md",
-        "last_commit_days": 92,
+        "last_commit_days": 99,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0026-canonical-ingestion-contract.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0027-market-information-management.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0032-vanguard-json-transcoding-gateway.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0033-event-triggered-sagas.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/archive/authentication-integration.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/archive/immutability-audit.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/archive/rbac-testing-guide.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/archive/task-8-service-integration.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/guides/circuit-breaker-usage.md",
-        "last_commit_days": 147,
+        "last_commit_days": 153,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/guides/financial-accounting-proto.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/guides/repository-conventions.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/guides/starlark-built-ins-reference.md",
-        "last_commit_days": 85,
+        "last_commit_days": 91,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/local-documentation.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/operations/audit-monitoring.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/001-universal-asset-system.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/003-meridian-edge.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/004-market-information-management.md",
-        "last_commit_days": 89,
+        "last_commit_days": 95,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/005-durable-execution-engine.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/017-reconciliation-grpc-wiring.md",
-        "last_commit_days": 92,
+        "last_commit_days": 99,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/026-operations-console-ui.md",
-        "last_commit_days": 92,
+        "last_commit_days": 99,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/031-identity-access-management.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/034-frontend-service-alignment.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/041-economy-generator.md",
-        "last_commit_days": 80,
+        "last_commit_days": 86,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/042-economy-ide.md",
-        "last_commit_days": 80,
+        "last_commit_days": 86,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/046-economy-visualization-completeness.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/052-email-platform.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/053-auth-email-flows.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/054-billing-ui.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/055-tenant-branding.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/prd/056-correspondence-service.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/reports/market-information-traceability.md",
-        "last_commit_days": 92,
+        "last_commit_days": 99,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/email-infrastructure.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/event-router.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/internal-account-operations.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/saga-validation-failure.md",
-        "last_commit_days": 85,
+        "last_commit_days": 91,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/testing/CHAOS_TESTING.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "docs/testing/COVERAGE_ANALYSIS.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "services/control-plane/internal/applier/testdata/tenant-saga-examples/README.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "services/event-router/k8s/README.md",
-        "last_commit_days": 85,
+        "last_commit_days": 91,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "shared/domain/money/PRECISION_GUARANTEES.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 2,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 4323.5,
+        "ratio": 4325.5,
         "confidence": "low"
       },
       {
         "path": "CLA.md",
-        "last_commit_days": 106,
+        "last_commit_days": 112,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "CODE_OF_CONDUCT.md",
-        "last_commit_days": 190,
+        "last_commit_days": 196,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "SECURITY.md",
-        "last_commit_days": 112,
+        "last_commit_days": 118,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "cookbook/docs/authoring-patterns.md",
-        "last_commit_days": 78,
+        "last_commit_days": 84,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0001-record-architecture-decisions.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0010-grpc-client-side-load-balancing.md",
-        "last_commit_days": 161,
+        "last_commit_days": 168,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0011-iso-20022-compliance-via-adapter-layer.md",
-        "last_commit_days": 84,
+        "last_commit_days": 90,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0012-lien-based-fund-reservation.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0015-standard-service-directory-structure.md",
-        "last_commit_days": 147,
+        "last_commit_days": 153,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0031-getbalance-nil-guard-retention.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/adr/template.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/demos/multi-organization-settlement.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/guides/calling-meridian-apis.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/guides/manifest-design-patterns.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/mapping-layer/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/002-internal-bank-account.md",
-        "last_commit_days": 89,
+        "last_commit_days": 95,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/006-starlark-saga-orchestration-core.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/008-starlark-service-bindings.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/009-production-readiness-review.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/011-valuation-service.md",
-        "last_commit_days": 92,
+        "last_commit_days": 99,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/014-control-plane.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/019-internal-bank-account-position-keeping-client.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/025-real-time-event-streaming.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/027-mcp-server.md",
-        "last_commit_days": 93,
+        "last_commit_days": 100,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/028-asset-agnostic-accounts.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/prd/047-security-audit-status.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/reports/saga-handler-audit.md",
-        "last_commit_days": 92,
+        "last_commit_days": 99,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/saga-service-catalog.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/secrets-management.md",
-        "last_commit_days": 163,
+        "last_commit_days": 169,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/spec/saga-contract.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/tilt-fast-startup.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "http/README.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 3,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2882.33,
+        "ratio": 2883.67,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0007-raw-yaml-over-helm-for-initial-development.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 4,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2161.75,
+        "ratio": 2162.75,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0009-application-level-audit-logging.md",
-        "last_commit_days": 156,
+        "last_commit_days": 162,
         "doc_churn_in_window": 4,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2161.75,
+        "ratio": 2162.75,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0025-clearing-purpose-specialization.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 4,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2161.75,
+        "ratio": 2162.75,
         "confidence": "low"
       },
       {
         "path": "docs/architecture/api-contracts/financial-accounting-contract.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 4,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2161.75,
+        "ratio": 2162.75,
         "confidence": "low"
       },
       {
         "path": "docs/guides/starlark-style-guide.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 4,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2161.75,
+        "ratio": 2162.75,
         "confidence": "low"
       },
       {
         "path": "docs/prd/029-operational-gateway.md",
-        "last_commit_days": 89,
+        "last_commit_days": 95,
         "doc_churn_in_window": 4,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2161.75,
+        "ratio": 2162.75,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/incident-response.md",
-        "last_commit_days": 190,
+        "last_commit_days": 196,
         "doc_churn_in_window": 4,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 2161.75,
+        "ratio": 2162.75,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0014-financial-instrument-reference-data.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 5,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1729.4,
+        "ratio": 1730.2,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0018-settlement-reconciliation.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 5,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1729.4,
+        "ratio": 1730.2,
         "confidence": "low"
       },
       {
         "path": "docs/archive/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 5,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1729.4,
+        "ratio": 1730.2,
         "confidence": "low"
       },
       {
         "path": "docs/prd/050-demo-sandbox.md",
-        "last_commit_days": 67,
+        "last_commit_days": 73,
         "doc_churn_in_window": 5,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1729.4,
+        "ratio": 1730.2,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/production-deployment.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 5,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1729.4,
+        "ratio": 1730.2,
         "confidence": "low"
       },
       {
         "path": "frontend/README.md",
-        "last_commit_days": 96,
+        "last_commit_days": 102,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 1478,
         "subject_code_count": 627,
@@ -2237,217 +2276,217 @@
       },
       {
         "path": ".github/claude-review-instructions.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 6,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1441.17,
+        "ratio": 1441.83,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0013-generic-asset-quantity-types.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 6,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1441.17,
+        "ratio": 1441.83,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0017-temporal-quality-ladder.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 6,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1441.17,
+        "ratio": 1441.83,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0028-starlark-saga-cel-valuation.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 6,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1441.17,
+        "ratio": 1441.83,
         "confidence": "low"
       },
       {
         "path": "docs/architecture/api-contracts/position-keeping-contract.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 6,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1441.17,
+        "ratio": 1441.83,
         "confidence": "low"
       },
       {
         "path": "docs/guides/testcontainers-usage.md",
-        "last_commit_days": 84,
+        "last_commit_days": 91,
         "doc_churn_in_window": 6,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1441.17,
+        "ratio": 1441.83,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/disaster-recovery.md",
-        "last_commit_days": 161,
+        "last_commit_days": 168,
         "doc_churn_in_window": 6,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1441.17,
+        "ratio": 1441.83,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0004-event-schema-evolution.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 7,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1235.29,
+        "ratio": 1235.86,
         "confidence": "low"
       },
       {
         "path": "docs/architecture/api-contracts/current-account-contract.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 7,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1235.29,
+        "ratio": 1235.86,
         "confidence": "low"
       },
       {
         "path": "docs/prd/036-cookbook-browser.md",
-        "last_commit_days": 84,
+        "last_commit_days": 90,
         "doc_churn_in_window": 7,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1235.29,
+        "ratio": 1235.86,
         "confidence": "low"
       },
       {
         "path": "docs/claude-code-skills.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 8,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1080.88,
+        "ratio": 1081.38,
         "confidence": "low"
       },
       {
         "path": "docs/prd/022-org-scoped-accounts.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 8,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1080.88,
+        "ratio": 1081.38,
         "confidence": "low"
       },
       {
         "path": "docs/runbooks/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 8,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 1080.88,
+        "ratio": 1081.38,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0005-adapter-pattern-layer-translation.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 9,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 960.78,
+        "ratio": 961.22,
         "confidence": "low"
       },
       {
         "path": "docs/guides/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 10,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 864.7,
+        "ratio": 865.1,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0002-microservices-per-bian-domain.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 11,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 786.09,
+        "ratio": 786.45,
         "confidence": "low"
       },
       {
         "path": "docs/prd/049-codebase-consistency.md",
-        "last_commit_days": 71,
+        "last_commit_days": 77,
         "doc_churn_in_window": 11,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 786.09,
+        "ratio": 786.45,
         "confidence": "low"
       },
       {
         "path": "docs/prd/024-structured-inbound-mapping.md",
-        "last_commit_days": 86,
+        "last_commit_days": 92,
         "doc_churn_in_window": 12,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 720.58,
+        "ratio": 720.92,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0003-database-schema-migrations.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 13,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 665.15,
+        "ratio": 665.46,
         "confidence": "low"
       },
       {
         "path": "CONTRIBUTING.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 15,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 576.47,
+        "ratio": 576.73,
         "confidence": "low"
       },
       {
         "path": "docs/adr/0006-tilt-local-development.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 15,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 576.47,
+        "ratio": 576.73,
         "confidence": "low"
       },
       {
         "path": "shared/README.md",
-        "last_commit_days": 54,
+        "last_commit_days": 60,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 1123,
         "subject_code_count": 540,
@@ -2457,47 +2496,47 @@
       },
       {
         "path": "docs/prd/023-product-directory.md",
-        "last_commit_days": 89,
+        "last_commit_days": 95,
         "doc_churn_in_window": 16,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 540.44,
+        "ratio": 540.69,
         "confidence": "low"
       },
       {
         "path": "docs/guides/new-bian-service-checklist.md",
-        "last_commit_days": 51,
+        "last_commit_days": 57,
         "doc_churn_in_window": 20,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 432.35,
+        "ratio": 432.55,
         "confidence": "low"
       },
       {
         "path": "docs/adr/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 23,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 375.96,
+        "ratio": 376.13,
         "confidence": "low"
       },
       {
         "path": "docs/prd/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 32,
-        "code_churn_in_window": 8647,
+        "code_churn_in_window": 8651,
         "subject_code_count": 3504,
         "subject_method": "repo-baseline",
-        "ratio": 270.22,
+        "ratio": 270.34,
         "confidence": "low"
       },
       {
         "path": "services/control-plane/README.md",
-        "last_commit_days": 15,
+        "last_commit_days": 21,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 546,
         "subject_code_count": 194,
@@ -2507,7 +2546,7 @@
       },
       {
         "path": "services/reconciliation/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 280,
         "subject_code_count": 153,
@@ -2517,7 +2556,7 @@
       },
       {
         "path": "services/reference-data/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 368,
         "subject_code_count": 152,
@@ -2527,7 +2566,7 @@
       },
       {
         "path": "services/tenant/README.md",
-        "last_commit_days": 15,
+        "last_commit_days": 21,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 295,
         "subject_code_count": 77,
@@ -2537,7 +2576,7 @@
       },
       {
         "path": "scripts/README.md",
-        "last_commit_days": 191,
+        "last_commit_days": 197,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 94,
         "subject_code_count": 40,
@@ -2547,7 +2586,7 @@
       },
       {
         "path": "services/party/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 280,
         "subject_code_count": 103,
@@ -2557,7 +2596,7 @@
       },
       {
         "path": "services/financial-accounting/README.md",
-        "last_commit_days": 15,
+        "last_commit_days": 21,
         "doc_churn_in_window": 4,
         "code_churn_in_window": 365,
         "subject_code_count": 102,
@@ -2567,7 +2606,7 @@
       },
       {
         "path": "services/payment-order/README.md",
-        "last_commit_days": 15,
+        "last_commit_days": 21,
         "doc_churn_in_window": 5,
         "code_churn_in_window": 429,
         "subject_code_count": 159,
@@ -2577,7 +2616,7 @@
       },
       {
         "path": "services/position-keeping/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 5,
         "code_churn_in_window": 428,
         "subject_code_count": 162,
@@ -2587,7 +2626,7 @@
       },
       {
         "path": "services/api-gateway/README.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 225,
         "subject_code_count": 110,
@@ -2597,7 +2636,7 @@
       },
       {
         "path": "services/current-account/README.md",
-        "last_commit_days": 15,
+        "last_commit_days": 21,
         "doc_churn_in_window": 10,
         "code_churn_in_window": 706,
         "subject_code_count": 143,
@@ -2607,7 +2646,7 @@
       },
       {
         "path": "services/operational-gateway/README.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 125,
         "subject_code_count": 73,
@@ -2617,7 +2656,7 @@
       },
       {
         "path": "services/mcp-server/README.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 4,
         "code_churn_in_window": 222,
         "subject_code_count": 69,
@@ -2627,7 +2666,7 @@
       },
       {
         "path": "docs/audit/multi-asset-purity.md",
-        "last_commit_days": 84,
+        "last_commit_days": 90,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 55,
         "subject_code_count": 19,
@@ -2637,7 +2676,7 @@
       },
       {
         "path": "docs/api/saga-validation.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 104,
         "subject_code_count": 65,
@@ -2647,7 +2686,7 @@
       },
       {
         "path": "services/identity/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 156,
         "subject_code_count": 67,
@@ -2657,7 +2696,7 @@
       },
       {
         "path": "services/market-information/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 4,
         "code_churn_in_window": 204,
         "subject_code_count": 94,
@@ -2667,7 +2706,7 @@
       },
       {
         "path": "docs/archive/ARCHITECTURE.md",
-        "last_commit_days": 85,
+        "last_commit_days": 91,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 44,
         "subject_code_count": 5,
@@ -2677,7 +2716,7 @@
       },
       {
         "path": "services/internal-account/README.md",
-        "last_commit_days": 15,
+        "last_commit_days": 21,
         "doc_churn_in_window": 5,
         "code_churn_in_window": 192,
         "subject_code_count": 108,
@@ -2687,7 +2726,7 @@
       },
       {
         "path": "services/financial-gateway/README.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 74,
         "subject_code_count": 42,
@@ -2697,7 +2736,7 @@
       },
       {
         "path": "services/forecasting/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 72,
         "subject_code_count": 46,
@@ -2707,7 +2746,7 @@
       },
       {
         "path": "docs/audit/frontend-backend-gaps.md",
-        "last_commit_days": 92,
+        "last_commit_days": 99,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 55,
         "subject_code_count": 19,
@@ -2717,7 +2756,7 @@
       },
       {
         "path": "api/proto/README.md",
-        "last_commit_days": 168,
+        "last_commit_days": 174,
         "doc_churn_in_window": 6,
         "code_churn_in_window": 157,
         "subject_code_count": 84,
@@ -2726,8 +2765,18 @@
         "confidence": "high"
       },
       {
+        "path": "shared/platform/observability/README.md",
+        "last_commit_days": 137,
+        "doc_churn_in_window": 2,
+        "code_churn_in_window": 47,
+        "subject_code_count": 19,
+        "subject_method": "nearest-ancestor",
+        "ratio": 23.5,
+        "confidence": "high"
+      },
+      {
         "path": "docs/architecture/boundary-migration-plan.md",
-        "last_commit_days": 164,
+        "last_commit_days": 170,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 44,
         "subject_code_count": 5,
@@ -2737,7 +2786,7 @@
       },
       {
         "path": "docs/architecture/service-coupling-analysis.md",
-        "last_commit_days": 147,
+        "last_commit_days": 153,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 44,
         "subject_code_count": 5,
@@ -2747,7 +2796,7 @@
       },
       {
         "path": "docs/architecture/starlark-saga-architecture.md",
-        "last_commit_days": 59,
+        "last_commit_days": 66,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 44,
         "subject_code_count": 5,
@@ -2756,18 +2805,8 @@
         "confidence": "high"
       },
       {
-        "path": "shared/platform/observability/README.md",
-        "last_commit_days": 130,
-        "doc_churn_in_window": 2,
-        "code_churn_in_window": 43,
-        "subject_code_count": 19,
-        "subject_method": "nearest-ancestor",
-        "ratio": 21.5,
-        "confidence": "high"
-      },
-      {
         "path": "shared/platform/bootstrap/README.md",
-        "last_commit_days": 130,
+        "last_commit_days": 137,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 33,
         "subject_code_count": 18,
@@ -2777,7 +2816,7 @@
       },
       {
         "path": "docs/architecture/data-model.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 44,
         "subject_code_count": 5,
@@ -2787,7 +2826,7 @@
       },
       {
         "path": "docs/architecture/event-driven-architecture.md",
-        "last_commit_days": 89,
+        "last_commit_days": 95,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 44,
         "subject_code_count": 5,
@@ -2797,7 +2836,7 @@
       },
       {
         "path": "cookbook/README.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 14,
         "subject_code_count": 6,
@@ -2807,7 +2846,7 @@
       },
       {
         "path": "services/event-router/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 5,
         "code_churn_in_window": 69,
         "subject_code_count": 48,
@@ -2817,7 +2856,7 @@
       },
       {
         "path": "README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 45,
         "code_churn_in_window": 525,
         "subject_code_count": 201,
@@ -2827,7 +2866,7 @@
       },
       {
         "path": "shared/platform/audit/README.md",
-        "last_commit_days": 130,
+        "last_commit_days": 137,
         "doc_churn_in_window": 5,
         "code_churn_in_window": 55,
         "subject_code_count": 19,
@@ -2837,7 +2876,7 @@
       },
       {
         "path": "docs/adr/0019-resilient-client-patterns.md",
-        "last_commit_days": 163,
+        "last_commit_days": 169,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 10,
         "subject_code_count": 5,
@@ -2847,7 +2886,7 @@
       },
       {
         "path": "services/audit-worker/README.md",
-        "last_commit_days": 17,
+        "last_commit_days": 23,
         "doc_churn_in_window": 6,
         "code_churn_in_window": 50,
         "subject_code_count": 28,
@@ -2857,7 +2896,7 @@
       },
       {
         "path": "docs/mapping-layer/examples.md",
-        "last_commit_days": 96,
+        "last_commit_days": 102,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8,
         "subject_code_count": 6,
@@ -2867,7 +2906,7 @@
       },
       {
         "path": "docs/patterns.md",
-        "last_commit_days": 18,
+        "last_commit_days": 24,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 8,
         "subject_code_count": 1,
@@ -2877,7 +2916,7 @@
       },
       {
         "path": "docs/adr/0034-position-compaction-strategy.md",
-        "last_commit_days": 84,
+        "last_commit_days": 90,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 7,
         "subject_code_count": 3,
@@ -2887,7 +2926,7 @@
       },
       {
         "path": "docs/runbooks/saga-failure-recovery.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 5,
         "code_churn_in_window": 33,
         "subject_code_count": 1,
@@ -2897,7 +2936,7 @@
       },
       {
         "path": "docs/architecture/bian-service-boundaries.md",
-        "last_commit_days": 89,
+        "last_commit_days": 95,
         "doc_churn_in_window": 7,
         "code_churn_in_window": 44,
         "subject_code_count": 5,
@@ -2907,7 +2946,7 @@
       },
       {
         "path": "deploy/demo/README.md",
-        "last_commit_days": 73,
+        "last_commit_days": 79,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 10,
         "subject_code_count": 3,
@@ -2917,7 +2956,7 @@
       },
       {
         "path": "services/internal-account/benchmarks/README.md",
-        "last_commit_days": 92,
+        "last_commit_days": 98,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 10,
         "subject_code_count": 4,
@@ -2927,7 +2966,7 @@
       },
       {
         "path": "docs/guides/ai-native-codebase-architecture.md",
-        "last_commit_days": 70,
+        "last_commit_days": 76,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 4,
         "subject_code_count": 1,
@@ -2937,7 +2976,7 @@
       },
       {
         "path": "services/internal-account/examples/README.md",
-        "last_commit_days": 92,
+        "last_commit_days": 98,
         "doc_churn_in_window": 2,
         "code_churn_in_window": 8,
         "subject_code_count": 6,
@@ -2947,7 +2986,7 @@
       },
       {
         "path": "docs/adr/0035-multi-asset-purity.md",
-        "last_commit_days": 83,
+        "last_commit_days": 89,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 2,
         "subject_code_count": 2,
@@ -2957,7 +2996,7 @@
       },
       {
         "path": "docs/adr/0020-per-service-audit-workers.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 4,
         "code_churn_in_window": 6,
         "subject_code_count": 1,
@@ -2967,7 +3006,7 @@
       },
       {
         "path": "tests/audit-e2e/README.md",
-        "last_commit_days": 92,
+        "last_commit_days": 98,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 4,
         "subject_code_count": 2,
@@ -2977,7 +3016,7 @@
       },
       {
         "path": "deployments/k8s/policies/tests/README.md",
-        "last_commit_days": 149,
+        "last_commit_days": 155,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 1,
         "subject_code_count": 1,
@@ -2987,7 +3026,7 @@
       },
       {
         "path": "docs/services/party/verification-guide.md",
-        "last_commit_days": 104,
+        "last_commit_days": 110,
         "doc_churn_in_window": 1,
         "code_churn_in_window": 1,
         "subject_code_count": 1,
@@ -2997,7 +3036,7 @@
       },
       {
         "path": "scripts/kafka-tests/README.md",
-        "last_commit_days": 60,
+        "last_commit_days": 66,
         "doc_churn_in_window": 3,
         "code_churn_in_window": 3,
         "subject_code_count": 2,
@@ -3007,7 +3046,7 @@
       },
       {
         "path": ".githooks/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 4,
         "code_churn_in_window": 2,
         "subject_code_count": 1,
@@ -3017,7 +3056,7 @@
       },
       {
         "path": "services/README.md",
-        "last_commit_days": 0,
+        "last_commit_days": 6,
         "doc_churn_in_window": 19,
         "code_churn_in_window": 1,
         "subject_code_count": 1,
@@ -3053,77 +3092,77 @@
     {
       "path": "docs/adr/0004-event-schema-evolution.md",
       "pagerank": 0.0604,
-      "last_commit_days": 0,
-      "code_churn_in_window": 8647,
-      "ratio": 1235.29,
+      "last_commit_days": 6,
+      "code_churn_in_window": 8651,
+      "ratio": 1235.86,
       "subject_method": "repo-baseline",
       "confidence": "low",
-      "priority": 74.612
+      "priority": 74.646
     },
     {
       "path": "docs/adr/0005-adapter-pattern-layer-translation.md",
       "pagerank": 0.0671,
-      "last_commit_days": 0,
-      "code_churn_in_window": 8647,
-      "ratio": 960.78,
+      "last_commit_days": 6,
+      "code_churn_in_window": 8651,
+      "ratio": 961.22,
       "subject_method": "repo-baseline",
       "confidence": "low",
-      "priority": 64.468
+      "priority": 64.498
     },
     {
       "path": "docs/adr/0002-microservices-per-bian-domain.md",
       "pagerank": 0.0496,
-      "last_commit_days": 0,
-      "code_churn_in_window": 8647,
-      "ratio": 786.09,
+      "last_commit_days": 6,
+      "code_churn_in_window": 8651,
+      "ratio": 786.45,
       "subject_method": "repo-baseline",
       "confidence": "low",
-      "priority": 38.99
+      "priority": 39.008
     },
     {
       "path": "docs/adr/0014-financial-instrument-reference-data.md",
       "pagerank": 0.0214,
-      "last_commit_days": 0,
-      "code_churn_in_window": 8647,
-      "ratio": 1729.4,
+      "last_commit_days": 6,
+      "code_churn_in_window": 8651,
+      "ratio": 1730.2,
       "subject_method": "repo-baseline",
       "confidence": "low",
-      "priority": 37.009
+      "priority": 37.026
     },
     {
       "path": "docs/adr/0003-database-schema-migrations.md",
       "pagerank": 0.0544,
-      "last_commit_days": 0,
-      "code_churn_in_window": 8647,
-      "ratio": 665.15,
+      "last_commit_days": 6,
+      "code_churn_in_window": 8651,
+      "ratio": 665.46,
       "subject_method": "repo-baseline",
       "confidence": "low",
-      "priority": 36.184
+      "priority": 36.201
     },
     {
       "path": "docs/adr/0028-starlark-saga-cel-valuation.md",
       "pagerank": 0.0244,
-      "last_commit_days": 0,
-      "code_churn_in_window": 8647,
-      "ratio": 1441.17,
+      "last_commit_days": 6,
+      "code_churn_in_window": 8651,
+      "ratio": 1441.83,
       "subject_method": "repo-baseline",
       "confidence": "low",
-      "priority": 35.165
+      "priority": 35.181
     },
     {
       "path": "docs/architecture/api-contracts/current-account-contract.md",
       "pagerank": 0.0204,
-      "last_commit_days": 0,
-      "code_churn_in_window": 8647,
-      "ratio": 1235.29,
+      "last_commit_days": 6,
+      "code_churn_in_window": 8651,
+      "ratio": 1235.86,
       "subject_method": "repo-baseline",
       "confidence": "low",
-      "priority": 25.2
+      "priority": 25.212
     },
     {
       "path": "docs/architecture/service-coupling-analysis.md",
       "pagerank": 0.0284,
-      "last_commit_days": 147,
+      "last_commit_days": 153,
       "code_churn_in_window": 44,
       "ratio": 22.0,
       "subject_method": "parallel-docs-tree",
@@ -3133,7 +3172,7 @@
     {
       "path": "docs/architecture/event-driven-architecture.md",
       "pagerank": 0.0238,
-      "last_commit_days": 89,
+      "last_commit_days": 95,
       "code_churn_in_window": 44,
       "ratio": 14.67,
       "subject_method": "parallel-docs-tree",
@@ -3143,7 +3182,7 @@
     {
       "path": "docs/architecture/bian-service-boundaries.md",
       "pagerank": 0.0254,
-      "last_commit_days": 89,
+      "last_commit_days": 95,
       "code_churn_in_window": 44,
       "ratio": 6.29,
       "subject_method": "parallel-docs-tree",
@@ -3153,6 +3192,12 @@
   ],
   "untracked_instruction_files": [],
   "broken_instruction_refs": [],
+  "sensitive_instruction_content": {},
+  "ancestor_instruction_files": [
+    "CLAUDE.md (2 level(s) above repo root)",
+    "CLAUDE.md (4 level(s) above repo root)",
+    "~/.claude/CLAUDE.md (global user instructions)"
+  ],
   "skills_present": true,
   "skills_count": 9,
   "skill_files": [
@@ -3295,6 +3340,330 @@
     },
     "boundary": "Scores what the repo makes agent-reachable; cannot observe the agent's live environment."
   },
+  "test_pressure": {
+    "mutation_config_present": false,
+    "mutation_tools_detected": [],
+    "ci_integrated": false,
+    "mutation_run": false,
+    "mutation_scope": [],
+    "per_file": [],
+    "survivor_density": {
+      "overall": null,
+      "total_survived": 0,
+      "total_mutants": null,
+      "by_file": {}
+    },
+    "survivor_clusters": [],
+    "gap_signal": "not assessed",
+    "cheap_heuristics": {
+      "assertion_on_internal": [
+        {
+          "test_file": "cookbook/schema_validation_test.go",
+          "subject_function": "(file)",
+          "internal_field": "fn",
+          "confidence": "low"
+        },
+        {
+          "test_file": "cookbook/validation_test.go",
+          "subject_function": "(file)",
+          "internal_field": "json",
+          "confidence": "low"
+        },
+        {
+          "test_file": "cookbook/validation_test.go",
+          "subject_function": "(file)",
+          "internal_field": "yaml",
+          "confidence": "low"
+        },
+        {
+          "test_file": "cookbook/validation_test.go",
+          "subject_function": "(file)",
+          "internal_field": "composes_with",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/auth_flows_test.go",
+          "subject_function": "(file)",
+          "internal_field": "com",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/registration_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "meridian",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/registration_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "com",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/registration_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "entries",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/auth_sso_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "wantErr",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/auth_sso_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "meridianhub",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/auth_sso_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "com",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/auth_sso_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "demo",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/auth_sso_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "localhost",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/headers_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expectedResult",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/headers_test.go",
+          "subject_function": "(file)",
+          "internal_field": "api",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/headers_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expected",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/consent_code_store_test.go",
+          "subject_function": "(file)",
+          "internal_field": "entries",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/transcoding_test.go",
+          "subject_function": "(file)",
+          "internal_field": "httpStatus",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/transcoding_test.go",
+          "subject_function": "(file)",
+          "internal_field": "grpcCode",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/verification_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "entries",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/providers_test.go",
+          "subject_function": "(file)",
+          "internal_field": "example",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/password_reset_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "entries",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/proxy_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expectedMatch",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/proxy_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expected",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/proxy_test.go",
+          "subject_function": "(file)",
+          "internal_field": "example",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/auth_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "com",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/config_test.go",
+          "subject_function": "(file)",
+          "internal_field": "example",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/config_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expected",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/config_test.go",
+          "subject_function": "(file)",
+          "internal_field": "wantError",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/config_test.go",
+          "subject_function": "(file)",
+          "internal_field": "payment",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/config_test.go",
+          "subject_function": "(file)",
+          "internal_field": "wantJWKSURL",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/config_test.go",
+          "subject_function": "(file)",
+          "internal_field": "wantIssuer",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expectedStatus",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expectedBody",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "config",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "logger",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "mux",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "tenantResolver",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "entries",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "endpoint",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "statusCode",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/server_test.go",
+          "subject_function": "(file)",
+          "internal_field": "healthChecker",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/error_response_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expected",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/error_response_test.go",
+          "subject_function": "(file)",
+          "internal_field": "httpStatus",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/error_response_test.go",
+          "subject_function": "(file)",
+          "internal_field": "stringCode",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/error_response_test.go",
+          "subject_function": "(file)",
+          "internal_field": "statusCode",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/mcp_consent_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "hasEntry",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/api-gateway/mcp_consent_handler_test.go",
+          "subject_function": "(file)",
+          "internal_field": "expectedError",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/reference-data/saga_migrations_test.go",
+          "subject_function": "(file)",
+          "internal_field": "container",
+          "confidence": "low"
+        },
+        {
+          "test_file": "services/reference-data/saga_migrations_test.go",
+          "subject_function": "(file)",
+          "internal_field": "name",
+          "confidence": "low"
+        }
+      ],
+      "untested_boundaries": [],
+      "duplicate_truth": [],
+      "confidence_note": "candidate signals for human judgement, never verdicts"
+    },
+    "mutation_note": "opt-in required: mutation testing mutates and runs code"
+  },
   "structure": {
     "available": true,
     "reason": "no importable Python packages found",
@@ -3311,91 +3680,103 @@
   "behaviour": {
     "available": true,
     "containment_by_dir": {
-      "services": 0.5859,
-      "frontend": 0.8132,
-      "shared": 0.3354,
+      "services": 0.5854,
+      "frontend": 0.8138,
+      "shared": 0.3344,
       "frontend/src": 0.6965,
       "docs": 0.6051,
-      ".github": 0.5759,
-      ".github/workflows": 0.5635,
-      "services/current-account": 0.2735,
+      ".github": 0.5753,
+      ".github/workflows": 0.563,
+      "services/current-account": 0.2723,
       "api": 0.1667,
       "api/proto": 0.1711,
       "api/proto/meridian": 0.1739,
-      "cmd": 0.2431,
+      "cmd": 0.2418,
       "shared/pkg": 0.3333,
-      "shared/platform": 0.2625,
-      "services/control-plane": 0.4423,
+      "shared/platform": 0.2609,
+      "services/control-plane": 0.4395,
       "frontend/src/features": 0.5065,
-      "services/payment-order": 0.2649,
+      "services/payment-order": 0.2632,
       "services/current-account/service": 0.2042,
-      "services/reference-data": 0.4029,
-      "services/position-keeping": 0.1884,
+      "services/reference-data": 0.4,
+      "services/position-keeping": 0.1871,
       "services/control-plane/internal": 0.4015,
+      "services/financial-accounting": 0.229,
       "docs/prd": 0.8308,
-      "services/financial-accounting": 0.2308,
-      "services/party": 0.3782,
-      "services/tenant": 0.2353,
+      "services/party": 0.375,
+      "services/tenant": 0.2333,
       "internal": 0.2477,
-      "cmd/meridian": 0.1875,
+      "cmd/meridian": 0.1856,
       "shared/pkg/saga": 0.4062,
       "services/gateway": 0.4881,
       "docs/adr": 0.2593,
-      "services/mcp-server": 0.5063,
-      "services/reconciliation": 0.3924,
+      "services/mcp-server": 0.5,
+      "services/reconciliation": 0.3875,
       "tests": 0.2025,
       "scripts": 0.1558,
       "frontend/src/pages": 0.2394,
       "services/reference-data/saga": 0.1618,
       "frontend/src/components": 0.1343,
-      "services/market-information": 0.2879,
+      "services/market-information": 0.2836,
       "deploy": 0.4062,
       "frontend/src/test": 0.0938,
       "services/control-plane/internal/applier": 0.3281,
       "services/internal-bank-account": 0.5397,
       "services/mcp-server/internal": 0.381,
       "deploy/demo": 0.3448,
-      "services/api-gateway": 0.1579,
-      "services/payment-order/cmd": 0.0182,
+      "services/api-gateway": 0.1552,
+      "services/payment-order/cmd": 0.0179,
       "services/payment-order/service": 0.1481,
       "services/financial-accounting/service": 0.1569,
       "services/payment-order/adapters": 0.04,
-      "services/current-account/cmd": 0.0208
+      "services/current-account/cmd": 0.0204
     },
     "change_coupling_pairs": [
       {
         "file_a": "go.mod",
         "file_b": "go.sum",
-        "co_change_count": 91,
-        "support_pct": 3.61
+        "co_change_count": 93,
+        "support_pct": 3.68
       },
       {
         "file_a": "frontend/package-lock.json",
         "file_b": "frontend/package.json",
-        "co_change_count": 25,
-        "support_pct": 0.99
+        "co_change_count": 26,
+        "support_pct": 1.03
       },
       {
         "file_a": ".github/workflows/build.yml",
         "file_b": ".github/workflows/security.yml",
-        "co_change_count": 22,
-        "support_pct": 0.87
+        "co_change_count": 23,
+        "support_pct": 0.91
       },
       {
         "file_a": ".github/workflows/build.yml",
         "file_b": ".github/workflows/test.yml",
-        "co_change_count": 22,
-        "support_pct": 0.87
+        "co_change_count": 23,
+        "support_pct": 0.91
       },
       {
         "file_a": ".github/workflows/nightly.yml",
+        "file_b": ".github/workflows/test.yml",
+        "co_change_count": 19,
+        "support_pct": 0.75
+      },
+      {
+        "file_a": ".github/workflows/quality.yml",
+        "file_b": ".github/workflows/security.yml",
+        "co_change_count": 19,
+        "support_pct": 0.75
+      },
+      {
+        "file_a": ".github/workflows/quality.yml",
         "file_b": ".github/workflows/test.yml",
         "co_change_count": 18,
         "support_pct": 0.71
       },
       {
-        "file_a": ".github/workflows/quality.yml",
-        "file_b": ".github/workflows/security.yml",
+        "file_a": ".github/workflows/security.yml",
+        "file_b": ".github/workflows/test.yml",
         "co_change_count": 18,
         "support_pct": 0.71
       },
@@ -3406,20 +3787,26 @@
         "support_pct": 0.71
       },
       {
-        "file_a": ".github/workflows/quality.yml",
-        "file_b": ".github/workflows/test.yml",
-        "co_change_count": 17,
-        "support_pct": 0.67
-      },
-      {
-        "file_a": ".github/workflows/security.yml",
-        "file_b": ".github/workflows/test.yml",
-        "co_change_count": 17,
-        "support_pct": 0.67
-      },
-      {
         "file_a": ".github/workflows/build.yml",
         "file_b": ".github/workflows/quality.yml",
+        "co_change_count": 17,
+        "support_pct": 0.67
+      },
+      {
+        "file_a": ".github/workflows/codeql.yml",
+        "file_b": ".github/workflows/security.yml",
+        "co_change_count": 16,
+        "support_pct": 0.63
+      },
+      {
+        "file_a": ".github/workflows/nightly.yml",
+        "file_b": ".github/workflows/quality.yml",
+        "co_change_count": 16,
+        "support_pct": 0.63
+      },
+      {
+        "file_a": ".github/workflows/nightly.yml",
+        "file_b": ".github/workflows/security.yml",
         "co_change_count": 16,
         "support_pct": 0.63
       },
@@ -3430,20 +3817,32 @@
         "support_pct": 0.63
       },
       {
-        "file_a": ".github/workflows/codeql.yml",
-        "file_b": ".github/workflows/security.yml",
+        "file_a": ".github/workflows/build.yml",
+        "file_b": ".github/workflows/codeql.yml",
         "co_change_count": 15,
         "support_pct": 0.59
       },
       {
-        "file_a": ".github/workflows/nightly.yml",
+        "file_a": ".github/workflows/build.yml",
+        "file_b": ".github/workflows/nightly.yml",
+        "co_change_count": 15,
+        "support_pct": 0.59
+      },
+      {
+        "file_a": ".github/workflows/codeql.yml",
         "file_b": ".github/workflows/quality.yml",
         "co_change_count": 15,
         "support_pct": 0.59
       },
       {
-        "file_a": ".github/workflows/nightly.yml",
-        "file_b": ".github/workflows/security.yml",
+        "file_a": ".github/workflows/codeql.yml",
+        "file_b": ".github/workflows/test.yml",
+        "co_change_count": 15,
+        "support_pct": 0.59
+      },
+      {
+        "file_a": ".github/workflows/security.yml",
+        "file_b": "go.mod",
         "co_change_count": 15,
         "support_pct": 0.59
       },
@@ -3460,32 +3859,8 @@
         "support_pct": 0.59
       },
       {
-        "file_a": ".github/workflows/build.yml",
-        "file_b": ".github/workflows/codeql.yml",
-        "co_change_count": 14,
-        "support_pct": 0.55
-      },
-      {
-        "file_a": ".github/workflows/build.yml",
-        "file_b": ".github/workflows/nightly.yml",
-        "co_change_count": 14,
-        "support_pct": 0.55
-      },
-      {
-        "file_a": ".github/workflows/codeql.yml",
-        "file_b": ".github/workflows/quality.yml",
-        "co_change_count": 14,
-        "support_pct": 0.55
-      },
-      {
-        "file_a": ".github/workflows/codeql.yml",
-        "file_b": ".github/workflows/test.yml",
-        "co_change_count": 14,
-        "support_pct": 0.55
-      },
-      {
-        "file_a": ".github/workflows/security.yml",
-        "file_b": "go.mod",
+        "file_a": ".github/workflows/deploy-demo.yml",
+        "file_b": ".github/workflows/deploy-develop.yml",
         "co_change_count": 14,
         "support_pct": 0.55
       },
@@ -3514,200 +3889,278 @@
         "support_pct": 0.55
       },
       {
-        "file_a": ".github/workflows/deploy-demo.yml",
-        "file_b": ".github/workflows/deploy-develop.yml",
+        "file_a": ".github/workflows/benchmarks.yml",
+        "file_b": ".github/workflows/nightly.yml",
         "co_change_count": 13,
-        "support_pct": 0.52
+        "support_pct": 0.51
+      },
+      {
+        "file_a": ".github/workflows/build.yml",
+        "file_b": ".github/workflows/deploy-demo.yml",
+        "co_change_count": 13,
+        "support_pct": 0.51
+      },
+      {
+        "file_a": ".github/workflows/codeql.yml",
+        "file_b": ".github/workflows/nightly.yml",
+        "co_change_count": 13,
+        "support_pct": 0.51
       },
       {
         "file_a": "services/current-account/cmd/main.go",
         "file_b": "services/payment-order/cmd/main.go",
         "co_change_count": 13,
-        "support_pct": 0.52
+        "support_pct": 0.51
       },
       {
         "file_a": "services/current-account/service/grpc_service_integration_test.go",
         "file_b": "services/current-account/service/grpc_service_test.go",
         "co_change_count": 13,
-        "support_pct": 0.52
+        "support_pct": 0.51
       },
       {
         "file_a": "services/tenant/service/grpc_service.go",
         "file_b": "services/tenant/service/grpc_service_test.go",
         "co_change_count": 13,
-        "support_pct": 0.52
+        "support_pct": 0.51
       },
       {
         "file_a": ".github/workflows/benchmarks.yml",
-        "file_b": ".github/workflows/nightly.yml",
+        "file_b": ".github/workflows/build.yml",
         "co_change_count": 12,
-        "support_pct": 0.48
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/benchmarks.yml",
+        "file_b": ".github/workflows/codeql.yml",
+        "co_change_count": 12,
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/benchmarks.yml",
+        "file_b": ".github/workflows/quality.yml",
+        "co_change_count": 12,
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/benchmarks.yml",
+        "file_b": ".github/workflows/security.yml",
+        "co_change_count": 12,
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/benchmarks.yml",
+        "file_b": ".github/workflows/test.yml",
+        "co_change_count": 12,
+        "support_pct": 0.47
       },
       {
         "file_a": ".github/workflows/build.yml",
-        "file_b": ".github/workflows/deploy-demo.yml",
+        "file_b": ".github/workflows/migrations.yml",
         "co_change_count": 12,
-        "support_pct": 0.48
+        "support_pct": 0.47
       },
       {
-        "file_a": ".github/workflows/codeql.yml",
+        "file_a": ".github/workflows/claude.yml",
+        "file_b": ".github/workflows/security.yml",
+        "co_change_count": 12,
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/migrations.yml",
         "file_b": ".github/workflows/nightly.yml",
         "co_change_count": 12,
-        "support_pct": 0.48
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/migrations.yml",
+        "file_b": ".github/workflows/quality.yml",
+        "co_change_count": 12,
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/migrations.yml",
+        "file_b": ".github/workflows/security.yml",
+        "co_change_count": 12,
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/migrations.yml",
+        "file_b": ".github/workflows/test.yml",
+        "co_change_count": 12,
+        "support_pct": 0.47
+      },
+      {
+        "file_a": ".github/workflows/test.yml",
+        "file_b": "go.mod",
+        "co_change_count": 12,
+        "support_pct": 0.47
       },
       {
         "file_a": "services/current-account/service/deposit_orchestrator.go",
         "file_b": "services/current-account/service/withdrawal_orchestrator.go",
         "co_change_count": 12,
-        "support_pct": 0.48
+        "support_pct": 0.47
       },
       {
         "file_a": "services/payment-order/service/grpc_service.go",
         "file_b": "services/payment-order/service/grpc_service_test.go",
         "co_change_count": 12,
-        "support_pct": 0.48
+        "support_pct": 0.47
       },
       {
         "file_a": ".github/workflows/benchmarks.yml",
-        "file_b": ".github/workflows/build.yml",
+        "file_b": ".github/workflows/migrations.yml",
         "co_change_count": 11,
-        "support_pct": 0.44
-      },
-      {
-        "file_a": ".github/workflows/benchmarks.yml",
-        "file_b": ".github/workflows/codeql.yml",
-        "co_change_count": 11,
-        "support_pct": 0.44
-      },
-      {
-        "file_a": ".github/workflows/benchmarks.yml",
-        "file_b": ".github/workflows/quality.yml",
-        "co_change_count": 11,
-        "support_pct": 0.44
-      },
-      {
-        "file_a": ".github/workflows/benchmarks.yml",
-        "file_b": ".github/workflows/security.yml",
-        "co_change_count": 11,
-        "support_pct": 0.44
-      },
-      {
-        "file_a": ".github/workflows/benchmarks.yml",
-        "file_b": ".github/workflows/test.yml",
-        "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
       },
       {
         "file_a": ".github/workflows/build.yml",
-        "file_b": ".github/workflows/migrations.yml",
+        "file_b": ".github/workflows/claude.yml",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
+      },
+      {
+        "file_a": ".github/workflows/build.yml",
+        "file_b": "go.mod",
+        "co_change_count": 11,
+        "support_pct": 0.43
       },
       {
         "file_a": ".github/workflows/claude.yml",
-        "file_b": ".github/workflows/security.yml",
-        "co_change_count": 11,
-        "support_pct": 0.44
-      },
-      {
-        "file_a": ".github/workflows/migrations.yml",
-        "file_b": ".github/workflows/nightly.yml",
-        "co_change_count": 11,
-        "support_pct": 0.44
-      },
-      {
-        "file_a": ".github/workflows/migrations.yml",
         "file_b": ".github/workflows/quality.yml",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
       },
       {
-        "file_a": ".github/workflows/migrations.yml",
-        "file_b": ".github/workflows/security.yml",
-        "co_change_count": 11,
-        "support_pct": 0.44
-      },
-      {
-        "file_a": ".github/workflows/migrations.yml",
+        "file_a": ".github/workflows/claude.yml",
         "file_b": ".github/workflows/test.yml",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
       },
       {
-        "file_a": ".github/workflows/test.yml",
-        "file_b": "go.mod",
+        "file_a": ".github/workflows/codeql.yml",
+        "file_b": ".github/workflows/migrations.yml",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
+      },
+      {
+        "file_a": ".github/workflows/migrations.yml",
+        "file_b": ".github/workflows/schema-validation.yml",
+        "co_change_count": 11,
+        "support_pct": 0.43
       },
       {
         "file_a": "deploy/demo/Caddyfile",
         "file_b": "deploy/demo/docker-compose.yml",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
       },
       {
         "file_a": "services/control-plane/internal/applier/grpc_handler.go",
         "file_b": "services/control-plane/internal/applier/grpc_handler_test.go",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
       },
       {
         "file_a": "services/current-account/cmd/main.go",
         "file_b": "services/tenant/cmd/main.go",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
       },
       {
         "file_a": "services/current-account/service/saga_handlers.go",
         "file_b": "shared/pkg/saga/schema/handlers.yaml",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
       },
       {
         "file_a": "services/financial-accounting/cmd/main.go",
         "file_b": "services/position-keeping/cmd/main.go",
         "co_change_count": 11,
-        "support_pct": 0.44
+        "support_pct": 0.43
       },
       {
         "file_a": ".github/workflows/benchmarks.yml",
+        "file_b": ".github/workflows/schema-validation.yml",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/build.yml",
+        "file_b": ".github/workflows/schema-validation.yml",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/claude.yml",
+        "file_b": ".github/workflows/codeql.yml",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/claude.yml",
         "file_b": ".github/workflows/migrations.yml",
         "co_change_count": 10,
         "support_pct": 0.4
       },
       {
-        "file_a": ".github/workflows/build.yml",
-        "file_b": ".github/workflows/claude.yml",
-        "co_change_count": 10,
-        "support_pct": 0.4
-      },
-      {
-        "file_a": ".github/workflows/build.yml",
-        "file_b": "go.mod",
-        "co_change_count": 10,
-        "support_pct": 0.4
-      },
-      {
         "file_a": ".github/workflows/claude.yml",
-        "file_b": ".github/workflows/quality.yml",
-        "co_change_count": 10,
-        "support_pct": 0.4
-      },
-      {
-        "file_a": ".github/workflows/claude.yml",
-        "file_b": ".github/workflows/test.yml",
+        "file_b": ".github/workflows/nightly.yml",
         "co_change_count": 10,
         "support_pct": 0.4
       },
       {
         "file_a": ".github/workflows/codeql.yml",
-        "file_b": ".github/workflows/migrations.yml",
+        "file_b": ".github/workflows/schema-validation.yml",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/codeql.yml",
+        "file_b": "go.mod",
         "co_change_count": 10,
         "support_pct": 0.4
       },
       {
         "file_a": ".github/workflows/migrations.yml",
+        "file_b": "go.mod",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/nightly.yml",
         "file_b": ".github/workflows/schema-validation.yml",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/quality.yml",
+        "file_b": ".github/workflows/schema-validation.yml",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/quality.yml",
+        "file_b": "go.mod",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/schema-validation.yml",
+        "file_b": ".github/workflows/security.yml",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": ".github/workflows/schema-validation.yml",
+        "file_b": ".github/workflows/test.yml",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": "Dockerfile",
+        "file_b": "Dockerfile.dev",
         "co_change_count": 10,
         "support_pct": 0.4
       },
@@ -3736,6 +4189,18 @@
         "support_pct": 0.4
       },
       {
+        "file_a": "services/current-account/cmd/Dockerfile",
+        "file_b": "services/party/cmd/Dockerfile",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
+        "file_a": "services/current-account/cmd/Dockerfile",
+        "file_b": "services/tenant/cmd/Dockerfile",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
         "file_a": "services/current-account/cmd/main.go",
         "file_b": "services/position-keeping/cmd/main.go",
         "co_change_count": 10,
@@ -3760,6 +4225,12 @@
         "support_pct": 0.4
       },
       {
+        "file_a": "services/party/cmd/Dockerfile",
+        "file_b": "services/tenant/cmd/Dockerfile",
+        "co_change_count": 10,
+        "support_pct": 0.4
+      },
+      {
         "file_a": "services/payment-order/cmd/main.go",
         "file_b": "services/position-keeping/cmd/main.go",
         "co_change_count": 10,
@@ -3779,85 +4250,31 @@
       },
       {
         "file_a": ".github/workflows/benchmarks.yml",
-        "file_b": ".github/workflows/schema-validation.yml",
+        "file_b": ".github/workflows/claude.yml",
         "co_change_count": 9,
         "support_pct": 0.36
       },
       {
-        "file_a": ".github/workflows/build.yml",
+        "file_a": ".github/workflows/claude.yml",
         "file_b": ".github/workflows/schema-validation.yml",
         "co_change_count": 9,
         "support_pct": 0.36
       },
       {
         "file_a": ".github/workflows/claude.yml",
-        "file_b": ".github/workflows/codeql.yml",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/claude.yml",
-        "file_b": ".github/workflows/migrations.yml",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/claude.yml",
-        "file_b": ".github/workflows/nightly.yml",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/codeql.yml",
-        "file_b": ".github/workflows/schema-validation.yml",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/codeql.yml",
-        "file_b": "go.mod",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/migrations.yml",
         "file_b": "go.mod",
         "co_change_count": 9,
         "support_pct": 0.36
       },
       {
         "file_a": ".github/workflows/nightly.yml",
-        "file_b": ".github/workflows/schema-validation.yml",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/quality.yml",
-        "file_b": ".github/workflows/schema-validation.yml",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/quality.yml",
         "file_b": "go.mod",
         "co_change_count": 9,
         "support_pct": 0.36
       },
       {
-        "file_a": ".github/workflows/schema-validation.yml",
-        "file_b": ".github/workflows/security.yml",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/schema-validation.yml",
-        "file_b": ".github/workflows/test.yml",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "Dockerfile",
-        "file_b": "Dockerfile.dev",
+        "file_a": ".github/workflows/test.yml",
+        "file_b": "Dockerfile",
         "co_change_count": 9,
         "support_pct": 0.36
       },
@@ -3868,112 +4285,64 @@
         "support_pct": 0.36
       },
       {
-        "file_a": "services/current-account/cmd/Dockerfile",
+        "file_a": "go.mod",
+        "file_b": "services/current-account/cmd/Dockerfile",
+        "co_change_count": 9,
+        "support_pct": 0.36
+      },
+      {
+        "file_a": "go.mod",
+        "file_b": "services/financial-accounting/cmd/Dockerfile",
+        "co_change_count": 9,
+        "support_pct": 0.36
+      },
+      {
+        "file_a": "go.mod",
         "file_b": "services/party/cmd/Dockerfile",
         "co_change_count": 9,
         "support_pct": 0.36
       },
       {
+        "file_a": "go.mod",
+        "file_b": "services/payment-order/cmd/Dockerfile",
+        "co_change_count": 9,
+        "support_pct": 0.36
+      },
+      {
+        "file_a": "go.mod",
+        "file_b": "services/position-keeping/cmd/Dockerfile",
+        "co_change_count": 9,
+        "support_pct": 0.36
+      },
+      {
+        "file_a": "go.mod",
+        "file_b": "services/tenant/cmd/Dockerfile",
+        "co_change_count": 9,
+        "support_pct": 0.36
+      },
+      {
         "file_a": "services/current-account/cmd/Dockerfile",
-        "file_b": "services/tenant/cmd/Dockerfile",
+        "file_b": "services/financial-accounting/cmd/Dockerfile",
         "co_change_count": 9,
         "support_pct": 0.36
       },
       {
-        "file_a": "services/current-account/service/grpc_service.go",
-        "file_b": "services/current-account/service/withdrawal_test.go",
+        "file_a": "services/current-account/cmd/Dockerfile",
+        "file_b": "services/payment-order/cmd/Dockerfile",
         "co_change_count": 9,
         "support_pct": 0.36
-      },
-      {
-        "file_a": "services/current-account/service/lien_service.go",
-        "file_b": "services/current-account/service/lien_service_test.go",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "services/financial-accounting/adapters/persistence/repository_test.go",
-        "file_b": "services/financial-accounting/service/grpc_integration_test.go",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "services/financial-accounting/cmd/main.go",
-        "file_b": "services/party/cmd/main.go",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "services/party/cmd/Dockerfile",
-        "file_b": "services/tenant/cmd/Dockerfile",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "services/party/cmd/main.go",
-        "file_b": "services/payment-order/cmd/main.go",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "services/payment-order/cmd/main.go",
-        "file_b": "services/tenant/cmd/main.go",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "services/payment-order/service/grpc_service.go",
-        "file_b": "services/payment-order/service/integration_test.go",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "services/payment-order/service/grpc_service_test.go",
-        "file_b": "services/payment-order/service/integration_test.go",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": "services/reference-data/saga/e2e_seeder_test.go",
-        "file_b": "services/reference-data/saga/seeder_test.go",
-        "co_change_count": 9,
-        "support_pct": 0.36
-      },
-      {
-        "file_a": ".github/workflows/benchmarks.yml",
-        "file_b": ".github/workflows/claude.yml",
-        "co_change_count": 8,
-        "support_pct": 0.32
-      },
-      {
-        "file_a": ".github/workflows/claude.yml",
-        "file_b": ".github/workflows/schema-validation.yml",
-        "co_change_count": 8,
-        "support_pct": 0.32
-      },
-      {
-        "file_a": ".github/workflows/claude.yml",
-        "file_b": "go.mod",
-        "co_change_count": 8,
-        "support_pct": 0.32
-      },
-      {
-        "file_a": ".github/workflows/nightly.yml",
-        "file_b": "go.mod",
-        "co_change_count": 8,
-        "support_pct": 0.32
       }
     ],
     "static_history_disagreement": [
       {
         "path": "services/payment-order/cmd",
-        "containment_ratio": 0.0182,
+        "containment_ratio": 0.0179,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
       {
         "path": "services/current-account/cmd",
-        "containment_ratio": 0.0208,
+        "containment_ratio": 0.0204,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
@@ -4002,6 +4371,12 @@
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
       {
+        "path": "services/api-gateway",
+        "containment_ratio": 0.1552,
+        "finding": "bleeding_module",
+        "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
+      },
+      {
         "path": "scripts",
         "containment_ratio": 0.1558,
         "finding": "bleeding_module",
@@ -4010,12 +4385,6 @@
       {
         "path": "services/financial-accounting/service",
         "containment_ratio": 0.1569,
-        "finding": "bleeding_module",
-        "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
-      },
-      {
-        "path": "services/api-gateway",
-        "containment_ratio": 0.1579,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
@@ -4045,13 +4414,13 @@
       },
       {
         "path": "cmd/meridian",
-        "containment_ratio": 0.1875,
+        "containment_ratio": 0.1856,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
       {
         "path": "services/position-keeping",
-        "containment_ratio": 0.1884,
+        "containment_ratio": 0.1871,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
@@ -4069,13 +4438,13 @@
       },
       {
         "path": "services/financial-accounting",
-        "containment_ratio": 0.2308,
+        "containment_ratio": 0.229,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
       {
         "path": "services/tenant",
-        "containment_ratio": 0.2353,
+        "containment_ratio": 0.2333,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
@@ -4087,7 +4456,7 @@
       },
       {
         "path": "cmd",
-        "containment_ratio": 0.2431,
+        "containment_ratio": 0.2418,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
@@ -4105,25 +4474,25 @@
       },
       {
         "path": "shared/platform",
-        "containment_ratio": 0.2625,
+        "containment_ratio": 0.2609,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
       {
         "path": "services/payment-order",
-        "containment_ratio": 0.2649,
+        "containment_ratio": 0.2632,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
       {
         "path": "services/current-account",
-        "containment_ratio": 0.2735,
+        "containment_ratio": 0.2723,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       },
       {
         "path": "services/market-information",
-        "containment_ratio": 0.2879,
+        "containment_ratio": 0.2836,
         "finding": "bleeding_module",
         "recommendation": "edits here bleed outside the directory (low containment); no static import graph available to cross-check the boundary"
       }
@@ -4138,7 +4507,7 @@
       },
       {
         "path": "frontend",
-        "containment_ratio": 0.8132,
+        "containment_ratio": 0.8138,
         "finding": "refactor_boundary",
         "recommendation": "safe to hand an agent in isolation - edits here stay contained (high containment)"
       }
@@ -4158,10 +4527,9 @@
       "shared/README.md": -1.0,
       "services/current-account/README.md": -1.0,
       "frontend/README.md": -1.0,
+      "scripts/README.md": -1.0,
       "services/financial-accounting/README.md": -1.0,
-      "services/api-gateway/README.md": -1.0,
       "SECURITY.md": -1.0,
-      "services/payment-order/README.md": -1.0,
       ".githooks/README.md": 0.75,
       ".github/claude-review-instructions.md": -1.0,
       "AGENTS.md": -1.0,
@@ -4371,9 +4739,9 @@
       "docs/tilt-fast-startup.md": -1.0,
       "frontend/docs/tenant-subdomain-routing.md": -1.0,
       "http/README.md": -1.0,
-      "scripts/README.md": -1.0,
       "scripts/kafka-tests/README.md": 0.5,
       "services/README.md": 0.975,
+      "services/api-gateway/README.md": -1.0,
       "services/audit-worker/README.md": -1.0,
       "services/control-plane/internal/applier/testdata/tenant-saga-examples/README.md": -1.0,
       "services/event-router/README.md": -1.0,
@@ -4387,6 +4755,7 @@
       "services/mcp-server/internal/resources/docs/starlark-guide.md": -1.0,
       "services/operational-gateway/README.md": -1.0,
       "services/party/README.md": -1.0,
+      "services/payment-order/README.md": -1.0,
       "services/reconciliation/README.md": -1.0,
       "services/reference-data/README.md": -1.0,
       "services/tenant/README.md": -1.0,
@@ -4435,7 +4804,7 @@
       },
       "services/current-account/README.md": {
         "complexity_summarised": 150.0,
-        "subject_code_count": 5,
+        "subject_code_count": 4,
         "doc_value": -150.0
       },
       "frontend/README.md": {
@@ -4443,25 +4812,20 @@
         "subject_code_count": 2,
         "doc_value": -145.0
       },
+      "scripts/README.md": {
+        "complexity_summarised": 118.0,
+        "subject_code_count": 2,
+        "doc_value": -118.0
+      },
       "services/financial-accounting/README.md": {
         "complexity_summarised": 116.0,
         "subject_code_count": 1,
         "doc_value": -116.0
       },
-      "services/api-gateway/README.md": {
-        "complexity_summarised": 100.0,
-        "subject_code_count": 1,
-        "doc_value": -100.0
-      },
       "SECURITY.md": {
         "complexity_summarised": 72.0,
         "subject_code_count": 3,
         "doc_value": -72.0
-      },
-      "services/payment-order/README.md": {
-        "complexity_summarised": 57.0,
-        "subject_code_count": 1,
-        "doc_value": -57.0
       },
       ".githooks/README.md": {
         "complexity_summarised": 0.0,
@@ -5508,11 +5872,6 @@
         "subject_code_count": 0,
         "doc_value": -0.0
       },
-      "scripts/README.md": {
-        "complexity_summarised": 0.0,
-        "subject_code_count": 0,
-        "doc_value": -0.0
-      },
       "scripts/kafka-tests/README.md": {
         "complexity_summarised": 0.0,
         "subject_code_count": 0,
@@ -5522,6 +5881,11 @@
         "complexity_summarised": 0.0,
         "subject_code_count": 0,
         "doc_value": 0.0
+      },
+      "services/api-gateway/README.md": {
+        "complexity_summarised": 0.0,
+        "subject_code_count": 0,
+        "doc_value": -0.0
       },
       "services/audit-worker/README.md": {
         "complexity_summarised": 0.0,
@@ -5584,6 +5948,11 @@
         "doc_value": -0.0
       },
       "services/party/README.md": {
+        "complexity_summarised": 0.0,
+        "subject_code_count": 0,
+        "doc_value": -0.0
+      },
+      "services/payment-order/README.md": {
         "complexity_summarised": 0.0,
         "subject_code_count": 0,
         "doc_value": -0.0
@@ -5656,16 +6025,6 @@
         "recommendation": "Fix or DELETE this doc. A stale summary over complex code is worse than none -- it lies to the next agent. Do not auto-generate a replacement; a hollow summary is still a lying map."
       },
       {
-        "path": "services/payment-order/service/HANDLER_ARCHITECTURE.md",
-        "complexity_summarised": 204.0,
-        "freshness": -1.0,
-        "doc_value": -204.0,
-        "finding": "lying_map",
-        "confidence": "low",
-        "subject_code_count": 1,
-        "recommendation": "Fix or DELETE this doc. A stale summary over complex code is worse than none -- it lies to the next agent. Do not auto-generate a replacement; a hollow summary is still a lying map."
-      },
-      {
         "path": "services/mcp-server/README.md",
         "complexity_summarised": 194.0,
         "freshness": -1.0,
@@ -5712,7 +6071,7 @@
         "doc_value": -150.0,
         "finding": "lying_map",
         "confidence": "high",
-        "subject_code_count": 5,
+        "subject_code_count": 4,
         "recommendation": "Fix or DELETE this doc. A stale summary over complex code is worse than none -- it lies to the next agent. Do not auto-generate a replacement; a hollow summary is still a lying map."
       },
       {
@@ -5726,20 +6085,20 @@
         "recommendation": "Fix or DELETE this doc. A stale summary over complex code is worse than none -- it lies to the next agent. Do not auto-generate a replacement; a hollow summary is still a lying map."
       },
       {
+        "path": "scripts/README.md",
+        "complexity_summarised": 118.0,
+        "freshness": -1.0,
+        "doc_value": -118.0,
+        "finding": "lying_map",
+        "confidence": "high",
+        "subject_code_count": 2,
+        "recommendation": "Fix or DELETE this doc. A stale summary over complex code is worse than none -- it lies to the next agent. Do not auto-generate a replacement; a hollow summary is still a lying map."
+      },
+      {
         "path": "services/financial-accounting/README.md",
         "complexity_summarised": 116.0,
         "freshness": -1.0,
         "doc_value": -116.0,
-        "finding": "lying_map",
-        "confidence": "high",
-        "subject_code_count": 1,
-        "recommendation": "Fix or DELETE this doc. A stale summary over complex code is worse than none -- it lies to the next agent. Do not auto-generate a replacement; a hollow summary is still a lying map."
-      },
-      {
-        "path": "services/api-gateway/README.md",
-        "complexity_summarised": 100.0,
-        "freshness": -1.0,
-        "doc_value": -100.0,
         "finding": "lying_map",
         "confidence": "high",
         "subject_code_count": 1,
@@ -5762,9 +6121,9 @@
       "docs/prd/026-operations-console-ui.md": true,
       "frontend/src/App.tsx": true,
       "frontend/src/features/reconciliation/pages/detail.test.tsx": true,
-      "services/api-gateway/server.go": true,
+      "scripts/demo.sh": true,
+      "scripts/doctor.sh": true,
       "services/control-plane/internal/validator/manifest_validator_test.go": true,
-      "services/current-account/adapters/persistence/repository.go": true,
       "services/current-account/e2e/saga_compensation_test.go": true,
       "services/current-account/service/grpc_service_integration_test.go": true,
       "services/current-account/service/grpc_service_test.go": true,
@@ -5773,7 +6132,6 @@
       "services/identity/service/grpc_service_test.go": true,
       "services/internal-account/e2e/e2e_test.go": true,
       "services/mcp-server/internal/tools/economy_test.go": true,
-      "services/payment-order/cmd/main.go": true,
       "services/payment-order/service/grpc_service_test.go": true,
       "services/position-keeping/app/config_test.go": true,
       "services/position-keeping/domain/financial_position_log_test.go": true,
@@ -5790,9 +6148,9 @@
       "docs/prd/026-operations-console-ui.md": true,
       "frontend/src/App.tsx": true,
       "frontend/src/features/reconciliation/pages/detail.test.tsx": true,
-      "services/api-gateway/server.go": true,
+      "scripts/demo.sh": true,
+      "scripts/doctor.sh": true,
       "services/control-plane/internal/validator/manifest_validator_test.go": true,
-      "services/current-account/adapters/persistence/repository.go": true,
       "services/current-account/e2e/saga_compensation_test.go": true,
       "services/current-account/service/grpc_service_integration_test.go": true,
       "services/current-account/service/grpc_service_test.go": true,
@@ -5801,7 +6159,6 @@
       "services/identity/service/grpc_service_test.go": true,
       "services/internal-account/e2e/e2e_test.go": true,
       "services/mcp-server/internal/tools/economy_test.go": true,
-      "services/payment-order/cmd/main.go": true,
       "services/payment-order/service/grpc_service_test.go": true,
       "services/position-keeping/app/config_test.go": true,
       "services/position-keeping/domain/financial_position_log_test.go": true,
@@ -5818,9 +6175,9 @@
       "docs/prd/026-operations-console-ui.md": "human",
       "frontend/src/App.tsx": "human",
       "frontend/src/features/reconciliation/pages/detail.test.tsx": "human",
-      "services/api-gateway/server.go": "human",
+      "scripts/demo.sh": "human",
+      "scripts/doctor.sh": "mixed",
       "services/control-plane/internal/validator/manifest_validator_test.go": "human",
-      "services/current-account/adapters/persistence/repository.go": "human",
       "services/current-account/e2e/saga_compensation_test.go": "human",
       "services/current-account/service/grpc_service_integration_test.go": "human",
       "services/current-account/service/grpc_service_test.go": "human",
@@ -5829,7 +6186,6 @@
       "services/identity/service/grpc_service_test.go": "human",
       "services/internal-account/e2e/e2e_test.go": "human",
       "services/mcp-server/internal/tools/economy_test.go": "human",
-      "services/payment-order/cmd/main.go": "human",
       "services/payment-order/service/grpc_service_test.go": "human",
       "services/position-keeping/app/config_test.go": "human",
       "services/position-keeping/domain/financial_position_log_test.go": "human",
@@ -5843,7 +6199,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 70,
+        "days_since_comprehension_event": 76,
         "finding": null,
         "recommendation": null
       },
@@ -5852,7 +6208,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 69,
+        "days_since_comprehension_event": 75,
         "finding": null,
         "recommendation": null
       },
@@ -5861,7 +6217,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 52,
+        "days_since_comprehension_event": 58,
         "finding": null,
         "recommendation": null
       },
@@ -5870,7 +6226,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 104,
+        "days_since_comprehension_event": 110,
         "finding": null,
         "recommendation": null
       },
@@ -5879,7 +6235,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 60,
+        "days_since_comprehension_event": 66,
         "finding": null,
         "recommendation": null
       },
@@ -5888,7 +6244,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 92,
+        "days_since_comprehension_event": 99,
         "finding": null,
         "recommendation": null
       },
@@ -5897,7 +6253,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 92,
+        "days_since_comprehension_event": 99,
         "finding": null,
         "recommendation": null
       },
@@ -5906,7 +6262,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 52,
+        "days_since_comprehension_event": 58,
         "finding": null,
         "recommendation": null
       },
@@ -5915,16 +6271,25 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 76,
+        "days_since_comprehension_event": 82,
         "finding": null,
         "recommendation": null
       },
       {
-        "path": "services/api-gateway/server.go",
+        "path": "scripts/demo.sh",
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 52,
+        "days_since_comprehension_event": 170,
+        "finding": null,
+        "recommendation": null
+      },
+      {
+        "path": "scripts/doctor.sh",
+        "human_anchor": true,
+        "intent_source": true,
+        "authorship_class": "mixed",
+        "days_since_comprehension_event": 101,
         "finding": null,
         "recommendation": null
       },
@@ -5933,16 +6298,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 0,
-        "finding": null,
-        "recommendation": null
-      },
-      {
-        "path": "services/current-account/adapters/persistence/repository.go",
-        "human_anchor": true,
-        "intent_source": true,
-        "authorship_class": "human",
-        "days_since_comprehension_event": 0,
+        "days_since_comprehension_event": 6,
         "finding": null,
         "recommendation": null
       },
@@ -5951,7 +6307,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 71,
+        "days_since_comprehension_event": 77,
         "finding": null,
         "recommendation": null
       },
@@ -5960,7 +6316,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 55,
+        "days_since_comprehension_event": 61,
         "finding": null,
         "recommendation": null
       },
@@ -5969,7 +6325,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 51,
+        "days_since_comprehension_event": 57,
         "finding": null,
         "recommendation": null
       },
@@ -5978,7 +6334,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 55,
+        "days_since_comprehension_event": 61,
         "finding": null,
         "recommendation": null
       },
@@ -5987,7 +6343,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 56,
+        "days_since_comprehension_event": 62,
         "finding": null,
         "recommendation": null
       },
@@ -5996,7 +6352,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 62,
+        "days_since_comprehension_event": 68,
         "finding": null,
         "recommendation": null
       },
@@ -6005,7 +6361,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 55,
+        "days_since_comprehension_event": 61,
         "finding": null,
         "recommendation": null
       },
@@ -6014,16 +6370,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 67,
-        "finding": null,
-        "recommendation": null
-      },
-      {
-        "path": "services/payment-order/cmd/main.go",
-        "human_anchor": true,
-        "intent_source": true,
-        "authorship_class": "human",
-        "days_since_comprehension_event": 62,
+        "days_since_comprehension_event": 73,
         "finding": null,
         "recommendation": null
       },
@@ -6032,7 +6379,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 61,
+        "days_since_comprehension_event": 67,
         "finding": null,
         "recommendation": null
       },
@@ -6041,7 +6388,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 73,
+        "days_since_comprehension_event": 79,
         "finding": null,
         "recommendation": null
       },
@@ -6050,7 +6397,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 141,
+        "days_since_comprehension_event": 147,
         "finding": null,
         "recommendation": null
       },
@@ -6059,7 +6406,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 61,
+        "days_since_comprehension_event": 67,
         "finding": null,
         "recommendation": null
       },
@@ -6068,7 +6415,7 @@
         "human_anchor": true,
         "intent_source": true,
         "authorship_class": "human",
-        "days_since_comprehension_event": 52,
+        "days_since_comprehension_event": 58,
         "finding": null,
         "recommendation": null
       }
@@ -6115,14 +6462,13 @@
       "name": "lying_map",
       "paths": [
         "frontend/README.md",
-        "services/api-gateway/README.md",
+        "scripts/README.md",
         "services/control-plane/README.md",
         "services/current-account/README.md",
         "services/financial-accounting/README.md",
         "services/identity/README.md",
         "services/internal-account/README.md",
         "services/mcp-server/README.md",
-        "services/payment-order/service/HANDLER_ARCHITECTURE.md",
         "services/position-keeping/README.md",
         "shared/README.md"
       ],
@@ -6132,6 +6478,19 @@
       "name": "unexplained_complexity",
       "paths": [],
       "action": "write the missing contract (do NOT auto-generate)"
+    },
+    {
+      "name": "untrusted_hotspot",
+      "paths": [],
+      "action": "strengthen tests to pin observable behaviour (not internal state)"
+    },
+    {
+      "name": "self_referential_tests",
+      "paths": [
+        "frontend/src/App.tsx",
+        "scripts/doctor.sh"
+      ],
+      "action": "request human review - tests verify internal consistency, not truth"
     },
     {
       "name": "orphaned_understanding",
@@ -6161,9 +6520,23 @@
       "score": 1
     },
     {
-      "path": "services/api-gateway/README.md",
+      "path": "frontend/src/App.tsx",
+      "findings": [
+        "self_referential_tests"
+      ],
+      "score": 1
+    },
+    {
+      "path": "scripts/README.md",
       "findings": [
         "lying_map"
+      ],
+      "score": 1
+    },
+    {
+      "path": "scripts/doctor.sh",
+      "findings": [
+        "self_referential_tests"
       ],
       "score": 1
     },
@@ -6208,346 +6581,50 @@
         "lying_map"
       ],
       "score": 1
-    },
-    {
-      "path": "services/payment-order/service/HANDLER_ARCHITECTURE.md",
-      "findings": [
-        "lying_map"
-      ],
-      "score": 1
-    },
-    {
-      "path": "services/position-keeping/README.md",
-      "findings": [
-        "lying_map"
-      ],
-      "score": 1
     }
   ],
-  "test_pressure": {
-    "mutation_config_present": false,
-    "mutation_tools_detected": [],
-    "ci_integrated": false,
-    "mutation_run": false,
-    "mutation_scope": [],
-    "per_file": [],
-    "survivor_density": {
-      "overall": null,
-      "total_survived": 0,
-      "total_mutants": null,
-      "by_file": {}
-    },
-    "survivor_clusters": [],
-    "gap_signal": "not assessed",
-    "cheap_heuristics": {
-      "assertion_on_internal": [
-        {
-          "test_file": "cookbook/schema_validation_test.go",
-          "subject_function": "(file)",
-          "internal_field": "fn",
-          "confidence": "low"
-        },
-        {
-          "test_file": "cookbook/validation_test.go",
-          "subject_function": "(file)",
-          "internal_field": "json",
-          "confidence": "low"
-        },
-        {
-          "test_file": "cookbook/validation_test.go",
-          "subject_function": "(file)",
-          "internal_field": "yaml",
-          "confidence": "low"
-        },
-        {
-          "test_file": "cookbook/validation_test.go",
-          "subject_function": "(file)",
-          "internal_field": "composes_with",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/auth_flows_test.go",
-          "subject_function": "(file)",
-          "internal_field": "com",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/registration_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "meridian",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/registration_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "com",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/registration_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "entries",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/auth_sso_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "wantErr",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/auth_sso_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "meridianhub",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/auth_sso_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "com",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/auth_sso_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "demo",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/auth_sso_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "localhost",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/headers_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expectedResult",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/headers_test.go",
-          "subject_function": "(file)",
-          "internal_field": "api",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/headers_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expected",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/consent_code_store_test.go",
-          "subject_function": "(file)",
-          "internal_field": "entries",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/transcoding_test.go",
-          "subject_function": "(file)",
-          "internal_field": "httpStatus",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/transcoding_test.go",
-          "subject_function": "(file)",
-          "internal_field": "grpcCode",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/verification_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "entries",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/providers_test.go",
-          "subject_function": "(file)",
-          "internal_field": "example",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/password_reset_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "entries",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/proxy_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expectedMatch",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/proxy_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expected",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/proxy_test.go",
-          "subject_function": "(file)",
-          "internal_field": "example",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/auth_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "com",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/config_test.go",
-          "subject_function": "(file)",
-          "internal_field": "example",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/config_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expected",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/config_test.go",
-          "subject_function": "(file)",
-          "internal_field": "wantError",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/config_test.go",
-          "subject_function": "(file)",
-          "internal_field": "payment",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/config_test.go",
-          "subject_function": "(file)",
-          "internal_field": "wantJWKSURL",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/config_test.go",
-          "subject_function": "(file)",
-          "internal_field": "wantIssuer",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expectedStatus",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expectedBody",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "config",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "logger",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "mux",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "tenantResolver",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "entries",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "endpoint",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "statusCode",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/server_test.go",
-          "subject_function": "(file)",
-          "internal_field": "healthChecker",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/error_response_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expected",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/error_response_test.go",
-          "subject_function": "(file)",
-          "internal_field": "httpStatus",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/error_response_test.go",
-          "subject_function": "(file)",
-          "internal_field": "stringCode",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/error_response_test.go",
-          "subject_function": "(file)",
-          "internal_field": "statusCode",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/mcp_consent_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "hasEntry",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/api-gateway/mcp_consent_handler_test.go",
-          "subject_function": "(file)",
-          "internal_field": "expectedError",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/reference-data/saga_migrations_test.go",
-          "subject_function": "(file)",
-          "internal_field": "container",
-          "confidence": "low"
-        },
-        {
-          "test_file": "services/reference-data/saga_migrations_test.go",
-          "subject_function": "(file)",
-          "internal_field": "name",
-          "confidence": "low"
-        }
-      ],
-      "untested_boundaries": [],
-      "duplicate_truth": [],
-      "confidence_note": "candidate signals for human judgement, never verdicts"
-    },
-    "mutation_note": "opt-in required: mutation testing mutates and runs code"
+  "findings_markdown": "## Cross-Layer Findings (Keyhole Readiness)\n\n### lying_map\n\nAction: fix or delete the doc\n\nPaths:\n- frontend/README.md\n- scripts/README.md\n- services/control-plane/README.md\n- services/current-account/README.md\n- services/financial-accounting/README.md\n- services/identity/README.md\n- services/internal-account/README.md\n- services/mcp-server/README.md\n- services/position-keeping/README.md\n- shared/README.md\n\n### self_referential_tests\n\nAction: request human review - tests verify internal consistency, not truth\n\nPaths:\n- frontend/src/App.tsx\n- scripts/doctor.sh\n\n### refactor_boundary\n\nAction: safe to hand an agent in isolation\n\nPaths:\n- docs/prd\n- frontend\n\n### Attention List (Priority Order)\n\n- frontend/README.md (score 1): lying_map\n- frontend/src/App.tsx (score 1): self_referential_tests\n- scripts/README.md (score 1): lying_map\n- scripts/doctor.sh (score 1): self_referential_tests\n- services/control-plane/README.md (score 1): lying_map\n",
+  "keyhole_summary": {
+    "concerns": [
+      {
+        "name": "lying_map",
+        "count": 10
+      },
+      {
+        "name": "self_referential_tests",
+        "count": 2
+      }
+    ],
+    "safe_zones": 2,
+    "total_concerns": 12,
+    "summary_text": "12 structural concerns (10 lying map, 2 self referential tests), 2 safe zones."
   },
-  "plugin_version": "1.15.0",
+  "prescribed_actions": [
+    {
+      "path": "frontend/README.md",
+      "action": "fix or delete the doc",
+      "findings": [
+        "lying_map"
+      ],
+      "rank": 1
+    },
+    {
+      "path": "frontend/src/App.tsx",
+      "action": "request human review - tests verify internal consistency, not truth",
+      "findings": [
+        "self_referential_tests"
+      ],
+      "rank": 2
+    },
+    {
+      "path": "scripts/README.md",
+      "action": "fix or delete the doc",
+      "findings": [
+        "lying_map"
+      ],
+      "rank": 3
+    }
+  ],
+  "plugin_version": "1.37.0",
   "anomalies": []
 }

@@ -1,6 +1,6 @@
 # Hotspot: `frontend/src/App.tsx`
 
-_First flagged: 2026-05-29. Last seen: 2026-05-29. Status: new._
+_First flagged: 2026-05-29. Last seen: 2026-06-04. Status: new._
 
 ## Current metrics
 
@@ -15,7 +15,7 @@ _First flagged: 2026-05-29. Last seen: 2026-05-29. Status: new._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-05-29 | 289 | 91.0 | 66 | new |
+| 2026-06-04 | 289 | 91.0 | 66 | new |
 
 ## Briefing for editing this file
 
@@ -25,7 +25,6 @@ Hotspot (new). 289 LOC, max cyclomatic complexity 91.0, 66 commits in churn wind
 
 ## Suggested actions
 
-- Promote frontend eslint complexity rules from warn to error so they ratchet (currently App.tsx ccn 91 is only flagged advisorily)
-- Decompose App.tsx: extract routing and provider wiring into separate modules
-- Add as a first target for the new CI mutation-testing pass, using a JS/TS mutation framework (Stryker, `@stryker-mutator/core`) — not the Go `gremlins`/`ooze` path used for Go hotspots
+- Request independent human review - code and co-located tests entered in the same commit
+- Confirm tests assert observable behaviour, not internal structure (66 commits, most-churned file)
 
