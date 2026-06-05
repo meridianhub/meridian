@@ -1,6 +1,6 @@
 # Hotspot: `Makefile`
 
-_First flagged: 2026-05-29. Last seen: 2026-05-29. Status: new._
+_First flagged: 2026-05-29. Last seen: 2026-06-04. Status: new._
 
 ## Current metrics
 
@@ -15,7 +15,7 @@ _First flagged: 2026-05-29. Last seen: 2026-05-29. Status: new._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-05-29 | 463 | 72.0 | 31 | new |
+| 2026-06-04 | 463 | 72.0 | 31 | new |
 
 ## Briefing for editing this file
 

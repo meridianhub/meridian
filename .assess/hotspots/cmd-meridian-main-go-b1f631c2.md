@@ -1,6 +1,6 @@
 # Hotspot: `cmd/meridian/main.go`
 
-_First flagged: 2026-05-29. Last seen: 2026-05-29. Status: new._
+_First flagged: 2026-05-29. Last seen: 2026-06-04. Status: new._
 
 ## Current metrics
 
@@ -15,7 +15,7 @@ _First flagged: 2026-05-29. Last seen: 2026-05-29. Status: new._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-05-29 | 431 | 69.0 | 64 | new |
+| 2026-06-04 | 431 | 69.0 | 64 | new |
 
 ## Briefing for editing this file
 
@@ -25,6 +25,4 @@ Hotspot (new). 431 LOC, max cyclomatic complexity 69.0, 64 commits in churn wind
 
 ## Suggested actions
 
-- Extract service wiring/init (ccn 69, 64 commits) into smaller named init functions
-- Add as a first target for the new CI mutation-testing pass
-
+- Pending LLM-generated suggestions

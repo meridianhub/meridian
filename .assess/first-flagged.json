@@ -15,5 +15,9 @@
   "services/payment-order/cmd/main.go": "2026-05-29",
   "Makefile": "2026-05-29",
   "services/current-account/adapters/persistence/repository.go": "2026-05-29",
-  "services/api-gateway/server.go": "2026-05-29"
+  "services/api-gateway/server.go": "2026-05-29",
+  "scripts/demo.sh": "2026-06-04",
+  "services/financial-accounting/service/financial_accounting_service_test.go": "2026-06-04",
+  "scripts/doctor.sh": "2026-06-04",
+  "services/current-account/service/lien_service_test.go": "2026-06-04"
 }

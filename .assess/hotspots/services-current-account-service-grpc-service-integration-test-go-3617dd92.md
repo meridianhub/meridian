@@ -1,6 +1,6 @@
 # Hotspot: `services/current-account/service/grpc_service_integration_test.go`
 
-_First flagged: 2026-05-29. Last seen: 2026-05-29. Status: new._
+_First flagged: 2026-05-29. Last seen: 2026-06-04. Status: new._
 
 ## Current metrics
 
@@ -15,7 +15,7 @@ _First flagged: 2026-05-29. Last seen: 2026-05-29. Status: new._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-05-29 | 1069 | 98.0 | 33 | new |
+| 2026-06-04 | 1069 | 98.0 | 33 | new |
 
 ## Briefing for editing this file
 

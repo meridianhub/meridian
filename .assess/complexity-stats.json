@@ -1,5 +1,5 @@
 {
-  "plugin_version": "1.15.0",
+  "plugin_version": "1.37.0",
   "files_scored": 4030,
   "scoring_coverage": {
     "lizard": 3303,
@@ -12,10 +12,59 @@
     "max": 3144.0,
     "total": 800888
   },
+  "est_tokens": {
+    "p50": 1409.5,
+    "p95": 6298.099999999999,
+    "max": 38671.0,
+    "total": 8657937,
+    "budget": {
+      "total": 8657937,
+      "budget": 200000,
+      "budget_basis": "estimate (~4 chars/token, documented default)",
+      "chars_per_token": 4,
+      "files_over_budget": 0,
+      "subtrees_over_budget": 6,
+      "over_budget_subtrees": [
+        {
+          "path": "services",
+          "est_tokens": 4690012
+        },
+        {
+          "path": "shared",
+          "est_tokens": 1109049
+        },
+        {
+          "path": "docs",
+          "est_tokens": 1026138
+        },
+        {
+          "path": "frontend",
+          "est_tokens": 775752
+        },
+        {
+          "path": "api",
+          "est_tokens": 284411
+        },
+        {
+          "path": "cmd",
+          "est_tokens": 227411
+        }
+      ]
+    }
+  },
   "ccn": {
+    "basis": "file-aggregate",
     "p50": 14.0,
     "p95": 75.0,
     "max": 336.0
+  },
+  "fn_ccn": {
+    "basis": "per-function",
+    "source": "lizard-only",
+    "function_count": 47402,
+    "p50": 1.0,
+    "p95": 6.0,
+    "max": 84.0
   },
   "churn": {
     "p50": 1.0,
@@ -24,73 +73,103 @@
   },
   "top_hotspots": [
     {
+      "path": "services/current-account/service/grpc_service_integration_test.go",
+      "loc": 1069,
+      "est_tokens": 15362,
+      "ccn": 98.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 21.0,
+      "commits": 33,
+      "source": "lizard"
+    },
+    {
+      "path": "Makefile",
+      "loc": 463,
+      "est_tokens": 6458,
+      "ccn": 72.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": null,
+      "commits": 31,
+      "source": "scc"
+    },
+    {
+      "path": "scripts/demo.sh",
+      "loc": 1113,
+      "est_tokens": 14489,
+      "ccn": 118.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": null,
+      "commits": 6,
+      "source": "scc"
+    },
+    {
+      "path": "services/payment-order/service/grpc_service_test.go",
+      "loc": 2283,
+      "est_tokens": 24924,
+      "ccn": 204.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 11.0,
+      "commits": 17,
+      "source": "lizard"
+    },
+    {
+      "path": "services/financial-accounting/service/financial_accounting_service_test.go",
+      "loc": 1943,
+      "est_tokens": 20755,
+      "ccn": 116.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 20.0,
+      "commits": 11,
+      "source": "lizard"
+    },
+    {
+      "path": "services/current-account/service/grpc_service_test.go",
+      "loc": 1427,
+      "est_tokens": 14089,
+      "ccn": 138.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 8.0,
+      "commits": 27,
+      "source": "lizard"
+    },
+    {
       "path": "frontend/src/App.tsx",
       "loc": 289,
+      "est_tokens": 5349,
       "ccn": 91.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 8.0,
       "commits": 66,
       "source": "lizard"
     },
     {
       "path": "cmd/meridian/main.go",
       "loc": 431,
+      "est_tokens": 4702,
       "ccn": 69.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 10.0,
       "commits": 64,
       "source": "lizard"
     },
     {
-      "path": "services/control-plane/internal/validator/manifest_validator_test.go",
-      "loc": 1054,
-      "ccn": 218.0,
-      "commits": 17,
-      "source": "lizard"
-    },
-    {
-      "path": "services/current-account/service/grpc_service_test.go",
-      "loc": 1427,
-      "ccn": 138.0,
-      "commits": 27,
-      "source": "lizard"
-    },
-    {
-      "path": "services/payment-order/service/grpc_service_test.go",
-      "loc": 2283,
-      "ccn": 204.0,
-      "commits": 17,
-      "source": "lizard"
-    },
-    {
-      "path": "services/current-account/service/grpc_service_integration_test.go",
-      "loc": 1069,
-      "ccn": 98.0,
-      "commits": 33,
-      "source": "lizard"
-    },
-    {
-      "path": "services/payment-order/cmd/main.go",
-      "loc": 306,
-      "ccn": 57.0,
-      "commits": 44,
-      "source": "lizard"
-    },
-    {
-      "path": "Makefile",
-      "loc": 463,
-      "ccn": 72.0,
-      "commits": 31,
+      "path": "scripts/doctor.sh",
+      "loc": 709,
+      "est_tokens": 6670,
+      "ccn": 73.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": null,
+      "commits": 8,
       "source": "scc"
     },
     {
-      "path": "services/current-account/adapters/persistence/repository.go",
-      "loc": 408,
-      "ccn": 92.0,
-      "commits": 24,
-      "source": "lizard"
-    },
-    {
-      "path": "services/api-gateway/server.go",
-      "loc": 421,
-      "ccn": 100.0,
-      "commits": 21,
+      "path": "services/current-account/service/lien_service_test.go",
+      "loc": 1538,
+      "est_tokens": 17620,
+      "ccn": 90.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 4.0,
+      "commits": 22,
       "source": "lizard"
     }
   ],
@@ -98,70 +177,100 @@
     {
       "path": "services/position-keeping/domain/financial_position_log_test.go",
       "loc": 1597,
+      "est_tokens": 15781,
       "ccn": 336.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 16.0,
       "commits": 2,
       "source": "lizard"
     },
     {
       "path": "services/control-plane/internal/validator/manifest_validator_test.go",
       "loc": 1054,
+      "est_tokens": 8052,
       "ccn": 218.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 9.0,
       "commits": 17,
       "source": "lizard"
     },
     {
       "path": "services/payment-order/service/grpc_service_test.go",
       "loc": 2283,
+      "est_tokens": 24924,
       "ccn": 204.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 11.0,
       "commits": 17,
       "source": "lizard"
     },
     {
       "path": "services/mcp-server/internal/tools/economy_test.go",
       "loc": 1023,
+      "est_tokens": 10408,
       "ccn": 194.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 9.0,
       "commits": 6,
       "source": "lizard"
     },
     {
       "path": "services/identity/service/grpc_service_test.go",
       "loc": 1534,
+      "est_tokens": 14797,
       "ccn": 161.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 3.0,
       "commits": 7,
       "source": "lizard"
     },
     {
       "path": "services/internal-account/e2e/e2e_test.go",
       "loc": 1443,
+      "est_tokens": 17830,
       "ccn": 159.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 8.0,
       "commits": 4,
       "source": "lizard"
     },
     {
       "path": "shared/platform/scheduler/cron_test.go",
       "loc": 1164,
+      "est_tokens": 9424,
       "ccn": 154.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 5.0,
       "commits": 5,
       "source": "lizard"
     },
     {
       "path": "services/current-account/e2e/saga_compensation_test.go",
       "loc": 1376,
+      "est_tokens": 17275,
       "ccn": 150.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 11.0,
       "commits": 5,
       "source": "lizard"
     },
     {
       "path": "services/position-keeping/app/config_test.go",
       "loc": 804,
+      "est_tokens": 6894,
       "ccn": 149.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 30.0,
       "commits": 6,
       "source": "lizard"
     },
     {
       "path": "frontend/src/features/reconciliation/pages/detail.test.tsx",
       "loc": 507,
+      "est_tokens": 5151,
       "ccn": 145.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 8.0,
       "commits": 2,
       "source": "lizard"
     }
@@ -170,70 +279,100 @@
     {
       "path": "docs/prd/001-universal-asset-system.md",
       "loc": 3144,
+      "est_tokens": 38671,
       "ccn": 0.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": null,
       "commits": 2,
       "source": "scc"
     },
     {
       "path": "docs/prd/011-valuation-service.md",
       "loc": 2361,
+      "est_tokens": 30020,
       "ccn": 0.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": null,
       "commits": 3,
       "source": "scc"
     },
     {
       "path": "services/payment-order/service/grpc_service_test.go",
       "loc": 2283,
+      "est_tokens": 24924,
       "ccn": 204.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 11.0,
       "commits": 17,
       "source": "lizard"
     },
     {
       "path": "docs/prd/026-operations-console-ui.md",
       "loc": 2076,
+      "est_tokens": 25505,
       "ccn": 0.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": null,
       "commits": 2,
       "source": "scc"
     },
     {
       "path": "services/financial-accounting/service/financial_accounting_service_test.go",
       "loc": 1943,
+      "est_tokens": 20755,
       "ccn": 116.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 20.0,
       "commits": 11,
       "source": "lizard"
     },
     {
       "path": "docs/prd/006-starlark-saga-orchestration-core.md",
       "loc": 1704,
+      "est_tokens": 22535,
       "ccn": 0.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": null,
       "commits": 3,
       "source": "scc"
     },
     {
       "path": "services/position-keeping/service/record_measurement_test.go",
       "loc": 1695,
+      "est_tokens": 16872,
       "ccn": 51.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 2.0,
       "commits": 5,
       "source": "lizard"
     },
     {
       "path": "services/position-keeping/domain/financial_position_log_test.go",
       "loc": 1597,
+      "est_tokens": 15781,
       "ccn": 336.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 16.0,
       "commits": 2,
       "source": "lizard"
     },
     {
       "path": "api/jsonschema/manifest.v1.schema.json",
       "loc": 1594,
+      "est_tokens": 20937,
       "ccn": 0.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": null,
       "commits": 9,
       "source": "scc"
     },
     {
       "path": "services/current-account/service/lien_service_test.go",
       "loc": 1538,
+      "est_tokens": 17620,
       "ccn": 90.0,
+      "ccn_basis": "file-aggregate",
+      "max_fn_ccn": 4.0,
       "commits": 22,
       "source": "lizard"
     }
