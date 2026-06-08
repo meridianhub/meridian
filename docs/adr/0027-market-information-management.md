@@ -183,6 +183,16 @@ LIMIT 1;
 
 ### Quality Ladder
 
+> **Canonical model:** ADR-0017 defines the authoritative provenance model. The
+> single ladder shown here is the coarse confidence axis (Axis A) of the
+> **Two-Axis Provenance Model**. The canonical Axis A enum is 4-level -
+> `ESTIMATE(1) -> PROVISIONAL(2) -> ACTUAL(3) -> VERIFIED(4)` - and revision
+> state is a separate axis (the `supersededBy` pointer + `revision` counter),
+> not a ladder rung. The 3-level enum below reflects the market-information
+> domain as currently shipped; it aligns with Axis A once `PROVISIONAL` is
+> added and the integers are renumbered to match the proto wire numbers. See
+> ADR-0017 for the precedence key (`QualityScore`) and the full rationale.
+
 The quality ladder implements **automatic supersession** based on data reliability:
 
 ```text
