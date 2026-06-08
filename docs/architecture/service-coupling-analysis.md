@@ -188,7 +188,7 @@ constructs the provider's generated client (see Table 3). Representative depende
 ### Asynchronous Communication (Kafka)
 
 Event-driven publishing and consumption is implemented through the outbox pattern. The canonical machine-
-readable list of all Kafka topics lives at `shared/platform/events/topics/topics.yaml` (49 topics across
+readable list of all Kafka topics lives at `shared/platform/events/topics/topics.yaml` (48 topics across
 11 publishing service groups), with Go constants in `shared/platform/events/topics/topics.go`.
 
 **Event Publishers (outbox-based):** current-account, internal-account, financial-accounting,
@@ -336,7 +336,7 @@ A complete BIAN domain mapping for all services is maintained in
 | One service per BIAN domain | PASS | 19 services under `services/` map to distinct domains |
 | Independent databases | PASS | No cross-service database access; per-service Atlas migrations |
 | gRPC for sync communication | PASS | Cross-service calls use generated proto clients (Table 3) |
-| Kafka for async events | PASS | Outbox publishers + 49 registered topics (`topics.yaml`) |
+| Kafka for async events | PASS | Outbox publishers + 48 registered topics (`topics.yaml`) |
 | No cross-service internal imports | PASS | Zero domain-to-domain internal imports |
 | Platform code separation | PASS | Platform code relocated to `shared/platform/` (P1-1 complete) |
 

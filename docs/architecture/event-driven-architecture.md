@@ -8,7 +8,7 @@
 
 > **Topic source of truth:** All Kafka topics are registered in
 > `shared/platform/events/topics/topics.yaml` (with Go constants in `topics.go`). As of 2026-06-08 the
-> registry defines 49 topics across 11 publishing service groups: audit, current-account,
+> registry defines 48 topics across 11 publishing service groups: audit, current-account,
 > internal-account, financial-accounting, market-information, payment-order, position-keeping, party,
 > reconciliation, operational-gateway, and financial-gateway. The Event Catalog below is kept consistent
 > with that registry; when they diverge, `topics.yaml` is authoritative. A `TestTopicsYAML_ConsistentWithGoConstants`
