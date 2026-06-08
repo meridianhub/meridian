@@ -29,8 +29,10 @@ instructions: |
   AuthService.ValidateAPIKey is called by api-gateway on every request. Key format:
   pk_{tenant_slug}_{entropy}. Hash is SHA-256; prefix enables O(1) tenant routing.
 
-  gRPC port 50062. Stripe webhook handling runs in the unified binary's HTTP server.
-  Kafka required for Stripe payment event publishing (KAFKA_BOOTSTRAP_SERVERS).
+  gRPC port 50062. The control-plane binary (cmd/main.go) serves gRPC only. The
+  Stripe webhook handler and HMAC-SHA256 signature verification live in
+  internal/stripe/webhook.go but are not currently wired to an HTTP route; live
+  Stripe webhook ingestion runs in financial-gateway.
 ---
 
 # control-plane
@@ -78,12 +80,11 @@ Proto files: `api/proto/meridian/control_plane/v1/` (relative to repo root).
 
 ### HTTP endpoints
 
-Stripe webhook handling runs in the unified binary's shared HTTP server, not in the
-standalone control-plane binary.
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/stripe/webhook` | Stripe webhook: HMAC-SHA256 verified, publishes payment events to Kafka |
+control-plane serves gRPC only. The Stripe webhook handler in
+`internal/stripe/webhook.go` (HMAC-SHA256 signature verification, 5-minute replay
+guard, Kafka payment-event publishing) is implemented but is not currently
+registered to an HTTP route in this service. Live Stripe webhook ingestion runs in
+`financial-gateway` (`POST /webhooks/stripe/{tenantID}`).
 
 ## Domain Model
 
@@ -197,7 +198,7 @@ Paths are relative to `services/control-plane/`.
 | `internal/differ/manifest_differ.go` | Kubernetes-style diff engine (`CREATE/UPDATE/DELETE/NO_CHANGE`); safety-checks deletions |
 | `internal/planner/manifest_planner.go` | Maps diff actions to dependency-ordered phased gRPC calls with idempotency keys |
 | `internal/admin/handler.go` | `CausationVisualizerService` and `BalanceSheetService` gRPC implementations |
-| `internal/stripe/webhook.go` | HMAC-SHA256 signature verification and Kafka payment event publishing; 5-minute replay guard |
+| `internal/stripe/webhook.go` | HMAC-SHA256 signature verification and Kafka payment event publishing; 5-minute replay guard (handler implemented but not currently wired to an HTTP route in this service) |
 | `rbac/method_permissions.go` | RBAC method-to-permission mapping; all RPC authorization rules live here |
 
 ## Configuration

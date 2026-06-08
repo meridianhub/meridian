@@ -94,7 +94,7 @@ classDiagram
     class Lien {
         +string LienID
         +string AccountID
-        +MoneyAmount Amount
+        +Money Amount
         +LienStatus Status
         +string PaymentOrderReference
         +InstrumentAmount ReservedQuantity
@@ -106,7 +106,7 @@ classDiagram
     class Withdrawal {
         +string WithdrawalID
         +string AccountID
-        +MoneyAmount Amount
+        +Money Amount
         +WithdrawalStatus Status
         +string Reference
         +int Version
@@ -235,4 +235,3 @@ terminal. Withdrawal lifecycle is PENDING -> COMPLETED / FAILED / CANCELLED.
 - [Architecture Layers - Core Ledger](../../docs/architecture-layers.md#4-core-ledger)
 - [Service Coupling Analysis](../../docs/architecture/service-coupling-analysis.md)
 - [BIAN Current Account specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/CurrentAccount.yaml)
-
