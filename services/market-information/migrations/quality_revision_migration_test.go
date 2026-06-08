@@ -9,6 +9,9 @@ package migrations_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/google/uuid"
@@ -18,6 +21,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// readMigration reads a migration SQL file from this test's own directory.
+func readMigration(t *testing.T, name string) string {
+	t.Helper()
+	_, filename, _, ok := runtime.Caller(0)
+	require.True(t, ok, "failed to resolve test file path")
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(filename), name))
+	require.NoError(t, err, "failed to read migration %s", name)
+	return string(data)
+}
 
 // pgErrorCode extracts the SQLSTATE code from a pgx error, or "" if not a PgError.
 func pgErrorCode(err error) string {
@@ -108,4 +121,54 @@ func TestMigrations_RevisionColumn_DefaultsToZero(t *testing.T) {
 		`SELECT revision FROM market_price_observation WHERE id = $1`, id).Scan(&revision)
 	require.NoError(t, err)
 	assert.Equal(t, 0, revision, "revision should default to 0 (original)")
+}
+
+// revisionOf returns the revision value for a given observation id.
+func revisionOf(ctx context.Context, t *testing.T, pool *pgxpool.Pool, id uuid.UUID) int {
+	t.Helper()
+	var revision int
+	err := pool.QueryRow(ctx,
+		`SELECT revision FROM market_price_observation WHERE id = $1`, id).Scan(&revision)
+	require.NoError(t, err)
+	return revision
+}
+
+// TestMigrations_BackfillRevision_MarksCorrectionRows verifies the backfill sets
+// revision=1 on correction rows (the newer rows that supersede an earlier
+// observation) while leaving the superseded originals at revision 0.
+func TestMigrations_BackfillRevision_MarksCorrectionRows(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping migration test in short mode")
+	}
+
+	ctx := context.Background()
+	pool := testdb.NewCockroachTestPool(t, testdb.WithMigrations("market-information"))
+	datasetID, sourceID := seedIDs(ctx, t, pool)
+
+	// Build a supersession chain: original was replaced by correction.
+	// superseded_by is a forward pointer, so original.superseded_by = correction.id.
+	correctionID, err := insertObservation(ctx, pool, datasetID, sourceID, "EUR/USD", 3)
+	require.NoError(t, err)
+	originalID, err := insertObservation(ctx, pool, datasetID, sourceID, "EUR/USD", 1)
+	require.NoError(t, err)
+
+	_, err = pool.Exec(ctx,
+		`UPDATE market_price_observation SET superseded_by = $1 WHERE id = $2`,
+		correctionID, originalID)
+	require.NoError(t, err)
+
+	// A standalone observation with no supersession should remain at revision 0.
+	standaloneID, err := insertObservation(ctx, pool, datasetID, sourceID, "GBP/USD", 2)
+	require.NoError(t, err)
+
+	// Re-run the actual backfill migration SQL against this data.
+	_, err = pool.Exec(ctx, readMigration(t, "20260608000004_backfill_revision.sql"))
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, revisionOf(ctx, t, pool, correctionID),
+		"the correction row (which supersedes another) should be revision 1")
+	assert.Equal(t, 0, revisionOf(ctx, t, pool, originalID),
+		"the superseded original should remain revision 0")
+	assert.Equal(t, 0, revisionOf(ctx, t, pool, standaloneID),
+		"a standalone observation should remain revision 0")
 }
