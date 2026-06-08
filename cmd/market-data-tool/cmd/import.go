@@ -63,7 +63,7 @@ to the Market Information Service via gRPC. It supports:
 CSV Format:
   The CSV must have headers matching the observation schema. Required columns:
   - observed_at: When the observation was made (RFC3339 timestamp)
-  - quality_level: ESTIMATE, PROVISIONAL, ACTUAL, or REVISED
+  - quality_level: ESTIMATE, PROVISIONAL, ACTUAL, or VERIFIED (REVISED accepted as legacy)
   - value: The observed value (decimal string, max 64 chars)
 
   Optional columns:
@@ -543,7 +543,13 @@ func handleImportInterrupt(
 }
 
 // csvRowToValidationRow converts a CSV row to a validation row.
+//
+// The Axis-B revision counter is derived from the quality string via
+// ParseQualityString: only the legacy REVISED label yields a non-zero revision.
+// The quality string has already been validated by the CSV parser, so a parse
+// error here is not expected; revision defaults to 0 if one occurs.
 func csvRowToValidationRow(csvRow *csvadapter.ObservationRow, datasetCode string) *validation.ObservationRow {
+	_, revision, _ := validation.ParseQualityString(csvRow.QualityLevel)
 	return &validation.ObservationRow{
 		LineNumber:   csvRow.LineNumber,
 		DatasetCode:  datasetCode,
@@ -552,6 +558,7 @@ func csvRowToValidationRow(csvRow *csvadapter.ObservationRow, datasetCode string
 		ValidFrom:    csvRow.ValidFrom,
 		ValidTo:      csvRow.ValidTo,
 		QualityLevel: csvRow.QualityLevel,
+		Revision:     revision,
 		Attributes:   csvRow.Attributes,
 	}
 }

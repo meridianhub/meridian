@@ -45,20 +45,27 @@ var OptionalColumns = []string{
 	ColumnValidTo,
 }
 
-// Valid quality level values.
+// validQualityLevels maps accepted quality-level strings to their canonical
+// uppercase form. The four canonical confidence grades on Axis A of the two-axis
+// quality model (ADR-0017) are ESTIMATE, PROVISIONAL, ACTUAL, and VERIFIED.
+// REVISED is accepted as a legacy label; downstream parsing (ParseQualityString)
+// normalizes it to VERIFIED confidence with revision 1.
 var validQualityLevels = map[string]string{
 	"ESTIMATE":    "ESTIMATE",
 	"PROVISIONAL": "PROVISIONAL",
 	"ACTUAL":      "ACTUAL",
-	"REVISED":     "REVISED",
+	"VERIFIED":    "VERIFIED",
+	"REVISED":     "REVISED", // legacy label, normalizes to VERIFIED + revision 1
 	// Also accept lowercase and title case
 	"estimate":    "ESTIMATE",
 	"provisional": "PROVISIONAL",
 	"actual":      "ACTUAL",
+	"verified":    "VERIFIED",
 	"revised":     "REVISED",
 	"Estimate":    "ESTIMATE",
 	"Provisional": "PROVISIONAL",
 	"Actual":      "ACTUAL",
+	"Verified":    "VERIFIED",
 	"Revised":     "REVISED",
 }
 
@@ -109,7 +116,9 @@ type ObservationRow struct {
 	// ValidTo is when the observation value expires (optional).
 	ValidTo *time.Time
 
-	// QualityLevel is the quality indicator (ESTIMATE, PROVISIONAL, ACTUAL, REVISED).
+	// QualityLevel is the confidence grade on Axis A of the two-axis quality
+	// model (ADR-0017): ESTIMATE, PROVISIONAL, ACTUAL, or VERIFIED. The legacy
+	// REVISED label is accepted and passed through for downstream normalization.
 	QualityLevel string
 
 	// Attributes contains dynamic attributes extracted from CSV columns.
@@ -507,7 +516,7 @@ func (p *Parser) parseRow(lineNumber int, record []string, schema *SchemaMapping
 			LineNumber: lineNumber,
 			Column:     ColumnQualityLevel,
 			Value:      qualityLevelStr,
-			Err:        fmt.Errorf("%w: must be one of ESTIMATE, PROVISIONAL, ACTUAL, REVISED", ErrInvalidQualityLevel),
+			Err:        fmt.Errorf("%w: must be one of ESTIMATE, PROVISIONAL, ACTUAL, VERIFIED (REVISED accepted as legacy)", ErrInvalidQualityLevel),
 		}
 	}
 

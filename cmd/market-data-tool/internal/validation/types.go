@@ -24,8 +24,16 @@ type ObservationRow struct {
 	// ValidTo is when the observation value expires (optional).
 	ValidTo *time.Time
 
-	// QualityLevel is the quality indicator (ESTIMATE, PROVISIONAL, ACTUAL, REVISED).
+	// QualityLevel is the confidence grade on Axis A of the two-axis quality
+	// model (ADR-0017): ESTIMATE, PROVISIONAL, ACTUAL, or VERIFIED. The legacy
+	// REVISED label is accepted on input and normalizes to VERIFIED confidence
+	// with Revision 1 (see validation.ParseQualityString).
 	QualityLevel string
+
+	// Revision is the correction counter on Axis B of the two-axis quality model:
+	// 0 = original observation, 1+ = correction. Derived from QualityLevel via
+	// ParseQualityString (only the legacy REVISED label yields a non-zero value).
+	Revision int
 
 	// Attributes contains the key-value attributes extracted from CSV columns.
 	Attributes map[string]string
