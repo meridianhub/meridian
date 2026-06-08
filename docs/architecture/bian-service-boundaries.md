@@ -201,25 +201,23 @@ The CurrentAccount service owns:
 
 ### Service Instability Analysis
 
-**Coupling Metrics (from 2025-11-19 analysis):**
+**Coupling Metrics (from 2026-06-08 analysis):**
 
-- **Afferent Coupling (Ca):** 0 (no services depend on current-account)
-- **Efferent Coupling (Ce):** 2 (depends on position-keeping and financial-accounting)
-- **Instability (I):** 1.00 (fully dependent, no dependents)
-- **Assessment:** Orchestration layer pattern - expected high instability
+- **Afferent Coupling (Ca):** 2 (position-keeping and reconciliation depend on current-account)
+- **Efferent Coupling (Ce):** 0 (no outbound cross-service gRPC dependencies)
+- **Instability (I):** 0.00 (stable provider)
+- **Assessment:** Stable provider - account state is consumed by other services
 
 **Interpretation:**
-This service acts as an orchestration layer coordinating operations across position-keeping and financial-accounting. High instability (I=1.00) is architecturally appropriate for this role, as it:
-
-- Shields clients from multi-service complexity
-- Provides a unified API for account operations
-- Adapts to changes in downstream service contracts
+Current-account is now a stable provider service. In the current topology it exposes account state that
+position-keeping and reconciliation consume; it does not itself call other domain services over gRPC. (In
+earlier analyses current-account was modelled as an orchestration layer with I=1.00; that orchestration is
+no longer expressed as direct outbound gRPC dependencies.)
 
 **Mitigation Strategies:**
 
-- Anti-corruption layer pattern insulates from proto changes
-- Circuit breakers prevent cascade failures
-- Comprehensive integration testing validates orchestration logic
+- Treat its proto surface as a stable contract (other services depend on it)
+- Publish account lifecycle changes via the outbox pattern for downstream consumers
 
 ---
 
@@ -422,24 +420,23 @@ The PositionKeeping service owns:
 
 ### Service Stability Analysis
 
-**Coupling Metrics (from 2025-11-19 analysis):**
+**Coupling Metrics (from 2026-06-08 analysis):**
 
-- **Afferent Coupling (Ca):** 1 (current-account depends on this service)
-- **Efferent Coupling (Ce):** 0 (no dependencies on other domain services)
-- **Instability (I):** 0.00 (fully stable)
-- **Assessment:** Stable provider service - foundational layer
+- **Afferent Coupling (Ca):** 4 (event-router, internal-account, reconciliation, mcp-server depend on it)
+- **Efferent Coupling (Ce):** 3 (reference-data, internal-account, current-account)
+- **Instability (I):** 0.43 (balanced - both provider and consumer)
+- **Assessment:** Central balance/position service - widely depended upon, with a few provider lookups
 
 **Interpretation:**
-This service is a stable foundation for transaction tracking with:
-
-- No outbound dependencies on other BIAN domains
-- Single consumer (current-account) with well-defined proto contract
-- Low risk of cascading changes
-- Appropriate role as a data persistence and audit service
+Position-keeping sits near the middle of the stability spectrum. It is a heavily-used provider (four
+services consume its position/balance data) and also performs provider lookups of its own (reference-data
+for instruments, internal-account, and current-account for account state). This is a deliberate part of
+the current topology; its provider role makes its proto surface a contract that downstream services rely
+on.
 
 **Stability Benefits:**
 
-- Changes isolated to this service only
+- Position/balance data is consumed widely, so its proto contract is treated as stable
 - Proto contract evolution is controlled
 - Event schema managed via buf breaking change detection (ADR-0004)
 
@@ -629,9 +626,9 @@ The FinancialAccounting service owns:
 
 ### Service Stability Analysis
 
-**Coupling Metrics (from 2025-11-19 analysis):**
+**Coupling Metrics (from 2026-06-08 analysis):**
 
-- **Afferent Coupling (Ca):** 1 (current-account depends on this service)
+- **Afferent Coupling (Ca):** 1 (mcp-server depends on this service)
 - **Efferent Coupling (Ce):** 0 (no dependencies on other domain services)
 - **Instability (I):** 0.00 (fully stable)
 - **Assessment:** Stable provider service - foundational layer
@@ -781,9 +778,9 @@ The MarketInformation service owns:
 
 ### Service Stability Analysis
 
-**Coupling Metrics:**
+**Coupling Metrics (from 2026-06-08 analysis):**
 
-- **Afferent Coupling (Ca):** 0 (no services depend on market-information yet)
+- **Afferent Coupling (Ca):** 3 (control-plane, event-router, mcp-server depend on it)
 - **Efferent Coupling (Ce):** 0 (no dependencies on other domain services)
 - **Instability (I):** 0.00 (fully stable)
 - **Assessment:** Stable provider service - foundational layer
@@ -1236,22 +1233,25 @@ caClient.RetrieveAccount(...)
 
 **Solution:** Introduce events or shared data entities to break the cycle
 
-#### ❌ PositionKeeping → Any Service (Outbound Dependencies)
+#### ❌ PositionKeeping Orchestrating Writes into Other Domains
 
-**Pattern:** PositionKeeping calling other services
+**Pattern:** PositionKeeping driving write/transaction operations in other services
 **Why Forbidden:**
 
-- Position-keeping is a stable provider service (I=0.00)
-- Should have zero efferent coupling to maintain stability
-- Acts as authoritative data source, not orchestrator
+- Position-keeping is a widely-consumed provider (Ca=4); it must not become a write orchestrator
+- Orchestrating writes into other domains would couple their write paths to position-keeping
+
+**Acceptable today:** In the current topology position-keeping performs read-only provider lookups
+(reference-data for instruments, internal-account, and current-account for account state). These reads are
+acceptable; what remains forbidden is position-keeping initiating writes/transactions in other domains.
 
 **Example:**
 
 ```go
-// FORBIDDEN - Position-keeping calling other services
+// FORBIDDEN - Position-keeping initiating a write in another domain
 // services/position-keeping/service/position_service.go
-import fa_pb "meridian/financial_accounting/v1"  // ❌ NOT ALLOWED
-faClient.InitiateBookingLog(...)
+import fa_pb "meridian/financial_accounting/v1"
+faClient.InitiateBookingLog(...)  // ❌ NOT ALLOWED - PK must not drive other domains' writes
 ```
 
 **Solution:** Position-keeping publishes events; other services consume and react
@@ -1288,45 +1288,42 @@ pkClient.UpdateFinancialPositionLog(ctx, &pb.UpdateRequest{
 
 ### Dependency Rationale and Trade-offs
 
-#### Why CurrentAccount Has High Instability (I=1.00)
+#### Why CurrentAccount Is a Stable Provider (I=0.00)
 
 **Coupling Metrics:**
 
-- **Afferent Coupling (Ca):** 0 (no services depend on current-account)
-- **Efferent Coupling (Ce):** 2 (depends on position-keeping and financial-accounting)
-- **Instability (I):** 1.00 (fully dependent, no dependents)
+- **Afferent Coupling (Ca):** 2 (position-keeping and reconciliation depend on it)
+- **Efferent Coupling (Ce):** 0 (no outbound cross-service gRPC dependencies)
+- **Instability (I):** 0.00 (stable provider)
 
 **Architectural Justification:**
 
-- Current-account is an **orchestration layer** coordinating account operations
-- Acts as API gateway for client applications
-- Shields clients from multi-service complexity
-- High instability is expected and appropriate for this role
+- Current-account exposes account state that other services consume
+- It does not call other domain services directly over gRPC
+- (In earlier 3-service analyses it was modelled as an I=1.00 orchestrator; that orchestration is no
+  longer expressed as direct outbound gRPC dependencies)
 
 **Trade-offs:**
 
-- **Benefit:** Unified API for account operations reduces client complexity
-- **Cost:** Changes in downstream services may require current-account updates
-- **Mitigation:** Anti-corruption layer pattern insulates from proto changes
+- **Benefit:** Stable contract for downstream consumers (position-keeping, reconciliation)
+- **Cost:** Must maintain backward compatibility in its proto contract
+- **Mitigation:** `buf breaking` detects contract violations in CI
 
-#### Why PositionKeeping and FinancialAccounting Are Stable (I=0.00)
+#### Why FinancialAccounting Is Stable and PositionKeeping Is Balanced
 
-**Coupling Metrics:**
+**FinancialAccounting (I=0.00):**
 
-- **Afferent Coupling (Ca):** 1 (current-account depends on each)
-- **Efferent Coupling (Ce):** 0 (no dependencies on other domain services)
-- **Instability (I):** 0.00 (fully stable)
+- **Afferent Coupling (Ca):** 1; **Efferent (Ce):** 0 - stable provider
 
-**Architectural Justification:**
+**PositionKeeping (I=0.43):**
 
-- Both are **provider services** offering data and computation
-- Act as stable foundations for orchestration layers
-- Changes isolated to service boundaries
-- Event-driven architecture for asynchronous coupling
+- **Afferent Coupling (Ca):** 4 (event-router, internal-account, reconciliation, mcp-server)
+- **Efferent Coupling (Ce):** 3 (reference-data, internal-account, current-account)
+- Both a widely-used provider and a consumer of provider lookups; sits mid-spectrum
 
 **Trade-offs:**
 
-- **Benefit:** Low risk of cascading changes, independent evolution
+- **Benefit:** Low risk of cascading changes for the stable providers; independent evolution
 - **Cost:** Must maintain backward compatibility in proto contracts
 - **Mitigation:** `buf breaking` detects contract violations in CI
 
@@ -1835,17 +1832,13 @@ graph TD
     %% Client to Services
     CLIENT -->|gRPC| CA
 
-    %% Synchronous Inter-Service Communication (gRPC)
-    CA -->|gRPC: RetrieveFinancialPositionLog<br/>ListFinancialPositionLogs| PK
-    CA -->|gRPC: InitiateFinancialBookingLog<br/>CaptureLedgerPosting| FA
+    %% Synchronous Inter-Service Communication (gRPC) - current topology
+    PK -->|gRPC: RetrieveAccount<br/>account state| CA
 
     %% Asynchronous Inter-Service Communication (Kafka)
-    CA -.->|Event: DepositInitiated| KAFKA
-    FA -.->|Event: PostingsCaptured<br/>BookingLogStatusChanged| KAFKA
-    PK -.->|Event: PositionUpdated<br/>TransactionStatusChanged| KAFKA
-
-    KAFKA -.->|Consume: DepositEvent| FA
-    KAFKA -.->|Future: Position Events| PK
+    CA -.->|Event: AccountFrozen / WithdrawalStatus| KAFKA
+    FA -.->|Event: BookingLogControlled| KAFKA
+    PK -.->|Event: TransactionCaptured / Posted| KAFKA
 
     %% Service to Database
     CA --> CADB
@@ -1866,15 +1859,15 @@ graph TD
     KAFKA_PLAT --> KAFKA
 
     %% Styling
-    classDef unstable fill:#ffd43b,stroke:#fab005,stroke-width:3px,color:#000
+    classDef balanced fill:#ffd43b,stroke:#fab005,stroke-width:3px,color:#000
     classDef stable fill:#51cf66,stroke:#37b24d,stroke-width:3px,color:#000
     classDef platform fill:#748ffc,stroke:#4c6ef5,stroke-width:2px,color:#fff
     classDef database fill:#495057,stroke:#343a40,stroke-width:2px,color:#fff
     classDef external fill:#e9ecef,stroke:#adb5bd,stroke-width:2px,color:#495057
     classDef messaging fill:#ff6b6b,stroke:#c92a2a,stroke-width:2px,color:#fff
 
-    class CA unstable
-    class FA,PK stable
+    class CA,FA stable
+    class PK balanced
     class OBS,KAFKA_PLAT,AUTH,TESTDB platform
     class CADB,FADB,PKDB database
     class CLIENT external
@@ -1884,8 +1877,8 @@ graph TD
     subgraph Legend["Legend"]
         direction TB
         L1["<b>Service Stability (Instability Metric I)</b>"]
-        L2["🟨 Yellow I=1.00: Unstable Orchestrator - Depends on other services"]
-        L3["🟩 Green I=0.00: Stable Provider - No dependencies on other services"]
+        L2["🟨 Yellow: Balanced (e.g. position-keeping I=0.43) - both provider and consumer"]
+        L3["🟩 Green I=0.00: Stable Provider - no outbound cross-service gRPC dependencies"]
         L4["<b>Communication Patterns</b>"]
         L5["━━━ Solid Line: Synchronous gRPC (request-response)"]
         L6["┄┄┄ Dashed Line: Asynchronous Kafka Events (fire-and-forget)"]
@@ -1900,41 +1893,39 @@ graph TD
 
 #### Service Layer Characteristics
 
-**CurrentAccount (Yellow - I=1.00):**
+**CurrentAccount (Green - I=0.00):**
 
-- **Role:** Orchestration layer and client-facing API gateway
-- **Instability Metric:** I = Ce / (Ca + Ce) = 2 / (0 + 2) = 1.00
-- **Dependencies:** Synchronously calls PositionKeeping and FinancialAccounting via gRPC
-- **Dependents:** None (no other services depend on current-account)
-- **Assessment:** High instability is architecturally appropriate for an orchestration layer
+- **Role:** Account state provider
+- **Instability Metric:** I = Ce / (Ca + Ce) = 0 / (2 + 0) = 0.00
+- **Dependencies:** No outbound cross-service gRPC dependencies
+- **Dependents:** position-keeping and reconciliation (Ca=2)
+- **Assessment:** Stable provider (earlier 3-service analyses modelled it as an I=1.00 orchestrator)
 - **Communication:**
-  - Outbound gRPC: 2 synchronous dependencies
-  - Outbound Events: Publishes deposit events to Kafka
-  - Inbound: Receives requests from external clients only
+  - Inbound gRPC: Account state queries from consumers
+  - Outbound Events: Publishes account lifecycle and withdrawal-status events to Kafka
 
 **FinancialAccounting (Green - I=0.00):**
 
 - **Role:** Double-entry bookkeeping and ledger posting provider
 - **Instability Metric:** I = Ce / (Ca + Ce) = 0 / (1 + 0) = 0.00
 - **Dependencies:** None on other BIAN domain services (only platform)
-- **Dependents:** CurrentAccount service (1 afferent coupling)
+- **Dependents:** mcp-server (Ca=1)
 - **Assessment:** Stable foundation service with no outbound domain dependencies
 - **Communication:**
-  - Inbound gRPC: Receives booking log and posting requests from CurrentAccount
-  - Inbound Events: Consumes deposit events from Kafka
-  - Outbound Events: Publishes posting completion and booking log status events
+  - Inbound gRPC: Booking log and posting requests
+  - Outbound Events: Publishes booking-log control events
 
-**PositionKeeping (Green - I=0.00):**
+**PositionKeeping (I=0.43 - Balanced):**
 
-- **Role:** Transaction log and audit trail provider
-- **Instability Metric:** I = Ce / (Ca + Ce) = 0 / (1 + 0) = 0.00
-- **Dependencies:** None on other BIAN domain services (only platform)
-- **Dependents:** CurrentAccount service (1 afferent coupling)
-- **Assessment:** Stable foundation service acting as authoritative transaction log
+- **Role:** Position/balance provider; performs provider lookups of its own
+- **Instability Metric:** I = Ce / (Ca + Ce) = 3 / (4 + 3) = 0.43
+- **Dependencies:** reference-data, internal-account, current-account (read-only provider lookups)
+- **Dependents:** event-router, internal-account, reconciliation, mcp-server (Ca=4)
+- **Assessment:** Widely-consumed provider sitting mid-spectrum on the stability scale
 - **Communication:**
-  - Inbound gRPC: Receives position log queries from CurrentAccount
-  - Outbound Events: Publishes position update and transaction status events
-  - No synchronous outbound dependencies (maintains stability)
+  - Inbound gRPC: Position/balance queries from consumers
+  - Outbound gRPC: Read-only lookups to reference-data and account services
+  - Outbound Events: Publishes transaction-lifecycle events
 
 #### Platform Layer (Blue Components)
 
@@ -2020,19 +2011,19 @@ graph TD
 
 #### Dependency Rule Enforcement
 
-**Allowed Patterns (Shown in Diagram):**
+**Allowed Patterns (current topology):**
 
-- ✅ CurrentAccount → PositionKeeping (gRPC sync)
-- ✅ CurrentAccount → FinancialAccounting (gRPC sync)
-- ✅ FinancialAccounting → PositionKeeping (Kafka async via events)
-- ✅ All Services → Platform (shared infrastructure)
+- ✅ PositionKeeping → CurrentAccount (gRPC sync, account-state read)
+- ✅ PositionKeeping → Reference-data / Internal-account (read-only provider lookups)
+- ✅ Services → Kafka (async events via the outbox pattern)
+- ✅ All Services → Platform (shared infrastructure in `shared/`)
 
-**Forbidden Patterns (Not in Diagram):**
+**Forbidden Patterns:**
 
-- ❌ PositionKeeping → Any Service (would violate I=0.00 stability)
-- ❌ FinancialAccounting → CurrentAccount (would create circular dependency)
+- ❌ PositionKeeping orchestrating writes into another domain's write path
+- ❌ Circular synchronous gRPC dependencies between domains
 - ❌ Direct database access across service boundaries
-- ❌ Internal package imports between services
+- ❌ Importing another service's internal packages
 
 #### Scalability and Failure Isolation
 

@@ -128,10 +128,13 @@ graph LR
 
 ### Table 1: Cross-Service Internal Imports (VIOLATIONS)
 
-No cross-service internal imports were detected. No service under `services/` imports another service's
-`internal/` or domain packages; all inter-service interaction is via proto/gRPC and Kafka.
+No cross-service internal imports were detected. Services under `services/` do not import another
+service's `internal/` packages; inter-service interaction is primarily via proto/gRPC and Kafka. A small
+number of shared domain types are imported across services as a known, allowlisted pattern (for example
+`api-gateway` importing `identity`/`tenant` domain types and `event-router` importing `audit-worker`
+domain types); these are tracked separately in architecture tests and are not boundary violations.
 
-**Total violations:** 0
+**Total internal-package violations:** 0
 
 The former violation class - services importing `internal/platform/*` - no longer applies because platform
 code has been relocated to `shared/platform/` (see Table 2). Shared infrastructure is now imported through
