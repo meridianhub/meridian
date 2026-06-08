@@ -1,8 +1,20 @@
 # Service Coupling Analysis
 
-**Analysis Date:** 2025-11-19
+**Analysis Date:** 2026-06-08
 **Repository:** github.com/meridianhub/meridian
-**Services Analyzed:** position-keeping, current-account, financial-accounting
+**Services Analyzed:** All 19 services under `services/` (api-gateway, audit-worker, control-plane,
+current-account, event-router, financial-accounting, financial-gateway, forecasting, identity,
+internal-account, market-information, mcp-server, operational-gateway, party, payment-order,
+position-keeping, reconciliation, reference-data, tenant)
+
+> **Methodology note (2026-06-08 refresh):** The codebase has since migrated services out of the
+> top-level `internal/` tree into `services/<service>/`, and platform code out of `internal/platform/`
+> into `shared/platform/`. The `scripts/analyze-coupling.sh` helper still discovers services by scanning
+> the top-level `internal/` directory, which now contains only `bootstrap` and `migrations`. As a result
+> the script reports zero domain services and cannot produce current coupling metrics until it is updated
+> to scan `services/` (see [P1-3](#p1-3-update-coupling-tooling-to-scan-services)). The figures below were
+> derived directly from the `services/` tree using `rg` over cross-service gRPC client instantiation,
+> Kafka topic usage, and import paths.
 
 ## Executive Summary
 
@@ -12,234 +24,275 @@ adherence to BIAN domain boundaries as defined in
 
 ### Key Findings
 
-- **Total Cross-Service Imports:** 17 violations detected
-- **Services Violating Boundaries:** All three services (position-keeping, current-account, financial-accounting)
-- **Primary Violation Pattern:** Improper use of `internal/platform` packages
-- **Severity:** MEDIUM - All violations are platform-related, not cross-service domain violations
+- **Cross-service internal imports:** 0 - no service imports another service's internal packages
+- **Platform code location:** `shared/platform/` (the `internal/platform` → shared migration is complete;
+  see [P1-1](#p1-1-migrate-platform-code-out-of-internalplatform-completed)). Shared reusable libraries
+  also live under `shared/pkg/` and `shared/domain/`.
+- **Inter-service communication:** synchronous gRPC clients and asynchronous Kafka events only, consistent
+  with ADR-0002 and ADR-0004
+- **Severity:** LOW - BIAN domain boundaries are respected across all 19 services
 
-### Top 5 Coupling Hotspots
+### Top Coupling Hotspots (Provider Services)
 
-1. **internal/platform/observability** - 10 imports across all services
-2. **internal/platform/testdb** - 4 imports for testing infrastructure
-3. **internal/platform/kafka** - 2 imports for event publishing
-4. **internal/platform/auth** - 1 import for authentication
-5. **Proto definitions** - 14 safe cross-service proto imports (expected for gRPC clients)
+Afferent coupling (how many other services call a service over gRPC) concentrates on foundational
+provider/registry services:
+
+1. **reference-data** - depended on by 5 services (instrument/account-type/saga registry lookups)
+2. **position-keeping** - depended on by 4 services (balance and position queries)
+3. **control-plane** - depended on by 3 services (manifest history, saga orchestration)
+4. **market-information** - depended on by 3 services (price observations)
+5. **mcp-server** - pure consumer/aggregator (depends on 7 services, no inbound dependencies)
 
 ### Risk Assessment
 
-#### Overall Risk: LOW-MEDIUM
+#### Overall Risk: LOW
 
-- No direct cross-service domain imports detected (services properly respect BIAN boundaries)
-- All violations are `internal/platform` usage patterns that should be refactored to `pkg/platform`
+- No cross-service domain imports detected (services properly respect BIAN boundaries)
+- Platform code now lives in `shared/platform/`, so the former `internal/platform` violation class no
+  longer exists
 - gRPC and Kafka communication patterns follow architectural guidelines
-- Current-account shows highest instability (I=1.00) due to dependencies on two other services
+- Pure-consumer services (mcp-server, event-router, payment-order, financial-gateway) show high
+  instability (I=1.00) by design - they orchestrate or aggregate without exposing inbound dependencies
 
 ## Dependency Graph
 
+Edges show cross-service gRPC client dependencies (consumer → provider) derived from
+`New<Service>ServiceClient` instantiation in non-test code under `services/`. All edges are dashed because
+every inter-service call goes through proto/gRPC - there are no cross-service internal imports. The
+`mcp-server` aggregator (consumes 7 services for the MCP tool surface) is omitted from the graph to reduce
+clutter; it is reflected in the metrics table below.
+
 ```mermaid
-graph TD
-    %% Service Nodes
-    PK[Position Keeping]
-    CA[Current Account]
-    FA[Financial Accounting]
-    PLAT[Platform]
+graph LR
+    %% Provider / foundational services
+    RD[reference-data]
+    PK[position-keeping]
+    CA[current-account]
+    IA[internal-account]
+    MI[market-information]
+    PARTY[party]
+    OG[operational-gateway]
 
-    %% Proto Dependencies (Safe - Green)
-    CA -.->|proto/gRPC| PK
-    CA -.->|proto/gRPC| FA
+    %% control-plane is both a provider and a consumer (orchestrator)
+    CP[control-plane]
 
-    %% Internal/Platform Usage (Warning - Yellow)
-    PK -->|observability| PLAT
-    PK -->|kafka| PLAT
-    PK -->|auth| PLAT
+    %% Consumer / orchestration services
+    ER[event-router]
+    FG[financial-gateway]
+    PO[payment-order]
+    REC[reconciliation]
 
-    CA -->|observability| PLAT
-    CA -->|testdb| PLAT
+    %% gRPC dependencies (consumer -.-> provider)
+    CP -.-> RD
+    CP -.-> IA
+    CP -.-> MI
+    CP -.-> PARTY
+    CP -.-> OG
 
-    FA -->|observability| PLAT
-    FA -->|kafka| PLAT
-    FA -->|testdb| PLAT
+    ER -.-> CP
+    ER -.-> MI
+    ER -.-> PK
 
-    %% Styling
-    classDef violation fill:#ff6b6b,stroke:#c92a2a,stroke-width:2px,color:#fff
-    classDef warning fill:#ffd43b,stroke:#fab005,stroke-width:2px,color:#000
-    classDef safe fill:#51cf66,stroke:#37b24d,stroke-width:2px,color:#000
-    classDef platform fill:#748ffc,stroke:#4c6ef5,stroke-width:2px,color:#fff
+    FG -.-> CP
 
-    class PK,CA,FA warning
-    class PLAT platform
+    IA -.-> PK
 
-    %% Legend
-    subgraph Legend
-        direction LR
-        L1[Safe: Proto only]:::safe
-        L2[Warning: Platform usage]:::warning
-        L3[Platform]:::platform
-    end
+    PO -.-> PARTY
+    PO -.-> RD
+
+    PK -.-> CA
+    PK -.-> IA
+    PK -.-> RD
+
+    REC -.-> CA
+    REC -.-> PK
+    REC -.-> RD
+
+    %% Styling - hue by afferent coupling role
+    classDef provider fill:#51cf66,stroke:#37b24d,stroke-width:2px,color:#000
+    classDef consumer fill:#ffd43b,stroke:#fab005,stroke-width:2px,color:#000
+
+    class RD,PK,CA,IA,MI,PARTY,OG provider
+    class ER,FG,PO,REC consumer
 ```
 
 ### Graph Interpretation
 
-- **Solid arrows:** `internal/platform` imports (requires refactoring to `pkg/platform`)
-- **Dashed arrows:** Proto/gRPC dependencies (safe and expected)
-- **Yellow nodes:** Services with platform coupling violations
-- **Blue node:** Shared platform code
+- **Dashed arrows:** Proto/gRPC dependencies (the only permitted inter-service coupling)
+- **Green nodes:** Provider services with inbound dependencies (afferent coupling)
+- **Yellow nodes:** Pure-consumer/orchestration services (no inbound dependencies)
+- **No solid arrows:** There are zero cross-service internal package imports - platform code is shared
+  via `shared/platform/` and `shared/pkg/`, not via cross-service imports
 
 ## Detailed Findings
 
 ### Table 1: Cross-Service Internal Imports (VIOLATIONS)
 
-All detected violations involve `internal/platform` imports rather than cross-service domain violations,
-which indicates proper BIAN boundary respect.
+No cross-service internal imports were detected. Services under `services/` do not import another
+service's `internal/` packages; inter-service interaction is primarily via proto/gRPC and Kafka. A small
+number of shared domain types are imported across services as a known, allowlisted pattern (for example
+`api-gateway` importing `identity`/`tenant` domain types and `event-router` importing `audit-worker`
+domain types); these are tracked separately in architecture tests and are not boundary violations.
 
-| Service | Imports From | Files Affected | Risk | Recommendation |
-|---------|--------------|----------------|------|----------------|
-| position-keeping | internal/platform/observability | 1 | MEDIUM | Move to pkg/platform |
-| position-keeping | internal/platform/kafka | 1 | MEDIUM | Move to pkg/platform |
-| position-keeping | internal/platform/auth | 1 | MEDIUM | Move to pkg/platform |
-| current-account | internal/platform/observability | 5 | MEDIUM | Move to pkg/platform |
-| current-account | internal/platform/testdb | 2 | MEDIUM | Move to pkg/platform |
-| financial-accounting | internal/platform/observability | 1 | MEDIUM | Move to pkg/platform |
-| financial-accounting | internal/platform/kafka | 2 | MEDIUM | Move to pkg/platform |
-| financial-accounting | internal/platform/testdb | 2 | MEDIUM | Move to pkg/platform |
+**Total internal-package violations:** 0
 
-**Total Files Affected:** 15 files across 3 services
+The former violation class - services importing `internal/platform/*` - no longer applies because platform
+code has been relocated to `shared/platform/` (see Table 2). Shared infrastructure is now imported through
+its public `shared/...` path by design, which does not violate Go internal-package semantics.
 
-### Table 2: Shared Code Classification
+### Table 2: Shared Code Location (current)
 
-| Package | Current Location | Should Be | Reason |
-|---------|------------------|-----------|--------|
-| observability | internal/platform/observability | pkg/platform/observability | Shared OpenTelemetry, logging, metrics |
-| kafka | internal/platform/kafka | pkg/platform/kafka | Kafka producer/consumer with protobuf |
-| testdb | internal/platform/testdb | pkg/platform/testdb | Shared Testcontainers infrastructure |
-| auth | internal/platform/auth | pkg/platform/auth | JWT validation and authorization |
+| Package family | Location | Examples | Purpose |
+|----------------|----------|----------|---------|
+| Platform infrastructure | `shared/platform/` | observability, kafka, events, db, auth, testdb, scheduler, ratelimit, gateway, tenant | Cross-cutting runtime infrastructure |
+| Reusable libraries | `shared/pkg/` | clients, saga, money, amount, cel, validation, idempotency, grpc, health, valuation | Domain-agnostic helpers and patterns |
+| Shared domain models | `shared/domain/` | models, common entity types | Types shared across service domains |
 
-### Table 3: Proto Dependencies (SAFE)
+### Table 3: Cross-Service gRPC Dependencies (SAFE)
 
-These imports represent proper gRPC client patterns and do not violate service boundaries.
+These edges represent proper gRPC client patterns (consumer service constructs the provider's generated
+client). They do not violate service boundaries.
 
-| Consumer Service | Proto Package | Provider Service | Usage Count | Pattern |
-|------------------|---------------|------------------|-------------|---------|
-| current-account | position_keeping | position-keeping | 7 | gRPC client calls |
-| current-account | financial_accounting | financial-accounting | 7 | gRPC client calls |
+| Consumer Service | Provider Service(s) | Pattern |
+|------------------|---------------------|---------|
+| control-plane | reference-data, internal-account, market-information, party, operational-gateway | gRPC client calls |
+| event-router | control-plane, market-information, position-keeping | gRPC client calls |
+| financial-gateway | control-plane | gRPC client calls |
+| internal-account | position-keeping | gRPC client calls |
+| payment-order | party, reference-data | gRPC client calls |
+| position-keeping | current-account, internal-account, reference-data | gRPC client calls |
+| reconciliation | current-account, position-keeping, reference-data | gRPC client calls |
+| mcp-server | reconciliation, control-plane, financial-accounting, market-information, operational-gateway, position-keeping, reference-data | MCP tool aggregator (read-only client surface) |
 
-**Total Proto Imports:** 14 (all safe and expected)
+Provider/registry RPCs (saga registry, account-type registry) are served by `reference-data`; manifest
+history and economy-generation RPCs are served by `control-plane`; provider-connection and
+instruction-route RPCs are served by `operational-gateway`.
 
 ## Data Flow Patterns
 
 ### Synchronous Communication (gRPC)
 
-The architecture follows proper gRPC patterns with protobuf-based communication:
+The architecture follows proper gRPC patterns with protobuf-based communication. Each consuming service
+constructs the provider's generated client (see Table 3). Representative dependencies:
 
-**Current Account Dependencies:**
-
-- `current-account` → `position-keeping` (gRPC client for balance queries)
-- `current-account` → `financial-accounting` (gRPC client for journal entries)
+- `position-keeping` → `reference-data`, `internal-account`, `current-account`
+- `reconciliation` → `current-account`, `position-keeping`, `reference-data`
+- `control-plane` → `reference-data`, `internal-account`, `market-information`, `party`, `operational-gateway`
 
 **Pattern Compliance:**
 
-- Services only depend on proto definitions (expected pattern)
+- Services only depend on generated proto clients (expected pattern)
 - No direct internal package imports between services (compliant with BIAN boundaries)
-- gRPC health checks implemented (detected in `service/health.go` files)
-
-**Files Using gRPC Clients:**
-
-- `services/current-account/client/client.go`
-- `shared/pkg/clients/resilient.go` (circuit breaker pattern)
+- Resilience (retry, circuit breaker) provided by `shared/pkg/clients`
 
 ### Asynchronous Communication (Kafka)
 
-Event-driven patterns detected across services:
+Event-driven publishing and consumption is implemented through the outbox pattern. The canonical machine-
+readable list of all Kafka topics lives at `shared/platform/events/topics/topics.yaml` (48 topics across
+11 publishing service groups), with Go constants in `shared/platform/events/topics/topics.go`.
 
-**Event Publishers:**
+**Event Publishers (outbox-based):** current-account, internal-account, financial-accounting,
+market-information, payment-order, position-keeping, party, reconciliation, operational-gateway,
+financial-gateway
 
-- position-keeping: 42 event publisher usages
-- financial-accounting: 9 event publisher usages
-
-**Event Consumers:**
-
-- financial-accounting: DepositConsumer implementation
+**Event Consumers:** financial-accounting (deposit consumer), payment-order (payment event consumer),
+event-router (audit consumer), audit-worker (audit consumer)
 
 **Pattern Compliance:**
 
-- Services use domain-defined EventPublisher interfaces
-- Kafka adapter implementations in `adapters/messaging/` layer
+- Services use domain-defined `EventPublisher` interfaces with outbox adapters in `adapters/messaging/`
+  (or `service/` for some services)
 - Protobuf serialization for events (as per ADR-0004)
+- Shared outbox implementation: `shared/platform/events/outbox.go`
 
 **Key Files:**
 
-- `internal/position-keeping/domain/event_publisher.go` (domain interface)
-- `internal/position-keeping/adapters/messaging/kafka_event_publisher.go` (implementation)
-- `internal/financial-accounting/adapters/messaging/deposit_consumer.go` (consumer)
+- `services/position-keeping/domain/event_publisher.go` (domain interface)
+- `services/position-keeping/adapters/messaging/outbox_event_publisher.go` (outbox publisher)
+- `services/financial-accounting/adapters/messaging/deposit_consumer.go` (consumer)
 
 ### Database Patterns
 
 **Schema Ownership (Compliant):**
 
-- Each service owns its own database schema
+- Each service owns its own database schema and migrations under `services/<service>/migrations/`
 - No cross-service database access detected
+- Migrations are managed by Atlas (per-service `atlas/atlas.hcl`), not Flyway
 
-**Detected Schemas:**
+**Outbox Pattern:**
 
-| Service | Schema | Tables | Migration Path |
-|---------|--------|--------|----------------|
-| current-account | current_account_audit | audit_log, audit_outbox | 20251103181700_audit_system.sql |
-
-**Outbox Pattern Detection:**
-
-- current-account implements audit outbox table
-- Supports reliable event publishing with transactional guarantees
+- Publishing services maintain an outbox table written in the same transaction as the state change
+- A background poller publishes to Kafka, providing at-least-once delivery (see
+  [Event-Driven Architecture](event-driven-architecture.md))
 
 ## Coupling Metrics
 
 ### Service-Level Metrics
 
-| Service | Afferent (Ca) | Efferent (Ce) | Instability (I) | Assessment | Abstractness (A) | Distance (D) |
-|---------|---------------|---------------|-----------------|------------|------------------|--------------|
-| position-keeping | 1 | 0 | 0.00 | **Stable** | 0.50 | 0.50 |
-| current-account | 0 | 2 | 1.00 | **Too Dependent** | 0.50 | 0.50 |
-| financial-accounting | 1 | 0 | 0.00 | **Stable** | 0.50 | 0.50 |
+Afferent (Ca) and efferent (Ce) coupling below are computed from cross-service gRPC client edges under
+`services/` (Table 3), excluding self-references. Abstractness is not recomputed in this refresh (the
+former tooling that produced it is stale); the column is omitted pending a tooling update.
+
+| Service | Afferent (Ca) | Efferent (Ce) | Instability (I) | Assessment |
+|---------|---------------|---------------|-----------------|------------|
+| reference-data | 5 | 0 | 0.00 | **Stable** (foundational registry/provider) |
+| position-keeping | 4 | 3 | 0.43 | Balanced (provider and consumer) |
+| control-plane | 3 | 5 | 0.63 | Orchestrator (depends on more than depend on it) |
+| market-information | 3 | 0 | 0.00 | **Stable** provider |
+| current-account | 2 | 0 | 0.00 | **Stable** provider |
+| internal-account | 2 | 1 | 0.33 | Mostly stable provider |
+| party | 2 | 0 | 0.00 | **Stable** provider |
+| operational-gateway | 2 | 0 | 0.00 | **Stable** provider |
+| financial-accounting | 1 | 0 | 0.00 | **Stable** provider |
+| reconciliation | 1 | 3 | 0.75 | Consumer-heavy |
+| payment-order | 0 | 2 | 1.00 | Pure consumer (orchestration) |
+| event-router | 0 | 3 | 1.00 | Pure consumer (event fan-out) |
+| financial-gateway | 0 | 1 | 1.00 | Pure consumer |
+| mcp-server | 0 | 7 | 1.00 | Pure consumer (MCP aggregator) |
+| tenant | 0 | 0 | n/a | Isolated (no cross-service gRPC edges) |
+
+Services with no cross-service gRPC edges in either direction (api-gateway, audit-worker, forecasting,
+identity) are omitted; they interact via Kafka and the gateway layer rather than direct gRPC clients.
 
 ### Metric Definitions
 
 - **Afferent Coupling (Ca):** Number of services that depend on this service
 - **Efferent Coupling (Ce):** Number of services this service depends on
 - **Instability (I):** Ce / (Ca + Ce), where 0 = stable, 1 = unstable
-- **Abstractness (A):** Ratio of abstract to concrete types (0.5 indicates balanced design)
-- **Distance from Main Sequence (D):** |A + I - 1|, ideal value near 0
 
 ### Interpretation
 
-**Position Keeping (I=0.00 - Stable):**
+**reference-data (I=0.00 - Stable):**
 
-- Acts as a provider service (Ca=1, Ce=0)
-- No outbound dependencies on other domain services
-- Low risk of cascading changes
-- Aligns with its role as a foundational balance tracking service
+- Highest afferent coupling (Ca=5): instrument, account-type, and saga-registry lookups make it a
+  foundational provider
+- No outbound gRPC dependencies on other domain services
+- Changes here have the widest blast radius - treat its proto surface as a stable contract
 
-**Current Account (I=1.00 - Too Dependent):**
+**position-keeping (I=0.43 - Balanced):**
 
-- Depends on both position-keeping and financial-accounting
-- Zero services depend on it (orchestration layer pattern)
-- High instability means changes in dependencies may ripple here
-- Expected pattern for a business transaction orchestration service
+- Both a provider (Ca=4: event-router, internal-account, reconciliation, mcp-server) and a consumer
+  (Ce=3: current-account, internal-account, reference-data)
+- Central to the position/balance flow; sits near the middle of the stability spectrum
 
-**Financial Accounting (I=0.00 - Stable):**
+**control-plane (I=0.63 - Orchestrator):**
 
-- Provider service for journal entries and postings
-- Single consumer (current-account)
-- Low risk profile
-- Stable foundation for financial operations
+- Depends on five services to orchestrate manifests and sagas while three services depend on its manifest
+  history and economy-generation RPCs
+- Higher instability is expected for an orchestration layer
 
-### Distance from Main Sequence
+**Pure consumers (I=1.00 - payment-order, event-router, financial-gateway, mcp-server):**
 
-All services show D=0.50, indicating they are moderately far from the ideal main sequence. This is primarily driven by:
+- Zero services depend on them; they aggregate or orchestrate
+- High instability is by design - changes in their dependencies may ripple here, but nothing downstream
+  depends on them
 
-- Moderate abstractness (A=0.50) in all services
-- Mixed stability characteristics (I values ranging 0.00-1.00)
+### Stability Observations
 
-**Recommendation:** Consider increasing abstraction in current-account to improve its position
-on the main sequence given its high instability.
+The topology is healthy: foundational providers (reference-data, market-information, party,
+current-account, financial-accounting) are stable (I=0.00), while orchestration and aggregation layers
+(control-plane, event-router, payment-order, mcp-server) carry the instability by design. There are no
+cyclic cross-service gRPC dependencies in the edges sampled.
 
 ## BIAN Context
 
@@ -252,14 +305,20 @@ Per [ADR-0002](../adr/0002-microservices-per-bian-domain.md), Meridian implement
 | position-keeping | Position Keeping | Tracks and updates financial positions | **COMPLIANT** - No cross-domain imports |
 | current-account | Current Account | Manages customer deposit accounts | **COMPLIANT** - Only uses proto interfaces |
 | financial-accounting | Financial Accounting | Records and reports financial transactions | **COMPLIANT** - Domain isolation maintained |
+| market-information | Market Information Management | Captures market price observations | **COMPLIANT** - Provider only |
+| party | Party Reference Data Management | Party registration and lifecycle (KYC/AML) | **COMPLIANT** - Provider only |
+| internal-account | Internal Account / Bank Internal Position | Internal facility and booking management | **COMPLIANT** |
+| reference-data | (Platform) Product/Instrument Directory | Instrument, account-type, and saga registry | **COMPLIANT** - Provider only |
+| reconciliation | Reconciliation | Settlement reconciliation and variance detection | **COMPLIANT** |
+| payment-order | Payment Order | Payment order lifecycle orchestration | **COMPLIANT** - Consumer/orchestrator |
+| operational-gateway | (Platform) Operational Instruction Routing | Instruction dispatch to external providers | **COMPLIANT** |
+| financial-gateway | (Platform) Payment Provider Gateway | Inbound payment-provider webhooks | **COMPLIANT** |
+| control-plane | (Platform) Manifest and Saga Orchestration | Economy manifest apply and saga execution | **COMPLIANT** - Orchestrator |
+
+A complete BIAN domain mapping for all services is maintained in
+[BIAN Service Boundaries](bian-service-boundaries.md).
 
 ### Service Boundary Validation
-
-**Expected Boundaries (per BIAN):**
-
-- Position Keeping: Maintains real-time position state
-- Current Account: Customer account operations and orchestration
-- Financial Accounting: Double-entry ledger and journal management
 
 **Actual Implementation:**
 
@@ -267,19 +326,19 @@ Per [ADR-0002](../adr/0002-microservices-per-bian-domain.md), Meridian implement
 - Communication follows specified patterns:
   - Synchronous: gRPC for queries and commands
   - Asynchronous: Kafka events for domain events
-- Each service has its own database schema
+- Each service has its own database schema and Atlas migrations
 - No shared database access detected
 
 ### ADR-0002 Compliance Summary
 
 | Principle | Status | Evidence |
 |-----------|--------|----------|
-| One service per BIAN domain | PASS | 3 services map to 3 BIAN domains |
-| Independent databases | PASS | No cross-service database access |
-| gRPC for sync communication | PASS | 14 proto imports for gRPC clients |
-| Kafka for async events | PASS | EventPublisher interfaces, 51 event patterns |
+| One service per BIAN domain | PASS | 19 services under `services/` map to distinct domains |
+| Independent databases | PASS | No cross-service database access; per-service Atlas migrations |
+| gRPC for sync communication | PASS | Cross-service calls use generated proto clients (Table 3) |
+| Kafka for async events | PASS | Outbox publishers + 48 registered topics (`topics.yaml`) |
 | No cross-service internal imports | PASS | Zero domain-to-domain internal imports |
-| Platform code separation | FAIL | 17 internal/platform imports (should be pkg/platform) |
+| Platform code separation | PASS | Platform code relocated to `shared/platform/` (P1-1 complete) |
 
 ## Prioritized Remediation Plan
 
@@ -299,176 +358,93 @@ boundaries with zero cross-service internal imports detected.
 
 **Prevention:** The absence of P0 violations demonstrates proper architectural discipline. To maintain this:
 
-- Enable CI gates (see P1-1 below) to prevent future violations
+- Update and enable the coupling CI gate (see P1-3) to prevent future violations
 - Require architectural review for any new service dependencies
-- Maintain strict separation between `internal/` packages across services
+- Maintain strict separation between each service's `internal/` packages
 
 ### P1 - High (Architectural Debt)
 
-#### P1-1: Migrate Platform Code from internal/platform to pkg/platform
+#### P1-1: Migrate Platform Code out of internal/platform (COMPLETED)
 
-**Problem:** Services import `internal/platform/*` packages, violating Go's internal package semantics.
-The `internal/` directory is meant for code that should not be imported by other modules, but our services
-need shared platform utilities.
+**Status:** COMPLETED. Platform code no longer lives in `internal/platform/`. The migration relocated
+shared infrastructure to `shared/platform/` (e.g. `observability`, `kafka`, `events`, `db`, `auth`,
+`testdb`, `scheduler`, `gateway`, `tenant`), with additional reusable libraries under `shared/pkg/` and
+shared domain types under `shared/domain/`. Services themselves moved from the top-level `internal/<service>/`
+tree to `services/<service>/`.
 
-**Impact:**
+> The original remediation plan proposed `pkg/platform/` as the target; the actual implementation used
+> `shared/platform/`. Either location resolves the original problem (platform code is no longer behind a
+> non-importable `internal/` boundary). The only `internal/platform` reference remaining in the codebase is
+> a documentation comment in `shared/domain/models/base.go`.
 
-- Violates Go module semantics (15 files affected across 3 services)
-- Prevents platform code reuse by external tools or future services
-- Creates confusion about which code is truly internal vs shared
-
-**Affected Files (15 total):**
-
-**Observability (7 files):**
-
-- `cmd/current-account/main.go:18`
-- `cmd/financial-accounting/main.go:17`
-- `internal/current-account/service/grpc_service.go:22`
-- `services/current-account/client/client.go:10`
-- `services/current-account/client/client_test.go:8`
-- `internal/position-keeping/app/container.go:10`
-
-**Kafka (2 files):**
-
-- `internal/position-keeping/adapters/messaging/kafka_event_publisher_test.go:9`
-- `internal/financial-accounting/adapters/messaging/deposit_consumer.go:12`
-- `internal/financial-accounting/adapters/messaging/deposit_consumer_test.go:12`
-
-**TestDB (4 files):**
-
-- `internal/current-account/adapters/persistence/repository_test.go:10`
-- `internal/current-account/service/grpc_service_test.go:12`
-- `internal/financial-accounting/adapters/persistence/repository_test.go:12`
-- `internal/financial-accounting/service/posting_service_test.go:11`
-- `internal/financial-accounting/adapters/messaging/deposit_consumer_test.go:13`
-
-**Auth (1 file):**
-
-- `internal/position-keeping/app/container.go:9`
-
-**Solution:**
-
-**Step 1: Create pkg/platform structure** (1 story point)
+**Verification:**
 
 ```bash
-mkdir -p pkg/platform/{observability,kafka,testdb,auth}
+# No production code imports internal/platform any more
+rg -l "meridian/internal/platform" --type go | grep -v _test.go
+# (returns nothing)
+
+# Platform code is present under shared/platform
+ls shared/platform/
 ```
 
-**Step 2: Move platform packages** (2 story points)
-
-- Move `internal/platform/observability` → `pkg/platform/observability`
-- Move `internal/platform/kafka` → `pkg/platform/kafka`
-- Move `internal/platform/testdb` → `pkg/platform/testdb`
-- Move `internal/platform/auth` → `pkg/platform/auth`
-- Preserve git history using `git mv`
-
-**Step 3: Update import paths** (2 story points)
-
-```bash
-# Automated with find/replace
-find ./cmd ./internal -name "*.go" -exec sed -i '' \
-  's|github.com/meridianhub/meridian/internal/platform|github.com/meridianhub/meridian/pkg/platform|g' {} \;
-```
-
-**Step 4: Verify with tests** (1 story point)
-
-```bash
-# Run all tests to ensure no regressions
-make test
-
-# Run coupling analysis to verify fix
-./scripts/analyze-coupling.sh | jq '.violations[] | select(.type == "internal-platform-import")'
-# Should return empty
-```
-
-**Effort Estimate:** 5 story points (1-2 days)
-
-**Dependencies:** None - can be done independently
-
-**Risk:** Low - Mechanical refactoring with automated tooling support. No business logic changes.
-
-**Alignment:**
-
-- **ADR-0002:** Supports proper platform code separation for microservices
-- **ADR-0005:** Platform adapters remain reusable across services
-
-**Related Tasks:** Foundation for all future platform work
+**Residual follow-up:** Update `scripts/analyze-coupling.sh` (see P1-3) so the CI gate can be re-enabled
+against the new `services/` and `shared/platform/` layout.
 
 ---
 
-#### P1-2: Reduce Current Account Service Instability
+#### P1-2: Monitor Instability of Orchestration and Aggregation Services
 
-**Problem:** Current Account service has an instability score of 1.00 (I=Ce/(Ca+Ce) = 2/(0+2) = 1.00),
-indicating it depends on two services (position-keeping, financial-accounting) but has zero services
-depending on it.
+**Problem:** Several services carry high instability (I=1.00) by design - they orchestrate or aggregate
+without exposing inbound dependencies: `payment-order`, `event-router`, `financial-gateway`, and the
+`mcp-server` MCP aggregator. `control-plane` (I=0.63) and `reconciliation` (I=0.75) are also
+consumer-heavy.
+
+**Why This Matters:**
+High instability is expected for orchestration and aggregation layers, but it means changes in their
+dependencies may ripple into them. This is acceptable as long as those services use the shared resilience
+layer and are not themselves depended upon.
+
+**Mitigation (already in place):**
+
+- Resilience (retry, circuit breaker) via `shared/pkg/clients`
+- Saga orchestration patterns via `shared/pkg/saga`
+- No service depends on these high-instability consumers, so their churn does not propagate downstream
+
+**Action:** No structural change required. Re-run the (updated) coupling tooling each release and alert if a
+service's instability shifts by more than 0.2 or if a previously stable provider gains outbound dependencies.
+
+**Effort Estimate:** 0 story points (monitoring only, gated on P1-3)
+
+---
+
+#### P1-3: Update Coupling Tooling to Scan services/
+
+**Problem:** `scripts/analyze-coupling.sh` (and the `calculate-coupling-metrics.sh` /
+`generate-coupling-mermaid.sh` helpers that consume its JSON) discover services by scanning the top-level
+`internal/` directory. After the service and platform migration, `internal/` contains only `bootstrap` and
+`migrations`, so the script reports zero domain services and produces empty violation/proto/schema sections.
+The metrics in this document were therefore derived manually from `services/`.
 
 **Impact:**
 
-- High change propagation risk - changes in dependencies ripple here
-- Service acts as orchestration layer without its own dependents
-- Distance from main sequence (D=0.50) indicates room for architectural improvement
+- The coupling CI gate cannot be enabled until the script is fixed (it would always pass with zero services)
+- `docs/architecture/coupling-metrics.json` cannot be regenerated automatically
 
-**Why This Matters:**
-This is expected for an orchestration service but indicates architectural fragility. The service is vulnerable
-to changes in both position-keeping and financial-accounting.
+**Solution:**
 
-**Affected Components:**
+- Change service discovery to enumerate `services/*/` (and treat `shared/platform/`, `shared/pkg/`,
+  `shared/domain/` as shared, non-service code)
+- Update the cross-service import detection to look for `services/<other>/internal` imports
+- Re-point the platform-usage check at `shared/platform` (informational only - this is now an allowed
+  shared import, not a violation)
+- Regenerate `coupling-metrics.json` from the corrected output
 
-- `services/current-account/client/client.go` (depends on position-keeping and financial-accounting)
-- `shared/pkg/clients/resilient.go` (circuit breaker - partial mitigation)
-- `shared/pkg/clients/circuitbreaker.go` (circuit breaker implementation)
+**Effort Estimate:** 3 story points
 
-**Solution Options:**
+**Dependencies:** None - unblocks the CI gate (P2-2)
 
-**Option A: Enhance Anti-Corruption Layer** (Recommended - 3 story points)
-
-```go
-// Add abstraction layer between current-account and dependencies
-
-// Define domain-level interfaces (not proto-coupled)
-type PositionReader interface {
-    GetBalance(ctx context.Context, accountID string) (Balance, error)
-}
-
-type JournalWriter interface {
-    RecordEntry(ctx context.Context, entry JournalEntry) error
-}
-
-// Implement adapters that translate to gRPC
-type PositionKeepingAdapter struct {
-    client pb.PositionKeepingServiceClient
-}
-
-func (a *PositionKeepingAdapter) GetBalance(ctx context.Context, accountID string) (Balance, error) {
-    // Translate domain request → proto → domain response
-    // Insulates current-account from proto changes in position-keeping
-}
-```
-
-**Option B: Extract Orchestration Patterns** (5 story points)
-
-- Create shared `pkg/orchestration` package with Saga patterns
-- Move orchestration logic out of current-account
-- Benefits future services that need similar patterns
-
-**Option C: Accept Current State** (0 story points)
-
-- Instability is expected for orchestration services
-- Existing `resilient_client.go` already mitigates cascade failures
-- No action needed unless change frequency becomes problematic
-
-**Effort Estimate:** 3 story points (Option A recommended)
-
-**Dependencies:** None - orthogonal to other remediation items
-
-**Risk:** Medium - Requires careful testing of service interactions
-
-**Alignment:**
-
-- **ADR-0002:** Maintains service independence through abstraction
-- **ADR-0005:** Anti-corruption layer follows adapter pattern
-
-**Related Tasks:** Consider in future architecture reviews
+**Risk:** Low - tooling-only change
 
 ---
 
@@ -517,9 +493,9 @@ None - current-account operates synchronously via gRPC.
 
 **Files to Create:**
 
-- `cmd/current-account/DEPENDENCIES.md`
-- `cmd/position-keeping/DEPENDENCIES.md`
-- `cmd/financial-accounting/DEPENDENCIES.md`
+- `services/current-account/DEPENDENCIES.md`
+- `services/position-keeping/DEPENDENCIES.md`
+- `services/financial-accounting/DEPENDENCIES.md`
 
 **Effort Estimate:** 2 story points (1 file per service × 3 services)
 
@@ -604,10 +580,10 @@ fi
 
 **Dependencies:**
 
-- Should be implemented after P1-1 (platform migration) to avoid false positives
-- Requires P1-1 completion first
+- Requires P1-3 (coupling tooling update) first - the script must discover services from `services/`
+  before a CI gate is meaningful
 
-**Risk:** Low - Scripts already exist, just need CI integration
+**Risk:** Low - Scripts exist but need updating (P1-3), then CI integration
 
 **Alignment:**
 
@@ -620,21 +596,22 @@ fi
 
 ### Summary Table
 
-| ID | Priority | Description | Effort (SP) | Risk | Dependencies |
-|----|----------|-------------|-------------|------|--------------|
-| P1-1 | High | Migrate internal/platform to pkg/platform | 5 | Low | None |
-| P1-2 | High | Reduce current-account instability | 3 | Medium | None |
-| P2-1 | Medium | Document service dependencies | 2 | None | None |
-| P2-2 | Medium | Implement CI coupling gates | 3 | Low | P1-1 |
+| ID | Priority | Description | Effort (SP) | Risk | Dependencies | Status |
+|----|----------|-------------|-------------|------|--------------|--------|
+| P1-1 | High | Migrate platform code out of internal/platform | 5 | Low | None | Completed |
+| P1-3 | High | Update coupling tooling to scan `services/` | 3 | Low | None | Open |
+| P1-2 | High | Monitor instability of orchestration services | 0 | Low | P1-3 | Open (monitoring) |
+| P2-1 | Medium | Document service dependencies | 2 | None | None | Open |
+| P2-2 | Medium | Implement CI coupling gates | 3 | Low | P1-3 | Open |
 
-**Total Effort:** 13 story points (approximately 2-3 weeks for one developer)
+**Remaining Effort:** 8 story points (P1-1 complete)
 
 **Recommended Execution Order:**
 
-1. **P1-1** (Week 1) - Platform migration unblocks everything else
-2. **P2-2** (Week 1-2) - CI gates prevent regression after P1-1
-3. **P2-1** (Week 2) - Documentation can happen in parallel
-4. **P1-2** (Week 3) - Architectural improvement, consider in next sprint
+1. **P1-3** - Update coupling tooling to scan `services/` (unblocks the CI gate and metric regeneration)
+2. **P2-2** - Enable the CI coupling gate once the tooling is corrected
+3. **P2-1** - Document service dependencies (can happen in parallel)
+4. **P1-2** - Ongoing monitoring of instability trends
 
 ---
 
@@ -644,7 +621,7 @@ After implementing remediation items:
 
 **Continuous Monitoring:**
 
-- Run `./scripts/analyze-coupling.sh` weekly to track metrics
+- Run `./scripts/analyze-coupling.sh` weekly to track metrics (after P1-3 updates it to scan `services/`)
 - Review coupling metrics in sprint retrospectives
 - Alert on instability score changes > 0.2
 
@@ -656,10 +633,10 @@ After implementing remediation items:
 
 **Success Criteria:**
 
-- Zero `internal-platform-import` violations (tracked in CI)
-- All services maintain I < 0.8 (instability score)
-- Service dependency graph matches BIAN architecture
-- < 5 minutes for new developers to understand service dependencies (via DEPENDENCIES.md)
+- Zero cross-service internal imports (tracked in CI once P1-3/P2-2 land)
+- Provider/registry services (reference-data, market-information, party) remain stable (I near 0.00)
+- Service dependency graph matches BIAN architecture (no cyclic cross-service gRPC edges)
+- Service dependencies are discoverable from the proto clients and `topics.yaml`
 
 ## Testing Strategy
 
@@ -673,7 +650,7 @@ After implementing remediation items:
 
 **Test Infrastructure:**
 
-- Testcontainers for PostgreSQL (internal/platform/testdb)
+- CockroachDB Testcontainers via `shared/platform/testdb`
 - Mock gRPC clients for resilience testing
 - Kafka test harness for consumer testing
 
@@ -688,53 +665,55 @@ After implementing remediation items:
    - Validate circuit breaker patterns in resilient_client.go
 
 3. **Coupling Regression Tests:**
-   - Automated checks for new `internal/` cross-service imports
-   - Pre-commit hooks running `scripts/analyze-coupling.sh`
+   - Automated checks for new cross-service `services/<other>/internal` imports
+   - Pre-commit hooks running `scripts/analyze-coupling.sh` (after P1-3)
 
 ## Appendix
 
 ### Analysis Methodology
 
-This analysis was performed using custom Go AST parsing scripts:
+The original analysis used custom scripts:
 
 1. `scripts/analyze-coupling.sh` - Detects import violations and patterns
 2. `scripts/calculate-coupling-metrics.sh` - Computes coupling metrics
 3. `scripts/generate-coupling-mermaid.sh` - Visualizes dependencies
 
+These scripts discover services from the top-level `internal/` directory and are stale relative to the
+current `services/` layout (see [P1-3](#p1-3-update-coupling-tooling-to-scan-services)). The 2026-06-08
+refresh therefore derived metrics directly from `services/` using `rg` over `New<Service>ServiceClient`
+instantiation (cross-service gRPC edges), Kafka topic usage, and import paths.
+
 **Analysis Coverage:**
 
-- Import declarations (cross-service and platform)
-- Proto message usage
-- gRPC client instantiation
-- Database schema ownership
-- Kafka event patterns
+- Cross-service gRPC client instantiation (consumer → provider edges)
+- Kafka topic ownership via `shared/platform/events/topics/topics.yaml`
+- Cross-service internal import scan (zero found)
+- Per-service database schema/migration ownership
 
 ### Raw Metrics Output
 
-Full metrics available in: `docs/architecture/coupling-metrics.json`
+Full metrics available in: `docs/architecture/coupling-metrics.json` (regenerate automatically once P1-3
+updates the tooling). Current code-derived values:
 
 ```json
 {
-  "timestamp": "2025-11-19T15:14:06Z",
+  "timestamp": "2026-06-08T00:00:00Z",
+  "method": "manual-rg-over-services-tree",
   "services": {
-    "position-keeping": {
-      "afferent_coupling": 1,
-      "efferent_coupling": 0,
-      "instability": 0,
-      "assessment": "stable"
-    },
-    "current-account": {
-      "afferent_coupling": 0,
-      "efferent_coupling": 2,
-      "instability": 1.00,
-      "assessment": "too-dependent"
-    },
-    "financial-accounting": {
-      "afferent_coupling": 1,
-      "efferent_coupling": 0,
-      "instability": 0,
-      "assessment": "stable"
-    }
+    "reference-data":      { "afferent_coupling": 5, "efferent_coupling": 0, "instability": 0.00, "assessment": "stable" },
+    "position-keeping":    { "afferent_coupling": 4, "efferent_coupling": 3, "instability": 0.43, "assessment": "balanced" },
+    "control-plane":       { "afferent_coupling": 3, "efferent_coupling": 5, "instability": 0.63, "assessment": "orchestrator" },
+    "market-information":  { "afferent_coupling": 3, "efferent_coupling": 0, "instability": 0.00, "assessment": "stable" },
+    "current-account":     { "afferent_coupling": 2, "efferent_coupling": 0, "instability": 0.00, "assessment": "stable" },
+    "internal-account":    { "afferent_coupling": 2, "efferent_coupling": 1, "instability": 0.33, "assessment": "stable" },
+    "party":               { "afferent_coupling": 2, "efferent_coupling": 0, "instability": 0.00, "assessment": "stable" },
+    "operational-gateway": { "afferent_coupling": 2, "efferent_coupling": 0, "instability": 0.00, "assessment": "stable" },
+    "financial-accounting":{ "afferent_coupling": 1, "efferent_coupling": 0, "instability": 0.00, "assessment": "stable" },
+    "reconciliation":      { "afferent_coupling": 1, "efferent_coupling": 3, "instability": 0.75, "assessment": "consumer-heavy" },
+    "payment-order":       { "afferent_coupling": 0, "efferent_coupling": 2, "instability": 1.00, "assessment": "pure-consumer" },
+    "event-router":        { "afferent_coupling": 0, "efferent_coupling": 3, "instability": 1.00, "assessment": "pure-consumer" },
+    "financial-gateway":   { "afferent_coupling": 0, "efferent_coupling": 1, "instability": 1.00, "assessment": "pure-consumer" },
+    "mcp-server":          { "afferent_coupling": 0, "efferent_coupling": 7, "instability": 1.00, "assessment": "aggregator" }
   }
 }
 ```

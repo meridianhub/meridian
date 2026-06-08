@@ -1,10 +1,18 @@
 # Event-Driven Architecture
 
-**Document Version:** 1.0
-**Last Updated:** 2025-11-19
+**Document Version:** 1.1
+**Last Updated:** 2026-06-08
 **Status:** Active
 **Related ADR:** [ADR-0004: Event Schema Evolution](../adr/0004-event-schema-evolution.md)
 **Related Documentation:** [BIAN Service Boundaries](bian-service-boundaries.md)
+
+> **Topic source of truth:** All Kafka topics are registered in
+> `shared/platform/events/topics/topics.yaml` (with Go constants in `topics.go`). As of 2026-06-08 the
+> registry defines 48 topics across 11 publishing service groups: audit, current-account,
+> internal-account, financial-accounting, market-information, payment-order, position-keeping, party,
+> reconciliation, operational-gateway, and financial-gateway. The Event Catalog below is kept consistent
+> with that registry; when they diverge, `topics.yaml` is authoritative. A `TestTopicsYAML_ConsistentWithGoConstants`
+> test enforces that the YAML and Go constants agree.
 
 ## Overview
 
@@ -125,55 +133,137 @@ google.type.Money amount = 4 [
 
 ## Event Catalog
 
+> **Registered topics vs proto messages:** The event proto files
+> (`api/proto/meridian/events/v1/*_events.proto`) define more message types than there are registered
+> Kafka topics. Only the topics present in `topics.yaml` are published today; the tables below list the
+> registered topics. Additional proto messages (e.g. `AccountCreatedEvent`, the
+> `FinancialBookingLog*`/`LedgerPosting*` set) are defined for future use or in-process use but do not have
+> dedicated registered topics yet.
+
 ### CurrentAccount Service Events
 
 **Event Proto:** `api/proto/meridian/events/v1/current_account_events.proto`
 
-| Event Type | Topic | Description | Consumers | Partition Key |
-|------------|-------|-------------|-----------|---------------|
-| `AccountCreatedEvent` | `current-account.account-created.v1` | New account facility initiated | Position-keeping, Financial-accounting, Risk-management | `account_id` |
-| `AccountStatusChangedEvent` | `current-account.account-status-changed.v1` | Account status transition (ACTIVE↔FROZEN↔CLOSED) | Position-keeping, Compliance, Reporting | `account_id` |
-| `AccountClosedEvent` | `current-account.account-closed.v1` | Account permanently closed (terminal state) | Position-keeping, Financial-accounting, Regulatory | `account_id` |
-| `TransactionInitiatedEvent` | `current-account.transaction-initiated.v1` | Transaction validated and ready for processing | Financial-accounting, Position-keeping | `account_id` |
-| `TransactionCompletedEvent` | `current-account.transaction-completed.v1` | Transaction successfully processed by all services | Notification, Reporting | `account_id` |
-| `TransactionFailedEvent` | `current-account.transaction-failed.v1` | Transaction failed during processing | Monitoring, DLQ, Notification | `account_id` |
-| `OverdraftConfiguredEvent` | `current-account.overdraft-configured.v1` | Overdraft facility configured or updated | Risk-management, Reporting | `account_id` |
-| `OverdraftLimitExceededEvent` | `current-account.overdraft-limit-exceeded.v1` | Transaction rejected due to insufficient funds | Fraud-detection, Notification | `account_id` |
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `AccountFrozenEvent` | `current-account.account-frozen.v1` | Account frozen (no debits or credits permitted) | `account_id` |
+| `AccountUnfrozenEvent` | `current-account.account-unfrozen.v1` | Previously frozen account unfrozen | `account_id` |
+| `AccountClosedEvent` | `current-account.account-closed.v1` | Account permanently closed (terminal state) | `account_id` |
+| `WithdrawalStatusUpdated` | `current-account.withdrawal-status.v1` | Withdrawal status change (initiated, completed, failed, reversed) | `account_id` |
 
 **Legacy Event (Deprecated):**
 
-- `DepositEvent` (in `deposit_event.proto`) - Being replaced by `TransactionInitiatedEvent` with `transaction_type = DEPOSIT`
+- `DepositEvent` (in `deposit_event.proto`) - retained for backward compatibility
+
+### InternalAccount Service Events
+
+**Event Proto:** `api/proto/meridian/events/v1/internal_account_events.proto`
+
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `FacilityCreatedEvent` | `internal-account.facility-created.v1` | New internal account facility initiated | `facility_id` |
+| `BookingCreatedEvent` | `internal-account.booking-created.v1` | New booking posted to an internal account | `account_id` |
 
 ### FinancialAccounting Service Events
 
 **Event Proto:** `api/proto/meridian/events/v1/financial_accounting_events.proto`
 
-| Event Type | Topic | Description | Consumers | Partition Key |
-|------------|-------|-------------|-----------|---------------|
-| `FinancialBookingLogInitiatedEvent` | `financial-accounting.booking-log-initiated.v1` | New booking log created (PENDING state) | Audit, Reporting | `booking_log_id` |
-| `FinancialBookingLogUpdatedEvent` | `financial-accounting.booking-log-updated.v1` | Booking log status or rules updated | Audit, Compliance | `booking_log_id` |
-| `FinancialBookingLogPostedEvent` | `financial-accounting.booking-log-posted.v1` | Booking log posted to GL (balanced, final state) | General-ledger, Reporting, Reconciliation | `booking_log_id` |
-| `FinancialBookingLogClosedEvent` | `financial-accounting.booking-log-closed.v1` | Booking log closed (terminal state) | Audit, Archival | `booking_log_id` |
-| `LedgerPostingCapturedEvent` | `financial-accounting.ledger-posting-captured.v1` | Debit/credit posting created | Trial-balance, Account-summary | `booking_log_id` |
-| `LedgerPostingAmendedEvent` | `financial-accounting.ledger-posting-amended.v1` | Posting amount amended before posting | Audit, Compliance | `booking_log_id` |
-| `LedgerPostingPostedEvent` | `financial-accounting.ledger-posting-posted.v1` | Posting finalized to general ledger | General-ledger, Reporting | `booking_log_id` |
-| `LedgerPostingRejectedEvent` | `financial-accounting.ledger-posting-rejected.v1` | Posting rejected during validation (terminal) | Monitoring, DLQ | `booking_log_id` |
-| `BalanceValidationFailedEvent` | `financial-accounting.balance-validation-failed.v1` | Debits ≠ Credits (double-entry violation) | Monitoring, Audit, Alerting | `booking_log_id` |
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `BookingLogControlledEvent` | `financial-accounting.booking-log-controlled.v1` | Booking log receives a control action (SUSPEND, RESUME, TERMINATE) | `booking_log_id` |
+| `BookingLogControlledEvent` | `financial-accounting.booking-log.controlled` | Legacy topic (deprecated, retained for dual-publish) | `booking_log_id` |
+
+### MarketInformation Service Events
+
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `ObservationRecorded` | `market-information.observation-recorded.v1` | New market price observation recorded | `instrument_id` |
+
+### PaymentOrder Service Events
+
+**Event Proto:** `api/proto/meridian/events/v1/payment_order_events.proto`
+
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `PaymentOrderInitiated` | `payment-order.initiated.v1` | New payment order initiated | `payment_order_id` |
+| `PaymentOrderReserved` | `payment-order.reserved.v1` | Funds reserved for a payment order | `payment_order_id` |
+| `PaymentOrderExecuting` | `payment-order.executing.v1` | Payment order begins execution with the gateway | `payment_order_id` |
+| `PaymentOrderCompleted` | `payment-order.completed.v1` | Payment order successfully completed | `payment_order_id` |
+| `PaymentOrderFailed` | `payment-order.failed.v1` | Payment order failed (non-retryable) | `payment_order_id` |
+| `PaymentOrderCancelled` | `payment-order.cancelled.v1` | Payment order cancelled before execution | `payment_order_id` |
+| `PaymentOrderReversed` | `payment-order.reversed.v1` | Completed payment order reversed | `payment_order_id` |
 
 ### PositionKeeping Service Events
 
 **Event Proto:** `api/proto/meridian/events/v1/position_keeping_events.proto`
 
-| Event Type | Topic | Description | Consumers | Partition Key |
-|------------|-------|-------------|-----------|---------------|
-| `TransactionCapturedEvent` | `position-keeping.transaction-captured.v1` | Transaction log entry created (draft state) | Reconciliation, Reporting | `log_id` |
-| `TransactionAmendedEvent` | `position-keeping.transaction-amended.v1` | Transaction amended before posting | Audit, Compliance | `log_id` |
-| `TransactionReconciledEvent` | `position-keeping.transaction-reconciled.v1` | Transaction reconciled against external records | Reconciliation-dashboard, Reporting | `log_id` |
-| `TransactionPostedEvent` | `position-keeping.transaction-posted.v1` | Transaction posted to GL (final state) | Reporting, Analytics | `log_id` |
-| `TransactionRejectedEvent` | `position-keeping.transaction-rejected.v1` | Transaction rejected during validation (terminal) | Monitoring, DLQ | `log_id` |
-| `TransactionFailedEvent` | `position-keeping.transaction-failed.v1` | Technical failure during processing | Monitoring, SRE, Alerting | `log_id` |
-| `TransactionCancelledEvent` | `position-keeping.transaction-cancelled.v1` | Transaction cancelled before posting | Audit, Reporting | `log_id` |
-| `BulkTransactionCapturedEvent` | `position-keeping.bulk-transaction-captured.v1` | Bulk import completed (1-10,000 transactions) | Reconciliation, Monitoring | `batch_id` |
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `TransactionCaptured` | `position-keeping.transaction-captured.v1` | New financial transaction captured | `log_id` |
+| `TransactionAmended` | `position-keeping.transaction-amended.v1` | Captured transaction amended | `log_id` |
+| `TransactionReconciled` | `position-keeping.transaction-reconciled.v1` | Transaction reconciled against settlement data | `log_id` |
+| `TransactionPosted` | `position-keeping.transaction-posted.v1` | Transaction posted to the ledger | `log_id` |
+| `TransactionRejected` | `position-keeping.transaction-rejected.v1` | Transaction rejected (validation failure) | `log_id` |
+| `TransactionFailed` | `position-keeping.transaction-failed.v1` | Transaction failed (system error) | `log_id` |
+| `TransactionCancelled` | `position-keeping.transaction-cancelled.v1` | Transaction cancelled | `log_id` |
+| `BulkTransactionCaptured` | `position-keeping.bulk-transaction-captured.v1` | Batch of transactions captured atomically | `batch_id` |
+| `OpeningBalanceRecorded` | `position-keeping.opening-balance-recorded.v1` | Opening balance recorded for a new account | `account_id` |
+
+### Party Service Events
+
+**Event Proto:** `api/proto/meridian/events/v1/party_events.proto`
+
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `PartyCreatedEvent` | `party.created.v1` | New party registered | `party_id` |
+| `PartyUpdatedEvent` | `party.updated.v1` | Party details updated | `party_id` |
+| `PartyControlledEvent` | `party.controlled.v1` | Control action applied (suspend, terminate, reactivate) | `party_id` |
+| `PartyVerificationCompletedEvent` | `party.verification-completed.v1` | KYC/AML verification reaches terminal state | `party_id` |
+
+### Reconciliation Service Events
+
+**Event Proto:** `api/proto/meridian/events/v1/reconciliation_events.proto`
+
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `ReconciliationRunStarted` | `reconciliation.run-started.v1` | Reconciliation run begins | `run_id` |
+| `ReconciliationRunCompleted` | `reconciliation.run-completed.v1` | Reconciliation run completes | `run_id` |
+| `VarianceDetected` | `reconciliation.variance-detected.v1` | Position variance detected | `run_id` |
+| `PositionLockRequested` | `reconciliation.position-lock-requested.v1` | Position lock requested to freeze a position | `position_id` |
+| `DisputeCreated` | `reconciliation.dispute-created.v1` | Reconciliation dispute raised | `dispute_id` |
+| `DisputeResolved` | `reconciliation.dispute-resolved.v1` | Reconciliation dispute resolved | `dispute_id` |
+
+### OperationalGateway Service Events
+
+**Event Proto:** `api/proto/meridian/events/v1/operational_gateway_events.proto`
+
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `InstructionCreatedEvent` | `operational-gateway.instruction-created.v1` | Instruction accepted (PENDING state) | `instruction_id` |
+| `InstructionDispatchedEvent` | `operational-gateway.instruction-dispatched.v1` | Instruction transitions to DISPATCHING | `instruction_id` |
+| `InstructionDeliveredEvent` | `operational-gateway.instruction-delivered.v1` | Instruction delivered to the provider | `instruction_id` |
+| `InstructionAcknowledgedEvent` | `operational-gateway.instruction-acknowledged.v1` | Provider confirms processing | `instruction_id` |
+| `InstructionFailedEvent` | `operational-gateway.instruction-failed.v1` | Instruction permanently failed after retries | `instruction_id` |
+| `InstructionExpiredEvent` | `operational-gateway.instruction-expired.v1` | Instruction expired before delivery | `instruction_id` |
+| `InstructionCancelledEvent` | `operational-gateway.instruction-cancelled.v1` | Pending instruction explicitly cancelled | `instruction_id` |
+
+### FinancialGateway Service Events
+
+Inbound payment-provider webhooks, validated and republished onto Kafka.
+
+| Event Type | Topic | Description | Partition Key |
+|------------|-------|-------------|---------------|
+| `PaymentCapturedEvent` | `financial-gateway.payment-captured.v1` | `payment_intent.succeeded` webhook validated | `payment_intent_id` |
+| `PaymentFailedEvent` | `financial-gateway.payment-failed.v1` | `payment_intent.payment_failed` webhook validated | `payment_intent_id` |
+| `PaymentRefundedEvent` | `financial-gateway.payment-refunded.v1` | `charge.refunded` webhook validated | `charge_id` |
+| `PaymentDisputedEvent` | `financial-gateway.payment-disputed.v1` | `charge.dispute.created` webhook validated | `charge_id` |
+
+### Audit Topic
+
+| Topic | Description |
+|-------|-------------|
+| `audit.events.v1` | Audit events for all service operations (consumed by audit-worker / event-router) |
+| `audit.events.v1.dlq` | Dead letter queue for audit events that could not be processed |
 
 ---
 
@@ -289,8 +379,10 @@ sequenceDiagram
 
 **Implementation:**
 
-- Outbox table: `audit_outbox` in each service's database
-- Polling worker: Background goroutine in each service
+- Shared implementation: `shared/platform/events/outbox.go` (`EventOutbox` model and poller)
+- Outbox tables: `event_outbox` for domain events; `audit_outbox` for audit-trail events (each in the
+  owning service's database)
+- Polling worker: Background goroutine in each publishing service
 - Batch size: 100 events per poll
 - Polling interval: 100ms (configurable)
 
@@ -374,9 +466,16 @@ CREATE INDEX idx_idempotency_expiry ON event_idempotency (processed_at);
 
 | Service | Publishes Events | Publishing Method | Trigger |
 |---------|------------------|-------------------|---------|
-| **CurrentAccount** | Account lifecycle, transaction orchestration events | Outbox pattern | After successful gRPC calls to downstream services |
-| **FinancialAccounting** | Booking log and posting events | Outbox pattern | After database writes (booking log creation, posting capture) |
-| **PositionKeeping** | Transaction log and position events | Outbox pattern | After database writes (transaction log creation, status updates) |
+| **CurrentAccount** | Account freeze/unfreeze/close, withdrawal status | Outbox pattern | After database write commits |
+| **InternalAccount** | Facility created, booking created | Outbox pattern | After database write commits |
+| **FinancialAccounting** | Booking log control events | Outbox pattern | After database write commits |
+| **MarketInformation** | Market price observations | Outbox pattern | After observation persisted |
+| **PaymentOrder** | Payment order lifecycle transitions | Outbox pattern | After state transition commits |
+| **PositionKeeping** | Transaction lifecycle, opening balances | Outbox pattern | After database write commits |
+| **Party** | Party created/updated/controlled, verification completed | Outbox pattern | After database write commits |
+| **Reconciliation** | Run lifecycle, variance/dispute, position locks | Outbox pattern | After database write commits |
+| **OperationalGateway** | Instruction lifecycle | Outbox pattern | After database write commits |
+| **FinancialGateway** | Validated payment-provider webhooks | Outbox pattern | After webhook validation commits |
 
 ### Publishing Rules
 
@@ -413,7 +512,7 @@ CREATE INDEX idx_idempotency_expiry ON event_idempotency (processed_at);
 ### Example: Publishing an Account Created Event
 
 ```go
-// internal/current-account/service/account_service.go
+// services/current-account/service/account_service.go
 
 func (s *AccountService) CreateAccount(ctx context.Context, req *pb.CreateAccountRequest) (*pb.AccountResponse, error) {
     // 1. Domain logic: Create account entity
@@ -508,7 +607,7 @@ consumerConfig := kafka.ConsumerConfig{
 ### Idempotent Consumer Pattern
 
 ```go
-// internal/financial-accounting/adapters/messaging/transaction_initiated_consumer.go
+// services/financial-accounting/adapters/messaging/transaction_initiated_consumer.go
 
 func (c *TransactionInitiatedConsumer) handleMessage(ctx context.Context, key []byte, msg proto.Message) error {
     event, ok := msg.(*eventsv1.TransactionInitiatedEvent)
@@ -570,7 +669,7 @@ func (c *TransactionInitiatedConsumer) handleMessage(ctx context.Context, key []
 Events that fail processing after retries are sent to a DLQ topic for investigation.
 
 ```go
-// internal/platform/kafka/consumer.go
+// shared/platform/kafka/consumer.go
 
 func (c *ProtoConsumer) processMessage(ctx context.Context, msg *kafka.Message) error {
     handlerCtx, cancel := context.WithTimeout(ctx, c.handlerTimeout)
@@ -868,16 +967,19 @@ jobs:
 ```text
 <service>.<event-name>.<version>
 
-Service:    current-account | financial-accounting | position-keeping
-Event Name: account-created | ledger-posting-captured | transaction-captured
+Service:    current-account | position-keeping | party | payment-order | operational-gateway | ...
+Event Name: account-frozen | transaction-captured | instruction-created | ...
 Version:    v1 | v2 | v3
 ```
 
+The service segment uses the hyphenated service name; the event-name segment is hyphenated; the version is
+`v<N>`. See `shared/platform/events/topics/topics.yaml` for the full registry.
+
 **Examples:**
 
-- `current-account.account-created.v1`
-- `financial-accounting.booking-log-posted.v1`
+- `current-account.account-frozen.v1`
 - `position-keeping.transaction-captured.v1`
+- `operational-gateway.instruction-created.v1`
 
 ### Topic Configuration Standards
 
@@ -1119,7 +1221,7 @@ func TestAccountCreatedEvent_Serialization(t *testing.T) {
 ### Integration Tests: End-to-End Event Flow
 
 ```go
-// internal/current-account/service/account_service_integration_test.go
+// services/current-account/service/account_service_integration_test.go
 
 func TestCreateAccount_PublishesEvent(t *testing.T) {
     // Start Kafka testcontainer
@@ -1154,7 +1256,7 @@ func TestCreateAccount_PublishesEvent(t *testing.T) {
 ### Contract Tests: Consumer Expectations
 
 ```go
-// internal/financial-accounting/adapters/messaging/account_created_consumer_test.go
+// services/financial-accounting/adapters/messaging/account_created_consumer_test.go
 
 func TestAccountCreatedConsumer_HandleEvent(t *testing.T) {
     // Arrange: Create test event
@@ -1438,6 +1540,6 @@ Command: ExecuteDeposit (causation_id = cmd-123)
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2025-11-19
-**Next Review:** 2026-02-19 (quarterly)
+**Document Version:** 1.1
+**Last Updated:** 2026-06-08
+**Next Review:** 2026-09-08 (quarterly)
