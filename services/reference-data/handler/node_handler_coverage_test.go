@@ -32,6 +32,7 @@ type stubNodeRepo struct {
 	getAncestorsErr error
 	getSubtreeErr   error
 	getAsAtErr      error
+	getAsAtNode     *node.Node
 	getHistoryErr   error
 	bulkCreateErr   error
 }
@@ -48,7 +49,10 @@ func (r *stubNodeRepo) GetByID(_ context.Context, _ uuid.UUID) (*node.Node, erro
 }
 
 func (r *stubNodeRepo) GetAsAt(_ context.Context, _ string, _ uuid.UUID, _ time.Time) (*node.Node, error) {
-	return nil, r.getAsAtErr
+	if r.getAsAtErr != nil {
+		return nil, r.getAsAtErr
+	}
+	return r.getAsAtNode, nil
 }
 
 func (r *stubNodeRepo) GetHistory(_ context.Context, _ string, _ uuid.UUID) ([]*node.Node, error) {
@@ -297,11 +301,27 @@ func TestNodeService_GetNodeAsAt_InvalidUUID(t *testing.T) {
 
 func TestNodeService_GetNodeAsAt_Success(t *testing.T) {
 	id := uuid.New()
-	repo := &stubNodeRepo{}
-	// GetAsAt returns the node via getAsAtErr==nil path; supply a node by
-	// reusing getByIDNode through a dedicated stub field is unnecessary - here
-	// we assert the not-found mapping which still proves the success-call wiring.
-	repo.getAsAtErr = node.ErrNotFound
+	repo := &stubNodeRepo{getAsAtNode: &node.Node{
+		ID:        id,
+		TenantID:  "cov_tenant",
+		NodeType:  "region",
+		Version:   2,
+		ValidFrom: time.Now(),
+	}}
+	svc := newStubNodeService(t, repo)
+
+	resp, err := svc.GetNodeAsAt(nodeTenantCtx(t), &pb.GetNodeAsAtRequest{
+		NodeId: id.String(),
+		AsAt:   timestamppb.New(time.Now()),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, id.String(), resp.GetNode().GetId())
+	assert.Equal(t, "region", resp.GetNode().GetNodeType())
+}
+
+func TestNodeService_GetNodeAsAt_NotFound(t *testing.T) {
+	id := uuid.New()
+	repo := &stubNodeRepo{getAsAtErr: node.ErrNotFound}
 	svc := newStubNodeService(t, repo)
 
 	_, err := svc.GetNodeAsAt(nodeTenantCtx(t), &pb.GetNodeAsAtRequest{

@@ -145,9 +145,24 @@ func TestMappingService_UpdateMapping_FieldMask(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	// Update stub only persists name/external_schema/fields; assert the mask
-	// applied name (others are validated by applyUpdateMask coverage itself).
-	assert.Equal(t, "renamed", updateResp.GetMapping().GetName())
+	// The response is built from applyUpdateMask's in-memory result, so every
+	// masked field is reflected regardless of what the stub persists. Assert
+	// each masked branch actually applied (and the unknown path was ignored).
+	m := updateResp.GetMapping()
+	assert.Equal(t, "renamed", m.GetName())
+	assert.JSONEq(t, `{"type":"object"}`, m.GetExternalSchema())
+	require.Len(t, m.GetFields(), 1)
+	assert.Equal(t, "a", m.GetFields()[0].GetExternalPath())
+	require.Len(t, m.GetInboundComputedFields(), 1)
+	assert.Equal(t, "c", m.GetInboundComputedFields()[0].GetTargetPath())
+	require.Len(t, m.GetOutboundComputedFields(), 1)
+	assert.Equal(t, "d", m.GetOutboundComputedFields()[0].GetTargetPath())
+	assert.Equal(t, "has(payload.x)", m.GetInboundValidationCel())
+	assert.Equal(t, "has(payload.y)", m.GetOutboundValidationCel())
+	assert.True(t, m.GetIsBatch())
+	assert.Equal(t, "items", m.GetBatchTargetPath())
+	require.NotNil(t, m.GetIdempotency())
+	assert.Equal(t, "a", m.GetIdempotency().GetSourceSelector())
 }
 
 func TestMappingService_DeleteMapping_InvalidUUID(t *testing.T) {
