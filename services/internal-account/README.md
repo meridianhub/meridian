@@ -16,7 +16,7 @@ instructions: |
 
   Key patterns:
   - Account lifecycle: ACTIVE -> SUSPENDED -> CLOSED (no PENDING state; CLOSED is terminal)
-  - Account types: CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE, INVENTORY
+  - Account types: CLEARING, NOSTRO, VOSTRO, HOLDING, SUSPENSE, REVENUE, EXPENSE
   - NOSTRO and VOSTRO accounts require CounterpartyDetails; other types must not include them
   - CLEARING accounts carry a ClearingPurpose (DEPOSIT / WITHDRAWAL / SETTLEMENT / GENERAL)
   - Balance is NOT stored locally - delegated to position-keeping per ADR-0023
@@ -88,25 +88,28 @@ classDiagram
     class CounterpartyDetails {
         +string CounterpartyID
         +string CounterpartyName
-        +string CounterpartyExternalRef
-        +CounterpartyType CounterpartyType
+        +string ExternalRef
+        +map Attributes
     }
 
     class Lien {
-        +string LienID
+        +string ID
         +string AccountID
-        +InstrumentAmount Amount
+        +int64 AmountCents
+        +string InstrumentCode
         +LienStatus Status
         +string PaymentOrderReference
+        +string BucketID
         +time ExpiresAt
     }
 
     class ValuationFeature {
-        +string FeatureID
+        +string ID
         +string AccountID
-        +string SourceInstrumentCode
-        +string TargetInstrumentCode
-        +string ValuationMethod
+        +string InstrumentCode
+        +string ValuationMethodID
+        +int ValuationMethodVersion
+        +LifecycleStatus LifecycleStatus
     }
 
     class InternalAccountType {
@@ -118,7 +121,6 @@ classDiagram
         SUSPENSE
         REVENUE
         EXPENSE
-        INVENTORY
     }
 
     class ClearingPurpose {
@@ -144,19 +146,12 @@ classDiagram
         TERMINATED
     }
 
-    class CounterpartyType {
-        <<enumeration>>
-        NOSTRO
-        VOSTRO
-    }
-
     InternalAccountFacility --> InternalAccountType
     InternalAccountFacility --> ClearingPurpose
     InternalAccountFacility --> InternalAccountStatus
     InternalAccountFacility "1" --> "0..1" CounterpartyDetails : required for NOSTRO/VOSTRO
     InternalAccountFacility "1" --> "*" Lien : has
     InternalAccountFacility "1" --> "*" ValuationFeature : has
-    CounterpartyDetails --> CounterpartyType
     Lien --> LienStatus
 ```
 
