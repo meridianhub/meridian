@@ -14,12 +14,14 @@ instructions: |
   Do not compute balances in any other service.
 
   FinancialPositionLog is the aggregate root. Each log is append-only and
-  enforces a hard limit of 10,000 entries. Transaction status machine:
-  PENDING -> RECONCILED -> POSTED -> REVERSED. POSTED is effectively immutable
+  enforces a hard limit of 10,000 entries. Status is tracked on the log via
+  StatusTracking through eight states: PENDING, RECONCILED, POSTED, FAILED,
+  REJECTED, AMENDED, CANCELLED, REVERSED. POSTED is effectively immutable
   (terminal for most mutations).
 
-  Parent-child lineage: reversals and amendments reference their parent log entry
-  via parent_log_id. This is how the audit chain for compensation is maintained.
+  Parent-child lineage: reversals and amendments reference their parent
+  transaction via TransactionLineage.parentTransactionID. This is how the audit
+  chain for compensation is maintained.
 
   7 BIAN balance types: OPENING, CLOSING, CURRENT, AVAILABLE, LEDGER, RESERVE, FREE.
   GetAccountBalance and GetAccountBalances are the two balance query RPCs; all other
@@ -81,21 +83,21 @@ classDiagram
     class FinancialPositionLog {
         +UUID logId
         +string accountId
-        +string instrumentCode
-        +TransactionStatus status
+        +string accountServiceDomain
+        +StatusTracking statusTracking
         +int64 version
-        +int entryCount
+        +Money openingBalance
         +time createdAt
+        +time updatedAt
     }
-    class TransactionEntry {
+    class TransactionLogEntry {
         +UUID entryId
-        +UUID logId
-        +UUID parentLogId
-        +decimal amount
+        +UUID transactionId
+        +string accountId
+        +Money amount
         +PostingDirection direction
-        +TransactionStatus status
         +TransactionSource source
-        +time effectiveAt
+        +time timestamp
     }
     class Balance {
         +BalanceType type
@@ -103,26 +105,31 @@ classDiagram
         +string instrumentCode
     }
     class Measurement {
-        +UUID measurementId
-        +string accountId
-        +string metricCode
+        +UUID id
+        +UUID financialPositionLogId
+        +MeasurementType measurementType
         +decimal value
-        +time recordedAt
+        +string unit
+        +time timestamp
     }
     class Reservation {
-        +UUID reservationId
+        +UUID lienId
         +string accountId
-        +decimal amount
+        +string instrumentCode
+        +decimal reservedAmount
         +ReservationStatus status
-        +time expiresAt
+        +time executedAt
+        +time terminatedAt
     }
-    FinancialPositionLog "1" --> "*" TransactionEntry : contains (append-only)
-    TransactionEntry --> TransactionEntry : parent-child lineage (reversals)
+    FinancialPositionLog "1" --> "*" TransactionLogEntry : contains (append-only)
+    TransactionLogEntry --> TransactionLogEntry : lineage via parentTransactionID (reversals)
     FinancialPositionLog ..> Balance : computed from entries
 ```
 
-`TransactionEntry.status`: `PENDING` -> `RECONCILED` -> `POSTED` -> `REVERSED`.
-`POSTED` entries are immutable; reversals create a new child entry referencing the parent.
+Status is tracked on the position log (`StatusTracking.CurrentStatus`) and flows
+through eight states: `PENDING`, `RECONCILED`, `POSTED`, `FAILED`, `REJECTED`,
+`AMENDED`, `CANCELLED`, `REVERSED`. `POSTED` entries are immutable; reversals append a
+new entry that references the parent transaction via `TransactionLineage`.
 Hard limit: 10,000 entries per `FinancialPositionLog`.
 
 **7 BIAN Balance Types:**
