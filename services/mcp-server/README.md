@@ -341,6 +341,35 @@ The current implementation ships a passthrough token issuer and validator
 suitable for development. For production, configure a real JWT signer and
 validator.
 
+## Security Considerations
+
+### Tenant isolation
+
+The MCP server is a single-tenant process. `MERIDIAN_API_KEY` is forwarded as a
+Bearer token on every outgoing gRPC call. The `api-gateway` uses this key to
+resolve the tenant and enforce boundaries — no tool call can reach a different
+tenant's data.
+
+### Plan-hash binding
+
+`meridian_manifest_plan` stores the result in an in-process session cache
+(`internal/session`) and returns a `plan_hash`. `meridian_manifest_apply` looks
+up that hash in the same cache; it rejects hashes from other sessions and
+expires entries after a short TTL. This prevents cross-session plan replay.
+
+### HTTP transport (when `MCP_OAUTH_ENABLED=true`)
+
+The `/mcp` endpoint requires a bearer token validated against the JWKS endpoint
+of the identity service. Clients must complete the OAuth 2.1 PKCE flow at
+`/oauth/authorize` and `/oauth/token` before calling tools. The token scope
+governs which tools are accessible.
+
+### stdio transport
+
+Process-level isolation. No network port is opened. The JSON-RPC channel (stdin/
+stdout) is accessible only to the parent process. Tool calls inherit the ambient
+`MERIDIAN_API_KEY` from the process environment.
+
 ## Local Development
 
 The MCP server is included in the Tilt local development stack.
