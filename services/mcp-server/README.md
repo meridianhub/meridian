@@ -58,6 +58,8 @@ load-bearing files listing below.
 | Tool | Description |
 |------|-------------|
 | `meridian_economy_structure` | Hierarchical summary of the tenant's economy: instruments, account types, valuation rules, sagas, payment rails |
+| `meridian_economy_graph` | Queries the relationship graph between manifest resources for impact analysis |
+| `meridian_economy_generate_context` | Retrieves the context that would be used to generate a manifest from a natural language description |
 | `meridian_instruments_list` | Lists instrument definitions with optional status filter (ACTIVE, DRAFT, DEPRECATED) |
 | `meridian_instrument_describe` | Full details for a specific instrument by code, including CEL validation expressions |
 | `meridian_sagas_list` | Lists saga workflow definitions with optional status filter and system saga exclusion |
@@ -65,11 +67,21 @@ load-bearing files listing below.
 | `meridian_handlers_describe` | Saga triggers and account type CEL policies from the current manifest |
 | `meridian_market_data_query` | Lists market data sets or queries observations for a specific dataset code |
 | `meridian_manifest_history` | Paginated manifest version history with apply status and timestamps |
+| `meridian_manifest_schema` | Manifest schema metadata: instrument types, normal balance values, valuation methods, trigger patterns, and field constraints |
 | `meridian_causation_tree` | Full parent->child saga causation tree for a root saga ID |
 | `meridian_positions_query` | Queries financial position logs with optional account filtering |
 | `meridian_postings_query` | Queries ledger postings with optional date range and account filtering |
 | `meridian_saga_executions` | Queries saga definitions and execution status filtered by state |
 | `meridian_reconciliation_status` | Queries reconciliation cycle status and variance mismatches |
+| `meridian_cookbook_list` | Lists available Meridian Cookbook entries |
+| `meridian_cookbook_describe` | Returns full details for a specific Meridian Cookbook entry |
+| `meridian_cookbook_discover` | Inspects a tenant manifest and returns compatible cookbook patterns with HATEOAS navigation links |
+| `meridian_topics_list` | Returns all registered event topics in the platform, with optional service filter |
+| `meridian_starlark_reference` | Returns the available Starlark service module bindings and built-in functions for writing saga scripts |
+| `meridian_gateway_dispatch_status` | Lists instructions filtered by status, connection, or time range |
+| `meridian_gateway_connection_health` | Shows provider connection health status and configuration |
+| `meridian_gateway_instruction_detail` | Gets detailed instruction information including the full attempt history |
+| `meridian_gateway_guide` | Returns guidance on choosing between the financial gateway and the operational gateway, including a decision tree |
 
 ### Simulate Tools
 
@@ -77,7 +89,11 @@ load-bearing files listing below.
 |------|-------------|
 | `meridian_manifest_validate` | Validates a manifest JSON without applying it; returns errors with paths and suggestions |
 | `meridian_manifest_diff` | Compares two manifests and returns a structured change summary by section |
+| `meridian_manifest_fix` | Auto-converts deprecated handler calls in a manifest's saga scripts |
+| `meridian_economy_generate` | Generates a tenant manifest from a natural language description using AI assistance |
 | `meridian_cel_evaluate` | Evaluates a CEL expression against a named environment without persisting state |
+| `meridian_cel_validate` | Compiles and validates a CEL expression; returns result, return type, and cost estimate |
+| `meridian_starlark_validate` | Validates a Starlark saga script for syntax errors |
 | `meridian_valuation_simulate` | Dry-runs a valuation conversion; returns full calculation path |
 | `meridian_saga_simulate` | Dry-runs a Starlark saga script with all service calls stubbed; returns step-by-step execution trace |
 
@@ -87,6 +103,8 @@ load-bearing files listing below.
 |------|-------------|
 | `meridian_manifest_plan` | Dry-runs a manifest apply, stores the result, and returns a `plan_hash` for use with apply |
 | `meridian_manifest_apply` | Applies a manifest that has been previously planned; requires the `plan_hash` from plan |
+| `meridian_manifest_rollback` | Rolls back the tenant's manifest to a previous version by sequence number |
+| `meridian_gateway_cancel_instruction` | Cancels a pending instruction before it is dispatched |
 
 The plan-before-apply workflow enforces a safety gate: `meridian_manifest_apply`
 rejects any manifest that was not first processed by `meridian_manifest_plan` in
@@ -158,10 +176,12 @@ backends.
 | `internal/auth/oauth.go`, `oidc.go` | OAuth 2.1 PKCE flow for the streamable HTTP transport |
 | `internal/auth/jwks_validator.go` | JWKS validation for OAuth bearer tokens when `MCP_OAUTH_ENABLED=true` |
 | `internal/auth/oidc_consent.go` | Mirrors the api-gateway's consent code store shape; changes must coordinate with `services/api-gateway/mcp_consent_handler.go` |
-| `internal/tools/economy.go`, `economy_generator.go`, `economy_manifest.go` | The economy structure and manifest tools that are the primary write surface |
-| `internal/tools/manifest_fix.go`, `validation.go` | Plan / apply / validate flow; the plan-before-apply safety gate lives here |
+| `internal/tools/economy.go`, `economy_generator.go`, `economy_manifest.go`, `economy_graph.go` | Economy structure, graph, manifest, and AI-generation tools |
+| `internal/tools/manifest_fix.go`, `validation.go` | Plan / apply / validate / fix flow; the plan-before-apply safety gate lives here |
 | `internal/tools/cookbook.go`, `cookbook_discover.go` | Cookbook discovery surface used by LLMs to find example flows |
-| `internal/tools/gateway.go` | Operational gateway tooling - instruction status and provider connection inspection |
+| `internal/tools/reference.go` | Schema and reference tools: `meridian_manifest_schema`, `meridian_starlark_reference`, `meridian_topics_list`, `meridian_gateway_guide` |
+| `internal/tools/gateway.go` | Operational gateway tooling - dispatch status, connection health, instruction detail, and cancel |
+| `internal/tools/audit_reconciliation.go` | Reconciliation status tooling |
 | `internal/session/` | Session management for the streamable HTTP transport (`Mcp-Session-Id`) |
 | `internal/errors/formatter.go` | Translates backend gRPC errors into MCP-friendly responses |
 | `internal/resources/`, `internal/prompts/` | Static resources (Starlark / CEL guides) and prompt templates |
@@ -381,3 +401,5 @@ curl -X POST http://localhost:8090/mcp \
 - [Control Plane Service](../control-plane/README.md)
 - [MCP Protocol Specification](https://spec.modelcontextprotocol.io/)
 - [Services Architecture](../README.md)
+- [Starlark Guide](internal/resources/docs/starlark-guide.md)
+- [CEL Reference](internal/resources/docs/cel-reference.md)
