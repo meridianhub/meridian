@@ -124,7 +124,11 @@ in the codebase** - there is no `DeltaEngine` type in Go and no `quality_score`
 column in any migration. This distinction matters because this amendment is the
 input to follow-up implementation work: an implementer must not assume a
 `quality_score` column or `DeltaEngine.Evaluate()` already exist as an
-integration point.
+integration point. The `measurements` schema (with its `quality_score` column)
+and the `DeltaEngine` type shown later in this ADR (sections "Measurement Log"
+and "Delta Engine") are **illustrative of that target design, not current
+code**; they describe the intended unified measurements model, whereas what
+ships today is the market-information `QualityLevel` enum and its migrations.
 
 The two-axis split holds for both the coarse (shipped) and fine (designed)
 keys: Axis A is the coarse projection, and once the `QualityScore` precedence
@@ -418,8 +422,9 @@ CREATE INDEX idx_measurements_tenant ON measurements(tenant_id);
 -- Overlap prevention is enforced at the application layer using optimistic
 -- concurrency via position_key_hash. Database-level exclusion constraints would
 -- require TSTZRANGE (not available on CockroachDB) and cannot handle our composite
--- key with JSONB attributes. The application layer (DeltaEngine) already evaluates
--- overlap as part of its supersession logic, making database-level enforcement redundant.
+-- key with JSONB attributes. In the target design the application layer
+-- (DeltaEngine) evaluates overlap as part of its supersession logic, making
+-- database-level enforcement redundant.
 --
 -- See the Overlap Prevention section in Implementation Notes for details.
 
@@ -1300,7 +1305,7 @@ func (e PositionEntry) GetAttributes(ctx context.Context, repo MeasurementReposi
 | **Axis B - Revision State** | Lifecycle: current vs corrected, tracked via `SupersededBy` pointer, `revision` counter (0=original, 1+=correction), and bitemporal validity |
 | **Quality Ladder** | Deprecated single-axis framing; superseded by the Two-Axis Provenance Model. Historically "estimate < customer read < meter actual" |
 | **QualityScore** | Fine-grained 0-100 authority value from the Source Authority Registry; the authoritative reconciliation precedence key |
-| **Confidence Grade** | Coarse projection of `QualityScore` onto Axis A (bands: 10-30 ESTIMATE, 50-70 PROVISIONAL, 90 ACTUAL, 100 VERIFIED) |
+| **Confidence Grade** | Coarse projection of `QualityScore` onto Axis A via a total monotonic mapping (`score < 50` ESTIMATE, `50-89` PROVISIONAL, `90-99` ACTUAL, `100` VERIFIED) |
 | **COEFFICIENT** | A data source (profile-coefficient calculation, `ESTIMATED_PROFILE`), mapping to the ESTIMATE grade - not a ladder level |
 | **REVISED** | A revision event on Axis B (sets `revision > 0`), not a confidence grade; removed from the Axis A enum |
 | **Wash & Reload** | Correction pattern: reverse old position entry, book new entry, preserving audit trail |
