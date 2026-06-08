@@ -1,4 +1,4 @@
-h1:IzAxDEHqJxyyWoy+G0OGQWB8iG1eSdTnW5/afPd26zI=
+h1:WeGHAGBs4qhJysCOZSO6h2vQdMBcyfjjAJAwxl6RaNw=
 20260116000001_initial.sql h1:CzgBK2HKBimqrB1SWGLD2tLaJdypAJ9IQfLqJ44EBu0=
 20260119000002_add_shared_dataset_support.sql h1:iztVWFVc76jnUhqNaNJyE6n51PxTnJsG2D6yjP21L7w=
 20260119000003_add_shared_dataset_index.sql h1:HL5xRFvhhqF5dmptHdppPUadAcpwfDZYDIvazD35KCk=
@@ -6,3 +6,7 @@ h1:IzAxDEHqJxyyWoy+G0OGQWB8iG1eSdTnW5/afPd26zI=
 20260123000003_add_cursor_pagination_indexes.sql h1:zKZKE8ENekdS7lwOuWPKb/VU1A2C+p+vLcppfEyF7wo=
 20260210000004_seed_utilization_datasets.sql h1:wd7zO7Bnj8ENvSR4LdPmSa95VrmFTjc0xmnzw5IDofg=
 20260401000001_add_data_source_status.sql h1:GXEKmKNw6jh5p0r0S/ij+7hD7SP8jGvTICp4GLF4ZVI=
+20260608000001_drop_quality_constraint.sql h1:5bl4Ww1heccFfO7o54P946DpdlurhGFpXrbZYO3EnXI=
+20260608000002_quality_level_verified.sql h1:3ilHbcQXS+wLMcuHQPVK/4SZxGZB/bo+0DE1pNFciRU=
+20260608000003_add_revision_column.sql h1:qgsZmqgQ4ph6QQpxh+dMoEXuuVMJUTfcoJq6CYZ9l9s=
+20260608000004_backfill_revision.sql h1:cNK3uPSpDxoaHi0ZhPOufRkPTytNn4ZvclGaCDt2j0w=
