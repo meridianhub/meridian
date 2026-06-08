@@ -321,6 +321,7 @@ func createSchemaObservationTable(ctx context.Context, conn *pgxpool.Conn) error
 			created_at timestamptz NOT NULL DEFAULT now(),
 			created_by character varying(100) NOT NULL DEFAULT 'SYSTEM',
 			quality integer NOT NULL,
+			revision integer NOT NULL DEFAULT 0,
 			observation_context jsonb NOT NULL DEFAULT '{}'::jsonb,
 			numeric_value numeric NULL,
 			text_value text NULL,
@@ -333,7 +334,10 @@ func createSchemaObservationTable(ctx context.Context, conn *pgxpool.Conn) error
 				FOREIGN KEY (data_source_id) REFERENCES data_source(id) ON DELETE RESTRICT,
 			CONSTRAINT fk_observation_superseded_by
 				FOREIGN KEY (superseded_by) REFERENCES market_price_observation(id) ON DELETE SET NULL,
-			CONSTRAINT chk_observation_quality CHECK (quality IN (1, 2, 3)),
+			-- Quality is Axis A (confidence): four-level ladder IN (1,2,3,4) per ADR-0017,
+			-- mirroring migration 20260608000002_quality_level_verified.sql. revision is
+			-- Axis B (lifecycle), mirroring migration 20260608000003_add_revision_column.sql.
+			CONSTRAINT chk_observation_quality CHECK (quality IN (1, 2, 3, 4)),
 			CONSTRAINT chk_observation_value_present CHECK (numeric_value IS NOT NULL OR text_value IS NOT NULL)
 		)
 	`)

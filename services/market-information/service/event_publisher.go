@@ -191,17 +191,8 @@ func mapObservationToProtoEvent(obs domain.MarketPriceObservation) *marketinform
 }
 
 // mapQualityLevelToProto converts a domain QualityLevel to a proto QualityLevel.
+// It delegates to the canonical lossless adapter (domainQualityLevelToProto) so
+// event publishing and the RPC path share one mapping table and cannot drift.
 func mapQualityLevelToProto(level domain.QualityLevel) marketinformationv1.QualityLevel {
-	switch level {
-	case domain.QualityLevelEstimate:
-		return marketinformationv1.QualityLevel_QUALITY_LEVEL_ESTIMATE
-	case domain.QualityLevelActual:
-		return marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL
-	case domain.QualityLevelVerified:
-		// Map Verified to ACTUAL since proto has ESTIMATE, PROVISIONAL, ACTUAL, REVISED
-		// The domain QualityLevelVerified is semantically closest to ACTUAL
-		return marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL
-	default:
-		return marketinformationv1.QualityLevel_QUALITY_LEVEL_UNSPECIFIED
-	}
+	return domainQualityLevelToProto(level)
 }

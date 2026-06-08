@@ -278,9 +278,10 @@ func TestProtoQualityLevelToDomain(t *testing.T) {
 	}{
 		{"unspecified defaults to estimate", pb.QualityLevel_QUALITY_LEVEL_UNSPECIFIED, domain.QualityLevelEstimate},
 		{"estimate", pb.QualityLevel_QUALITY_LEVEL_ESTIMATE, domain.QualityLevelEstimate},
-		{"provisional maps to estimate", pb.QualityLevel_QUALITY_LEVEL_PROVISIONAL, domain.QualityLevelEstimate},
+		{"provisional", pb.QualityLevel_QUALITY_LEVEL_PROVISIONAL, domain.QualityLevelProvisional},
 		{"actual", pb.QualityLevel_QUALITY_LEVEL_ACTUAL, domain.QualityLevelActual},
-		{"revised maps to verified", pb.QualityLevel_QUALITY_LEVEL_REVISED, domain.QualityLevelVerified},
+		// Proto slot 4 is still spelled REVISED but is semantically VERIFIED (rename pending task 14).
+		{"revised slot maps to verified", pb.QualityLevel_QUALITY_LEVEL_REVISED, domain.QualityLevelVerified},
 		{"unknown defaults to estimate", pb.QualityLevel(999), domain.QualityLevelEstimate},
 	}
 
@@ -299,8 +300,10 @@ func TestDomainQualityLevelToProto(t *testing.T) {
 		expected pb.QualityLevel
 	}{
 		{"estimate", domain.QualityLevelEstimate, pb.QualityLevel_QUALITY_LEVEL_ESTIMATE},
+		{"provisional", domain.QualityLevelProvisional, pb.QualityLevel_QUALITY_LEVEL_PROVISIONAL},
 		{"actual", domain.QualityLevelActual, pb.QualityLevel_QUALITY_LEVEL_ACTUAL},
-		{"verified maps to actual", domain.QualityLevelVerified, pb.QualityLevel_QUALITY_LEVEL_ACTUAL},
+		// VERIFIED maps onto proto slot 4 (still spelled REVISED, semantically VERIFIED; rename pending task 14).
+		{"verified maps to revised slot", domain.QualityLevelVerified, pb.QualityLevel_QUALITY_LEVEL_REVISED},
 		{"unknown maps to unspecified", domain.QualityLevel(99), pb.QualityLevel_QUALITY_LEVEL_UNSPECIFIED},
 	}
 
@@ -308,6 +311,27 @@ func TestDomainQualityLevelToProto(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := domainQualityLevelToProto(tt.input)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestQualityLevel_ProtoDomainRoundTrip is the golden lossless round-trip: every
+// domain confidence grade must survive domain -> proto -> domain as the identity.
+// This guards against a regression to the old lossy mapping (where VERIFIED and
+// PROVISIONAL collapsed onto other levels and lost information).
+func TestQualityLevel_ProtoDomainRoundTrip(t *testing.T) {
+	levels := []domain.QualityLevel{
+		domain.QualityLevelEstimate,
+		domain.QualityLevelProvisional,
+		domain.QualityLevelActual,
+		domain.QualityLevelVerified,
+	}
+
+	for _, level := range levels {
+		t.Run(level.String(), func(t *testing.T) {
+			roundTripped := protoQualityLevelToDomain(domainQualityLevelToProto(level))
+			assert.Equal(t, level, roundTripped,
+				"domain -> proto -> domain must be identity for %s", level)
 		})
 	}
 }

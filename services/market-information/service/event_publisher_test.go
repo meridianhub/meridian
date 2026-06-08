@@ -192,8 +192,10 @@ func TestMapQualityLevelToProto(t *testing.T) {
 		expected marketinformationv1.QualityLevel
 	}{
 		{"estimate", domain.QualityLevelEstimate, marketinformationv1.QualityLevel_QUALITY_LEVEL_ESTIMATE},
+		{"provisional", domain.QualityLevelProvisional, marketinformationv1.QualityLevel_QUALITY_LEVEL_PROVISIONAL},
 		{"actual", domain.QualityLevelActual, marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL},
-		{"verified maps to actual", domain.QualityLevelVerified, marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL},
+		// VERIFIED maps onto proto slot 4 (still spelled REVISED, semantically VERIFIED; rename pending task 14).
+		{"verified maps to revised slot", domain.QualityLevelVerified, marketinformationv1.QualityLevel_QUALITY_LEVEL_REVISED},
 		{"unknown maps to unspecified", domain.QualityLevel(99), marketinformationv1.QualityLevel_QUALITY_LEVEL_UNSPECIFIED},
 	}
 

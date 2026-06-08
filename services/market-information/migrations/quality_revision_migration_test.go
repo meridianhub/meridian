@@ -85,6 +85,13 @@ func TestMigrations_QualityLadder_AcceptsFourLevels(t *testing.T) {
 	datasetID, sourceID := seedIDs(ctx, t, pool)
 
 	t.Run("accepts each level 1-4 including VERIFIED", func(t *testing.T) {
+		// quality=4 is the VERIFIED level under the four-level confidence encoding
+		// (proto slot 4, still spelled QUALITY_LEVEL_REVISED; the symbol rename is
+		// pending task 14). PR #2249 only widened the CHECK to accept value 4; it
+		// did NOT re-encode existing rows. The data re-encode from the legacy
+		// three-level encoding to the four-level ladder lands in
+		// 20260608000005_remap_quality_to_4level.sql (this PR), exercised by
+		// TestMigrations_RemapQuality_ReEncodesLegacyLevels below.
 		for quality := 1; quality <= 4; quality++ {
 			_, err := insertObservation(ctx, pool, datasetID, sourceID, "EUR/USD", quality)
 			require.NoError(t, err, "quality %d should be accepted", quality)
@@ -171,4 +178,50 @@ func TestMigrations_BackfillRevision_MarksCorrectionRows(t *testing.T) {
 		"the superseded original should remain revision 0")
 	assert.Equal(t, 0, revisionOf(ctx, t, pool, standaloneID),
 		"a standalone observation should remain revision 0")
+}
+
+// qualityOf returns the quality value for a given observation id.
+func qualityOf(ctx context.Context, t *testing.T, pool *pgxpool.Pool, id uuid.UUID) int {
+	t.Helper()
+	var quality int
+	err := pool.QueryRow(ctx,
+		`SELECT quality FROM market_price_observation WHERE id = $1`, id).Scan(&quality)
+	require.NoError(t, err)
+	return quality
+}
+
+// TestMigrations_RemapQuality_ReEncodesLegacyLevels verifies the data-remap
+// migration re-encodes the legacy three-level quality encoding
+// (1=ESTIMATE, 2=ACTUAL, 3=VERIFIED) to the four-level confidence ladder
+// (1=ESTIMATE, 2=PROVISIONAL, 3=ACTUAL, 4=VERIFIED). Without this remap, the
+// post-cutover code would silently misread every legacy 2 as PROVISIONAL and
+// every legacy 3 as ACTUAL: a silent confidence downgrade.
+func TestMigrations_RemapQuality_ReEncodesLegacyLevels(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping migration test in short mode")
+	}
+
+	ctx := context.Background()
+	pool := testdb.NewCockroachTestPool(t, testdb.WithMigrations("market-information"))
+	datasetID, sourceID := seedIDs(ctx, t, pool)
+
+	// Seed rows carrying the legacy encoding. legacy 1=ESTIMATE, 2=ACTUAL,
+	// 3=VERIFIED. The widened CHECK (PR #2249) admits all of these.
+	legacyEstimateID, err := insertObservation(ctx, pool, datasetID, sourceID, "EUR/USD", 1)
+	require.NoError(t, err)
+	legacyActualID, err := insertObservation(ctx, pool, datasetID, sourceID, "GBP/USD", 2)
+	require.NoError(t, err)
+	legacyVerifiedID, err := insertObservation(ctx, pool, datasetID, sourceID, "USD/JPY", 3)
+	require.NoError(t, err)
+
+	// Re-run the actual remap migration SQL against this legacy-encoded data.
+	_, err = pool.Exec(ctx, readMigration(t, "20260608000005_remap_quality_to_4level.sql"))
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, qualityOf(ctx, t, pool, legacyEstimateID),
+		"legacy ESTIMATE (1) should remain 1 (ESTIMATE)")
+	assert.Equal(t, 3, qualityOf(ctx, t, pool, legacyActualID),
+		"legacy ACTUAL (2) should re-encode to 3 (ACTUAL)")
+	assert.Equal(t, 4, qualityOf(ctx, t, pool, legacyVerifiedID),
+		"legacy VERIFIED (3) should re-encode to 4 (VERIFIED)")
 }
