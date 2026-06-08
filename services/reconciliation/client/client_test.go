@@ -205,7 +205,7 @@ func TestNew_ServiceNameConnection(t *testing.T) {
 	_, _, err := client.New(client.Config{
 		ServiceName: "reconciliation",
 		Namespace:   "test-ns",
-		Port:        50058,
+		Port:        client.DefaultPort,
 	})
 	// This may succeed (creating a lazy connection) or fail depending on resolver
 	// The key is it doesn't panic and handles the path

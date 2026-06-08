@@ -11,7 +11,7 @@
 //	client, cleanup, err := client.New(ctx, client.Config{
 //	    ServiceName: "reference-data",
 //	    Namespace:   "default",
-//	    Port:        50051,
+//	    Port:        50059,
 //	    RedisAddr:   "redis:6379",
 //	})
 //	if err != nil {
@@ -24,7 +24,7 @@
 //	client, cleanup, err := client.New(ctx, client.Config{
 //	    ServiceName: "reference-data",
 //	    Namespace:   "default",
-//	    Port:        50051,
+//	    Port:        50059,
 //	})
 package client
 
@@ -42,11 +42,12 @@ import (
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 )
 
 const (
 	// DefaultPort is the default gRPC port for the Reference Data service.
-	DefaultPort = 50051
+	DefaultPort = ports.ReferenceData
 
 	// DefaultTimeout is the default timeout for gRPC calls.
 	DefaultTimeout = 30 * time.Second
@@ -69,7 +70,7 @@ const (
 
 // Config holds configuration for the Reference Data client.
 type Config struct {
-	// Target is the gRPC server address (e.g., "localhost:50051").
+	// Target is the gRPC server address (e.g., "localhost:50059").
 	// If set, overrides Kubernetes DNS-based discovery.
 	//
 	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
@@ -84,7 +85,7 @@ type Config struct {
 	Namespace string
 
 	// Port is the service port number.
-	// Defaults to 50051 if not specified.
+	// Defaults to 50059 if not specified.
 	Port int
 
 	// Timeout is the default timeout for RPC calls.

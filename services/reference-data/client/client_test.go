@@ -18,12 +18,13 @@ import (
 	referencedatav1 "github.com/meridianhub/meridian/api/proto/meridian/reference_data/v1"
 	"github.com/meridianhub/meridian/services/reference-data/cache"
 	"github.com/meridianhub/meridian/services/reference-data/registry"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 func TestConfig_Defaults(t *testing.T) {
 	// Verify constants are defined correctly
-	assert.Equal(t, 50051, DefaultPort)
+	assert.Equal(t, ports.ReferenceData, DefaultPort)
 	assert.Equal(t, 30*time.Second, DefaultTimeout)
 	assert.Equal(t, "default", DefaultNamespace)
 	assert.Equal(t, "reference-data", ServiceName)

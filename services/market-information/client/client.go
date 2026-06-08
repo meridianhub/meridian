@@ -13,7 +13,7 @@
 //	client, cleanup, err := client.New(ctx, client.Config{
 //	    ServiceName: "market-information",
 //	    Namespace:   "default",
-//	    Port:        50051,
+//	    Port:        50058,
 //	})
 //	if err != nil {
 //	    return err
@@ -26,7 +26,7 @@
 // Usage with direct address (development):
 //
 //	client, cleanup, err := client.New(ctx, client.Config{
-//	    Target: "localhost:50051",
+//	    Target: "localhost:50058",
 //	})
 package client
 
@@ -42,11 +42,12 @@ import (
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 )
 
 const (
 	// DefaultPort is the default gRPC port for the Market Information service.
-	DefaultPort = 50051
+	DefaultPort = ports.MarketInformation
 
 	// DefaultTimeout is the default timeout for gRPC calls.
 	DefaultTimeout = 30 * time.Second
@@ -60,7 +61,7 @@ const (
 
 // Config holds configuration for the Market Information client.
 type Config struct {
-	// Target is the gRPC server address (e.g., "localhost:50051").
+	// Target is the gRPC server address (e.g., "localhost:50058").
 	// If set, overrides Kubernetes DNS-based discovery.
 	//
 	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
@@ -75,7 +76,7 @@ type Config struct {
 	Namespace string
 
 	// Port is the service port number.
-	// Defaults to 50051 if not specified.
+	// Defaults to 50058 if not specified.
 	Port int
 
 	// Timeout is the default timeout for RPC calls.
