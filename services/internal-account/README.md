@@ -232,3 +232,5 @@ Lien lifecycle mirrors `current-account`: ACTIVE -> EXECUTED (terminal) or TERMI
 - [Architecture Layers - Core Ledger](../../docs/architecture-layers.md#4-core-ledger)
 - [Service Coupling Analysis](../../docs/architecture/service-coupling-analysis.md)
 - [BIAN Internal Account specification](https://github.com/bian-official/public/blob/main/release14.0.0/semantic-apis/oas3%20/yamls/InternalAccount.yaml)
+- [Benchmarks](benchmarks/README.md) - performance benchmarks for this service
+- [Examples](examples/README.md) - runnable usage examples

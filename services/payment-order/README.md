@@ -181,3 +181,4 @@ Paths are relative to `services/payment-order/`.
 - [`docs/data-flows.md`](../../docs/data-flows.md) - Payment lifecycle sequence diagram (section 1)
 - [`docs/patterns.md`](../../docs/patterns.md) - Saga, idempotency, and outbox patterns
 - [`api/proto/meridian/payment_order/v1/payment_order.proto`](../../api/proto/meridian/payment_order/v1/payment_order.proto)
+- [Handler Architecture](service/HANDLER_ARCHITECTURE.md) - how saga handlers are structured in this service

@@ -144,10 +144,10 @@ This follows industry practice for Go monorepos with interdependent services. Se
 | Document Type | Location | Example |
 |--------------|----------|---------|
 | Architecture decisions | `docs/adr/` | `0015-standard-service-directory-structure.md` |
-| Usage guides | `docs/guides/` | `circuit-breaker-usage.md` |
-| Operational runbooks | `docs/runbooks/` | `incident-response.md` |
-| Architecture diagrams | `docs/architecture/` | `service-coupling-analysis.md` |
-| Testing guides | `docs/testing/` | `COVERAGE_ANALYSIS.md` |
+| Usage guides | `docs/guides/` | [`circuit-breaker-usage.md`](../guides/circuit-breaker-usage.md) |
+| Operational runbooks | `docs/runbooks/` | [`incident-response.md`](../runbooks/incident-response.md) |
+| Architecture diagrams | `docs/architecture/` | [`service-coupling-analysis.md`](../architecture/service-coupling-analysis.md) |
+| Testing guides | `docs/testing/` | [`COVERAGE_ANALYSIS.md`](../testing/COVERAGE_ANALYSIS.md) |
 
 **Exceptions**: README.md files may exist at package roots to document package purpose (Go convention), but substantial documentation belongs in `docs/`.
 

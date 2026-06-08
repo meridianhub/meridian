@@ -158,6 +158,8 @@ Browse the full technical documentation index at [docs/README.md](docs/README.md
 covering architecture, developer guides, runbooks, integrations, API reference,
 product requirements, and architecture decision records.
 
+Release history and notable changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+
 ## Technology
 
 | Layer | Stack |
