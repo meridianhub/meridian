@@ -109,6 +109,7 @@ stateDiagram-v2
 | [Per-Tenant Scheduled Execution](060-per-tenant-scheduled-execution.md) | Phased scheduling identity: attribution, manifest bridge, deferred JWT auth |
 | [MCP Auth Session Unification](061-mcp-auth-session-unification.md) | Unify MCP authentication and session handling across transports |
 | [Self-Service Onboarding Readiness](062-self-service-onboarding-readiness.md) | Readiness assessment for self-service tenant onboarding |
+| [AI-Readiness Closure (assess 2026-06-04)](064-assess-2026-06-04-ai-readiness-closure.md) | Close the Layer 0 navigability gap: reconcile lying maps, wire orphan docs, add cross-references |
 
 ### Task Master PRDs (`.taskmaster/docs/`)
 
@@ -173,7 +174,7 @@ These PRDs were implemented by appending tasks to existing tags rather than crea
 
 | File | Type |
 |------|------|
-| `panic-audit-inventory.md` | Audit inventory (reference doc, not a PRD) |
+| [`panic-audit-inventory.md`](../archive/panic-audit-inventory.md) | Audit inventory (reference doc, not a PRD) |
 
 ## What are PRDs?
 

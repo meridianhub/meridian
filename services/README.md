@@ -497,6 +497,20 @@ and Current Account services by matching positions and identifying discrepancies
 
 See [services/reconciliation/README.md](reconciliation/README.md) for full documentation.
 
+### Market Information Service
+
+The Market Information service records bi-temporal market observations and applies the quality
+ladder (Estimate -> Coefficient -> Actual -> Revised), supplying market data to forecasting,
+valuation, and settlement.
+
+**Responsibilities:**
+
+- **Bi-Temporal Observations**: Track what was known and when it was known
+- **Quality Ladder**: Promote observations from estimate through to revised actuals
+- **Delta Engine**: Wash-and-reload corrections without locking the database
+
+See [services/market-information/README.md](market-information/README.md) for full documentation.
+
 ### Forecasting Service
 
 The Forecasting service generates forward curves and forecasts using configurable Starlark-based

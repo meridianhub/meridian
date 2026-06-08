@@ -35,6 +35,14 @@ documentation.
 - [Saga Handler Loading](saga-handler-loading.md)
 - [Saga Service Catalog](saga-service-catalog.md)
 
+## Source Tree Guides
+
+Entry-point READMEs for the major code subtrees outside `services/`:
+
+- [Frontend](../frontend/README.md) - the operations console (React/TypeScript UI)
+- [Scripts](../scripts/README.md) - demo, doctor, and developer tooling scripts
+- [Shared Packages](../shared/README.md) - cross-service domain, platform, and infrastructure packages
+
 ## Developer Guides
 
 - [Developer Guides Index](guides/README.md) - conventions, value types, Starlark, proto, and testing guides
@@ -49,6 +57,11 @@ documentation.
 - [Audit System Monitoring](operations/audit-monitoring.md)
 - [Secrets Management](secrets-management.md)
 - [Tilt Fast Startup Mode](tilt-fast-startup.md)
+
+### Deployment Configuration
+
+- [Deployment Configurations](../deploy/README.md) - per-environment Docker Compose stacks (dev, develop, demo)
+- [Kubernetes Deployments](../deployments/k8s/README.md) - Kustomize manifests, overlays, and admission policies
 
 ## Integrations
 
@@ -79,6 +92,7 @@ documentation.
 
 ## Testing
 
+- [Cross-Service Tests](../tests/README.md) - end-to-end, integration, contract, and load test suites
 - [Chaos Testing Strategy](testing/CHAOS_TESTING.md)
 - [Test Coverage Analysis](testing/COVERAGE_ANALYSIS.md)
 

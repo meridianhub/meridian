@@ -214,6 +214,9 @@ make proto
 make test
 ```
 
+The git hooks installed by `.githooks/install.sh` run secret scanning and markdown linting on every commit;
+see [.githooks/README.md](.githooks/README.md) for what each hook enforces and how to skip them when needed.
+
 ## Development Workflow
 
 ### Standard Workflow
@@ -1152,6 +1155,10 @@ Closes #123
 3. Address feedback
 4. Approval and merge
 
+Pull requests are also reviewed by an automated Claude reviewer. The conventions it follows -
+what it checks for and how it comments - are documented in
+[.github/claude-review-instructions.md](.github/claude-review-instructions.md).
+
 ## Architecture Decisions
 
 ### When to Create an ADR
@@ -1216,7 +1223,7 @@ Place ADRs in `docs/adr/` with numbering:
 ## Code of Conduct
 
 Be respectful, professional, and collaborative. We value diverse perspectives and view questions and feedback as
-opportunities for continuous improvement.
+opportunities for continuous improvement. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for the full policy.
 
 ## License
 

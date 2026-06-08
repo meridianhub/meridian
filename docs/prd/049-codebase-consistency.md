@@ -309,7 +309,7 @@ names without reading each service's `errors.go`.
 
 **Files Affected**:
 
-- `docs/guides/error-conventions.md` (new)
+- [`docs/guides/error-conventions.md`](../guides/error-conventions.md) (new)
 
 **Acceptance Criteria**:
 
@@ -329,7 +329,7 @@ names without reading each service's `errors.go`.
 
 **Files Affected**:
 
-- `docs/guides/repository-conventions.md` (new)
+- [`docs/guides/repository-conventions.md`](../guides/repository-conventions.md) (new)
 
 **Acceptance Criteria**:
 
@@ -349,7 +349,7 @@ names without reading each service's `errors.go`.
 
 **Files Affected**:
 
-- `docs/guides/value-types.md` (new)
+- [`docs/guides/value-types.md`](../guides/value-types.md) (new)
 
 **Acceptance Criteria**:
 
@@ -375,7 +375,7 @@ in this PRD and ADR-015.
 
 **Files Affected**:
 
-- `docs/guides/new-bian-service-checklist.md`
+- [`docs/guides/new-bian-service-checklist.md`](../guides/new-bian-service-checklist.md)
 
 **Acceptance Criteria**:
 

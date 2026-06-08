@@ -161,3 +161,4 @@ flowchart LR
 
 - Architecture layers: [`docs/architecture-layers.md`](../../docs/architecture-layers.md#8-observability-and-routing)
 - Event-driven architecture: [`docs/architecture/event-driven-architecture.md`](../../docs/architecture/event-driven-architecture.md)
+- Kubernetes manifests: [`k8s/README.md`](k8s/README.md) - deployment, config, and network policy for this service

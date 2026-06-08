@@ -23,7 +23,7 @@ your configuration against the canonical example.
 |-----------|---------|
 | `patterns/` | Domain pattern bundles: `manifest-fragment.yaml`, Starlark `.star` saga files, and `pattern.json` metadata |
 | `schema/` | JSON Schema definitions for registry validation (`registry.json`, `registry-item.json`) |
-| `docs/` | Authoring guides for patterns (`authoring-patterns.md`) and UI components (`authoring-components.md`) |
+| `docs/` | Authoring guides for patterns ([`authoring-patterns.md`](docs/authoring-patterns.md)) and UI components ([`authoring-components.md`](docs/authoring-components.md)) |
 | `ui/` | UI component registry entries: `component.json` metadata pointing to frontend source files |
 
 ## Relationship to Reference Data
