@@ -2,6 +2,7 @@ package domain
 
 import (
 	"testing"
+	"time"
 )
 
 // These tests target mutation-testing survivors in the state-transition
@@ -106,7 +107,14 @@ func TestFinancialPositionLog_Transitions_BumpVersionAndAudit(t *testing.T) {
 
 			versionBefore := log.Version
 			auditsBefore := log.AuditEntryCount()
-			updatedBefore := log.UpdatedAt
+
+			// Force UpdatedAt into the past so the post-transition assertion that
+			// the timestamp strictly advanced is meaningful and non-flaky (no
+			// dependence on sub-nanosecond timing between two time.Now calls). The
+			// Version and AuditEntryCount assertions are the mutation killers; this
+			// is a monotonicity sanity check on the timestamp the transition writes.
+			staleMarker := time.Now().UTC().Add(-time.Hour)
+			log.UpdatedAt = staleMarker
 
 			if err := tc.transition(t, log); err != nil {
 				t.Fatalf("transition returned unexpected error: %v", err)
@@ -129,9 +137,10 @@ func TestFinancialPositionLog_Transitions_BumpVersionAndAudit(t *testing.T) {
 				t.Errorf("AuditEntryCount = %d, want %d (provided audit entry must be appended)", got, want)
 			}
 
-			// UpdatedAt must advance; the early-return mutants skip this line.
-			if log.UpdatedAt.Before(updatedBefore) {
-				t.Errorf("UpdatedAt went backwards: before=%v after=%v", updatedBefore, log.UpdatedAt)
+			// UpdatedAt must strictly advance past the stale marker; the
+			// early-return mutants return before any timestamp write runs.
+			if !log.UpdatedAt.After(staleMarker) {
+				t.Errorf("UpdatedAt did not advance: marker=%v after=%v", staleMarker, log.UpdatedAt)
 			}
 		})
 	}
