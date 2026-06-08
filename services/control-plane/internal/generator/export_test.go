@@ -35,6 +35,37 @@ func NewDeprecatedHandlerInfoWithDefaults(currentName string, defaults map[strin
 	}
 }
 
+// NewDeprecatedHandlerInfoWithRule creates a deprecatedHandlerInfo with a fully-specified
+// ConversionRule (param mapping plus defaults) for tests.
+func NewDeprecatedHandlerInfoWithRule(currentName string, paramMapping, defaults map[string]string) deprecatedHandlerInfo {
+	return deprecatedHandlerInfo{
+		currentName: currentName,
+		rule:        &schema.ConversionRule{ParamMapping: paramMapping, Defaults: defaults},
+	}
+}
+
+// CollectDeprecatedHandlersFromRegistry is the exported test hook for
+// collectDeprecatedHandlersFromRegistry.
+var CollectDeprecatedHandlersFromRegistry = collectDeprecatedHandlersFromRegistry
+
+// DeprecatedHandlerCurrentName returns the current handler name recorded in a
+// deprecatedHandlerInfo, for test assertions on the unexported field.
+func DeprecatedHandlerCurrentName(info deprecatedHandlerInfo) string {
+	return info.currentName
+}
+
+// SplitAtMatchingParen is the exported test hook for splitAtMatchingParen.
+var SplitAtMatchingParen = splitAtMatchingParen
+
+// AdvancePastString is the exported test hook for advancePastString.
+var AdvancePastString = advancePastString
+
+// RenameKwargs is the exported test hook for renameKwargs.
+var RenameKwargs = renameKwargs
+
+// FindUnquotedComment is the exported test hook for findUnquotedComment.
+var FindUnquotedComment = findUnquotedComment
+
 // FindHandlerCall is the exported test hook for findHandlerCall.
 var FindHandlerCall = findHandlerCall
 

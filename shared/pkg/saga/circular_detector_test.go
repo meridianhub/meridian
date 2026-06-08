@@ -303,3 +303,199 @@ func TestCircularDetectorEdgeCases(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+// TestExtractInvokeSagaCallsEmptyScript exercises the early-return guard for
+// an empty script in ExtractInvokeSagaCalls.
+func TestExtractInvokeSagaCallsEmptyScript(t *testing.T) {
+	detector := NewCircularDetector()
+	assert.Nil(t, detector.ExtractInvokeSagaCalls(""))
+}
+
+// TestExtractInvokeSagaCallsSyntaxError exercises the parse-error path in
+// ExtractInvokeSagaCalls, which returns nil rather than surfacing the error.
+func TestExtractInvokeSagaCallsSyntaxError(t *testing.T) {
+	detector := NewCircularDetector()
+	// Unterminated call: parse fails, so extraction yields nil.
+	assert.Nil(t, detector.ExtractInvokeSagaCalls("invoke_saga("))
+}
+
+// TestExtractInvokeSagaCallsAcrossNodeTypes drives the AST traversal through
+// every statement and expression node type that extractFromStmt and
+// extractFromExpr recurse into. Each case places an invoke_saga call inside a
+// distinct syntactic context and asserts the target is extracted, guaranteeing
+// the corresponding switch arm is exercised (no vacuous cases).
+func TestExtractInvokeSagaCallsAcrossNodeTypes(t *testing.T) {
+	detector := NewCircularDetector()
+
+	testCases := []struct {
+		name     string
+		script   string
+		expected []string
+	}{
+		// --- statement node types (extractFromStmt) ---
+		{
+			name:     "DefStmt body",
+			script:   "def handler():\n    invoke_saga(\"in-def\")\n",
+			expected: []string{"in-def"},
+		},
+		{
+			name:     "IfStmt cond, true and false branches",
+			script:   "if invoke_saga(\"in-cond\"):\n    invoke_saga(\"in-true\")\nelse:\n    invoke_saga(\"in-false\")\n",
+			expected: []string{"in-cond", "in-true", "in-false"},
+		},
+		{
+			name:     "ForStmt iterable and body",
+			script:   "for item in [invoke_saga(\"in-iter\")]:\n    invoke_saga(\"in-body\")\n",
+			expected: []string{"in-iter", "in-body"},
+		},
+		{
+			name:     "ReturnStmt result",
+			script:   "def handler():\n    return invoke_saga(\"in-return\")\n",
+			expected: []string{"in-return"},
+		},
+		{
+			name:     "ReturnStmt with no result",
+			script:   "def handler():\n    invoke_saga(\"before-return\")\n    return\n",
+			expected: []string{"before-return"},
+		},
+		// --- expression node types (extractFromExpr) ---
+		{
+			name:     "BinaryExpr both operands",
+			script:   "result = invoke_saga(\"bin-left\") + invoke_saga(\"bin-right\")\n",
+			expected: []string{"bin-left", "bin-right"},
+		},
+		{
+			name:     "UnaryExpr operand",
+			script:   "result = not invoke_saga(\"in-unary\")\n",
+			expected: []string{"in-unary"},
+		},
+		{
+			name:     "ListExpr elements",
+			script:   "result = [invoke_saga(\"in-list\")]\n",
+			expected: []string{"in-list"},
+		},
+		{
+			name:     "DictExpr key and value",
+			script:   "result = {invoke_saga(\"dict-key\"): invoke_saga(\"dict-value\")}\n",
+			expected: []string{"dict-key", "dict-value"},
+		},
+		{
+			name:     "TupleExpr elements",
+			script:   "result = (invoke_saga(\"in-tuple\"),)\n",
+			expected: []string{"in-tuple"},
+		},
+		{
+			name:     "ParenExpr inner",
+			script:   "result = (invoke_saga(\"in-paren\") + 0)\n",
+			expected: []string{"in-paren"},
+		},
+		{
+			name:     "CondExpr cond, true and false",
+			script:   "result = invoke_saga(\"cond-true\") if invoke_saga(\"cond-test\") else invoke_saga(\"cond-false\")\n",
+			expected: []string{"cond-true", "cond-test", "cond-false"},
+		},
+		{
+			name:     "IndexExpr base and index",
+			script:   "result = data[invoke_saga(\"in-index\")]\n",
+			expected: []string{"in-index"},
+		},
+		{
+			name:     "SliceExpr base, low, high and step",
+			script:   "result = data[invoke_saga(\"slice-lo\"):invoke_saga(\"slice-hi\"):invoke_saga(\"slice-step\")]\n",
+			expected: []string{"slice-lo", "slice-hi", "slice-step"},
+		},
+		{
+			name:     "DotExpr receiver",
+			script:   "result = invoke_saga(\"in-dot\").field\n",
+			expected: []string{"in-dot"},
+		},
+		{
+			// Slice with omitted low/high/step passes nil sub-expressions into
+			// extractFromExpr, exercising its nil-expr guard.
+			name:     "SliceExpr with omitted bounds",
+			script:   "result = invoke_saga(\"slice-base\")[:]\n",
+			expected: []string{"slice-base"},
+		},
+		{
+			name:     "Comprehension for-clause and if-clause",
+			script:   "result = [item for item in [invoke_saga(\"comp-iter\")] if invoke_saga(\"comp-if\")]\n",
+			expected: []string{"comp-iter", "comp-if"},
+		},
+		{
+			name:     "LambdaExpr body",
+			script:   "handler = lambda: invoke_saga(\"in-lambda\")\n",
+			expected: []string{"in-lambda"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			refs := detector.ExtractInvokeSagaCalls(tc.script)
+			assert.ElementsMatch(t, tc.expected, refs, "script: %q", tc.script)
+		})
+	}
+}
+
+// TestExtractSagaNameArgNonStringPositional covers the branch in
+// extractSagaNameArg where the first positional argument is not a string
+// literal (so no name is extracted and the call is ignored).
+func TestExtractSagaNameArgNonStringPositional(t *testing.T) {
+	detector := NewCircularDetector()
+	// First positional arg is an identifier, not a string literal.
+	refs := detector.ExtractInvokeSagaCalls("invoke_saga(some_variable)\n")
+	assert.Empty(t, refs)
+}
+
+// TestExtractSagaNameArgNonStringKeyword covers the keyword-argument branch in
+// extractSagaNameArg where saga_name is bound to a non-string-literal value.
+func TestExtractSagaNameArgNonStringKeyword(t *testing.T) {
+	detector := NewCircularDetector()
+	refs := detector.ExtractInvokeSagaCalls("invoke_saga(saga_name=some_variable)\n")
+	assert.Empty(t, refs)
+}
+
+// TestFindCyclesAtActivationDisconnectedGraph verifies that traversal from a
+// start saga ignores cycles that exist in a disconnected component.
+func TestFindCyclesAtActivationDisconnectedGraph(t *testing.T) {
+	sagaGraph := map[string][]string{
+		"saga-A": {"saga-B"},
+		"saga-B": {}, // A -> B is an acyclic component
+		"saga-X": {"saga-Y"},
+		"saga-Y": {"saga-X"}, // X <-> Y cycle, but unreachable from A
+	}
+
+	detector := NewCircularDetector()
+	detector.SetSagaGraph(sagaGraph)
+
+	// Starting from A, the X<->Y cycle is unreachable.
+	assert.Empty(t, detector.FindCyclesAtActivation("saga-A"))
+
+	// Starting from X, the cycle is found.
+	cycles := detector.FindCyclesAtActivation("saga-X")
+	require.Len(t, cycles, 1)
+}
+
+// TestFindCyclesAtActivationSharedSubgraph exercises the visited-but-not-on-path
+// short circuit: saga-D is reachable via two paths but only visited once.
+func TestFindCyclesAtActivationSharedSubgraph(t *testing.T) {
+	// Diamond where D fans out further; D is reached via both B and C.
+	sagaGraph := map[string][]string{
+		"saga-A": {"saga-B", "saga-C"},
+		"saga-B": {"saga-D"},
+		"saga-C": {"saga-D"},
+		"saga-D": {"saga-E"},
+		"saga-E": {},
+	}
+
+	detector := NewCircularDetector()
+	detector.SetSagaGraph(sagaGraph)
+
+	assert.Empty(t, detector.FindCyclesAtActivation("saga-A"))
+}
+
+// TestFormatCycleSingleElement confirms FormatCycle handles a one-element cycle
+// without inserting a separator.
+func TestFormatCycleSingleElement(t *testing.T) {
+	detector := NewCircularDetector()
+	assert.Equal(t, "only-saga", detector.FormatCycle([]string{"only-saga"}))
+}

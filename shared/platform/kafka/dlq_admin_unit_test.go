@@ -1,12 +1,16 @@
 package kafka
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // --- Unit tests for DLQInspector validation ---
@@ -193,4 +197,137 @@ func TestParseDLQMetadata_DuplicateHeaders(t *testing.T) {
 func TestErrNilInspector(t *testing.T) {
 	require.NotNil(t, ErrNilInspector)
 	assert.Equal(t, "DLQ inspector cannot be nil", ErrNilInspector.Error())
+}
+
+// --- checkFetchErrors: pure error-classification logic (no broker) ---
+//
+// kgo.NewErrFetch synthesizes a Fetches carrying a single error, letting us
+// exercise every branch of checkFetchErrors without a live broker.
+
+func TestCheckFetchErrors(t *testing.T) {
+	realErr := errors.New("partition unavailable")
+
+	tests := []struct {
+		name      string
+		fetches   kgo.Fetches
+		wantErr   bool
+		wantWraps error
+	}{
+		{
+			name:    "no errors returns nil",
+			fetches: kgo.Fetches{},
+			wantErr: false,
+		},
+		{
+			name:    "deadline exceeded is ignored",
+			fetches: kgo.NewErrFetch(context.DeadlineExceeded),
+			wantErr: false,
+		},
+		{
+			name:    "context canceled is ignored",
+			fetches: kgo.NewErrFetch(context.Canceled),
+			wantErr: false,
+		},
+		{
+			name:      "real error is surfaced and wrapped",
+			fetches:   kgo.NewErrFetch(realErr),
+			wantErr:   true,
+			wantWraps: realErr,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkFetchErrors(tt.fetches)
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "error reading DLQ message")
+			if tt.wantWraps != nil {
+				assert.ErrorIs(t, err, tt.wantWraps)
+			}
+		})
+	}
+}
+
+// --- Constructor success paths + Close (lazy client, no broker contact) ---
+//
+// kgo.NewClient connects lazily, so the inspector/replay constructors succeed
+// with an unreachable broker address. Close tears down the lazy client without
+// any network round-trip.
+
+func TestNewDLQInspector_Success(t *testing.T) {
+	inspector, err := NewDLQInspector(DLQInspectorConfig{
+		BootstrapServers: "localhost:9092",
+		ClientID:         "test-inspector",
+		DLQTopics:        []string{"orders.dlq", "users.dlq"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, inspector)
+	assert.NotNil(t, inspector.client)
+	assert.NotNil(t, inspector.admin)
+	assert.Equal(t, []string{"orders.dlq", "users.dlq"}, inspector.config.DLQTopics)
+
+	assert.NoError(t, inspector.Close())
+}
+
+func TestNewDLQInspector_Success_NoClientID(t *testing.T) {
+	inspector, err := NewDLQInspector(DLQInspectorConfig{
+		BootstrapServers: "localhost:9092",
+		DLQTopics:        []string{"orders.dlq"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, inspector)
+
+	assert.NoError(t, inspector.Close())
+}
+
+func TestNewDLQReplay_Success(t *testing.T) {
+	replay, err := NewDLQReplay(DLQReplayConfig{
+		BootstrapServers: "localhost:9092",
+		ClientID:         "test-replay",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, replay)
+	assert.NotNil(t, replay.producer)
+	assert.Equal(t, "localhost:9092", replay.config.BootstrapServers)
+
+	replay.Close()
+}
+
+// --- ReplayProtoMessage: unmarshal failure short-circuits before producing ---
+//
+// When the DLQ payload is not valid protobuf, ReplayProtoMessage returns the
+// unmarshal error before touching the producer, so no broker is required.
+
+func TestReplayProtoMessage_UnmarshalError(t *testing.T) {
+	replay, err := NewDLQReplay(DLQReplayConfig{
+		BootstrapServers: "localhost:9092",
+	})
+	require.NoError(t, err)
+	defer replay.Close()
+
+	dlqMsg := DLQMessage{
+		Record: &kgo.Record{
+			Value: []byte{0xFF, 0xFF, 0xFF}, // invalid protobuf wire format
+		},
+		Metadata: DLQMetadata{OriginalTopic: "orders.events.v1"},
+	}
+
+	msg, err := replay.ReplayProtoMessage(ctx(t), dlqMsg, func() proto.Message {
+		return &timestamppb.Timestamp{}
+	})
+	require.Error(t, err)
+	assert.Nil(t, msg)
+	assert.Contains(t, err.Error(), "failed to unmarshal DLQ message")
+}
+
+// ctx returns a context bound to the test's lifetime.
+func ctx(t *testing.T) context.Context {
+	t.Helper()
+	c, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return c
 }
