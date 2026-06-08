@@ -1,10 +1,16 @@
 # BIAN Service Boundaries
 
-**Document Version:** 1.1
-**Last Updated:** 2026-01-19
+**Document Version:** 1.2
+**Last Updated:** 2026-06-08
 **Status:** Active
 **Related ADR:** [ADR-0002: Microservices Per BIAN Domain](../adr/0002-microservices-per-bian-domain.md)
 **Related Analysis:** [Service Coupling Analysis](service-coupling-analysis.md)
+
+> **Scope note (2026-06-08):** This document details four representative service domains (CurrentAccount,
+> PositionKeeping, FinancialAccounting, MarketInformation). The codebase now contains 19 services under
+> `services/`. For the complete service-to-BIAN-domain mapping and current coupling metrics, see the
+> [Service Coupling Analysis](service-coupling-analysis.md). Platform code has been migrated out of
+> `internal/platform/` into `shared/platform/`; references below have been updated accordingly.
 
 ## Overview
 
@@ -17,8 +23,8 @@ Meridian follows a microservices-per-BIAN-domain architecture where:
 1. **One Service per BIAN Domain**: Each BIAN service domain is implemented as an independently deployable microservice
 2. **Independent Databases**: Each service owns its database schema with no cross-service database access
 3. **Proto-Based Communication**: Services communicate exclusively via protobuf-defined gRPC (synchronous) and Kafka events (asynchronous)
-4. **No Internal Package Coupling**: Services must not import `internal/<other-service>/` packages
-5. **Shared Platform Code**: Common infrastructure resides in `pkg/platform/` (currently being migrated from `internal/platform/`)
+4. **No Internal Package Coupling**: Services must not import another service's `internal/` packages (`services/<other-service>/internal/...`)
+5. **Shared Platform Code**: Common infrastructure resides in `shared/platform/`, with reusable libraries in `shared/pkg/` and shared domain types in `shared/domain/`
 
 ### BIAN Compliance
 
@@ -31,20 +37,23 @@ The service boundaries defined in this document adhere to BIAN Service Landscape
 
 ### Current Coupling Analysis Summary
 
-As of the [2025-11-19 coupling analysis](service-coupling-analysis.md):
+As of the [2026-06-08 coupling analysis](service-coupling-analysis.md):
 
 - **Zero cross-service domain violations**: No service imports another service's internal packages
-- **17 platform usage violations**: Services import `internal/platform/*` packages (remediation in progress to move to `pkg/platform/`)
-- **Clean proto dependencies**: 14 safe cross-service proto imports for gRPC client communication
-- **Stable architecture**: Position-keeping (I=0.00) and financial-accounting (I=0.00) are stable provider services; current-account (I=1.00) is an orchestration layer with expected high instability
+- **Platform separation complete**: Platform code now lives in `shared/platform/` (the former
+  `internal/platform` violation class no longer exists)
+- **Clean proto dependencies**: Cross-service calls use generated gRPC clients only
+- **Stable architecture**: Foundational providers (reference-data Ca=5, position-keeping Ca=4,
+  market-information, party, current-account, financial-accounting) are stable; orchestration/aggregation
+  layers (control-plane, event-router, payment-order, mcp-server) carry instability by design
 
 ---
 
 ## CurrentAccount Service
 
 **BIAN Domain:** Current Account
-**Service Location:** `cmd/current-account/`
-**Internal Package:** `internal/current-account/`
+**Service Location:** `services/current-account/`
+**Package Layout:** `services/current-account/{domain,service,adapters,app,client}`
 **Proto Definition:** `api/proto/meridian/current_account/v1/current_account.proto`
 **Database Schema:** `current_account_audit` (audit_log, audit_outbox)
 
@@ -182,8 +191,8 @@ The CurrentAccount service owns:
    - MUST NOT maintain its own transaction log
 
 4. **Cross-service internal imports** - Architectural boundary violation
-   - MUST NOT import `internal/position-keeping/*` packages
-   - MUST NOT import `internal/financial-accounting/*` packages
+   - MUST NOT import `services/position-keeping/*` packages
+   - MUST NOT import `services/financial-accounting/*` packages
    - MUST use proto-defined gRPC clients only
 
 5. **Database schema access to other services**
@@ -217,8 +226,8 @@ This service acts as an orchestration layer coordinating operations across posit
 ## PositionKeeping Service
 
 **BIAN Domain:** Position Keeping
-**Service Location:** `cmd/position-keeping/`
-**Internal Package:** `internal/position-keeping/`
+**Service Location:** `services/position-keeping/`
+**Package Layout:** `services/position-keeping/{domain,service,adapters,app,client}`
 **Proto Definition:** `api/proto/meridian/position_keeping/v1/position_keeping.proto`
 **Event Publications:** `api/proto/meridian/events/v1/position_keeping_events.proto`
 
@@ -367,8 +376,8 @@ The PositionKeeping service owns:
 - Position update events (42 publisher usages identified in coupling analysis)
 - Transaction status change events
 - Audit trail events
-- **Implementation:** `internal/position-keeping/adapters/messaging/kafka_event_publisher.go`
-- **Domain Interface:** `internal/position-keeping/domain/event_publisher.go`
+- **Implementation:** `services/position-keeping/adapters/messaging/kafka_event_publisher.go`
+- **Domain Interface:** `services/position-keeping/domain/event_publisher.go`
 
 #### What This Service DEPENDS ON
 
@@ -403,8 +412,8 @@ The PositionKeeping service owns:
    - MUST provide data services only (create, retrieve, update logs)
 
 4. **Cross-service internal imports**
-   - MUST NOT import `internal/current-account/*` packages
-   - MUST NOT import `internal/financial-accounting/*` packages
+   - MUST NOT import `services/current-account/*` packages
+   - MUST NOT import `services/financial-accounting/*` packages
 
 5. **Business rule enforcement beyond transaction logging**
    - MUST NOT validate business rules (e.g., transaction limits)
@@ -439,8 +448,8 @@ This service is a stable foundation for transaction tracking with:
 ## FinancialAccounting Service
 
 **BIAN Domain:** Financial Accounting
-**Service Location:** `cmd/financial-accounting/`
-**Internal Package:** `internal/financial-accounting/`
+**Service Location:** `services/financial-accounting/`
+**Package Layout:** `services/financial-accounting/{domain,service,adapters,app,client}`
 **Proto Definition:** `api/proto/meridian/financial_accounting/v1/financial_accounting.proto`
 **Event Subscriptions:** `api/proto/meridian/events/v1/deposit_event.proto`, `api/proto/meridian/events/v1/financial_accounting_events.proto`
 
@@ -526,7 +535,7 @@ The FinancialAccounting service owns:
   - Listens to deposit events from Kafka
   - Automatically creates booking logs and postings for deposits
   - Asynchronous transaction processing
-  - **Implementation:** `internal/financial-accounting/adapters/messaging/deposit_consumer.go`
+  - **Implementation:** `services/financial-accounting/adapters/messaging/deposit_consumer.go`
 
 - **Financial accounting event publication** (9 publisher usages identified)
   - Publishes posting completion events
@@ -610,8 +619,8 @@ The FinancialAccounting service owns:
    - MUST process events and API requests independently
 
 4. **Cross-service internal imports**
-   - MUST NOT import `internal/current-account/*` packages
-   - MUST NOT import `internal/position-keeping/*` packages
+   - MUST NOT import `services/current-account/*` packages
+   - MUST NOT import `services/position-keeping/*` packages
 
 5. **Transaction log persistence beyond accounting entries**
    - MUST NOT duplicate position-keeping's transaction log
@@ -798,82 +807,37 @@ This service is a stable foundation for market data with:
 
 ## Shared vs Service-Specific Code
 
-### Platform Code (`pkg/platform/` - Shared Infrastructure)
+### Platform Code (`shared/platform/` - Shared Infrastructure)
 
-**IMPORTANT: Migration in Progress**
-Platform code is currently in `internal/platform/` but is being migrated to `pkg/platform/` to follow Go module semantics. See [Coupling Analysis - P1-1 Remediation](service-coupling-analysis.md#p1-1-migrate-platform-code-from-internalplatform-to-pkgplatform) for details.
+Platform code lives in `shared/platform/` (the `internal/platform` → shared migration is complete; see
+[Coupling Analysis - P1-1](service-coupling-analysis.md#p1-1-migrate-platform-code-out-of-internalplatform-completed)).
+Reusable, domain-agnostic libraries live in `shared/pkg/`, and shared domain types in `shared/domain/`.
 
-#### Current Platform Packages (To Be Moved to `pkg/platform/`)
+#### Platform Packages (`shared/platform/`)
 
-**`observability/` - OpenTelemetry Integration**
+| Package | Purpose |
+|---------|---------|
+| `observability/` | OpenTelemetry tracing, structured logging, metrics, trace propagation |
+| `kafka/` | Kafka producer/consumer with protobuf serialization, offset management, DLQ |
+| `events/` | Outbox pattern (`outbox.go`) and the topic registry (`events/topics/topics.yaml`) |
+| `db/` | Database access helpers (GORM tenant scoping, transactions) |
+| `auth/` | JWT validation and gRPC authorization middleware |
+| `testdb/` | CockroachDB Testcontainers integration for tests |
+| `scheduler/` | Scheduled job execution |
+| `ratelimit/` | Rate limiting |
+| `gateway/` | HTTP/gRPC gateway helpers |
+| `tenant/` | Multi-tenant context propagation |
+| `bootstrap/`, `defaults/`, `env/`, `ports/`, `quantity/`, `redislock/`, `sandbox/`, `await/` | Supporting infrastructure |
 
-- Distributed tracing with OpenTelemetry
-- Structured logging with contextual fields
-- Metrics collection (counters, histograms, gauges)
-- Trace context propagation across gRPC calls
-- **Used by:** All services (7 imports detected)
-- **Files:**
-  - `cmd/current-account/main.go` - Service startup tracing
-  - `internal/current-account/service/grpc_service.go` - Request tracing
-  - `services/current-account/client/` - Client-side tracing
-  - `cmd/financial-accounting/main.go` - Service startup tracing
-  - `internal/position-keeping/app/container.go` - Dependency injection with tracing
+#### Reusable Libraries (`shared/pkg/`)
 
-**`kafka/` - Kafka Producer/Consumer Infrastructure**
+Domain-agnostic helpers including `clients` (resilient gRPC clients: retry, circuit breaker), `saga`
+(saga orchestration patterns), `money`/`amount`, `cel`, `validation`, `idempotency`, `grpc`, `health`,
+`interceptors`, and `valuation`.
 
-- Kafka producer with protobuf serialization
-- Kafka consumer with offset management
-- Consumer group coordination
-- Error handling and retry logic
-- **Used by:** Position-keeping, financial-accounting (3 imports detected)
-- **Files:**
-  - `internal/position-keeping/adapters/messaging/kafka_event_publisher.go`
-  - `internal/financial-accounting/adapters/messaging/deposit_consumer.go`
+#### Shared Domain (`shared/domain/`)
 
-**`testdb/` - Testcontainers Integration**
-
-- PostgreSQL Testcontainers setup
-- Database schema initialization for tests
-- Transaction isolation for test cases
-- Connection pool management for tests
-- **Used by:** Current-account, financial-accounting (5 imports detected)
-- **Files:**
-  - `internal/current-account/adapters/persistence/repository_test.go`
-  - `internal/current-account/service/grpc_service_test.go`
-  - `internal/financial-accounting/adapters/persistence/repository_test.go`
-  - `internal/financial-accounting/service/posting_service_test.go`
-  - `internal/financial-accounting/adapters/messaging/deposit_consumer_test.go`
-
-**`auth/` - JWT Validation and Authorization**
-
-- JWT token parsing and validation
-- Authorization middleware for gRPC
-- Role-based access control (RBAC)
-- **Used by:** Position-keeping (1 import detected)
-- **Files:**
-  - `internal/position-keeping/app/container.go`
-
-#### Future Platform Packages (Not Yet Implemented)
-
-**`database/` - Database Connection Management**
-
-- Connection pooling
-- Transaction management
-- Database health checks
-- Migration coordination with Atlas
-
-**`grpc/` - gRPC Server and Client Utilities**
-
-- Server interceptors (logging, tracing, auth)
-- Client interceptors (retry, circuit breaker)
-- Health check implementations
-- gRPC connection management
-
-**`idempotency/` - Idempotency Key Management**
-
-- Redis-based idempotency key storage
-- Duplicate request detection
-- Response caching for idempotent operations
+Domain types shared across service boundaries (e.g. `models`, common entity types).
 
 ### Service Structure
 
@@ -973,9 +937,9 @@ These rules enforce architectural boundaries and prevent coupling violations. Th
 **Examples:**
 
 ```go
-// FORBIDDEN - Cross-service internal import
-import "github.com/meridianhub/meridian/internal/position-keeping/domain"
-import "github.com/meridianhub/meridian/internal/financial-accounting/service"
+// FORBIDDEN - Cross-service package import
+import "github.com/meridianhub/meridian/services/position-keeping/domain"
+import "github.com/meridianhub/meridian/services/financial-accounting/service"
 
 // CORRECT - Use proto-defined gRPC client
 import pb "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
@@ -1001,20 +965,22 @@ import fa_pb "github.com/meridianhub/meridian/api/proto/meridian/financial_accou
 - Clear contract boundaries prevent implementation leakage
 - Supports polyglot service implementations
 
-**Current Status:** COMPLIANT (14 safe proto imports detected)
+**Current Status:** COMPLIANT (cross-service calls use generated gRPC clients only)
 
-**Communication Patterns:**
+**Communication Patterns (representative current edges):**
 
 **Synchronous (gRPC):**
 
-- Current-account → Position-keeping (balance queries, transaction retrieval)
-- Current-account → Financial-accounting (posting creation)
+- Position-keeping → Reference-data, Internal-account, Current-account
+- Reconciliation → Current-account, Position-keeping, Reference-data
+- Control-plane → Reference-data, Internal-account, Market-information, Party, Operational-gateway
 
 **Asynchronous (Kafka):**
 
-- Current-account → Financial-accounting (deposit events)
-- Position-keeping → All consumers (position update events)
-- Financial-accounting → All consumers (posting completion events)
+- Position-keeping → consumers of transaction lifecycle events
+- Financial-gateway → consumers of validated payment-provider events
+- See [Event-Driven Architecture](event-driven-architecture.md) and
+  `shared/platform/events/topics/topics.yaml` for the full topic map
 
 **Examples:**
 
@@ -1031,7 +997,7 @@ event := &events.DepositEvent{
 publisher.Publish(ctx, event)
 
 // FORBIDDEN - Direct function call to another service
-import "github.com/meridianhub/meridian/internal/position-keeping/service"
+import "github.com/meridianhub/meridian/services/position-keeping/service"
 result := service.CreateTransactionLog(log)  // ❌ NOT ALLOWED
 ```
 
@@ -1042,46 +1008,34 @@ result := service.CreateTransactionLog(log)  // ❌ NOT ALLOWED
 buf breaking --against '.git#branch=develop'
 ```
 
-#### Rule 3: Platform Code in `pkg/platform/` Only
+#### Rule 3: Shared Platform Code in `shared/` Only
 
-**Rule:** Shared platform code MUST reside in `pkg/platform/` and MUST NOT be in `internal/platform/`.
+**Rule:** Shared infrastructure MUST reside under `shared/platform/` (or `shared/pkg/`, `shared/domain/`)
+and MUST NOT be placed in the top-level `internal/` tree.
 
 **Rationale:**
 
-- `internal/` is semantically private and should not be imported across services
-- `pkg/` is the correct location for shared, reusable libraries
-- Clarifies which code is truly internal vs shared infrastructure
-- Follows Go module semantics for public packages
-- Enables external tools to import platform utilities
+- `shared/` is importable across all services by design
+- Clarifies which code is truly service-private (`services/<svc>/...`) vs shared infrastructure
+- Enables platform utilities to be reused by every service and supporting tool
 
-**Current Status:** NON-COMPLIANT (17 violations - migration in progress)
-
-**Remediation:** See [Coupling Analysis - P1-1](service-coupling-analysis.md#p1-1-migrate-platform-code-from-internalplatform-to-pkgplatform) for detailed migration plan.
-
-**Affected Packages:**
-
-- `internal/platform/observability` → `pkg/platform/observability` (7 files)
-- `internal/platform/kafka` → `pkg/platform/kafka` (3 files)
-- `internal/platform/testdb` → `pkg/platform/testdb` (5 files)
-- `internal/platform/auth` → `pkg/platform/auth` (1 file)
+**Current Status:** COMPLIANT (migration from `internal/platform/` to `shared/platform/` complete; see
+[Coupling Analysis - P1-1](service-coupling-analysis.md#p1-1-migrate-platform-code-out-of-internalplatform-completed)).
 
 **Examples:**
 
 ```go
-// CURRENT (NON-COMPLIANT) - Will be removed
-import "github.com/meridianhub/meridian/internal/platform/observability"
+// CORRECT - Import shared platform code
+import "github.com/meridianhub/meridian/shared/platform/observability"
+import "github.com/meridianhub/meridian/shared/platform/kafka"
 
-// TARGET (COMPLIANT) - Migration target
-import "github.com/meridianhub/meridian/pkg/platform/observability"
+// CORRECT - Reusable libraries and shared domain types
+import "github.com/meridianhub/meridian/shared/pkg/clients"
+import "github.com/meridianhub/meridian/shared/domain/models"
 ```
 
-**Migration Checklist:**
-
-- [ ] Move package from `internal/platform/` to `pkg/platform/`
-- [ ] Update all import statements across services
-- [ ] Update go.mod if package exports change
-- [ ] Run full test suite to verify compatibility
-- [ ] Update documentation references
+**Guardrail:** New shared code goes under `shared/`; service-private code stays under
+`services/<service>/`. A service must never import another service's non-public packages.
 
 #### Rule 4: Independent Database Schemas
 
@@ -1126,10 +1080,10 @@ client.UpdateFinancialBookingLog(ctx, &pb.UpdateRequest{LogId: logID, Status: st
 
 ```go
 // Each service maintains its own database connection pool
-// internal/current-account/app/container.go
+// services/current-account/app/container.go
 db, err := sql.Open("postgres", os.Getenv("CURRENT_ACCOUNT_DB_URL"))
 
-// internal/position-keeping/app/container.go
+// services/position-keeping/app/container.go
 db, err := sql.Open("postgres", os.Getenv("POSITION_KEEPING_DB_URL"))
 ```
 
@@ -1171,7 +1125,7 @@ db, err := sql.Open("postgres", os.Getenv("POSITION_KEEPING_DB_URL"))
 
 ```go
 // CORRECT - Domain logic in service's domain package
-// internal/current-account/domain/account.go
+// services/current-account/domain/account.go
 func (a *Account) ValidateOverdraftLimit(amount Money) error {
     if !a.OverdraftEnabled {
         return errors.New("overdraft not enabled")
@@ -1241,10 +1195,10 @@ These dependency patterns are architecturally permitted and support the BIAN-ali
 **Direction:** Services → Platform utilities
 **Allowed Packages:**
 
-- `pkg/platform/observability` - OpenTelemetry tracing, logging, metrics
-- `pkg/platform/kafka` - Kafka producer/consumer infrastructure
-- `pkg/platform/auth` - JWT validation and authorization
-- `pkg/platform/testdb` - Testcontainers integration for tests
+- `shared/platform/observability` - OpenTelemetry tracing, logging, metrics
+- `shared/platform/kafka` - Kafka producer/consumer infrastructure
+- `shared/platform/auth` - JWT validation and authorization
+- `shared/platform/testdb` - CockroachDB Testcontainers integration for tests
 
 **Justification:**
 
@@ -1271,11 +1225,11 @@ These patterns violate architectural boundaries and MUST be prevented:
 // FORBIDDEN - Circular dependency
 // CurrentAccount → FinancialAccounting → CurrentAccount
 
-// internal/current-account/service/account_service.go
+// services/current-account/service/account_service.go
 import fa_pb "meridian/financial_accounting/v1"
 faClient.InitiateBookingLog(...)
 
-// internal/financial-accounting/service/posting_service.go
+// services/financial-accounting/service/posting_service.go
 import ca_pb "meridian/current_account/v1"  // ❌ NOT ALLOWED
 caClient.RetrieveAccount(...)
 ```
@@ -1295,7 +1249,7 @@ caClient.RetrieveAccount(...)
 
 ```go
 // FORBIDDEN - Position-keeping calling other services
-// internal/position-keeping/service/position_service.go
+// services/position-keeping/service/position_service.go
 import fa_pb "meridian/financial_accounting/v1"  // ❌ NOT ALLOWED
 faClient.InitiateBookingLog(...)
 ```
@@ -1315,7 +1269,7 @@ faClient.InitiateBookingLog(...)
 
 ```go
 // FORBIDDEN - Bypassing financial-accounting
-// internal/current-account/service/deposit_service.go
+// services/current-account/service/deposit_service.go
 pkClient.UpdateFinancialPositionLog(ctx, &pb.UpdateRequest{
     TransactionLog: &pb.TransactionLogEntry{
         Amount: depositAmount,  // ❌ Missing double-entry validation
@@ -1457,7 +1411,7 @@ When reviewing pull requests, verify:
 
 - [ ] **No cross-service internal imports** - Check import statements in changed files
 - [ ] **Proto-only communication** - All inter-service calls use gRPC or events
-- [ ] **Platform code location** - New shared code in `pkg/platform/`, not `internal/platform/`
+- [ ] **Platform code location** - New shared code in `shared/platform/` (or `shared/pkg/`), not in a service's package or the top-level `internal/`
 - [ ] **Database isolation** - No direct queries to other service schemas
 - [ ] **Domain logic placement** - Business rules in owning service's domain package
 - [ ] **Dependency direction** - New dependencies follow allowed patterns
@@ -1724,7 +1678,7 @@ resp, err := faClient.CaptureLedgerPosting(ctx, &pb.CaptureRequest{
 **Consumer:**
 
 - **Service:** FinancialAccounting
-- **Implementation:** `internal/financial-accounting/adapters/messaging/deposit_consumer.go`
+- **Implementation:** `services/financial-accounting/adapters/messaging/deposit_consumer.go`
 
 **Event Flow:**
 
@@ -1744,7 +1698,7 @@ resp, err := faClient.CaptureLedgerPosting(ctx, &pb.CaptureRequest{
 **Publisher:**
 
 - **Service:** PositionKeeping
-- **Implementation:** `internal/position-keeping/adapters/messaging/kafka_event_publisher.go`
+- **Implementation:** `services/position-keeping/adapters/messaging/kafka_event_publisher.go`
 - **Usage:** 42 event publisher usages detected
 
 **Consumers:**
@@ -1835,11 +1789,11 @@ Each service has integration tests that validate boundaries are respected:
 
 **Manual Review Checklist:**
 
-- [ ] No `internal/<other-service>/` imports
+- [ ] No imports of another service's `services/<other-service>/` packages
 - [ ] All cross-service calls use proto-defined gRPC or events
 - [ ] No direct database access to other service schemas
 - [ ] Business logic resides in owning service's domain package
-- [ ] Platform code uses `pkg/platform/` (post-migration)
+- [ ] Platform code uses `shared/platform/` (or `shared/pkg/`)
 
 ---
 
@@ -1855,13 +1809,13 @@ graph TD
         CLIENT[Client Applications<br/>Web/Mobile/API]
     end
 
-    subgraph Services["Microservices Layer"]
-        CA[CurrentAccount<br/>BIAN: Current Account<br/><b>I=1.00 Orchestrator</b>]
+    subgraph Services["Microservices Layer (representative subset of 19)"]
+        CA[CurrentAccount<br/>BIAN: Current Account<br/><b>I=0.00 Stable provider</b>]
         FA[FinancialAccounting<br/>BIAN: Financial Accounting<br/><b>I=0.00 Stable</b>]
-        PK[PositionKeeping<br/>BIAN: Position Keeping<br/><b>I=0.00 Stable</b>]
+        PK[PositionKeeping<br/>BIAN: Position Keeping<br/><b>I=0.43 Balanced</b>]
     end
 
-    subgraph Platform["Platform Layer pkg/platform/"]
+    subgraph Platform["Platform Layer shared/platform/"]
         OBS[Observability<br/>OpenTelemetry]
         KAFKA_PLAT[Kafka Infrastructure<br/>Producer/Consumer]
         AUTH[Authentication<br/>JWT Validation]
@@ -1988,29 +1942,25 @@ graph TD
 
 - **Used by:** All services
 - **Provides:** Distributed tracing, structured logging, metrics collection
-- **Current Location:** `internal/platform/observability` (migration to `pkg/platform/observability` in progress)
-- **Imports:** 7 files across all services
+- **Location:** `shared/platform/observability`
 
 **Kafka Infrastructure:**
 
-- **Used by:** FinancialAccounting, PositionKeeping
-- **Provides:** Proto-based producer/consumer, offset management, error handling
-- **Current Location:** `internal/platform/kafka` (migration to `pkg/platform/kafka` in progress)
-- **Imports:** 3 files
+- **Used by:** All publishing/consuming services
+- **Provides:** Proto-based producer/consumer, offset management, DLQ, error handling
+- **Location:** `shared/platform/kafka` (topic registry in `shared/platform/events/topics/`)
 
 **Authentication (JWT):**
 
-- **Used by:** PositionKeeping
+- **Used by:** Services exposing authenticated gRPC/HTTP
 - **Provides:** JWT token validation, authorization middleware, RBAC
-- **Current Location:** `internal/platform/auth` (migration to `pkg/platform/auth` in progress)
-- **Imports:** 1 file
+- **Location:** `shared/platform/auth`
 
 **Test Infrastructure (Testcontainers):**
 
-- **Used by:** CurrentAccount, FinancialAccounting
-- **Provides:** PostgreSQL Testcontainers setup, database schema initialization
-- **Current Location:** `internal/platform/testdb` (migration to `pkg/platform/testdb` in progress)
-- **Imports:** 5 test files
+- **Used by:** Services with integration tests
+- **Provides:** CockroachDB Testcontainers setup, database schema initialization
+- **Location:** `shared/platform/testdb`
 
 #### Database Layer (Gray Components)
 
