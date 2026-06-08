@@ -1,45 +1,60 @@
 // Package domain contains the core business logic for market information.
 package domain
 
-// QualityLevel represents the quality tier of market data in the Time-Bound Quality Ladder.
-// Higher values indicate more reliable data that should take precedence in reconciliation.
+// QualityLevel represents the confidence grade of market data on Axis A of the
+// two-axis quality model (ADR-0017). Higher values indicate greater confidence
+// and take precedence during reconciliation.
 //
-// The quality ladder follows this hierarchy:
-//   - ESTIMATE (1): Forecasted or projected values based on models/patterns
-//   - ACTUAL (2): Real measured values from data sources
-//   - VERIFIED (3): Actual values that have been cross-checked and validated
+// The four-level confidence ladder:
+//   - ESTIMATE (1): Forecasted or projected values based on models/patterns.
+//   - PROVISIONAL (2): Metered/received data that has not yet been validated.
+//   - ACTUAL (3): Metered, validated data.
+//   - VERIFIED (4): Actual values that have been cross-checked against multiple
+//     sources or manually verified.
 //
-// This ordering is fundamental to the Estimates vs. Actuals reconciliation pattern:
-// when multiple values exist for the same time period, higher quality levels supersede lower ones.
+// This ordering drives the Estimates vs. Actuals reconciliation pattern: when
+// multiple values exist for the same time period, higher confidence grades
+// supersede lower ones via Supersedes.
+//
+// Axis A (confidence, this enum) is orthogonal to Axis B (lifecycle/correction
+// lineage), which is tracked by the revision counter and supersession links, not
+// by a confidence grade.
 type QualityLevel int
 
-// Quality level constants for the Time-Bound Quality Ladder.
+// Quality level constants for the Axis-A confidence ladder.
 const (
 	// QualityLevelEstimate represents forecasted or projected values.
 	// These are typically generated from models, historical patterns, or forward curves.
 	QualityLevelEstimate QualityLevel = 1
 
-	// QualityLevelActual represents real measured values from data sources.
+	// QualityLevelProvisional represents metered or received data that has not yet
+	// been validated. It sits above ESTIMATE (real measurement, not a forecast) but
+	// below ACTUAL (not yet validated).
+	QualityLevelProvisional QualityLevel = 2
+
+	// QualityLevelActual represents metered, validated data from data sources.
 	// These are received from APIs, feeds, or manual entry of observed data.
-	QualityLevelActual QualityLevel = 2
+	QualityLevelActual QualityLevel = 3
 
 	// QualityLevelVerified represents actual values that have been cross-checked.
 	// These have undergone validation against multiple sources or manual verification.
-	QualityLevelVerified QualityLevel = 3
+	QualityLevelVerified QualityLevel = 4
 )
 
 // qualityLevelNames maps quality levels to their display names.
 var qualityLevelNames = map[QualityLevel]string{
-	QualityLevelEstimate: "Estimate",
-	QualityLevelActual:   "Actual",
-	QualityLevelVerified: "Verified",
+	QualityLevelEstimate:    "Estimate",
+	QualityLevelProvisional: "Provisional",
+	QualityLevelActual:      "Actual",
+	QualityLevelVerified:    "Verified",
 }
 
 // validQualityLevels contains all valid quality levels for efficient lookup.
 var validQualityLevels = map[QualityLevel]bool{
-	QualityLevelEstimate: true,
-	QualityLevelActual:   true,
-	QualityLevelVerified: true,
+	QualityLevelEstimate:    true,
+	QualityLevelProvisional: true,
+	QualityLevelActual:      true,
+	QualityLevelVerified:    true,
 }
 
 // String returns the human-readable name of the quality level.
@@ -56,8 +71,10 @@ func (q QualityLevel) IsValid() bool {
 	return validQualityLevels[q]
 }
 
-// Supersedes returns true if this quality level should take precedence over the other.
-// Higher quality levels supersede lower ones in the reconciliation process.
+// Supersedes returns true if this quality level should take precedence over the
+// other. This is Axis A only: a higher confidence grade supersedes a lower one.
+// Lifecycle/correction state (Axis B) is handled separately by the revision
+// counter and supersession links and must not influence this comparison.
 func (q QualityLevel) Supersedes(other QualityLevel) bool {
 	return q > other
 }
