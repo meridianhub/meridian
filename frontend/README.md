@@ -20,11 +20,18 @@ npm run dev
 | `npm run lint` | Lint TypeScript files |
 | `npm run typecheck` | Type-check without emitting |
 | `npm run generate` | Generate API clients from proto definitions |
+| `npm run e2e` | Run Playwright end-to-end tests (headless) |
+| `npm run e2e:headed` | Run Playwright end-to-end tests (headed browser) |
 
 ## Stack
 
 - **Framework:** React 19 + TypeScript (strict mode)
 - **Build:** Vite 7
 - **Testing:** Vitest + React Testing Library
+- **E2E Testing:** Playwright
 - **Linting:** ESLint + Prettier
 - **API:** Connect-ES via `buf generate`
+
+## Architecture
+
+- [Tenant Subdomain Routing](docs/tenant-subdomain-routing.md)
