@@ -92,17 +92,28 @@ enum DataSetStatus {
   DATA_SET_STATUS_DEPRECATED = 3;
 }
 
-// QualityLevel defines the confidence level of an observation.
+// QualityLevel defines the confidence grade of an observation (Axis A of the
+// two-axis quality model). Higher values indicate greater confidence and take
+// precedence during reconciliation:
+//   ESTIMATE(1) -> PROVISIONAL(2) -> ACTUAL(3) -> VERIFIED(4).
+// This axis is orthogonal to the lifecycle/supersession axis, which is modeled
+// by the MarketPriceObservation.revision field and the superseded_by_id /
+// supersedes_observation_id links rather than by an enum value.
 enum QualityLevel {
   // QUALITY_LEVEL_UNSPECIFIED means the quality is unknown.
   QUALITY_LEVEL_UNSPECIFIED = 0;
   // QUALITY_LEVEL_ESTIMATE indicates a preliminary estimate, subject to revision.
   QUALITY_LEVEL_ESTIMATE = 1;
-  // QUALITY_LEVEL_PROVISIONAL indicates a provisional value, pending final verification.
+  // QUALITY_LEVEL_PROVISIONAL indicates metered/received data that has not yet
+  // been validated. Maps to confidence scores 50-70.
   QUALITY_LEVEL_PROVISIONAL = 2;
-  // QUALITY_LEVEL_ACTUAL indicates a verified, final value.
+  // QUALITY_LEVEL_ACTUAL indicates metered, validated data. Maps to confidence
+  // score 90.
   QUALITY_LEVEL_ACTUAL = 3;
-  // QUALITY_LEVEL_REVISED indicates a corrected value replacing a previous observation.
+  // QUALITY_LEVEL_REVISED is DEPRECATED: revision state is now modeled via the
+  // MarketPriceObservation.revision field, not via a confidence grade. For
+  // backward compatibility this value maps to VERIFIED quality (the highest
+  // confidence grade on Axis A). @deprecated Use the revision field instead.
   QUALITY_LEVEL_REVISED = 4;
 }
 
@@ -239,6 +250,13 @@ message MarketPriceObservation {
 
   // attributes contains additional metadata for this observation.
   repeated meridian.quantity.v1.AttributeEntry attributes = 14;
+
+  // revision is the correction sequence number on the lifecycle axis (Axis B)
+  // of the two-axis quality model: 0 = original observation, 1+ = correction.
+  // A non-zero revision indicates this observation supersedes a previous one
+  // (see superseded_by_id / supersedes_observation_id for the linkage). This is
+  // orthogonal to the confidence grade carried by the quality field.
+  uint32 revision = 15;
 }
 
 // DataSourceStatus defines the lifecycle state of a data source.

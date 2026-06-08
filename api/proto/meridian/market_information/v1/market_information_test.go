@@ -918,6 +918,53 @@ func TestMarketPriceObservationSerialization(t *testing.T) {
 	}
 }
 
+// TestMarketPriceObservationRevisionField verifies the revision field (Axis B of
+// the two-axis quality model) round-trips through serialization and defaults to 0.
+func TestMarketPriceObservationRevisionField(t *testing.T) {
+	now := timestamppb.Now()
+	validUUID := "123e4567-e89b-12d3-a456-426614174000"
+	sourceUUID := "987fcdeb-51a2-3e4f-b6c7-890123456789"
+
+	// A freshly constructed observation defaults revision to 0 (original).
+	original := &marketinformationv1.MarketPriceObservation{
+		Id:             validUUID,
+		DatasetCode:    "USD_EUR_FX",
+		DatasetVersion: 1,
+		ObservedAt:     now,
+		ValidFrom:      now,
+		Value:          "1.2345",
+		Quality:        marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL,
+		SourceId:       sourceUUID,
+		CreatedAt:      now,
+	}
+	if original.GetRevision() != 0 {
+		t.Errorf("default revision = %d, want 0", original.GetRevision())
+	}
+
+	// A non-zero revision marks a correction that supersedes a prior observation.
+	for _, rev := range []uint32{0, 1, 2, 42} {
+		obs := proto.Clone(original).(*marketinformationv1.MarketPriceObservation)
+		obs.Revision = rev
+
+		data, err := proto.Marshal(obs)
+		if err != nil {
+			t.Fatalf("failed to marshal observation with revision %d: %v", rev, err)
+		}
+
+		decoded := &marketinformationv1.MarketPriceObservation{}
+		if err := proto.Unmarshal(data, decoded); err != nil {
+			t.Fatalf("failed to unmarshal observation with revision %d: %v", rev, err)
+		}
+
+		if decoded.GetRevision() != rev {
+			t.Errorf("revision not preserved: got %d, want %d", decoded.GetRevision(), rev)
+		}
+		if !proto.Equal(obs, decoded) {
+			t.Errorf("round-trip mismatch for revision %d", rev)
+		}
+	}
+}
+
 // TestServiceClientInterface verifies service client interface exists with all methods.
 func TestServiceClientInterface(_ *testing.T) {
 	// This test verifies the gRPC client interface has all expected methods.
