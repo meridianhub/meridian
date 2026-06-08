@@ -215,6 +215,9 @@ func TestShouldPublishObservationEvent(t *testing.T) {
 	}{
 		{"actual publishes", domain.QualityLevelActual, true},
 		{"verified publishes", domain.QualityLevelVerified, true},
+		// PROVISIONAL is metered but unvalidated, so it must not trigger publishing
+		// (only ACTUAL and VERIFIED do).
+		{"provisional does not publish", domain.QualityLevelProvisional, false},
 		{"estimate does not publish", domain.QualityLevelEstimate, false},
 		{"unknown does not publish", domain.QualityLevel(99), false},
 	}
