@@ -37,15 +37,21 @@ fi
 cd "${REPO_ROOT}"
 
 # Service list (dynamically discovered)
+#
+# Post-ADR-0017, each service lives in its own directory under services/.
+# Every subdirectory of services/ is a service; plain files (embed.go,
+# README.md) are ignored by the -type d filter.
 SERVICES=()
-if [[ -d "internal" ]]; then
+if [[ -d "services" ]]; then
     while IFS= read -r service_dir; do
         service_name="$(basename "${service_dir}")"
-        # Exclude platform and domain (not services)
-        if [[ "${service_name}" != "platform" && "${service_name}" != "domain" ]]; then
-            SERVICES+=("${service_name}")
-        fi
-    done < <(find internal -mindepth 1 -maxdepth 1 -type d)
+        SERVICES+=("${service_name}")
+    done < <(find services -mindepth 1 -maxdepth 1 -type d | sort)
+fi
+
+if [[ ${#SERVICES[@]} -eq 0 ]]; then
+    echo -e "${RED}Error: No services discovered under services/${NC}" >&2
+    exit 1
 fi
 
 echo -e "${YELLOW}Analyzing ${#SERVICES[@]} services: ${SERVICES[*]}${NC}" >&2
@@ -60,51 +66,46 @@ kafka_patterns=()
 #
 # Section 1: Find cross-service internal imports
 #
-# Pattern: Service A importing internal/service-b/...
-# These should use public APIs (proto/gRPC) instead
+# Pattern: Service A importing services/service-b/internal/...
+# Go's internal-package rule already forbids this across service roots, so any
+# match is a genuine encapsulation violation. Services should depend on each
+# other through their public client packages (services/<svc>/client) or proto.
 #
 analyze_cross_service_imports() {
     local from_service="$1"
     local to_service="$2"
 
-    # Search in both cmd/{service} and internal/{service}
-    local search_paths=(
-        "cmd/${from_service}"
-        "internal/${from_service}"
-    )
+    local search_path="services/${from_service}"
+    [[ ! -d "${search_path}" ]] && return
 
-    for search_path in "${search_paths[@]}"; do
-        [[ ! -d "${search_path}" ]] && continue
+    # Find Go files importing the target service's internal package
+    while IFS=: read -r file line_num content; do
+        # Skip test files and vendor
+        [[ "${file}" =~ _test\.go$ ]] && continue
+        [[ "${file}" =~ /vendor/ ]] && continue
 
-        # Find Go files importing the target service
-        while IFS=: read -r file line_num content; do
-            # Skip test files and vendor
-            [[ "${file}" =~ _test\.go$ ]] && continue
-            [[ "${file}" =~ /vendor/ ]] && continue
+        # Extract the imported package path
+        local import_path=""
+        if [[ "${content}" =~ \"([^\"]+/services/${to_service}/internal[^\"]*)\" ]]; then
+            import_path="${BASH_REMATCH[1]}"
+        fi
 
-            # Extract the imported package path
-            local import_path=""
-            if [[ "${content}" =~ \"([^\"]+/internal/${to_service}[^\"]*)\" ]]; then
-                import_path="${BASH_REMATCH[1]}"
-            fi
+        [[ -z "${import_path}" ]] && continue
 
-            [[ -z "${import_path}" ]] && continue
-
-            violations+=("$(cat <<EOF
+        violations+=("$(cat <<EOF
     {
       "from": "${from_service}",
-      "to": "internal/${to_service}",
+      "to": "services/${to_service}/internal",
       "file": "${file}",
       "line": ${line_num},
       "import_path": "${import_path}",
       "type": "cross-service-internal-import",
       "severity": "high",
-      "message": "Service '${from_service}' directly imports internal package of '${to_service}'. Use gRPC/proto interface instead."
+      "message": "Service '${from_service}' directly imports internal package of '${to_service}'. Use the public client package or gRPC/proto interface instead."
     }
 EOF
 )")
-        done < <(rg -n "internal/${to_service}" "${search_path}" --type go 2>/dev/null || true)
-    done
+    done < <(rg -n "services/${to_service}/internal" "${search_path}" --type go 2>/dev/null || true)
 }
 
 echo -e "${YELLOW}[1/6] Analyzing cross-service imports...${NC}" >&2
@@ -118,45 +119,46 @@ done
 #
 # Section 2: Analyze internal/platform usage in services
 #
-# Pattern: Service importing internal/platform instead of pkg/platform
-# Platform utilities should be in pkg/platform (public) or service-specific
+# Post-ADR-0017 the public platform utilities live in shared/platform, which
+# every service is expected to import (not a violation). A private
+# internal/platform package would be a violation; none exist today, so this
+# section normally reports nothing while still exercising the real services.
 #
 analyze_platform_imports() {
     echo -e "${YELLOW}[2/6] Analyzing internal/platform usage...${NC}" >&2
 
     for service in "${SERVICES[@]}"; do
-        local search_paths=(
-            "cmd/${service}"
-            "internal/${service}"
-        )
+        local search_path="services/${service}"
+        [[ ! -d "${search_path}" ]] && continue
 
-        for search_path in "${search_paths[@]}"; do
-            [[ ! -d "${search_path}" ]] && continue
+        while IFS=: read -r file line_num content; do
+            # Skip vendor
+            [[ "${file}" =~ /vendor/ ]] && continue
 
-            while IFS=: read -r file line_num content; do
-                # Skip vendor
-                [[ "${file}" =~ /vendor/ ]] && continue
+            # Extract the imported package
+            local import_path=""
+            if [[ "${content}" =~ \"([^\"]+/internal/platform[^\"]*)\" ]]; then
+                import_path="${BASH_REMATCH[1]}"
+            fi
 
-                # Extract the imported package
-                local import_path=""
-                if [[ "${content}" =~ \"([^\"]+/internal/platform[^\"]*)\" ]]; then
-                    import_path="${BASH_REMATCH[1]}"
-                fi
+            [[ -z "${import_path}" ]] && continue
 
-                [[ -z "${import_path}" ]] && continue
+            # Determine if the public shared/platform equivalent exists.
+            # Map internal/platform/<package>/... to its top-level package so
+            # nested imports (e.g. internal/platform/kafka/producer) resolve to
+            # shared/platform/kafka, not the leaf segment.
+            local platform_suffix="${import_path##*/internal/platform/}"
+            local package_name="${platform_suffix%%/*}"
+            local should_be_public="false"
+            local message="Service '${service}' imports internal/platform/${package_name}."
 
-                # Determine if this should be in pkg/platform
-                local package_name="${import_path##*/}"
-                local should_be_public="false"
-                local message="Service '${service}' imports internal/platform/${package_name}."
+            # Check if similar functionality exists in shared/platform
+            if [[ -d "shared/platform/${package_name}" ]]; then
+                should_be_public="true"
+                message="Service '${service}' imports internal/platform/${package_name} but shared/platform/${package_name} exists. Use the public API."
+            fi
 
-                # Check if similar functionality exists in pkg/platform
-                if [[ -d "pkg/platform/${package_name}" ]]; then
-                    should_be_public="true"
-                    message="Service '${service}' imports internal/platform/${package_name} but pkg/platform/${package_name} exists. Use public API."
-                fi
-
-                violations+=("$(cat <<EOF
+            violations+=("$(cat <<EOF
     {
       "from": "${service}",
       "to": "${import_path}",
@@ -169,8 +171,7 @@ analyze_platform_imports() {
     }
 EOF
 )")
-            done < <(rg -n "internal/platform" "${search_path}" --type go 2>/dev/null || true)
-        done
+        done < <(rg -n "internal/platform" "${search_path}" --type go 2>/dev/null || true)
     done
 }
 analyze_platform_imports
@@ -191,21 +192,16 @@ analyze_proto_usage() {
             # Convert service name to proto package format (e.g., position-keeping -> position_keeping)
             local proto_pkg="${other_svc//-/_}"
 
-            local search_paths=(
-                "cmd/${service}"
-                "internal/${service}"
-            )
+            local search_path="services/${service}"
+            [[ ! -d "${search_path}" ]] && continue
 
-            for search_path in "${search_paths[@]}"; do
-                [[ ! -d "${search_path}" ]] && continue
+            # Look for proto package imports
+            while IFS=: read -r file line_num content; do
+                [[ "${file}" =~ /vendor/ ]] && continue
 
-                # Look for proto package imports
-                while IFS=: read -r file line_num content; do
-                    [[ "${file}" =~ /vendor/ ]] && continue
-
-                    # Extract proto import
-                    if [[ "${content}" =~ api/proto/meridian/${proto_pkg} ]]; then
-                        proto_usage+=("$(cat <<EOF
+                # Extract proto import
+                if [[ "${content}" =~ api/proto/meridian/${proto_pkg} ]]; then
+                    proto_usage+=("$(cat <<EOF
     {
       "from_service": "${service}",
       "proto_package": "${proto_pkg}",
@@ -217,9 +213,8 @@ analyze_proto_usage() {
     }
 EOF
 )")
-                    fi
-                done < <(rg -n "api/proto/meridian/${proto_pkg}" "${search_path}" --type go 2>/dev/null || true)
-            done
+                fi
+            done < <(rg -n "api/proto/meridian/${proto_pkg}" "${search_path}" --type go 2>/dev/null || true)
         done
     done
 }
@@ -249,9 +244,7 @@ analyze_grpc_clients() {
 
             # Determine which service is instantiating the client
             local from_service=""
-            if [[ "${file}" =~ cmd/([^/]+)/ ]]; then
-                from_service="${BASH_REMATCH[1]}"
-            elif [[ "${file}" =~ internal/([^/]+)/ ]]; then
+            if [[ "${file}" =~ services/([^/]+)/ ]]; then
                 from_service="${BASH_REMATCH[1]}"
             fi
 
@@ -273,7 +266,7 @@ analyze_grpc_clients() {
     }
 EOF
 )")
-        done < <(rg -n "${pattern}" --type go 2>/dev/null || true)
+        done < <(rg -n "${pattern}" services --type go 2>/dev/null || true)
     done
 }
 analyze_grpc_clients
@@ -287,7 +280,7 @@ analyze_grpc_clients
 analyze_database_schemas() {
     echo -e "${YELLOW}[5/6] Analyzing database schemas...${NC}" >&2
 
-    [[ ! -d "migrations" ]] && return
+    [[ ! -d "services" ]] && return
 
     # Track tables across services (using temporary file instead of associative array for compatibility)
     local table_tracking_file
@@ -295,15 +288,20 @@ analyze_database_schemas() {
     trap "rm -f ${table_tracking_file}" RETURN
 
     for service in "${SERVICES[@]}"; do
-        local migration_dir="migrations/${service//-/_}"
+        # Each service owns its migrations under services/<service>/migrations
+        local migration_dir="services/${service}/migrations"
         [[ ! -d "${migration_dir}" ]] && continue
 
         while IFS= read -r migration_file; do
             # Extract CREATE TABLE statements
             while IFS= read -r line; do
-                # Match CREATE TABLE with optional IF NOT EXISTS
-                if [[ "${line}" =~ CREATE[[:space:]]+TABLE[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?([A-Za-z_][A-Za-z0-9_.]*) ]]; then
-                    local table_name="${BASH_REMATCH[2]}"
+                # Match CREATE TABLE with optional IF NOT EXISTS.
+                # Identifiers may be double-quoted and/or schema-qualified
+                # (e.g. "public"."saga_definitions"), so allow quotes in the
+                # capture, then strip quotes and any schema prefix below.
+                if [[ "${line}" =~ CREATE[[:space:]]+TABLE[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?(\"?[A-Za-z_][A-Za-z0-9_.\"]*) ]]; then
+                    local table_name="${BASH_REMATCH[2]//\"/}"
+                    table_name="${table_name##*.}"
 
                     # Track which services define this table
                     echo "${table_name}:${service}" >> "${table_tracking_file}"
@@ -362,13 +360,11 @@ analyze_kafka_patterns() {
         [[ "${file}" =~ _test\.go$ ]] && continue  # Skip test files for cleaner output
 
         local service=""
-        if [[ "${file}" =~ cmd/([^/]+)/ ]]; then
-            service="${BASH_REMATCH[1]}"
-        elif [[ "${file}" =~ internal/([^/]+)/ ]]; then
+        if [[ "${file}" =~ services/([^/]+)/ ]]; then
             service="${BASH_REMATCH[1]}"
         fi
 
-        [[ -z "${service}" || "${service}" == "platform" ]] && continue
+        [[ -z "${service}" ]] && continue
 
         kafka_patterns+=("$(cat <<EOF
     {
@@ -380,7 +376,7 @@ analyze_kafka_patterns() {
     }
 EOF
 )")
-    done < <(rg -n "kafka\.NewProtoProducer|NewProtoProducer" --type go 2>/dev/null || true)
+    done < <(rg -n "kafka\.NewProtoProducer|NewProtoProducer" services --type go 2>/dev/null || true)
 
     # Look for Kafka consumer patterns
     while IFS=: read -r file line_num content; do
@@ -388,13 +384,11 @@ EOF
         [[ "${file}" =~ _test\.go$ ]] && continue  # Skip test files for cleaner output
 
         local service=""
-        if [[ "${file}" =~ cmd/([^/]+)/ ]]; then
-            service="${BASH_REMATCH[1]}"
-        elif [[ "${file}" =~ internal/([^/]+)/ ]]; then
+        if [[ "${file}" =~ services/([^/]+)/ ]]; then
             service="${BASH_REMATCH[1]}"
         fi
 
-        [[ -z "${service}" || "${service}" == "platform" ]] && continue
+        [[ -z "${service}" ]] && continue
 
         kafka_patterns+=("$(cat <<EOF
     {
@@ -406,7 +400,7 @@ EOF
     }
 EOF
 )")
-    done < <(rg -n "kafka\.NewProtoConsumer|NewProtoConsumer" --type go 2>/dev/null || true)
+    done < <(rg -n "kafka\.NewProtoConsumer|NewProtoConsumer" services --type go 2>/dev/null || true)
 
     # Look for EventPublisher (domain pattern)
     while IFS=: read -r file line_num content; do
@@ -414,13 +408,11 @@ EOF
         [[ "${file}" =~ _test\.go$ ]] && continue
 
         local service=""
-        if [[ "${file}" =~ cmd/([^/]+)/ ]]; then
-            service="${BASH_REMATCH[1]}"
-        elif [[ "${file}" =~ internal/([^/]+)/ ]]; then
+        if [[ "${file}" =~ services/([^/]+)/ ]]; then
             service="${BASH_REMATCH[1]}"
         fi
 
-        [[ -z "${service}" || "${service}" == "platform" ]] && continue
+        [[ -z "${service}" ]] && continue
 
         kafka_patterns+=("$(cat <<EOF
     {
@@ -432,7 +424,7 @@ EOF
     }
 EOF
 )")
-    done < <(rg -n "EventPublisher|event_publisher" --type go 2>/dev/null || true)
+    done < <(rg -n "EventPublisher|event_publisher" services --type go 2>/dev/null || true)
 }
 analyze_kafka_patterns
 

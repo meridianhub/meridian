@@ -1,29 +1,157 @@
 {
-  "timestamp": "2025-11-19T15:43:48Z",
+  "timestamp": "2026-06-08T13:20:05Z",
   "services": {
-    "position-keeping": {
-      "afferent_coupling": 1,
+    "api-gateway": {
+      "afferent_coupling": 0,
+      "efferent_coupling": 4,
+      "instability": 1.00,
+      "assessment": "too-dependent",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "audit-worker": {
+      "afferent_coupling": 0,
       "efferent_coupling": 0,
-      "instability": 0,
+      "instability": 0.0,
       "assessment": "stable",
       "abstractness": 0.5,
       "distance_from_main_sequence": 0.50
     },
+    "control-plane": {
+      "afferent_coupling": 5,
+      "efferent_coupling": 6,
+      "instability": 0.54,
+      "assessment": "acceptable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0
+    },
     "current-account": {
+      "afferent_coupling": 3,
+      "efferent_coupling": 4,
+      "instability": 0.57,
+      "assessment": "acceptable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0
+    },
+    "event-router": {
       "afferent_coupling": 0,
-      "efferent_coupling": 2,
+      "efferent_coupling": 3,
       "instability": 1.00,
       "assessment": "too-dependent",
       "abstractness": 0.5,
       "distance_from_main_sequence": 0.50
     },
     "financial-accounting": {
+      "afferent_coupling": 3,
+      "efferent_coupling": 1,
+      "instability": 0.25,
+      "assessment": "stable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.24
+    },
+    "financial-gateway": {
       "afferent_coupling": 1,
+      "efferent_coupling": 1,
+      "instability": 0.50,
+      "assessment": "acceptable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0
+    },
+    "forecasting": {
+      "afferent_coupling": 0,
+      "efferent_coupling": 1,
+      "instability": 1.00,
+      "assessment": "too-dependent",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "identity": {
+      "afferent_coupling": 0,
+      "efferent_coupling": 0,
+      "instability": 0.0,
+      "assessment": "stable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "internal-account": {
+      "afferent_coupling": 5,
+      "efferent_coupling": 2,
+      "instability": 0.28,
+      "assessment": "too-rigid",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.20
+    },
+    "market-information": {
+      "afferent_coupling": 5,
+      "efferent_coupling": 0,
+      "instability": 0,
+      "assessment": "too-rigid",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "mcp-server": {
+      "afferent_coupling": 0,
+      "efferent_coupling": 7,
+      "instability": 1.00,
+      "assessment": "too-dependent",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "operational-gateway": {
+      "afferent_coupling": 2,
       "efferent_coupling": 0,
       "instability": 0,
       "assessment": "stable",
       "abstractness": 0.5,
       "distance_from_main_sequence": 0.50
+    },
+    "party": {
+      "afferent_coupling": 5,
+      "efferent_coupling": 0,
+      "instability": 0,
+      "assessment": "too-rigid",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "payment-order": {
+      "afferent_coupling": 0,
+      "efferent_coupling": 7,
+      "instability": 1.00,
+      "assessment": "too-dependent",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "position-keeping": {
+      "afferent_coupling": 6,
+      "efferent_coupling": 3,
+      "instability": 0.33,
+      "assessment": "acceptable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.14
+    },
+    "reconciliation": {
+      "afferent_coupling": 1,
+      "efferent_coupling": 3,
+      "instability": 0.75,
+      "assessment": "too-dependent",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.24
+    },
+    "reference-data": {
+      "afferent_coupling": 6,
+      "efferent_coupling": 0,
+      "instability": 0,
+      "assessment": "too-rigid",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0.50
+    },
+    "tenant": {
+      "afferent_coupling": 1,
+      "efferent_coupling": 1,
+      "instability": 0.50,
+      "assessment": "acceptable",
+      "abstractness": 0.5,
+      "distance_from_main_sequence": 0
     }
   }
 }

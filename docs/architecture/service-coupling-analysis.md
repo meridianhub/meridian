@@ -7,14 +7,14 @@ current-account, event-router, financial-accounting, financial-gateway, forecast
 internal-account, market-information, mcp-server, operational-gateway, party, payment-order,
 position-keeping, reconciliation, reference-data, tenant)
 
-> **Methodology note (2026-06-08 refresh):** The codebase has since migrated services out of the
-> top-level `internal/` tree into `services/<service>/`, and platform code out of `internal/platform/`
-> into `shared/platform/`. The `scripts/analyze-coupling.sh` helper still discovers services by scanning
-> the top-level `internal/` directory, which now contains only `bootstrap` and `migrations`. As a result
-> the script reports zero domain services and cannot produce current coupling metrics until it is updated
-> to scan `services/` (see [P1-3](#p1-3-update-coupling-tooling-to-scan-services)). The figures below were
-> derived directly from the `services/` tree using `rg` over cross-service gRPC client instantiation,
-> Kafka topic usage, and import paths.
+> **Methodology note (2026-06-08 refresh):** The codebase migrated services out of the top-level
+> `internal/` tree into `services/<service>/`, and platform code out of `internal/platform/` into
+> `shared/platform/`. `scripts/analyze-coupling.sh` has been updated to match: it now discovers services by
+> scanning `services/*/`, detects cross-service `services/<other>/internal` imports, treats `shared/platform/`
+> as an allowed shared import, and reads migrations from `services/<service>/migrations/`
+> (see [P1-3](#p1-3-update-coupling-tooling-to-scan-services), completed). The figures below and
+> `docs/architecture/coupling-metrics.json` are generated directly from the script's output across all 19
+> services via `scripts/calculate-coupling-metrics.sh`.
 
 ## Executive Summary
 
@@ -388,8 +388,8 @@ rg -l "meridian/internal/platform" --type go | grep -v _test.go
 ls shared/platform/
 ```
 
-**Residual follow-up:** Update `scripts/analyze-coupling.sh` (see P1-3) so the CI gate can be re-enabled
-against the new `services/` and `shared/platform/` layout.
+**Residual follow-up:** Done - `scripts/analyze-coupling.sh` now scans the `services/` and `shared/platform/`
+layout (see P1-3), so the CI gate can be re-enabled.
 
 ---
 
@@ -414,33 +414,35 @@ layer and are not themselves depended upon.
 **Action:** No structural change required. Re-run the (updated) coupling tooling each release and alert if a
 service's instability shifts by more than 0.2 or if a previously stable provider gains outbound dependencies.
 
-**Effort Estimate:** 0 story points (monitoring only, gated on P1-3)
+**Effort Estimate:** 0 story points (monitoring only; coupling tooling repaired under P1-3)
 
 ---
 
-#### P1-3: Update Coupling Tooling to Scan services/
+#### P1-3: Update Coupling Tooling to Scan services/ (Completed)
 
 **Problem:** `scripts/analyze-coupling.sh` (and the `calculate-coupling-metrics.sh` /
-`generate-coupling-mermaid.sh` helpers that consume its JSON) discover services by scanning the top-level
+`generate-coupling-mermaid.sh` helpers that consume its JSON) discovered services by scanning the top-level
 `internal/` directory. After the service and platform migration, `internal/` contains only `bootstrap` and
-`migrations`, so the script reports zero domain services and produces empty violation/proto/schema sections.
-The metrics in this document were therefore derived manually from `services/`.
+`migrations`, so the script reported zero domain services and produced empty violation/proto/schema sections.
 
-**Impact:**
+**Resolution:** `scripts/analyze-coupling.sh` now scans the `services/` tree directly:
 
-- The coupling CI gate cannot be enabled until the script is fixed (it would always pass with zero services)
-- `docs/architecture/coupling-metrics.json` cannot be regenerated automatically
+- Service discovery enumerates `services/*/` (plain files such as `embed.go`/`README.md` are skipped by the
+  `-type d` filter); `shared/platform/`, `shared/pkg/`, and `shared/domain/` are treated as shared,
+  non-service code
+- Cross-service import detection looks for `services/<other>/internal` imports
+- The platform-usage check is re-pointed at `shared/platform` (an allowed shared import, not a violation);
+  a residual `internal/platform` import would still be flagged, but none exist
+- Database-schema analysis reads migrations from `services/<service>/migrations/`, and the
+  `CREATE TABLE` parser now handles double-quoted and schema-qualified identifiers
+  (e.g. `"public"."saga_definitions"`)
+- `coupling-metrics.json` is regenerated from the corrected output via `scripts/calculate-coupling-metrics.sh`,
+  now covering all 19 services
 
-**Solution:**
+The JSON output schema is unchanged, so the downstream Mermaid and metrics helpers continue to work. With
+the script repaired, the coupling CI gate (see P2-2) can be enabled.
 
-- Change service discovery to enumerate `services/*/` (and treat `shared/platform/`, `shared/pkg/`,
-  `shared/domain/` as shared, non-service code)
-- Update the cross-service import detection to look for `services/<other>/internal` imports
-- Re-point the platform-usage check at `shared/platform` (informational only - this is now an allowed
-  shared import, not a violation)
-- Regenerate `coupling-metrics.json` from the corrected output
-
-**Effort Estimate:** 3 story points
+**Effort Estimate:** 3 story points (delivered)
 
 **Dependencies:** None - unblocks the CI gate (P2-2)
 
@@ -580,10 +582,10 @@ fi
 
 **Dependencies:**
 
-- Requires P1-3 (coupling tooling update) first - the script must discover services from `services/`
-  before a CI gate is meaningful
+- P1-3 (coupling tooling update) is complete - the script now discovers services from `services/`, so a CI
+  gate is meaningful
 
-**Risk:** Low - Scripts exist but need updating (P1-3), then CI integration
+**Risk:** Low - Scripts are repaired; remaining work is CI integration only
 
 **Alignment:**
 
@@ -599,19 +601,18 @@ fi
 | ID | Priority | Description | Effort (SP) | Risk | Dependencies | Status |
 |----|----------|-------------|-------------|------|--------------|--------|
 | P1-1 | High | Migrate platform code out of internal/platform | 5 | Low | None | Completed |
-| P1-3 | High | Update coupling tooling to scan `services/` | 3 | Low | None | Open |
+| P1-3 | High | Update coupling tooling to scan `services/` | 3 | Low | None | Completed |
 | P1-2 | High | Monitor instability of orchestration services | 0 | Low | P1-3 | Open (monitoring) |
 | P2-1 | Medium | Document service dependencies | 2 | None | None | Open |
 | P2-2 | Medium | Implement CI coupling gates | 3 | Low | P1-3 | Open |
 
-**Remaining Effort:** 8 story points (P1-1 complete)
+**Remaining Effort:** 5 story points (P1-1, P1-3 complete)
 
 **Recommended Execution Order:**
 
-1. **P1-3** - Update coupling tooling to scan `services/` (unblocks the CI gate and metric regeneration)
-2. **P2-2** - Enable the CI coupling gate once the tooling is corrected
-3. **P2-1** - Document service dependencies (can happen in parallel)
-4. **P1-2** - Ongoing monitoring of instability trends
+1. **P2-2** - Enable the CI coupling gate now that the tooling scans `services/` and regenerates metrics
+2. **P2-1** - Document service dependencies (can happen in parallel)
+3. **P1-2** - Ongoing monitoring of instability trends
 
 ---
 
@@ -621,7 +622,7 @@ After implementing remediation items:
 
 **Continuous Monitoring:**
 
-- Run `./scripts/analyze-coupling.sh` weekly to track metrics (after P1-3 updates it to scan `services/`)
+- Run `./scripts/analyze-coupling.sh` weekly to track metrics (now scans `services/` per P1-3)
 - Review coupling metrics in sprint retrospectives
 - Alert on instability score changes > 0.2
 
@@ -633,7 +634,7 @@ After implementing remediation items:
 
 **Success Criteria:**
 
-- Zero cross-service internal imports (tracked in CI once P1-3/P2-2 land)
+- Zero cross-service internal imports (P1-3 tooling landed; CI tracking lands with P2-2)
 - Provider/registry services (reference-data, market-information, party) remain stable (I near 0.00)
 - Service dependency graph matches BIAN architecture (no cyclic cross-service gRPC edges)
 - Service dependencies are discoverable from the proto clients and `topics.yaml`
@@ -666,22 +667,22 @@ After implementing remediation items:
 
 3. **Coupling Regression Tests:**
    - Automated checks for new cross-service `services/<other>/internal` imports
-   - Pre-commit hooks running `scripts/analyze-coupling.sh` (after P1-3)
+   - Pre-commit hooks running `scripts/analyze-coupling.sh` (now scans `services/` per P1-3)
 
 ## Appendix
 
 ### Analysis Methodology
 
-The original analysis used custom scripts:
+The analysis uses custom scripts:
 
 1. `scripts/analyze-coupling.sh` - Detects import violations and patterns
 2. `scripts/calculate-coupling-metrics.sh` - Computes coupling metrics
 3. `scripts/generate-coupling-mermaid.sh` - Visualizes dependencies
 
-These scripts discover services from the top-level `internal/` directory and are stale relative to the
-current `services/` layout (see [P1-3](#p1-3-update-coupling-tooling-to-scan-services)). The 2026-06-08
-refresh therefore derived metrics directly from `services/` using `rg` over `New<Service>ServiceClient`
-instantiation (cross-service gRPC edges), Kafka topic usage, and import paths.
+These scripts now discover services from the `services/` tree
+(see [P1-3](#p1-3-update-coupling-tooling-to-scan-services), completed). The 2026-06-08 refresh was generated
+by running them across all 19 services - `rg` over `New<Service>ServiceClient` instantiation (cross-service
+gRPC edges), Kafka topic usage, import paths, and per-service migrations.
 
 **Analysis Coverage:**
 
@@ -692,8 +693,8 @@ instantiation (cross-service gRPC edges), Kafka topic usage, and import paths.
 
 ### Raw Metrics Output
 
-Full metrics available in: `docs/architecture/coupling-metrics.json` (regenerate automatically once P1-3
-updates the tooling). Current code-derived values:
+Full metrics available in: `docs/architecture/coupling-metrics.json` (regenerated via
+`scripts/calculate-coupling-metrics.sh`). Representative values:
 
 ```json
 {
