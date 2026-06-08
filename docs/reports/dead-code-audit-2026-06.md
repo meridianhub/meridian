@@ -74,7 +74,7 @@ code as of 2026-06-08.
 ## Reproduction
 
 ```bash
-go install honnef.co/go/tools/cmd/staticcheck@latest
+go install honnef.co/go/tools/cmd/staticcheck@2026.1  # v0.7.0, the version used for this audit
 cd <repo-root>
 staticcheck -checks U1000 ./...   # expect: no output, exit 0
 ```
