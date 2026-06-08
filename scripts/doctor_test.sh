@@ -29,13 +29,13 @@ assert_equals() {
 
     if [ "$expected" = "$actual" ]; then
         echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
         return 0
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Expected: $expected"
         echo "  Actual:   $actual"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
         return 1
     fi
 }
@@ -48,13 +48,13 @@ assert_contains() {
     # Use grep -F for literal string matching, with -- to prevent option interpretation
     if echo "$haystack" | grep -qF -- "$needle"; then
         echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
         return 0
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Expected to contain: $needle"
         echo "  Actual output: $haystack"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
         return 1
     fi
 }
@@ -66,13 +66,13 @@ assert_exit_code() {
 
     if [ "$expected" -eq "$actual" ]; then
         echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
         return 0
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Expected exit code: $expected"
         echo "  Actual exit code:   $actual"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
         return 1
     fi
 }
@@ -86,10 +86,10 @@ echo "Test Suite: Basic Script Properties"
 echo "------------------------------------"
 if [ -f "$SCRIPT_DIR/doctor.sh" ] && [ -x "$SCRIPT_DIR/doctor.sh" ]; then
     echo -e "${GREEN}✓${NC} doctor.sh exists and is executable"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} doctor.sh exists and is executable"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 echo ""
 
@@ -101,6 +101,18 @@ assert_contains "$help_output" "Usage:" "Shows help message with --help"
 assert_contains "$help_output" "--check" "Help includes --check option"
 assert_contains "$help_output" "--fix" "Help includes --fix option"
 assert_contains "$help_output" "--verbose" "Help includes --verbose option"
+
+# Behaviour: --help exits 0 (observable contract, not source structure)
+"$SCRIPT_DIR/doctor.sh" --help >/dev/null 2>&1
+assert_exit_code 0 $? "Exits 0 after printing help"
+
+# Behaviour: an unknown option is rejected at runtime with a non-zero exit
+# and a diagnostic message. This exercises the actual argument parser rather
+# than grepping the source for the case statement.
+unknown_exit=0
+unknown_output=$("$SCRIPT_DIR/doctor.sh" --not-a-real-flag 2>&1) || unknown_exit=$?
+assert_exit_code 1 "$unknown_exit" "Exits 1 on unknown option"
+assert_contains "$unknown_output" "Unknown option" "Reports the unknown option to the user"
 echo ""
 
 # Test 3: PKG_MANAGER validation (security test)
@@ -110,28 +122,28 @@ echo "--------------------------"
 # We'll test this by checking the script's actual commands
 if grep -q 'case "$PKG_MANAGER" in' "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} PKG_MANAGER validation exists"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} PKG_MANAGER validation exists"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Check that dangerous patterns are not present
 if grep -q 'eval.*install_cmd' "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${RED}✗${NC} Script does not use eval with install commands"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 else
     echo -e "${GREEN}✓${NC} Script does not use eval with install commands"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 fi
 
 # Check security documentation exists
 if grep -q "Security model:" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} Security model documentation present"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} Security model documentation present"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 echo ""
 
@@ -142,10 +154,10 @@ echo "---------------------------------"
 # Check that doctor.sh has git hooks validation function
 if grep -qF -- "check_git_hooks" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} Git hooks validation function exists"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} Git hooks validation function exists"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Create a mock git repository to test cmp logic
@@ -165,10 +177,10 @@ echo "# modified" >> "$TEST_DIR/test-repo/.githooks/pre-commit"
 # The cmp command (as used in doctor.sh) should detect the difference
 if ! cmp -s "$TEST_DIR/test-repo/.githooks/pre-commit" "$TEST_DIR/test-repo/.git/hooks/pre-commit"; then
     echo -e "${GREEN}✓${NC} cmp correctly detects out-of-sync hooks"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} cmp correctly detects out-of-sync hooks"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 echo ""
 
@@ -179,36 +191,36 @@ echo "---------------------------------------"
 # Check that get_install_cmd function exists and has proper structure
 if grep -q "get_install_cmd()" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} get_install_cmd function exists"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} get_install_cmd function exists"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Check for platform-specific commands
 if grep -q "macos-go.*brew install go" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} macOS Go install command present"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} macOS Go install command present"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 if grep -q "linux-go.*golang-go" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} Linux Go install command present"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} Linux Go install command present"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Check that PKG_MANAGER is actually used in commands
 if grep -q '\$PKG_MANAGER' "$SCRIPT_DIR/doctor.sh" && grep -q "get_install_cmd" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} PKG_MANAGER variable is utilized"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} PKG_MANAGER variable is utilized"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 echo ""
 
@@ -219,19 +231,19 @@ echo "------------------------------"
 # Check that network detection uses curl with --fail
 if grep -q "curl.*--fail" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} Network detection uses curl with --fail flag"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} Network detection uses curl with --fail flag"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
 # Check for timeout portability handling
 if grep -q "gtimeout" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} Handles GNU timeout (gtimeout) for macOS"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} Handles GNU timeout (gtimeout) for macOS"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 echo ""
 
@@ -242,10 +254,10 @@ echo "------------------------------"
 # Check that script validates docker daemon, not just docker binary
 if grep -q "docker info" "$SCRIPT_DIR/doctor.sh" || grep -q "check_docker_daemon" "$SCRIPT_DIR/doctor.sh"; then
     echo -e "${GREEN}✓${NC} Validates Docker daemon is running"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗${NC} Validates Docker daemon is running"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 echo ""
 
