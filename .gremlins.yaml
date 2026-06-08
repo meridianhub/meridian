@@ -1,0 +1,54 @@
+# Gremlins mutation-testing configuration for Meridian's financial-correctness core.
+#
+# Why this file exists: a surviving mutant in these packages means money (or
+# energy/carbon/compute quantities) can move incorrectly without a test
+# catching it. Mutation testing measures whether the test suite actually
+# constrains behaviour, not just whether lines are executed.
+#
+# Run locally:
+#   gremlins unleash ./services/position-keeping/domain/
+# See docs/runbooks/mutation-testing.md for full usage and triage guidance.
+
+unleash:
+  # The per-mutant test timeout is derived from the baseline coverage run
+  # multiplied by this coefficient. The financial-core unit suites are fast
+  # (sub-second coverage runs), so the default coefficient leaves no headroom
+  # for the Go compile+link step that precedes each mutant's test run, causing
+  # every mutant to TIMED_OUT instead of KILLED/LIVED. A coefficient of 20
+  # gives each mutant ample wall-clock to compile and run. Raise further on
+  # slower CI runners if you observe spurious TIMED_OUT results.
+  timeout-coefficient: 20
+
+  # Integration tests are gated behind the `integration` build tag and require
+  # CockroachDB testcontainers. Mutation testing runs the fast unit suites only;
+  # do not set the `integration` tag here.
+  dry-run: false
+
+  # Quality gates are advisory in CI (the workflow is non-blocking). Leave the
+  # thresholds at 0 so a local run never exits non-zero purely on score; use the
+  # reported efficacy/coverage as the signal instead.
+  threshold-efficacy: 0
+  threshold-mcover: 0
+
+# Mutant operators. Defaults cover the high-value financial cases (boundary
+# conditions, negated conditionals, arithmetic operators). increment_decrement
+# and invert_negatives are enabled because off-by-one and sign errors in
+# balance/amount arithmetic move money the wrong way.
+mutants:
+  arithmetic_base:
+    enabled: true
+  conditionals_boundary:
+    enabled: true
+  conditionals_negation:
+    enabled: true
+  increment_decrement:
+    enabled: true
+  invert_negatives:
+    enabled: true
+  # Disabled: these generate high-noise, low-signal mutants for this codebase.
+  invert_assignments:
+    enabled: false
+  invert_bitwise:
+    enabled: false
+  invert_loopctrl:
+    enabled: false

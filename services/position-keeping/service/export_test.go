@@ -14,3 +14,6 @@ var ValidateUpdateRequestForTesting = validateUpdateRequest
 
 // ProtoAuditEntryToDomainForTesting exposes protoAuditEntryToDomain for testing.
 var ProtoAuditEntryToDomainForTesting = protoAuditEntryToDomain
+
+// ResolveOpeningBalanceForTesting exposes resolveOpeningBalance for testing.
+var ResolveOpeningBalanceForTesting = resolveOpeningBalance

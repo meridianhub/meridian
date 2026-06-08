@@ -448,6 +448,13 @@ func TestQty_ComparisonHelpers(t *testing.T) {
 		lt, err = q2.LessThan(q1)
 		require.NoError(t, err)
 		assert.False(t, lt)
+
+		// Equal-value boundary: LessThan must be strict (false on equal). This
+		// kills the CONDITIONALS_BOUNDARY mutant that weakens `cmp < 0` to
+		// `cmp <= 0` (quantity.go:268).
+		lt, err = q1.LessThan(q3)
+		require.NoError(t, err)
+		assert.False(t, lt, "LessThan must be false for equal quantities")
 	})
 
 	t.Run("LessThanOrEqual", func(t *testing.T) {
@@ -472,6 +479,13 @@ func TestQty_ComparisonHelpers(t *testing.T) {
 		gt, err = q1.GreaterThan(q2)
 		require.NoError(t, err)
 		assert.False(t, gt)
+
+		// Equal-value boundary: GreaterThan must be strict (false on equal). This
+		// kills the CONDITIONALS_BOUNDARY mutant that weakens `cmp > 0` to
+		// `cmp >= 0` (quantity.go:288).
+		gt, err = q1.GreaterThan(q3)
+		require.NoError(t, err)
+		assert.False(t, gt, "GreaterThan must be false for equal quantities")
 	})
 
 	t.Run("GreaterThanOrEqual", func(t *testing.T) {
