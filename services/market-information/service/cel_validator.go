@@ -106,7 +106,11 @@ func NewCelValidator() (*CelValidator, error) {
 //   - valid_from: timestamp - start of effective time range
 //   - valid_to: timestamp - end of effective time range
 //   - source_id: string - the data source identifier
-//   - quality: int - quality level (1=Estimate, 2=Actual, 3=Verified)
+//   - quality: int - confidence grade on the proto QualityLevel scale
+//     (1=Estimate, 2=Provisional, 3=Actual, 4=Verified). This is the proto enum
+//     value (int(req.Quality)), which cut over to the four-level ladder in #2248.
+//     CEL rules comparing quality to an integer literal must account for the new
+//     intermediate PROVISIONAL=2 (e.g. `quality >= 2` now includes Provisional).
 func createValidationEnv() (*cel.Env, error) {
 	return cel.NewEnv(
 		cel.Variable("value", cel.StringType),

@@ -21,6 +21,20 @@
 --
 -- CockroachDB: plain UPDATEs, no plpgsql, no CONCURRENTLY. The CHECK already
 -- admits 1-4, so both intermediate and final states validate.
+--
+-- DEPLOY SEQUENCING (read before deploying to an env with existing rows): the
+-- code flip and this re-encode are atomic in the PR but NOT automatically atomic
+-- at runtime. They must not overlap with the old binary serving traffic:
+--   - If this migration runs while OLD pods still serve: a re-encoded 3 reads as
+--     old VERIFIED (wrong) and a re-encoded 4 fails the old domain IsValid (old
+--     range was 1-3).
+--   - If NEW pods start before this migration runs: a legacy 2 reads as
+--     PROVISIONAL - the silent downgrade this migration exists to prevent.
+-- Therefore deploy as a single cutover with no mixed-version window: drain/stop
+-- the old binary, run the migration to completion, then start the new binary
+-- (equivalently, a brief maintenance pause around the migration). On the demo/
+-- develop unified-binary deploy this is satisfied by running `--migrate` to
+-- completion before the new container serves traffic.
 
 UPDATE market_price_observation SET quality = 4 WHERE quality = 3;
 UPDATE market_price_observation SET quality = 3 WHERE quality = 2;
