@@ -61,7 +61,7 @@ yesterday. Without modeling this "Temporal Weighting," you get the classic billi
 
 ### Relationship to Other ADRs
 
-- **ADR-0017 (Temporal Quality Ledger):** Data model foundation - measurements, quality ladder, supersession
+- **ADR-0017 (Temporal Quality Ladder):** Data model foundation - measurements, the Two-Axis Provenance Model (confidence grade + revision state), and supersession. Precedence is keyed on the fine-grained `QualityScore`; corrections are Axis B revision events, not grade changes
 - **ADR-0013 (Universal Quantity Type System):** `Quantity[D]` with dimensional safety
 - **ADR-0014 (Dynamic Asset Registry):** Tenant-defined assets with attribute schemas
 - **ADR-0016 (Tenant Isolation):** Schema-per-tenant isolation

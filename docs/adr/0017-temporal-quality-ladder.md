@@ -22,6 +22,126 @@ Date: 2025-12-14
 
 Accepted (Implemented)
 
+Amended 2026-06-08: the single "quality ladder" framing is replaced by the
+**Two-Axis Provenance Model** (see the section below). The original ladder
+conflated two orthogonal concerns - confidence and lifecycle - into one
+ordered enum. The amendment separates them. All earlier sections of this ADR
+remain accurate for the data physics (measurements, supersession pointer,
+wash and reload); read them through the two-axis lens described next.
+
+## Amendment (2026-06-08): Two-Axis Provenance Model
+
+### Why the single ladder was wrong
+
+The pattern existed in five conflicting forms across docs and code. The most
+damaging variant ranked `REVISED` above `ACTUAL` in a single ordered ladder
+(`ESTIMATE -> ACTUAL -> REVISED`). Under integer-comparison supersession that
+lets a **revised low-confidence estimate outrank a fresh validated actual** -
+a settle-on-the-wrong-number bug that passes every existing test and only
+surfaces in production reconciliation. A second latent trap: the proto enum
+numbers `ACTUAL = 3` while the domain enum numbered `ACTUAL = 2`, so any code
+that crossed the boundary on the raw integer silently corrupted precedence.
+
+The fix is to recognise that "how confident are we in this number" and "is this
+number current or has it been corrected" are **two independent questions**.
+Collapsing them into one ladder is the root cause. The resolution is two
+orthogonal axes, not one ladder.
+
+### Axis A - Confidence grade (drives reconciliation precedence)
+
+A monotonic 4-level enum. Higher grade wins in `Supersedes()`:
+
+| Grade | Domain enum | Proto int | Meaning |
+|-------|-------------|-----------|---------|
+| ESTIMATE | 1 | 1 | Forecast or modelled value (no direct measurement) |
+| PROVISIONAL | 2 | 2 | Metered but not yet validated (a real tier, not a synonym for ESTIMATE) |
+| ACTUAL | 3 | 3 | Validated measured value |
+| VERIFIED | 4 | 4 | Cross-checked / final settlement value |
+
+This grading is monotonic and total: precedence is a simple comparison along
+Axis A. `PROVISIONAL` is a genuine tier, not a relabel of `ESTIMATE` - the
+Source Authority Registry already scores `ACTUAL_UNVALIDATED = 70` distinctly
+from `ACTUAL_VALIDATED = 90`, so the data has always carried this distinction;
+the enum now names it.
+
+This redefinition **preserves proto ints 1-3** (ESTIMATE, PROVISIONAL, ACTUAL
+keep their wire numbers) and **redefines proto slot 4 from `REVISED` to
+`VERIFIED`**. The domain enum gains `PROVISIONAL = 2` and renumbers
+`ACTUAL = 3`, `VERIFIED = 4` so that **domain int == proto int** for every
+grade. This closes the `ACTUAL = 3` (proto) vs `ACTUAL = 2` (domain)
+silent-corruption gap.
+
+### Axis B - Supersession / lifecycle (current vs corrected)
+
+Whether a measurement is the current truth or has been corrected is **not** a
+quality grade. It is a lifecycle event tracked independently of Axis A:
+
+- **`SupersededBy` pointer** (already present): links a measurement to the one
+  that replaced it. A measurement is current when `SupersededBy IS NULL`.
+- **Bitemporal validity** (valid time + transaction time): when the value was
+  true vs when we learned it.
+- **`revision` counter** (new): `0` for the original measurement, `1+` for each
+  correction in the chain. A correction increments the counter; it does not
+  change the confidence grade.
+
+A correction is therefore an **event on Axis B** (sets `revision > 0` and the
+`SupersededBy` pointer), not a move up Axis A. A correction can occur at any
+confidence grade: you can revise an `ESTIMATE` with a better `ESTIMATE`, or
+revise an `ACTUAL` with a `VERIFIED`. The two axes are independent.
+
+### `REVISED` leaves the enum
+
+`REVISED` was never a confidence grade - it described a lifecycle state. It is
+removed from Axis A. Corrections are expressed via Axis B (`revision` counter +
+`SupersededBy` pointer + bitemporal validity). Proto slot 4, formerly
+`REVISED`, is redefined to `VERIFIED`.
+
+### `COEFFICIENT` is a source, not a level
+
+`COEFFICIENT` (profile-coefficient calculation, e.g. `ESTIMATED_PROFILE`,
+quality score ~30) is a **data source**, recorded in the Source Authority
+Registry and mapping to the `ESTIMATE` confidence grade. It is not a rung on
+any ladder. Treat it as a provenance attribute of the measurement's source,
+purged from all ladder enumerations.
+
+### Reconciliation precedence key (investigation result)
+
+Two supersession mechanisms exist in the codebase, and they operate at
+different granularities:
+
+| Mechanism | Location | Key | Granularity |
+|-----------|----------|-----|-------------|
+| `DeltaEngine.Evaluate()` | Position Keeping | `QualityScore` (0-100, Source Authority Registry) | Fine |
+| `QualityLevel.Supersedes()` | `market-information/domain` | enum integer comparison (`q > other`) | Coarse |
+
+The **authoritative reconciliation precedence key is the fine-grained
+`QualityScore`** consulted by the Delta Engine when it books the financial
+position (`incoming.QualityScore < existing.QualityScore` -> archive;
+`>` -> wash and reload). The coarse `QualityLevel.Supersedes()` enum in the
+market-information domain is a **derived, lower-resolution projection** of the
+same ordering, used for observation-level quality comparison. The two-axis
+split holds for both: Axis A is exactly that coarse projection, and the
+`QualityScore` bands map onto it (see the registry table below). Where a fine
+decision is needed, consult the registry `QualityScore`; the enum grade must
+never contradict it.
+
+### Decision record: domain / proto / DB alignment
+
+* **Domain enum** (`services/market-information/domain/quality_level.go`):
+  redefine to `ESTIMATE=1, PROVISIONAL=2, ACTUAL=3, VERIFIED=4` so domain
+  integers equal proto integers.
+* **Proto enum** (`api/proto/meridian/market_information/v1`): keep
+  `ESTIMATE=1, PROVISIONAL=2, ACTUAL=3`; redefine slot `4` from `REVISED` to
+  `VERIFIED`.
+* **Database**: `measurements.quality_score` (0-100) remains the authoritative
+  fine-grained precedence value; add a `revision` integer column
+  (`DEFAULT 0`) to carry Axis B. The existing `superseded_by` pointer continues
+  to carry the supersession link. No grade column is required on the row - the
+  coarse grade is derivable from `quality_score` via the band table.
+* **Consequence**: `Supersedes()` precedence can never be inverted by a
+  correction, because corrections move along Axis B and leave the Axis A grade
+  (and the underlying `QualityScore`) untouched.
+
 ## Context
 
 Meridian must support assets where the "true" value for a time period is not known immediately
@@ -406,15 +526,25 @@ type SourceAuthority struct {
 
 **Example Source Quality Rankings:**
 
-| Source Code | Quality Score | Description |
-|-------------|---------------|-------------|
-| `DEFAULT_PROFILE` | 10 | Regulatory default when no data |
-| `ESTIMATED_HISTORIC` | 20 | Same period last year |
-| `ESTIMATED_PROFILE` | 30 | Profile coefficient calculation |
-| `CUSTOMER_READ` | 50 | Customer-submitted reading |
-| `ACTUAL_UNVALIDATED` | 70 | Meter reading, not yet validated |
-| `ACTUAL_VALIDATED` | 90 | Meter reading, passed validation |
-| `ACTUAL_FINAL` | 100 | Final settlement reading |
+The `QualityScore` is the fine-grained, authoritative precedence value. The
+**Confidence Grade (Axis A)** is the coarse projection of the score onto the
+4-level enum, via these bands: **10-30 = ESTIMATE, 50-70 = PROVISIONAL,
+90 = ACTUAL, 100 = VERIFIED**.
+
+| Source Code | Quality Score | Confidence Grade (Axis A) | Description |
+|-------------|---------------|---------------------------|-------------|
+| `DEFAULT_PROFILE` | 10 | ESTIMATE | Regulatory default when no data |
+| `ESTIMATED_HISTORIC` | 20 | ESTIMATE | Same period last year |
+| `ESTIMATED_PROFILE` | 30 | ESTIMATE | Profile coefficient calculation (COEFFICIENT source) |
+| `CUSTOMER_READ` | 50 | PROVISIONAL | Customer-submitted reading |
+| `ACTUAL_UNVALIDATED` | 70 | PROVISIONAL | Meter reading, not yet validated |
+| `ACTUAL_VALIDATED` | 90 | ACTUAL | Meter reading, passed validation |
+| `ACTUAL_FINAL` | 100 | VERIFIED | Final settlement reading |
+
+`COEFFICIENT` is the `ESTIMATED_PROFILE` source (a profile-coefficient
+calculation), not a separate level - it maps to the `ESTIMATE` grade. The
+Confidence Grade column is derivable from `QualityScore`; it is never stored
+independently in a way that could diverge from the score.
 
 **Lookup at measurement ingestion:**
 
@@ -1135,11 +1265,18 @@ func (e PositionEntry) GetAttributes(ctx context.Context, repo MeasurementReposi
 
 | Term | Definition |
 |------|------------|
-| **Quality Ladder** | Hierarchy of data sources ranked by authority (e.g., estimate < customer read < meter actual) |
+| **Two-Axis Provenance Model** | Confidence (Axis A) and lifecycle (Axis B) tracked as independent axes, replacing the single quality ladder |
+| **Axis A - Confidence Grade** | Monotonic 4-level enum ESTIMATE(1) -> PROVISIONAL(2) -> ACTUAL(3) -> VERIFIED(4); drives `Supersedes()` precedence |
+| **Axis B - Revision State** | Lifecycle: current vs corrected, tracked via `SupersededBy` pointer, `revision` counter (0=original, 1+=correction), and bitemporal validity |
+| **Quality Ladder** | Deprecated single-axis framing; superseded by the Two-Axis Provenance Model. Historically "estimate < customer read < meter actual" |
+| **QualityScore** | Fine-grained 0-100 authority value from the Source Authority Registry; the authoritative reconciliation precedence key |
+| **Confidence Grade** | Coarse projection of `QualityScore` onto Axis A (bands: 10-30 ESTIMATE, 50-70 PROVISIONAL, 90 ACTUAL, 100 VERIFIED) |
+| **COEFFICIENT** | A data source (profile-coefficient calculation, `ESTIMATED_PROFILE`), mapping to the ESTIMATE grade - not a ladder level |
+| **REVISED** | A revision event on Axis B (sets `revision > 0`), not a confidence grade; removed from the Axis A enum |
 | **Wash & Reload** | Correction pattern: reverse old position entry, book new entry, preserving audit trail |
-| **Supersession** | Replacement of one measurement by another of higher quality for the same position |
+| **Supersession** | Replacement of one measurement by another of higher confidence grade for the same position |
 | **Position Key** | Composite identifier: (tenant_id, account_id, asset_code, period, attributes) |
-| **Delta Engine** | Decision component that evaluates incoming measurements against current state |
+| **Delta Engine** | Decision component that evaluates incoming measurements against current state using `QualityScore` |
 
 For settlement and reconciliation terms, see ADR-0018.
 
