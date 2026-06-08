@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	mappb "github.com/meridianhub/meridian/api/proto/meridian/mapping/v1"
 	"github.com/meridianhub/meridian/services/reference-data/mapping"
@@ -118,6 +119,124 @@ func TestProtoComputedFieldsToDomain(t *testing.T) {
 		assert.Equal(t, "parse_decimal(raw_amount)", result[0].CELExpression)
 		assert.Equal(t, "status", result[1].TargetPath)
 		assert.Equal(t, `"ACTIVE"`, result[1].CELExpression)
+	})
+}
+
+func TestMappingToProto_Nil(t *testing.T) {
+	t.Parallel()
+	assert.Nil(t, mappingToProto(nil))
+}
+
+func TestProtoTransformToDomain_Variants(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil input returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, protoTransformToDomain(nil))
+	})
+
+	t.Run("enum mapping", func(t *testing.T) {
+		t.Parallel()
+		in := &mappb.FieldTransform{
+			Transform: &mappb.FieldTransform_EnumMapping{
+				EnumMapping: &mappb.EnumMapping{
+					Values:           map[string]string{"A": "active"},
+					Fallback:         "fb",
+					OutboundFallback: "ofb",
+				},
+			},
+		}
+		out := protoTransformToDomain(in)
+		require.NotNil(t, out.EnumMapping)
+		assert.Equal(t, map[string]string{"A": "active"}, out.EnumMapping.Values)
+		assert.Equal(t, "fb", out.EnumMapping.Fallback)
+		assert.Equal(t, "ofb", out.EnumMapping.OutboundFallback)
+	})
+
+	t.Run("date format", func(t *testing.T) {
+		t.Parallel()
+		in := &mappb.FieldTransform{
+			Transform: &mappb.FieldTransform_DateFormat{DateFormat: "RFC3339"},
+		}
+		out := protoTransformToDomain(in)
+		assert.Equal(t, "RFC3339", out.DateFormat)
+	})
+
+	t.Run("default value", func(t *testing.T) {
+		t.Parallel()
+		in := &mappb.FieldTransform{
+			Transform: &mappb.FieldTransform_DefaultValue{DefaultValue: "N/A"},
+		}
+		out := protoTransformToDomain(in)
+		assert.Equal(t, "N/A", out.DefaultValue)
+	})
+
+	t.Run("attribute flatten", func(t *testing.T) {
+		t.Parallel()
+		in := &mappb.FieldTransform{
+			Transform: &mappb.FieldTransform_AttributeFlatten{
+				AttributeFlatten: &mappb.AttributeFlatten{
+					SourceKeys:  []string{"a", "b"},
+					TargetField: "attrs",
+				},
+			},
+		}
+		out := protoTransformToDomain(in)
+		require.NotNil(t, out.AttributeFlatten)
+		assert.Equal(t, []string{"a", "b"}, out.AttributeFlatten.SourceKeys)
+		assert.Equal(t, "attrs", out.AttributeFlatten.TargetField)
+	})
+}
+
+func TestDomainTransformToProto_Variants(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil input returns nil", func(t *testing.T) {
+		t.Parallel()
+		assert.Nil(t, domainTransformToProto(nil))
+	})
+
+	t.Run("enum mapping", func(t *testing.T) {
+		t.Parallel()
+		in := &mapping.FieldTransform{
+			EnumMapping: &mapping.EnumMapping{
+				Values:           map[string]string{"A": "active"},
+				Fallback:         "fb",
+				OutboundFallback: "ofb",
+			},
+		}
+		out := domainTransformToProto(in)
+		em := out.GetEnumMapping()
+		require.NotNil(t, em)
+		assert.Equal(t, map[string]string{"A": "active"}, em.GetValues())
+		assert.Equal(t, "fb", em.GetFallback())
+		assert.Equal(t, "ofb", em.GetOutboundFallback())
+	})
+
+	t.Run("date format", func(t *testing.T) {
+		t.Parallel()
+		out := domainTransformToProto(&mapping.FieldTransform{DateFormat: "RFC3339"})
+		assert.Equal(t, "RFC3339", out.GetDateFormat())
+	})
+
+	t.Run("default value", func(t *testing.T) {
+		t.Parallel()
+		out := domainTransformToProto(&mapping.FieldTransform{DefaultValue: "N/A"})
+		assert.Equal(t, "N/A", out.GetDefaultValue())
+	})
+
+	t.Run("attribute flatten", func(t *testing.T) {
+		t.Parallel()
+		in := &mapping.FieldTransform{
+			AttributeFlatten: &mapping.AttributeFlatten{
+				SourceKeys:  []string{"a", "b"},
+				TargetField: "attrs",
+			},
+		}
+		af := domainTransformToProto(in).GetAttributeFlatten()
+		require.NotNil(t, af)
+		assert.Equal(t, []string{"a", "b"}, af.GetSourceKeys())
+		assert.Equal(t, "attrs", af.GetTargetField())
 	})
 }
 
