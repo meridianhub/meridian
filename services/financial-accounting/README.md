@@ -73,7 +73,7 @@ classDiagram
         +string ProductServiceReference
         +string BusinessUnitReference
         +string ChartOfAccountsRules
-        +string BaseInstrumentCode
+        +Currency BaseCurrency
         +TransactionStatus Status
         +time CreatedAt
         +time UpdatedAt
@@ -83,9 +83,9 @@ classDiagram
         +string ID
         +string FinancialBookingLogID
         +PostingDirection Direction
-        +InstrumentAmount PostingAmount
+        +Money Amount
         +string AccountID
-        +AccountServiceDomain AccountServiceDomain
+        +string AccountServiceDomain
         +time ValueDate
         +string PostingResult
         +TransactionStatus Status
@@ -115,8 +115,10 @@ classDiagram
 Every financial transaction creates at least one debit and one credit posting.
 The booking log transitions to `POSTED` only when the sum of all `DEBIT` postings
 equals the sum of all `CREDIT` postings (double-entry invariant enforced at service layer).
-`PostingAmount` uses `InstrumentAmount` for multi-asset support: currencies, energy (kWh),
-carbon credits, and compute hours are all valid posting units.
+A posting's `Amount` is a `Money` value (the `Qty[Monetary]` type from the Universal
+Asset System), pairing a decimal amount with a validated currency instrument so any
+currency is a valid posting unit. Commodity quantities (energy kWh, carbon credits,
+compute hours) are tracked in `position-keeping`, not posted to the general ledger here.
 
 `POSTED`, `CANCELLED`, and `REVERSED` are behaviorally terminal: control actions block
 further transitions on them. `FAILED` is the suspended state produced by the `SUSPEND` control
@@ -150,8 +152,10 @@ produceable via `ControlFinancialBookingLog`.
 | `cmd/main.go` | Process wiring; initialises container, gRPC server, and metrics server |
 | `app/container.go` | Dependency injection; wires database, Redis, Kafka, and optional service clients |
 | `service/server.go` | gRPC service registration; changes here affect the public contract |
-| `service/posting_service.go` | Core double-entry validation; enforces debits-equal-credits invariant |
-| `service/grpc_booking_endpoints.go` | Booking log RPC handlers; booking log lifecycle state machine |
+| `service/posting_service.go` | Posting construction and double-entry helpers for deposit and settlement flows |
+| `domain/validation.go` | Reusable double-entry primitives (`ValidateTransactionBalance`, `ValidateDoubleEntryPair`); per-instrument balancing and cross-instrument rejection |
+| `service/grpc_mappers.go` | `validateDoubleEntryBalance` - enforces the debits-equal-credits invariant on the PENDING -> POSTED transition |
+| `service/grpc_booking_endpoints.go` | Booking log RPC handlers; booking log lifecycle state machine; gates the POSTED transition on the balance check |
 | `service/grpc_ledger_endpoints.go` | Ledger posting RPC handlers; idempotency enforcement per posting |
 | `domain/financial_booking_log.go` | FinancialBookingLog entity; status transition rules and aggregate invariants |
 | `domain/ledger_posting.go` | LedgerPosting entity; direction semantics and immutability rules after capture |
@@ -183,7 +187,7 @@ produceable via `ControlFinancialBookingLog`.
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `KAFKA_BOOTSTRAP_SERVERS` | No | - | Kafka broker list; enables audit event publishing when set |
-| `KAFKA_AUDIT_TOPIC` | No | `audit.events.*` | Audit event topic name override |
+| `KAFKA_AUDIT_TOPIC` | No | `audit.events.v1` | Audit event topic name override |
 
 ### Idempotency Store (Redis)
 
