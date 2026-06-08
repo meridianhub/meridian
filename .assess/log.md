@@ -55,3 +55,14 @@
 [Full report](./assess-report.md)
 
 ---
+## 2026-06-08 (v1.38.3)
+
+- **Files scored:** 4050
+- **AI Readiness:** 8.0 / 8 (Exemplary (AI-Native))
+- **Instructions grade:** A
+- **Hotspot transitions:** 0 graduated, 0 regressed, 0 new, 10 persistent
+- **Top action:** Refresh or delete frontend/README.md - high-confidence lying map (subject frontend/ churned 1,480 commits, ratio 740)
+
+[Full report](./assess-report.md)
+
+---
