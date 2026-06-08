@@ -491,7 +491,7 @@ Phase 1 and file issues to add count RPCs or
 **Layout:**
 
 - **List view:** DataTable with columns: Log ID, Account ID, Amount, Currency/Instrument, Direction (DEBIT/CREDIT), Status, Quality Level, Transaction Date. Filterable by account, direction, quality level.
-- **Detail view:** Position log details with quality ladder indicator (ESTIMATE → COEFFICIENT → ACTUAL → REVISED). Balance view showing provisional vs available balance.
+- **Detail view:** Position log details with quality ladder indicator (ESTIMATE → PROVISIONAL → ACTUAL → VERIFIED). Balance view showing provisional vs available balance.
 - **Measurement view:** Quality ladder visualization for a position — shows the progression from estimate to actual.
 - **Actions:** Record position log, record measurement,
   update position, merge positions, record reservation,
@@ -718,7 +718,7 @@ their expressions to affect assertion behavior.
 Variance detection uses **strict equality** (zero vs non-zero).
 There are no user-configurable tolerance thresholds — this is
 intentional for financial integrity. The quality ladder
-(ESTIMATE, COEFFICIENT, ACTUAL, REVISED) drives variance detection
+(ESTIMATE, PROVISIONAL, ACTUAL, VERIFIED) drives variance detection
 when data quality improves between reconciliation runs.
 
 Persistent imbalances trigger P1 alerts after 3 consecutive days
@@ -1436,7 +1436,7 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   PROVISIONING: 'info', PROVISIONING_PENDING: 'info',
   PROVISIONING_FAILED: 'error', DEPROVISIONED: 'neutral',
   // Position quality ladder
-  ESTIMATE: 'warning', COEFFICIENT: 'info', ACTUAL: 'success', REVISED: 'info',
+  ESTIMATE: 'warning', PROVISIONAL: 'info', ACTUAL: 'success', VERIFIED: 'info',
 };
 ```
 
@@ -1624,8 +1624,8 @@ provides a browsable reference alongside the editor.
 Visual indicator for position keeping quality levels.
 
 ```text
-ESTIMATE → COEFFICIENT → ACTUAL → REVISED
-  [○]         [◐]         [●]       [↻]
+ESTIMATE → PROVISIONAL → ACTUAL → VERIFIED
+  [○]         [◐]         [●]       [✓]
 ```
 
 Each level has a distinct icon and color, showing the data provenance chain.

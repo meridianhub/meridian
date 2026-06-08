@@ -367,7 +367,7 @@ declarative validation.
   `tenant` during provisioning; tenant instruments are user-managed.
 - **market-information:** BIAN Market Information Management. Bi-temporal price
   observations with the time-bound quality ladder
-  (`ESTIMATE -> PROVISIONAL -> ACTUAL -> REVISED`). Data sources carry trust levels
+  (`ESTIMATE -> PROVISIONAL -> ACTUAL -> VERIFIED`). Data sources carry trust levels
   for conflict resolution.
 
 ### Boundary Rules

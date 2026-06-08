@@ -133,7 +133,7 @@ Before detailing work streams, here is what already exists and what this PRD bui
 | Component | Status | Key Capabilities |
 |-----------|--------|------------------|
 | `utilization-metering-consumer` | Implemented | Consumes `AuditEvent` from 6+ Kafka topics (`{schema}.audit.events`), transforms to `UtilizationMeasurement`, sends to Position Keeping for tenant-zero billing. **WS-1 adds MDS output alongside PK** for time-of-use pricing analytics |
-| Market Information Management | Implemented (17/18 tasks) | Bi-temporal observations, quality ladder (ESTIMATE/PROVISIONAL/ACTUAL/REVISED), CEL validation, resolution keys, data sources with trust levels, batch ingestion, Kafka event publishing (`ObservationRecorded`) |
+| Market Information Management | Implemented (17/18 tasks) | Bi-temporal observations, quality ladder (ESTIMATE/PROVISIONAL/ACTUAL/VERIFIED), CEL validation, resolution keys, data sources with trust levels, batch ingestion, Kafka event publishing (`ObservationRecorded`) |
 | Reference Data (Instrument Registry) | Implemented | Instrument definitions, CEL validation expressions, fungibility keys, lifecycle management (DRAFT/ACTIVE/DEPRECATED), tiered caching |
 | Starlark Runtime | Implemented | `shared/pkg/saga/starlark_runner.go`, service module injection from `handlers.yaml`, compensation support, bounded execution |
 | CEL Runtime | Implemented | `cel-go v0.27.0`, used in market information (validation, resolution keys), reference data (instrument validation), saga evaluation |
@@ -147,14 +147,15 @@ The Market Information Service defines a 4-level quality ladder at the proto lev
 | Level | Proto Enum | Domain Mapping | Value |
 |-------|-----------|----------------|-------|
 | ESTIMATE | `QUALITY_LEVEL_ESTIMATE` | `QualityLevelEstimate` | 1 |
-| PROVISIONAL | `QUALITY_LEVEL_PROVISIONAL` | maps to `QualityLevelEstimate` | 1 |
-| ACTUAL | `QUALITY_LEVEL_ACTUAL` | `QualityLevelActual` | 2 |
-| REVISED | `QUALITY_LEVEL_REVISED` | maps to `QualityLevelVerified` | 3 |
+| PROVISIONAL | `QUALITY_LEVEL_PROVISIONAL` | `QualityLevelProvisional` | 2 |
+| ACTUAL | `QUALITY_LEVEL_ACTUAL` | `QualityLevelActual` | 3 |
+| VERIFIED | `QUALITY_LEVEL_REVISED` (slot 4) | `QualityLevelVerified` | 4 |
 
-**Note:** The domain layer currently collapses PROVISIONAL into ESTIMATE and
-REVISED into VERIFIED (3-level model). This PRD's forecasting output should
-publish at `QUALITY_LEVEL_ESTIMATE` quality, allowing actuals to naturally
-supersede forecasts via the existing quality ladder.
+**Note:** The domain layer is a 1:1 four-level confidence ladder (Axis A of
+ADR-0017): ESTIMATE=1, PROVISIONAL=2, ACTUAL=3, VERIFIED=4. Proto slot 4 is still
+spelled `QUALITY_LEVEL_REVISED` but is semantically VERIFIED; the symbol rename is
+deferred. This PRD's forecasting output should publish at `QUALITY_LEVEL_ESTIMATE`
+quality, allowing actuals to naturally supersede forecasts via the quality ladder.
 
 ### Reference Data Service: Instrument Registry vs Hierarchical Nodes
 
