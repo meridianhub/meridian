@@ -9,7 +9,7 @@
 //	client, cleanup, err := client.New(client.Config{
 //	    ServiceName: "operational-gateway",
 //	    Namespace:   "default",
-//	    Port:        50051,
+//	    Port:        50063,
 //	})
 //	if err != nil {
 //	    return err
@@ -19,7 +19,7 @@
 // Usage with direct connection (for local development):
 //
 //	client, cleanup, err := client.New(client.Config{
-//	    Target:  "localhost:50051",
+//	    Target:  "localhost:50063",
 //	    Timeout: 30 * time.Second,
 //	})
 package client
@@ -55,7 +55,7 @@ var ErrTargetRequired = clients.ErrConnTargetRequired
 
 // Config holds configuration for the OperationalGateway client.
 type Config struct {
-	// Target is the gRPC server address (e.g., "localhost:50051").
+	// Target is the gRPC server address (e.g., "localhost:50063").
 	// If set, overrides Kubernetes DNS-based discovery.
 	//
 	// Deprecated: Use ServiceName, Namespace, and Port for DNS-based load balancing.
@@ -70,7 +70,7 @@ type Config struct {
 	Namespace string
 
 	// Port is the service port number.
-	// Defaults to 50051 if not specified.
+	// Defaults to 50063 if not specified.
 	Port int
 
 	// Timeout is the default timeout for RPC calls.

@@ -9,7 +9,7 @@
 //	client, cleanup, err := client.New(client.Config{
 //	    ServiceName: "reconciliation",
 //	    Namespace:   "default",
-//	    Port:        50058,
+//	    Port:        50060,
 //	    Tracer:      tracer,
 //	})
 //	if err != nil {
@@ -20,7 +20,7 @@
 // Usage with direct connection (for local development):
 //
 //	client, cleanup, err := client.New(client.Config{
-//	    Target:  "localhost:50058",
+//	    Target:  "localhost:50060",
 //	    Timeout: 30 * time.Second,
 //	})
 package client
@@ -56,7 +56,7 @@ var ErrTargetRequired = clients.ErrConnTargetRequired
 
 // Config holds configuration for the AccountReconciliation client.
 type Config struct {
-	// Target is the gRPC server address (e.g., "localhost:50058" or "reconciliation:50058").
+	// Target is the gRPC server address (e.g., "localhost:50060" or "reconciliation:50060").
 	// If set, overrides Kubernetes DNS-based discovery.
 	Target string
 
@@ -69,7 +69,7 @@ type Config struct {
 	Namespace string
 
 	// Port is the service port number.
-	// Defaults to 50058 if not specified.
+	// Defaults to 50060 if not specified.
 	Port int
 
 	// Timeout is the default timeout for RPC calls.
