@@ -251,6 +251,19 @@ func TestDecimalValue_Comparison(t *testing.T) {
 	gt, err := starlark.Compare(syntax.GT, a, c)
 	require.NoError(t, err)
 	assert.True(t, gt)
+
+	// Equal-value boundary: < and > must be strict (false on equal values).
+	// a and b are both "10.5". These assertions kill the CONDITIONALS_BOUNDARY
+	// mutants that weaken `cmp < 0` to `cmp <= 0` (decimal.go:112) and `cmp > 0`
+	// to `cmp >= 0` (decimal.go:116) in the Starlark Decimal comparison path
+	// used by tenant saga scripts.
+	ltEqual, err := starlark.Compare(syntax.LT, a, b)
+	require.NoError(t, err)
+	assert.False(t, ltEqual, "LT must be false for equal Decimals")
+
+	gtEqual, err := starlark.Compare(syntax.GT, a, b)
+	require.NoError(t, err)
+	assert.False(t, gtEqual, "GT must be false for equal Decimals")
 }
 
 func TestDecimalValue_NegativeOperations(t *testing.T) {
