@@ -42,11 +42,12 @@ import (
 	refcel "github.com/meridianhub/meridian/services/reference-data/cel"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 )
 
 const (
 	// DefaultPort is the default gRPC port for the Reference Data service.
-	DefaultPort = 50051
+	DefaultPort = ports.ReferenceData
 
 	// DefaultTimeout is the default timeout for gRPC calls.
 	DefaultTimeout = 30 * time.Second

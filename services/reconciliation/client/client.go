@@ -33,12 +33,13 @@ import (
 	reconciliationv1 "github.com/meridianhub/meridian/api/proto/meridian/reconciliation/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 	"google.golang.org/grpc"
 )
 
 const (
 	// DefaultPort is the default gRPC port for the AccountReconciliation service.
-	DefaultPort = 50058
+	DefaultPort = ports.Reconciliation
 
 	// DefaultTimeout is the default timeout for gRPC calls.
 	DefaultTimeout = 30 * time.Second

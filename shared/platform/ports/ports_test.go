@@ -3,6 +3,17 @@ package ports_test
 import (
 	"testing"
 
+	currentaccountclient "github.com/meridianhub/meridian/services/current-account/client"
+	financialaccountingclient "github.com/meridianhub/meridian/services/financial-accounting/client"
+	financialgatewayclient "github.com/meridianhub/meridian/services/financial-gateway/client"
+	internalaccountclient "github.com/meridianhub/meridian/services/internal-account/client"
+	marketinformationclient "github.com/meridianhub/meridian/services/market-information/client"
+	operationalgatewayclient "github.com/meridianhub/meridian/services/operational-gateway/client"
+	partyclient "github.com/meridianhub/meridian/services/party/client"
+	positionkeepingclient "github.com/meridianhub/meridian/services/position-keeping/client"
+	reconciliationclient "github.com/meridianhub/meridian/services/reconciliation/client"
+	referencedataclient "github.com/meridianhub/meridian/services/reference-data/client"
+	tenantclient "github.com/meridianhub/meridian/services/tenant/client"
 	"github.com/meridianhub/meridian/shared/platform/ports"
 	"github.com/stretchr/testify/assert"
 )
@@ -35,6 +46,38 @@ func TestGrpcPortsAreInExpectedRange(t *testing.T) {
 	for _, port := range grpcPorts {
 		assert.GreaterOrEqual(t, port, 50051, "gRPC port should be >= 50051")
 		assert.LessOrEqual(t, port, 50099, "gRPC port should be <= 50099")
+	}
+}
+
+// TestClientDefaultPortsMatchRegistry is a drift-prevention guard: every service
+// client's DefaultPort must equal its canonical constant in this registry. If anyone
+// re-hardcodes a port that diverges from the registry, this test fails loudly.
+//
+// To add a new service client, append one row to the table below.
+func TestClientDefaultPortsMatchRegistry(t *testing.T) {
+	cases := []struct {
+		service      string
+		clientPort   int
+		registryPort int
+	}{
+		{"current-account", currentaccountclient.DefaultPort, ports.CurrentAccount},
+		{"financial-accounting", financialaccountingclient.DefaultPort, ports.FinancialAccounting},
+		{"position-keeping", positionkeepingclient.DefaultPort, ports.PositionKeeping},
+		{"party", partyclient.DefaultPort, ports.Party},
+		{"tenant", tenantclient.DefaultPort, ports.Tenant},
+		{"internal-account", internalaccountclient.DefaultPort, ports.InternalAccount},
+		{"market-information", marketinformationclient.DefaultPort, ports.MarketInformation},
+		{"reference-data", referencedataclient.DefaultPort, ports.ReferenceData},
+		{"reconciliation", reconciliationclient.DefaultPort, ports.Reconciliation},
+		{"operational-gateway", operationalgatewayclient.DefaultPort, ports.OperationalGateway},
+		{"financial-gateway", financialgatewayclient.DefaultPort, ports.FinancialGateway},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.service, func(t *testing.T) {
+			assert.Equal(t, tc.registryPort, tc.clientPort,
+				"%s client DefaultPort must match ports registry constant", tc.service)
+		})
 	}
 }
 

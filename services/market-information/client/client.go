@@ -42,11 +42,12 @@ import (
 	marketinformationv1 "github.com/meridianhub/meridian/api/proto/meridian/market_information/v1"
 	"github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/meridianhub/meridian/shared/platform/observability"
+	"github.com/meridianhub/meridian/shared/platform/ports"
 )
 
 const (
 	// DefaultPort is the default gRPC port for the Market Information service.
-	DefaultPort = 50051
+	DefaultPort = ports.MarketInformation
 
 	// DefaultTimeout is the default timeout for gRPC calls.
 	DefaultTimeout = 30 * time.Second
