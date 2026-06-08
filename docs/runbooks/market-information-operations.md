@@ -13,7 +13,7 @@ instructions: |
   Use this runbook for Market Information Management service operations.
   Port: 50058 (gRPC). Database: market_information.
   Bi-temporal model: observed_at (event time) + created_at (knowledge time).
-  Quality ladder: ESTIMATE < PROVISIONAL < ACTUAL < REVISED.
+  Quality ladder: ESTIMATE < PROVISIONAL < ACTUAL < VERIFIED.
   Trust levels: 0-100 (higher = more authoritative source).
 ---
 
@@ -61,16 +61,20 @@ debugging bi-temporal queries, configuring data sources, or investigating CEL va
 Observations are ranked by quality level (higher takes precedence):
 
 ```text
-VERIFIED (3)   ← Cross-checked, audited values (highest)
+VERIFIED (4)     ← Cross-checked, audited values (highest)
     │
-ACTUAL (2)     ← Real measured values from data sources
+ACTUAL (3)       ← Metered, validated values from data sources
     │
-ESTIMATE (1)   ← Forecasted or projected values (lowest)
+PROVISIONAL (2)  ← Metered but not yet validated
+    │
+ESTIMATE (1)     ← Forecasted or projected values (lowest)
 ```
 
-> **Note**: The proto defines 4 quality levels (ESTIMATE, PROVISIONAL, ACTUAL, REVISED) but the domain
-> implementation currently supports 3 levels (ESTIMATE, ACTUAL, VERIFIED) for the core reconciliation
-> use case. PROVISIONAL and REVISED are mapped appropriately at the service layer.
+> **Note**: This is Axis A (confidence grade) of the two-axis quality model (ADR-0017). The domain enum
+> has four levels (ESTIMATE=1, PROVISIONAL=2, ACTUAL=3, VERIFIED=4). The proto enum slot 4 is still
+> spelled `QUALITY_LEVEL_REVISED` but is semantically VERIFIED; the symbol rename is deferred. COEFFICIENT
+> is a data source (maps to ESTIMATE), not a level. REVISED (revision>0) is a lifecycle event on Axis B,
+> not a confidence tier.
 
 #### Bi-Temporal Model
 
@@ -420,7 +424,8 @@ kubectl logs -l app=market-information -n production | grep "data source"
 
 If an incorrect observation was recorded:
 
-1. Record a REVISED quality observation with correct value
+1. Record a corrected observation (at the appropriate confidence level, e.g. VERIFIED) with the
+   correct value; the correction carries revision>0 (Axis B)
 2. The system automatically supersedes the incorrect observation
 3. Bi-temporal queries will return the corrected value
 

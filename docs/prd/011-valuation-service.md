@@ -713,7 +713,7 @@ message ValuationAnalysis {
 
 message MarketDataQuality {
   string observation_id = 1;
-  string source_trust_level = 2;  // "ESTIMATE", "COEFFICIENT", "ACTUAL", "REVISED"
+  string source_trust_level = 2;  // "ESTIMATE", "PROVISIONAL", "ACTUAL", "VERIFIED"
   string instrument_code = 3;     // e.g., "EPEX_SPOT"
   string value = 4;               // The rate/price used
 }
@@ -1107,9 +1107,12 @@ of the evidence used for that valuation.
 Per ADR-018, the `ValuationAnalysis` MUST include the `SourceTrustLevel` of each market data observation used:
 
 - `ESTIMATE` (Quality 1): Forecast or projection
-- `COEFFICIENT` (Quality 2): Model-derived value
-- `ACTUAL` (Quality 3): Metered or observed value
-- `REVISED` (Quality 4): Corrected after audit
+- `PROVISIONAL` (Quality 2): Metered but not yet validated
+- `ACTUAL` (Quality 3): Metered, validated value
+- `VERIFIED` (Quality 4): Cross-checked against multiple sources or manually verified
+
+COEFFICIENT is a data source (maps to ESTIMATE), not a level. REVISED is a lifecycle event
+(revision>0), not a confidence tier. See ADR-0017.
 
 **Why This Matters:**
 

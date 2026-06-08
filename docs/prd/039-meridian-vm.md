@@ -918,7 +918,7 @@ financial performance across historical data?"
 
 The bitemporal data model makes this architecturally possible. Every position, posting,
 and valuation is timestamped with both valid-time and transaction-time. The quality ladder
-(ESTIMATE → COEFFICIENT → ACTUAL → REVISED) means the system already handles multiple
+(ESTIMATE → PROVISIONAL → ACTUAL → VERIFIED) means the system already handles multiple
 versions of truth.
 
 ```text

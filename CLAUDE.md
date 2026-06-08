@@ -274,10 +274,12 @@ Big Tech won't do this (not their problem space).
 Most systems treat data as binary (present/absent). Meridian treats data as having **provenance**:
 
 ```
-Quality Ladder: ESTIMATE → COEFFICIENT → ACTUAL → REVISED
-                   ↓           ↓           ↓         ↓
-             (forecast)  (modeled)    (metered)  (corrected)
+Quality Ladder: ESTIMATE → PROVISIONAL → ACTUAL → VERIFIED
+                   ↓            ↓           ↓         ↓
+             (forecast)   (unvalidated) (metered) (cross-checked)
 ```
+
+COEFFICIENT is a data source (maps to ESTIMATE), not a level. REVISED is a lifecycle event (revision>0), not a confidence tier. See ADR-0017.
 
 Every measurement carries:
 
