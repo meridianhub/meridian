@@ -7,10 +7,6 @@
 package marketinformationv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	v11 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
@@ -20,6 +16,9 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -4101,56 +4100,54 @@ func file_meridian_market_information_v1_market_information_proto_rawDescGZIP() 
 	return file_meridian_market_information_v1_market_information_proto_rawDescData
 }
 
-var (
-	file_meridian_market_information_v1_market_information_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-	file_meridian_market_information_v1_market_information_proto_msgTypes  = make([]protoimpl.MessageInfo, 36)
-	file_meridian_market_information_v1_market_information_proto_goTypes   = []any{
-		(DataCategory)(0),                      // 0: meridian.market_information.v1.DataCategory
-		(DataSetStatus)(0),                     // 1: meridian.market_information.v1.DataSetStatus
-		(QualityLevel)(0),                      // 2: meridian.market_information.v1.QualityLevel
-		(DataSourceStatus)(0),                  // 3: meridian.market_information.v1.DataSourceStatus
-		(*DataSetDefinition)(nil),              // 4: meridian.market_information.v1.DataSetDefinition
-		(*MarketPriceObservation)(nil),         // 5: meridian.market_information.v1.MarketPriceObservation
-		(*DataSource)(nil),                     // 6: meridian.market_information.v1.DataSource
-		(*ObservationRecorded)(nil),            // 7: meridian.market_information.v1.ObservationRecorded
-		(*RegisterDataSetRequest)(nil),         // 8: meridian.market_information.v1.RegisterDataSetRequest
-		(*RegisterDataSetResponse)(nil),        // 9: meridian.market_information.v1.RegisterDataSetResponse
-		(*UpdateDataSetRequest)(nil),           // 10: meridian.market_information.v1.UpdateDataSetRequest
-		(*UpdateDataSetResponse)(nil),          // 11: meridian.market_information.v1.UpdateDataSetResponse
-		(*ActivateDataSetRequest)(nil),         // 12: meridian.market_information.v1.ActivateDataSetRequest
-		(*ActivateDataSetResponse)(nil),        // 13: meridian.market_information.v1.ActivateDataSetResponse
-		(*DeprecateDataSetRequest)(nil),        // 14: meridian.market_information.v1.DeprecateDataSetRequest
-		(*DeprecateDataSetResponse)(nil),       // 15: meridian.market_information.v1.DeprecateDataSetResponse
-		(*RetrieveDataSetRequest)(nil),         // 16: meridian.market_information.v1.RetrieveDataSetRequest
-		(*RetrieveDataSetResponse)(nil),        // 17: meridian.market_information.v1.RetrieveDataSetResponse
-		(*ListDataSetsRequest)(nil),            // 18: meridian.market_information.v1.ListDataSetsRequest
-		(*ListDataSetsResponse)(nil),           // 19: meridian.market_information.v1.ListDataSetsResponse
-		(*RegisterDataSourceRequest)(nil),      // 20: meridian.market_information.v1.RegisterDataSourceRequest
-		(*RegisterDataSourceResponse)(nil),     // 21: meridian.market_information.v1.RegisterDataSourceResponse
-		(*UpdateDataSourceRequest)(nil),        // 22: meridian.market_information.v1.UpdateDataSourceRequest
-		(*UpdateDataSourceResponse)(nil),       // 23: meridian.market_information.v1.UpdateDataSourceResponse
-		(*DeactivateDataSourceRequest)(nil),    // 24: meridian.market_information.v1.DeactivateDataSourceRequest
-		(*DeactivateDataSourceResponse)(nil),   // 25: meridian.market_information.v1.DeactivateDataSourceResponse
-		(*DeprecateDataSourceRequest)(nil),     // 26: meridian.market_information.v1.DeprecateDataSourceRequest
-		(*DeprecateDataSourceResponse)(nil),    // 27: meridian.market_information.v1.DeprecateDataSourceResponse
-		(*ListDataSourcesRequest)(nil),         // 28: meridian.market_information.v1.ListDataSourcesRequest
-		(*ListDataSourcesResponse)(nil),        // 29: meridian.market_information.v1.ListDataSourcesResponse
-		(*RecordObservationRequest)(nil),       // 30: meridian.market_information.v1.RecordObservationRequest
-		(*RecordObservationResponse)(nil),      // 31: meridian.market_information.v1.RecordObservationResponse
-		(*BatchObservationEntry)(nil),          // 32: meridian.market_information.v1.BatchObservationEntry
-		(*RecordObservationBatchRequest)(nil),  // 33: meridian.market_information.v1.RecordObservationBatchRequest
-		(*BatchObservationResult)(nil),         // 34: meridian.market_information.v1.BatchObservationResult
-		(*RecordObservationBatchResponse)(nil), // 35: meridian.market_information.v1.RecordObservationBatchResponse
-		(*RetrieveObservationRequest)(nil),     // 36: meridian.market_information.v1.RetrieveObservationRequest
-		(*RetrieveObservationResponse)(nil),    // 37: meridian.market_information.v1.RetrieveObservationResponse
-		(*ListObservationsRequest)(nil),        // 38: meridian.market_information.v1.ListObservationsRequest
-		(*ListObservationsResponse)(nil),       // 39: meridian.market_information.v1.ListObservationsResponse
-		(*structpb.Struct)(nil),                // 40: google.protobuf.Struct
-		(*timestamppb.Timestamp)(nil),          // 41: google.protobuf.Timestamp
-		(*v1.AttributeEntry)(nil),              // 42: meridian.quantity.v1.AttributeEntry
-		(*v11.IdempotencyKey)(nil),             // 43: meridian.common.v1.IdempotencyKey
-	}
-)
+var file_meridian_market_information_v1_market_information_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_meridian_market_information_v1_market_information_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_meridian_market_information_v1_market_information_proto_goTypes = []any{
+	(DataCategory)(0),                      // 0: meridian.market_information.v1.DataCategory
+	(DataSetStatus)(0),                     // 1: meridian.market_information.v1.DataSetStatus
+	(QualityLevel)(0),                      // 2: meridian.market_information.v1.QualityLevel
+	(DataSourceStatus)(0),                  // 3: meridian.market_information.v1.DataSourceStatus
+	(*DataSetDefinition)(nil),              // 4: meridian.market_information.v1.DataSetDefinition
+	(*MarketPriceObservation)(nil),         // 5: meridian.market_information.v1.MarketPriceObservation
+	(*DataSource)(nil),                     // 6: meridian.market_information.v1.DataSource
+	(*ObservationRecorded)(nil),            // 7: meridian.market_information.v1.ObservationRecorded
+	(*RegisterDataSetRequest)(nil),         // 8: meridian.market_information.v1.RegisterDataSetRequest
+	(*RegisterDataSetResponse)(nil),        // 9: meridian.market_information.v1.RegisterDataSetResponse
+	(*UpdateDataSetRequest)(nil),           // 10: meridian.market_information.v1.UpdateDataSetRequest
+	(*UpdateDataSetResponse)(nil),          // 11: meridian.market_information.v1.UpdateDataSetResponse
+	(*ActivateDataSetRequest)(nil),         // 12: meridian.market_information.v1.ActivateDataSetRequest
+	(*ActivateDataSetResponse)(nil),        // 13: meridian.market_information.v1.ActivateDataSetResponse
+	(*DeprecateDataSetRequest)(nil),        // 14: meridian.market_information.v1.DeprecateDataSetRequest
+	(*DeprecateDataSetResponse)(nil),       // 15: meridian.market_information.v1.DeprecateDataSetResponse
+	(*RetrieveDataSetRequest)(nil),         // 16: meridian.market_information.v1.RetrieveDataSetRequest
+	(*RetrieveDataSetResponse)(nil),        // 17: meridian.market_information.v1.RetrieveDataSetResponse
+	(*ListDataSetsRequest)(nil),            // 18: meridian.market_information.v1.ListDataSetsRequest
+	(*ListDataSetsResponse)(nil),           // 19: meridian.market_information.v1.ListDataSetsResponse
+	(*RegisterDataSourceRequest)(nil),      // 20: meridian.market_information.v1.RegisterDataSourceRequest
+	(*RegisterDataSourceResponse)(nil),     // 21: meridian.market_information.v1.RegisterDataSourceResponse
+	(*UpdateDataSourceRequest)(nil),        // 22: meridian.market_information.v1.UpdateDataSourceRequest
+	(*UpdateDataSourceResponse)(nil),       // 23: meridian.market_information.v1.UpdateDataSourceResponse
+	(*DeactivateDataSourceRequest)(nil),    // 24: meridian.market_information.v1.DeactivateDataSourceRequest
+	(*DeactivateDataSourceResponse)(nil),   // 25: meridian.market_information.v1.DeactivateDataSourceResponse
+	(*DeprecateDataSourceRequest)(nil),     // 26: meridian.market_information.v1.DeprecateDataSourceRequest
+	(*DeprecateDataSourceResponse)(nil),    // 27: meridian.market_information.v1.DeprecateDataSourceResponse
+	(*ListDataSourcesRequest)(nil),         // 28: meridian.market_information.v1.ListDataSourcesRequest
+	(*ListDataSourcesResponse)(nil),        // 29: meridian.market_information.v1.ListDataSourcesResponse
+	(*RecordObservationRequest)(nil),       // 30: meridian.market_information.v1.RecordObservationRequest
+	(*RecordObservationResponse)(nil),      // 31: meridian.market_information.v1.RecordObservationResponse
+	(*BatchObservationEntry)(nil),          // 32: meridian.market_information.v1.BatchObservationEntry
+	(*RecordObservationBatchRequest)(nil),  // 33: meridian.market_information.v1.RecordObservationBatchRequest
+	(*BatchObservationResult)(nil),         // 34: meridian.market_information.v1.BatchObservationResult
+	(*RecordObservationBatchResponse)(nil), // 35: meridian.market_information.v1.RecordObservationBatchResponse
+	(*RetrieveObservationRequest)(nil),     // 36: meridian.market_information.v1.RetrieveObservationRequest
+	(*RetrieveObservationResponse)(nil),    // 37: meridian.market_information.v1.RetrieveObservationResponse
+	(*ListObservationsRequest)(nil),        // 38: meridian.market_information.v1.ListObservationsRequest
+	(*ListObservationsResponse)(nil),       // 39: meridian.market_information.v1.ListObservationsResponse
+	(*structpb.Struct)(nil),                // 40: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),          // 41: google.protobuf.Timestamp
+	(*v1.AttributeEntry)(nil),              // 42: meridian.quantity.v1.AttributeEntry
+	(*v11.IdempotencyKey)(nil),             // 43: meridian.common.v1.IdempotencyKey
+}
 var file_meridian_market_information_v1_market_information_proto_depIdxs = []int32{
 	0,  // 0: meridian.market_information.v1.DataSetDefinition.category:type_name -> meridian.market_information.v1.DataCategory
 	40, // 1: meridian.market_information.v1.DataSetDefinition.attribute_schema:type_name -> google.protobuf.Struct
