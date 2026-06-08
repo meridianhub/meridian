@@ -274,7 +274,7 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | Tenant | 50056 | - | 9090 |
 | InternalAccount | 50057 | - | 9090 |
 | MarketInformation | 50058 | - | 8082 |
-| ReferenceData | 50059 | - | 9090 |
+| ReferenceData | 50059 | - | 8082 |
 | Reconciliation | 50060 | - | 9090 |
 | Forecasting | 50061 | - | 9090 |
 | ControlPlane | - | - | - |
