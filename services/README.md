@@ -30,7 +30,7 @@ flowchart LR
             FA["FinancialAccounting<br/>:50052"]
             Party["Party<br/>:50055"]
             PO["PaymentOrder<br/>:50054, :8080"]
-            RD["ReferenceData<br/>:50051"]
+            RD["ReferenceData<br/>:50059"]
             MI["MarketInformation<br/>:50058"]
             IBA["InternalAccount<br/>:50057"]
             Recon["Reconciliation<br/>:50060"]
@@ -274,6 +274,7 @@ Redis provides optional distributed idempotency for exactly-once semantics:
 | Tenant | 50056 | - | 9090 |
 | InternalAccount | 50057 | - | 9090 |
 | MarketInformation | 50058 | - | 8082 |
+| ReferenceData | 50059 | - | 8082 |
 | Reconciliation | 50060 | - | 9090 |
 | Forecasting | 50061 | - | 9090 |
 | ControlPlane | - | - | - |
@@ -632,7 +633,7 @@ When `Resilience` is configured, clients automatically include:
 | InternalAccount | `services/internal-account/client` | 50057 |
 | MarketInformation | `services/market-information/client` | 50058 |
 | Reconciliation | `services/reconciliation/client` | 50060 |
-| ReferenceData | `services/reference-data/client` | 50051 |
+| ReferenceData | `services/reference-data/client` | 50059 |
 
 ## Service Directory Structure
 

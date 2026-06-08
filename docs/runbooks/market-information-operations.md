@@ -11,7 +11,7 @@ triggers:
   - Quality ladder supersession issues
 instructions: |
   Use this runbook for Market Information Management service operations.
-  Port: 50061 (gRPC). Database: market_information.
+  Port: 50058 (gRPC). Database: market_information.
   Bi-temporal model: observed_at (event time) + created_at (knowledge time).
   Quality ladder: ESTIMATE < PROVISIONAL < ACTUAL < REVISED.
   Trust levels: 0-100 (higher = more authoritative source).
@@ -30,8 +30,8 @@ debugging bi-temporal queries, configuring data sources, or investigating CEL va
 | Property | Value |
 |----------|-------|
 | **Service Name** | market-information |
-| **gRPC Port** | 50061 |
-| **HTTP/REST Port** | 8061 (via gRPC gateway) |
+| **gRPC Port** | 50058 |
+| **HTTP Port** | 8082 (`/metrics`, `/health`, `/ready`) |
 | **Database** | market_information (schema-per-tenant) |
 | **Namespace** | production / staging |
 | **Deployment** | market-information |
@@ -40,7 +40,7 @@ debugging bi-temporal queries, configuring data sources, or investigating CEL va
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| Tenant | 50050 | Tenant provisioning and multi-tenancy |
+| Tenant | 50056 | Tenant provisioning and multi-tenancy |
 | CockroachDB | 26257 | Persistent storage |
 | Kafka | 9092 | Event publishing (optional) |
 
@@ -129,7 +129,7 @@ grpcurl -plaintext \
     "resolution_key_expression": "observation_context.base_currency + \"/\" + observation_context.quote_currency",
     "error_message_expression": "\"Invalid exchange rate: must be positive\""
   }' \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   meridian.market_information.v1.MarketInformationService/RegisterDataSet
 ```
 
@@ -153,7 +153,7 @@ grpcurl -plaintext \
 ```bash
 grpcurl -plaintext \
   -d '{"code": "USD_EUR_FX", "version": 1}' \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   meridian.market_information.v1.MarketInformationService/ActivateDataSet
 ```
 
@@ -169,7 +169,7 @@ grpcurl -plaintext \
     "description": "European Central Bank daily FX reference rates",
     "trust_level": 90
   }' \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   meridian.market_information.v1.MarketInformationService/RegisterDataSource
 ```
 
@@ -199,7 +199,7 @@ grpcurl -plaintext \
     },
     "numeric_value": {"value": "0.9215", "scale": 4}
   }' \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   meridian.market_information.v1.MarketInformationService/RecordObservation
 ```
 
@@ -215,7 +215,7 @@ grpcurl -plaintext \
     "resolution_key": "USD/EUR",
     "as_of_time": "2026-01-19T16:00:00Z"
   }' \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   meridian.market_information.v1.MarketInformationService/QueryBestKnownValue
 ```
 
@@ -238,7 +238,7 @@ rpc error: code = InvalidArgument desc = validation failed: rate must be positiv
    ```bash
    grpcurl -plaintext \
      -d '{"code": "USD_EUR_FX", "version": 0}' \
-     market-information.production.svc.cluster.local:50061 \
+     market-information.production.svc.cluster.local:50058 \
      meridian.market_information.v1.MarketInformationService/RetrieveDataSet
    ```
 
@@ -268,7 +268,7 @@ rpc error: code = FailedPrecondition desc = data source EXTERNAL_API is not acti
 ```bash
 # Check data source status
 grpcurl -plaintext \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   meridian.market_information.v1.MarketInformationService/ListDataSources
 ```
 
@@ -291,7 +291,7 @@ rpc error: code = NotFound desc = dataset not found: UNKNOWN_CODE
 ```bash
 # List all datasets
 grpcurl -plaintext \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   meridian.market_information.v1.MarketInformationService/ListDataSets
 ```
 
@@ -395,7 +395,7 @@ ORDER BY trust_level DESC;
 ```bash
 # gRPC health check
 grpcurl -plaintext \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   grpc.health.v1.Health/Check
 ```
 
@@ -434,7 +434,7 @@ grpcurl -plaintext \
     "observation_context": {"base_currency": "USD", "quote_currency": "EUR", "rate": "0.9220"},
     "numeric_value": {"value": "0.9220", "scale": 4}
   }' \
-  market-information.production.svc.cluster.local:50061 \
+  market-information.production.svc.cluster.local:50058 \
   meridian.market_information.v1.MarketInformationService/RecordObservation
 ```
 
@@ -468,8 +468,8 @@ ORDER BY o.created_at DESC;
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `GRPC_PORT` | gRPC server port | 50061 |
-| `HTTP_PORT` | HTTP gateway port | 8061 |
+| `GRPC_PORT` | gRPC server port | 50058 |
+| `METRICS_PORT` | HTTP port for `/metrics`, `/health`, `/ready` | 8082 |
 | `DATABASE_URL` | CockroachDB connection string | Required |
 | `KAFKA_BROKERS` | Kafka broker addresses | Optional |
 | `LOG_LEVEL` | Logging level | info |
