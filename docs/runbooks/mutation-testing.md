@@ -143,9 +143,19 @@ unchanged.
 | `shared/pkg/money` | 100.00% | 100.00% | none (already complete) |
 | `shared/pkg/types` | 100.00% | 100.00% | none (already complete) |
 | `shared/platform/quantity` | 95.24% | 100.00% | `Qty.LessThan` / `GreaterThan` equal-value boundary |
-| `services/position-keeping/domain` | 84.14% | ~97% | `Version++` + audit-entry guards across all 6 state transitions |
-| `services/position-keeping/service` | 92.08% | ~93% | `resolveOpeningBalance` currency-resolution boundary/negation |
-| `shared/pkg/saga` | *pending full sweep* | *pending* | Starlark `Decimal` `<` / `>` equal-value boundary |
+| `services/position-keeping/domain` | 84.14% | 97.37% | `Version++` + audit-entry guards across all 6 state transitions |
+| `services/position-keeping/service` | 92.08% | 92.62% | `resolveOpeningBalance` currency-resolution boundary/negation |
+| `shared/pkg/saga` | see note | see note | Starlark `Decimal` `<` / `>` equal-value boundary |
+
+> **Saga sweep note.** The `shared/pkg/saga` unit suite takes ~30s to run, so with
+> `timeout-coefficient: 20` each mutant gets a ~10-minute timeout and the full-package sweep
+> (several hundred covered mutants) does not complete in a practical inline run - this is the
+> case the weekly CI job exists for. A partial baseline sweep surfaced ~180 survivors
+> concentrated in validation/reporting/schema code (`validation/report.go`, `validator.go`,
+> `runtime.go`, `schema/validation_modules.go`) - Medium impact, not direct value movement.
+> The High-impact arithmetic survivor (Starlark `Decimal` comparison boundary, `decimal.go:112,116`)
+> was killed and verified by injection in this change. Run the full saga sweep via the weekly
+> CI job (or `gremlins unleash -S lv ./shared/pkg/saga/` with patience) to capture its score.
 
 ### Documented remaining survivors (Medium/Low, future work)
 
@@ -153,6 +163,11 @@ unchanged.
   boundary guards on defensive slice copies. **Equivalent mutants**: `append([]uuid.UUID(nil), empty...)`
   is nil regardless, so no test can distinguish. Skip.
 - **`services/position-keeping/domain/testfixtures/fixtures.go`** - test-only helper. Skip.
+- **`shared/pkg/saga/validation/report.go`, `validator.go`, `runtime.go`,
+  `schema/validation_modules.go`** - the bulk of the saga survivors (~180 observed) live in
+  validation, reporting, and schema-derivation code. **Medium impact**: these affect
+  manifest-validation messages and schema handling, not direct value movement. Worthwhile
+  follow-up sweep, but lower priority than balance/amount/arithmetic survivors.
 - **`shared/pkg/saga/backoff.go`** - retry backoff boundary conditions (Medium). Killing
   these requires asserting exact backoff durations at interval edges; worthwhile follow-up.
 - **`shared/pkg/saga/decimal.go:89`** - `ARITHMETIC_BASE` on the string-hash accumulator
