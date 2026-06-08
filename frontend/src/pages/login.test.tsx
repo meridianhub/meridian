@@ -68,6 +68,9 @@ function setup(initialEntries: string[] = ['/login']) {
 
 describe('LoginPage', () => {
   beforeEach(() => {
+    // vitest 4's vi.restoreAllMocks() only restores spies, not vi.fn() call
+    // history, so clear the module-level mocks explicitly for test isolation.
+    vi.clearAllMocks()
     mockState.providers = []
     mockState.isBareDomain = false
     vi.stubGlobal('fetch', vi.fn())
