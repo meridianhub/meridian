@@ -1,10 +1,99 @@
-# Service Coupling Analysis Scripts
+# Meridian Scripts
 
-This directory contains automated tools for analyzing and visualizing service coupling in the Meridian microservices architecture.
+Utility and automation scripts for developing, operating, and testing the Meridian platform.
+Scripts are run from the repository root unless noted otherwise.
 
-## Scripts
+## Contents
 
-### 1. `analyze-coupling.sh`
+- [Development Environment](#development-environment)
+- [Demo and Seed Data](#demo-and-seed-data)
+- [Service Coupling Analysis](#service-coupling-analysis)
+- [Kafka Testing](#kafka-testing)
+
+---
+
+## Development Environment
+
+### `doctor.sh`
+
+Validates the local development environment. Checks required tools and their minimum versions,
+then reports missing or outdated dependencies. Optionally fixes issues automatically.
+
+**Usage:**
+
+```bash
+# Check environment (report only)
+./scripts/doctor.sh
+
+# Check and automatically fix issues
+./scripts/doctor.sh --fix
+
+# Verbose output
+./scripts/doctor.sh -v
+```
+
+**Checks performed:**
+
+- Core tools: `go` (1.23+), `git`, `make`, `docker`, `kubectl`, `helm`
+- Local dev: `kind`, `ctlptl`, `tilt` (0.30+)
+- Proto toolchain: `buf` (1.x+), `protoc`, `grpcurl`
+- Database: `cockroach` (23.x+)
+- Code quality: `golangci-lint` (2.x+)
+- Frontend: `node` (20+), `npm` (10+) + frontend npm dependencies
+
+**Exit codes:**
+
+- `0` - All checks passed
+- `1` - One or more checks failed
+
+---
+
+## Demo and Seed Data
+
+### `demo.sh`
+
+End-to-end platform demo that exercises the core saga patterns: multi-service transactions,
+load balancing, distributed tracing, health checks, and idempotency.
+
+**Usage:**
+
+```bash
+# Run the full demo (starts Tilt, seeds data, executes sagas)
+./scripts/demo.sh
+
+# Override tenant
+DEMO_TENANT=my-tenant ./scripts/demo.sh
+```
+
+**What it demonstrates:**
+
+- Saga pattern with multi-step distributed transactions
+- Load-balanced gRPC calls across services
+- Distributed tracing via the observability stack
+- Idempotency key handling (replay safety)
+
+**Prerequisites:** Tilt stack running (`tilt up`) or the script will start it.
+
+### Related demo scripts
+
+| Script | Purpose |
+|--------|---------|
+| `demo-cross-org-settlement.sh` | Cross-organisation settlement saga |
+| `demo-provision-organizations.sh` | Provision demo tenant organisations |
+| `demo-seed-data.sh` | Seed reference and transaction data for demos |
+| `demo-validation.sh` | Validate demo environment is correctly configured |
+| `reset-demo.sh` | Reset demo tenant to a clean state |
+| `seed-dev-tenant.sh` | Seed the local dev tenant with reference data |
+
+---
+
+## Service Coupling Analysis
+
+This section covers automated tools for analyzing and visualizing service coupling in the Meridian microservices architecture.
+
+### Coupling scripts
+
+#### `analyze-coupling.sh`
 
 Analyzes the codebase for service coupling violations and generates a structured JSON report.
 
@@ -28,7 +117,7 @@ Analyzes the codebase for service coupling violations and generates a structured
 - `0` - Analysis completed successfully
 - `1` - Error (invalid repository structure or analysis failure)
 
-### 2. `generate-coupling-mermaid.sh`
+#### `generate-coupling-mermaid.sh`
 
 Generates Mermaid diagram syntax from the coupling analysis JSON.
 
@@ -60,7 +149,7 @@ Generates Mermaid diagram syntax from the coupling analysis JSON.
 - `0` - Success
 - `1` - Error (invalid JSON or missing jq)
 
-### 3. `test-mermaid-generation.sh`
+#### `test-mermaid-generation.sh`
 
 Validates that the Mermaid generation script produces correct output.
 
@@ -241,3 +330,17 @@ graph TD
 
 - [ADR-002: Microservices per BIAN Domain](../docs/adr/0002-microservices-per-bian-domain.md)
 - [ADR-005: Adapter Pattern Layer Translation](../docs/adr/0005-adapter-pattern-layer-translation.md)
+
+---
+
+## Kafka Testing
+
+Automated Kafka cluster health and failover tests. See [kafka-tests/README.md](kafka-tests/README.md) for full details.
+
+| Script | Purpose |
+|--------|---------|
+| `kafka-tests/cluster-health.sh` | Fast health check: 3-broker KRaft quorum, topic create/delete |
+| `kafka-tests/failover-test.sh` | Failover test: kill a broker, verify message persistence and leader re-election |
+
+Both scripts integrate with Tilt (`tilt trigger kafka-health` / `tilt trigger kafka-failover`)
+and run in GitHub Actions CI on changes to Kafka config.
