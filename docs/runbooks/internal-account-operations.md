@@ -40,7 +40,7 @@ handling account lifecycle operations, or recovering from service failures.
 | Service | Port | Purpose |
 |---------|------|---------|
 | Position Keeping | 50053 | Balance queries (source of truth) |
-| Reference Data | 50052 | Instrument validation |
+| Reference Data | 50059 | Instrument validation |
 | CockroachDB | 26257 | Persistent storage |
 
 ### Account Types

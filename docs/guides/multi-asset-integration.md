@@ -72,10 +72,10 @@ Multi-asset operations coordinate across these BIAN-aligned services:
 
 | Service | Port | Role in Multi-Asset Flow |
 |---------|------|--------------------------|
-| Reference Data | 50051 | Instrument definitions, CEL validation rules, fungibility logic |
+| Reference Data | 50059 | Instrument definitions, CEL validation rules, fungibility logic |
 | Position Keeping | 50053 | Track quantities in native units with audit trail |
 | Financial Accounting | 50052 | Record valued amounts in settlement currency |
-| Current Account | 50057 | Customer-facing operations with overdraft and liens |
+| Current Account | 50051 | Customer-facing operations with overdraft and liens |
 
 ```mermaid
 sequenceDiagram
@@ -352,7 +352,7 @@ import (
 
 func recordEnergyConsumption(ctx context.Context, accountID string, kwhAmount decimal.Decimal, touPeriod int) error {
     // Step 1: Connect to services
-    refDataConn, err := grpc.Dial("reference-data:50051", grpc.WithInsecure())
+    refDataConn, err := grpc.Dial("reference-data:50059", grpc.WithInsecure())
     if err != nil {
         return err
     }
@@ -432,7 +432,7 @@ func recordCarbonCredit(
     projectID string,
 ) error {
     // Connect to Reference Data service
-    refDataConn, err := grpc.Dial("reference-data:50051", grpc.WithInsecure())
+    refDataConn, err := grpc.Dial("reference-data:50059", grpc.WithInsecure())
     if err != nil {
         return err
     }
