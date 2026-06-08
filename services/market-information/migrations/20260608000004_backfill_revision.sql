@@ -8,6 +8,11 @@
 --
 -- Runs in its own migration so the revision column (added in
 -- 20260608000003_add_revision_column.sql) is public before this DML references it.
+--
+-- Flat seed by design: every correction row is seeded to revision = 1 (a boolean
+-- "is a correction" marker), not a per-chain depth counter. For a chain A -> B -> C
+-- both B and C are seeded to 1. revision is incremented going forward by application
+-- code on each new correction; this one-time backfill does not reconstruct depth.
 
 UPDATE market_price_observation
 SET revision = 1
