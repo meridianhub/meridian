@@ -296,7 +296,16 @@ func attributesToProto(attrs map[string]string) []*quantityv1.AttributeEntry {
 	return entries
 }
 
-// qualityStringToProto converts a quality level string to the proto enum.
+// qualityStringToProto converts a quality level string to the proto enum on
+// Axis A (confidence) of the two-axis quality model (ADR-0017).
+//
+// Proto slot 4 is still spelled QUALITY_LEVEL_REVISED but its doc comment
+// redefines it to VERIFIED confidence semantics (the rename to a dedicated
+// QUALITY_LEVEL_VERIFIED symbol is pending). Both the canonical VERIFIED grade
+// and the legacy REVISED label therefore map onto slot 4.
+//
+// Axis B (the revision counter) is server-assigned and is not carried on the
+// write request, so it is intentionally absent from this mapping.
 func qualityStringToProto(quality string) marketinformationv1.QualityLevel {
 	switch quality {
 	case "ESTIMATE":
@@ -305,7 +314,8 @@ func qualityStringToProto(quality string) marketinformationv1.QualityLevel {
 		return marketinformationv1.QualityLevel_QUALITY_LEVEL_PROVISIONAL
 	case "ACTUAL":
 		return marketinformationv1.QualityLevel_QUALITY_LEVEL_ACTUAL
-	case "REVISED":
+	case "VERIFIED", "REVISED":
+		// Slot 4: VERIFIED confidence (legacy REVISED label maps here too).
 		return marketinformationv1.QualityLevel_QUALITY_LEVEL_REVISED
 	default:
 		return marketinformationv1.QualityLevel_QUALITY_LEVEL_UNSPECIFIED

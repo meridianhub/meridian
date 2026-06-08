@@ -23,6 +23,10 @@ var (
 
 	// ErrNilDatasetChecker indicates the dataset checker is required but nil.
 	ErrNilDatasetChecker = errors.New("dataset checker cannot be nil")
+
+	// ErrUnknownQualityString indicates a quality string that does not map to a
+	// known confidence grade on the four-level ladder (ADR-0017).
+	ErrUnknownQualityString = errors.New("unknown quality level string")
 )
 
 // FieldError represents a validation error for a specific field.

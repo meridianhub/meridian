@@ -102,6 +102,9 @@ func TestParser_Parse(t *testing.T) {
 			{"ESTIMATE", "ESTIMATE"},
 			{"estimate", "ESTIMATE"},
 			{"PROVISIONAL", "PROVISIONAL"},
+			{"VERIFIED", "VERIFIED"},
+			{"verified", "VERIFIED"},
+			{"Verified", "VERIFIED"},
 			{"REVISED", "REVISED"},
 		}
 

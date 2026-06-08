@@ -182,7 +182,7 @@ func printSchemaText(dataset *infra.DataSetDefinition) {
 	fmt.Println()
 	fmt.Println("  Required CSV Columns:")
 	fmt.Println("    - observed_at      RFC3339 timestamp when observation was made")
-	fmt.Println("    - quality_level    ESTIMATE, PROVISIONAL, ACTUAL, or REVISED")
+	fmt.Println("    - quality_level    ESTIMATE, PROVISIONAL, ACTUAL, or VERIFIED (REVISED accepted as legacy)")
 	fmt.Println("    - value            Decimal string (max 64 characters)")
 	fmt.Println()
 
