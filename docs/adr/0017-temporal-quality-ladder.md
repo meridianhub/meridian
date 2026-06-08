@@ -109,21 +109,28 @@ purged from all ladder enumerations.
 Two supersession mechanisms exist in the codebase, and they operate at
 different granularities:
 
-| Mechanism | Location | Key | Granularity |
-|-----------|----------|-----|-------------|
-| `DeltaEngine.Evaluate()` | Position Keeping | `QualityScore` (0-100, Source Authority Registry) | Fine |
-| `QualityLevel.Supersedes()` | `market-information/domain` | enum integer comparison (`q > other`) | Coarse |
+| Mechanism | Location | Key | Granularity | Status |
+|-----------|----------|-----|-------------|--------|
+| `QualityLevel.Supersedes()` | `market-information/domain/quality_level.go` | enum integer comparison (`q > other`) | Coarse | **Implemented** - the only shipped precedence today |
+| `DeltaEngine.Evaluate()` | Position Keeping | `QualityScore` (0-100, Source Authority Registry) | Fine | **Designed, not yet built** - no `DeltaEngine` type in Go, no `quality_score`/`measurements` column in any migration |
 
-The **authoritative reconciliation precedence key is the fine-grained
-`QualityScore`** consulted by the Delta Engine when it books the financial
-position (`incoming.QualityScore < existing.QualityScore` -> archive;
-`>` -> wash and reload). The coarse `QualityLevel.Supersedes()` enum in the
-market-information domain is a **derived, lower-resolution projection** of the
-same ordering, used for observation-level quality comparison. The two-axis
-split holds for both: Axis A is exactly that coarse projection, and the
-`QualityScore` bands map onto it (see the registry table below). Where a fine
-decision is needed, consult the registry `QualityScore`; the enum grade must
-never contradict it.
+**Today the only implemented reconciliation precedence is the coarse
+`QualityLevel.Supersedes()` enum** (`q > other`) in the market-information
+domain; this is the authoritative precedence in running code. The fine-grained
+`QualityScore` precedence consulted by a `DeltaEngine` (booking the financial
+position: `incoming.QualityScore < existing.QualityScore` -> archive;
+`>` -> wash and reload) is the **designed target of this ADR, not yet present
+in the codebase** - there is no `DeltaEngine` type in Go and no `quality_score`
+column in any migration. This distinction matters because this amendment is the
+input to follow-up implementation work: an implementer must not assume a
+`quality_score` column or `DeltaEngine.Evaluate()` already exist as an
+integration point.
+
+The two-axis split holds for both the coarse (shipped) and fine (designed)
+keys: Axis A is the coarse projection, and once the `QualityScore` precedence
+is built its bands map onto the same ordering (see the registry table below).
+When the fine-grained path lands, the enum grade must never contradict the
+`QualityScore`.
 
 ### Decision record: domain / proto / DB alignment
 
@@ -133,11 +140,25 @@ never contradict it.
 * **Proto enum** (`api/proto/meridian/market_information/v1`): keep
   `ESTIMATE=1, PROVISIONAL=2, ACTUAL=3`; redefine slot `4` from `REVISED` to
   `VERIFIED`.
-* **Database**: `measurements.quality_score` (0-100) remains the authoritative
-  fine-grained precedence value; add a `revision` integer column
-  (`DEFAULT 0`) to carry Axis B. The existing `superseded_by` pointer continues
-  to carry the supersession link. No grade column is required on the row - the
-  coarse grade is derivable from `quality_score` via the band table.
+* **Database**: widen the quality `CHECK` constraint to `IN (1,2,3,4)` and add a
+  `revision` integer column (`DEFAULT 0`) to carry Axis B. The existing
+  `superseded_by` pointer continues to carry the supersession link. A
+  fine-grained `quality_score` column (0-100) is the *designed* precedence
+  store; it does not exist yet (see the precedence table above) and is added by
+  the future Delta Engine work, at which point no coarse grade column is needed
+  because the grade is derivable from `quality_score` via the band table.
+* **Cutover is a re-encoding, not an additive change - existing rows MUST be
+  remapped.** The `quality` column today stores the **legacy 3-level domain
+  encoding**: `1=ESTIMATE, 2=ACTUAL, 3=VERIFIED`. The target 4-level encoding
+  is `1=ESTIMATE, 2=PROVISIONAL, 3=ACTUAL, 4=VERIFIED`. The stored integers do
+  not move, but their meaning shifts: without a remap, a stored `2` (legacy
+  ACTUAL) would silently read as PROVISIONAL and a stored `3` (legacy VERIFIED)
+  as ACTUAL - a silent quality downgrade, exactly the corruption class this ADR
+  exists to prevent. The domain-enum cutover MUST therefore ship a data-remap
+  migration that re-encodes existing rows **old `3` -> `4`, then old `2` -> `3`
+  (in that order, to avoid a `3` collision)**, landing atomically with the
+  domain code change. Widening the `CHECK` to allow `4` ahead of the cutover is
+  a harmless forward-compatible superset and may land first.
 * **Consequence**: `Supersedes()` precedence can never be inverted by a
   correction, because corrections move along Axis B and leave the Axis A grade
   (and the underlying `QualityScore`) untouched.
@@ -528,8 +549,17 @@ type SourceAuthority struct {
 
 The `QualityScore` is the fine-grained, authoritative precedence value. The
 **Confidence Grade (Axis A)** is the coarse projection of the score onto the
-4-level enum, via these bands: **10-30 = ESTIMATE, 50-70 = PROVISIONAL,
-90 = ACTUAL, 100 = VERIFIED**.
+4-level enum. Because `QualityScore` is a tenant/asset-configurable `int` over
+the full `0-100` range, the projection MUST be a total, monotonic function with
+no gaps (a custom source scored 0, 40, 80, or 95 must still map to a grade).
+The canonical derivation - which reproduces all seven example points below - is:
+
+```
+score < 50          -> ESTIMATE
+50 <= score < 90    -> PROVISIONAL
+90 <= score < 100   -> ACTUAL
+score == 100        -> VERIFIED
+```
 
 | Source Code | Quality Score | Confidence Grade (Axis A) | Description |
 |-------------|---------------|---------------------------|-------------|
