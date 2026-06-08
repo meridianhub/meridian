@@ -1,6 +1,6 @@
 # Hotspot: `services/payment-order/service/grpc_service_test.go`
 
-_First flagged: 2026-05-22. Last seen: 2026-06-04. Status: new._
+_First flagged: 2026-05-22. Last seen: 2026-06-08. Status: persistent._
 
 ## Current metrics
 
@@ -15,14 +15,14 @@ _First flagged: 2026-05-22. Last seen: 2026-06-04. Status: new._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-06-04 | 2283 | 204.0 | 17 | new |
+| 2026-06-08 | 2283 | 204.0 | 17 | persistent |
 
 ## Briefing for editing this file
 
 Use this briefing when about to modify `services/payment-order/service/grpc_service_test.go`:
 
-Hotspot (new). 2283 LOC, max cyclomatic complexity 204.0, 17 commits in churn window. (Briefing refined by LLM via assess_finalize - see Suggested actions below.)
+Hotspot (persistent). 2283 LOC, max cyclomatic complexity 204.0, 17 commits in churn window. (Briefing refined by LLM via assess_finalize - see Suggested actions below.)
 
 ## Suggested actions
 
-- Pending LLM-generated suggestions
+This file is flagged but outside this run's Top 3. See the report's Top 3 Actions, or run a focused /assess pass for file-specific guidance.
