@@ -429,6 +429,9 @@ If an incorrect observation was recorded:
 2. The system automatically supersedes the incorrect observation
 3. Bi-temporal queries will return the corrected value
 
+<!-- QUALITY_LEVEL_REVISED is the proto symbol for slot 4 (semantically VERIFIED, the
+     highest confidence grade); the symbol rename is deferred. See the note above. -->
+
 ```bash
 grpcurl -plaintext \
   -d '{
