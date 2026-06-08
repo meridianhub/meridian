@@ -1,0 +1,138 @@
+name: Mutation Testing
+
+# Opt-in only. Mutation testing is expensive (it compiles and runs the test
+# suite once per mutant) so it does not run on every push or PR. It runs:
+#   - on demand via the Actions "Run workflow" button (workflow_dispatch), and
+#   - weekly on a schedule, to catch test-suite erosion over time.
+#
+# This workflow is NON-BLOCKING: it is not a required check and never gates a
+# merge. Its job is to surface surviving mutants in the financial-correctness
+# core (where a survivor means money/quantities can move wrong without a failing
+# test) so they can be triaged. See docs/runbooks/mutation-testing.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Which target package set to mutate'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - position-keeping-domain
+          - position-keeping-service
+          - saga
+          - money
+          - quantity
+  schedule:
+    # Sunday 02:00 UTC, weekly.
+    - cron: '0 2 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: "Mutation sweep (${{ matrix.target.name }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: position-keeping-domain
+            path: ./services/position-keeping/domain/
+          - name: position-keeping-service
+            path: ./services/position-keeping/service/
+          - name: saga
+            path: ./shared/pkg/saga/
+          - name: money
+            path: ./shared/pkg/money/
+          - name: quantity
+            path: ./shared/platform/quantity/
+
+    steps:
+      - name: Skip target not selected
+        id: gate
+        run: |
+          selected="${{ github.event.inputs.target }}"
+          # schedule runs have no inputs -> run everything
+          if [ -z "$selected" ] || [ "$selected" = "all" ] || [ "$selected" = "${{ matrix.target.name }}" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Target ${{ matrix.target.name }} not selected (chose $selected); skipping."
+          fi
+
+      - name: Checkout code
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.4'
+          cache: true
+
+      - name: Set up buf
+        if: steps.gate.outputs.run == 'true'
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate protobuf files
+        if: steps.gate.outputs.run == 'true'
+        run: buf generate
+
+      - name: Download dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: go mod download
+
+      - name: Install gremlins
+        if: steps.gate.outputs.run == 'true'
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+
+      - name: Run mutation sweep
+        if: steps.gate.outputs.run == 'true'
+        # Non-blocking: report results regardless of mutation score. The
+        # .gremlins.yaml thresholds are 0, so gremlins exits 0 on score alone;
+        # continue-on-error guards against infra hiccups (e.g. a single timed-out
+        # mutant) failing the informational job.
+        continue-on-error: true
+        run: |
+          mkdir -p mutation-results
+          gremlins unleash "${{ matrix.target.path }}" \
+            --output "mutation-results/${{ matrix.target.name }}.json" \
+            2>&1 | tee "mutation-results/${{ matrix.target.name }}.log"
+
+      - name: Summarise results
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          log="mutation-results/${{ matrix.target.name }}.log"
+          {
+            echo "### Mutation sweep: ${{ matrix.target.name }}"
+            echo ""
+            echo '```'
+            grep -E "Killed:|Lived:|Timed out:|efficacy|coverage" "$log" || echo "(no summary line found)"
+            echo '```'
+            echo ""
+            echo "Survivors (LIVED):"
+            echo '```'
+            grep "LIVED" "$log" | sed 's/.*LIVED //' | sort | uniq || echo "(none)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload mutation results
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-results-${{ matrix.target.name }}
+          path: mutation-results/
+          retention-days: 30
