@@ -143,8 +143,12 @@ analyze_platform_imports() {
 
             [[ -z "${import_path}" ]] && continue
 
-            # Determine if the public shared/platform equivalent exists
-            local package_name="${import_path##*/}"
+            # Determine if the public shared/platform equivalent exists.
+            # Map internal/platform/<package>/... to its top-level package so
+            # nested imports (e.g. internal/platform/kafka/producer) resolve to
+            # shared/platform/kafka, not the leaf segment.
+            local platform_suffix="${import_path##*/internal/platform/}"
+            local package_name="${platform_suffix%%/*}"
             local should_be_public="false"
             local message="Service '${service}' imports internal/platform/${package_name}."
 
