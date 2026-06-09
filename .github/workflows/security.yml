@@ -280,8 +280,17 @@ jobs:
       with:
         fetch-depth: 0  # Full history for secret scanning
 
+    # Use the open-source gitleaks binary directly, not gitleaks/gitleaks-action.
+    # The action requires a paid GITLEAKS_LICENSE for GitHub organizations, and
+    # Actions secrets are withheld from Dependabot-triggered runs - so the action
+    # fails on every Dependabot PR with "missing gitleaks license". The CLI is
+    # MIT-licensed, needs no key, scans identically, and matches our pre-commit
+    # hook (which also runs the gitleaks binary). It auto-loads .gitleaks.toml and
+    # .gitleaksignore from the repo root.
     - name: Run Gitleaks
-      uses: gitleaks/gitleaks-action@v3
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}  # Optional: for Gitleaks Pro features
+        GITLEAKS_VERSION: "8.30.1"
+      run: |
+        curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+          | tar -xzf - gitleaks
+        ./gitleaks git . --redact --verbose --exit-code 1
