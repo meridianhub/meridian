@@ -280,17 +280,15 @@ jobs:
       with:
         fetch-depth: 0  # Full history for secret scanning
 
-    # Use the open-source gitleaks binary directly, not gitleaks/gitleaks-action.
+    # Run gitleaks via its official Docker image, not gitleaks/gitleaks-action.
     # The action requires a paid GITLEAKS_LICENSE for GitHub organizations, and
     # Actions secrets are withheld from Dependabot-triggered runs - so the action
-    # fails on every Dependabot PR with "missing gitleaks license". The CLI is
-    # MIT-licensed, needs no key, scans identically, and matches our pre-commit
-    # hook (which also runs the gitleaks binary). It auto-loads .gitleaks.toml and
-    # .gitleaksignore from the repo root.
+    # failed on every Dependabot PR with "missing gitleaks license". The image is
+    # the same MIT-licensed scanner, needs no key, and - unlike a version pinned in
+    # a run step - its tag IS tracked and auto-bumped by Dependabot's github-actions
+    # ecosystem (so it can't silently rot). It scans full git history and auto-loads
+    # .gitleaks.toml / .gitleaksignore from the repo root (mounted at /github/workspace).
     - name: Run Gitleaks
-      env:
-        GITLEAKS_VERSION: "8.30.1"
-      run: |
-        curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-          | tar -xzf - gitleaks
-        ./gitleaks git . --redact --verbose --exit-code 1
+      uses: docker://ghcr.io/gitleaks/gitleaks:v8.30.1
+      with:
+        args: git /github/workspace --redact --verbose --exit-code 1
