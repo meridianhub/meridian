@@ -14,9 +14,13 @@ export function DirectionBadge({ direction }: DirectionBadgeProps) {
       data-direction={direction}
       className={cn(
         'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
+        // Credit = filled (green tint), debit = outlined (card + ink border).
+        // Never hue alone: the fill/outline pairing plus the text label carry
+        // the meaning for colour-blind users. Debit is not an error state, so
+        // no destructive red here.
         isCredit
-          ? 'bg-success-muted text-success-foreground border-success/30'
-          : 'bg-destructive/10 text-destructive border-destructive/30',
+          ? 'bg-success-muted text-success-foreground border-success/40'
+          : 'bg-card text-foreground border-foreground/40',
       )}
     >
       {isCredit ? (

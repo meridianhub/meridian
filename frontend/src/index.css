@@ -1,10 +1,24 @@
+@import "./fonts.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * "The Modern Ledger" theme — aligned with the marketing site
+ * (meridianhub.github.io assets/css/main.css). Warm paper and ink with
+ * hairline rules, one calm green accent, dark "engine" panels for
+ * machine-side surfaces.
+ *
+ * Light mode: paper #faf7f1 / ink #1c2433 / rule #ded6c6 / credit #1e7a4f
+ * Dark mode ("engine"): #141b29 / #d6deeb / #232d42 / #5ddc96
+ */
+
 @theme inline {
+    --font-sans: "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif;
+    --font-serif: "Fraunces", Georgia, serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
     --radius-lg: var(--radius);
@@ -57,69 +71,72 @@
 }
 
 :root {
+    /* Cards render at radius-xl = 14px, matching the marketing site's 12-14px */
     --radius: 0.625rem;
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.129 0.042 264.695);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.129 0.042 264.695);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.129 0.042 264.695);
-    --primary: oklch(0.208 0.042 265.755);
-    --primary-foreground: oklch(0.984 0.003 247.858);
-    --secondary: oklch(0.968 0.007 247.896);
-    --secondary-foreground: oklch(0.208 0.042 265.755);
-    --muted: oklch(0.968 0.007 247.896);
-    --muted-foreground: oklch(0.554 0.046 257.417);
-    --accent: oklch(0.968 0.007 247.896);
-    --accent-foreground: oklch(0.208 0.042 265.755);
+    --background: oklch(0.9768 0.0086 84.57); /* paper #faf7f1 */
+    --foreground: oklch(0.2598 0.0306 262.67); /* ink #1c2433 */
+    --card: oklch(0.9945 0.0057 84.57); /* paper-card #fffdf9 */
+    --card-foreground: oklch(0.2598 0.0306 262.67);
+    --popover: oklch(0.9945 0.0057 84.57);
+    --popover-foreground: oklch(0.2598 0.0306 262.67);
+    --primary: oklch(0.5157 0.1086 157.99); /* credit green #1e7a4f */
+    --primary-foreground: oklch(0.9945 0.0057 84.57);
+    --secondary: oklch(0.9473 0.0144 84.58); /* paper-deep #f2ede3 */
+    --secondary-foreground: oklch(0.2598 0.0306 262.67);
+    --muted: oklch(0.9473 0.0144 84.58);
+    --muted-foreground: oklch(0.4617 0.0428 267.73); /* ink-soft #4e5871 */
+    --accent: oklch(0.9473 0.0144 84.58);
+    --accent-foreground: oklch(0.2598 0.0306 262.67);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.929 0.013 255.508);
-    --input: oklch(0.929 0.013 255.508);
-    --ring: oklch(0.704 0.04 256.788);
-    --chart-1: oklch(0.646 0.222 41.116);
-    --chart-2: oklch(0.6 0.118 184.704);
-    --chart-3: oklch(0.398 0.07 227.392);
-    --chart-4: oklch(0.828 0.189 84.429);
-    --chart-5: oklch(0.769 0.188 70.08);
-    --sidebar: oklch(0.984 0.003 247.858);
-    --sidebar-foreground: oklch(0.129 0.042 264.695);
-    --sidebar-primary: oklch(0.208 0.042 265.755);
-    --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-accent: oklch(0.968 0.007 247.896);
-    --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-    --sidebar-border: oklch(0.929 0.013 255.508);
-    --sidebar-ring: oklch(0.704 0.04 256.788);
-    --success: oklch(0.59 0.15 145);
-    --success-foreground: oklch(0.27 0.08 145);
-    --success-muted: oklch(0.95 0.04 145);
-    --warning: oklch(0.75 0.15 85);
-    --warning-foreground: oklch(0.35 0.1 85);
-    --warning-muted: oklch(0.95 0.04 85);
-    --info: oklch(0.59 0.15 250);
-    --info-foreground: oklch(0.27 0.08 250);
-    --info-muted: oklch(0.95 0.04 250);
+    --border: oklch(0.8781 0.0233 84.59); /* rule #ded6c6 */
+    --input: oklch(0.8781 0.0233 84.59);
+    --ring: oklch(0.5157 0.1086 157.99);
+    --chart-1: oklch(0.5157 0.1086 157.99); /* credit green */
+    --chart-2: oklch(0.6234 0.1234 77.39); /* amber */
+    --chart-3: oklch(0.52 0.1 250.58); /* ledger blue */
+    --chart-4: oklch(0.4617 0.0428 267.73); /* ink-soft */
+    --chart-5: oklch(0.52 0.08 200); /* teal */
+    --sidebar: oklch(0.9768 0.0086 84.57);
+    --sidebar-foreground: oklch(0.2598 0.0306 262.67);
+    --sidebar-primary: oklch(0.5157 0.1086 157.99);
+    --sidebar-primary-foreground: oklch(0.9945 0.0057 84.57);
+    --sidebar-accent: oklch(0.9473 0.0144 84.58);
+    --sidebar-accent-foreground: oklch(0.2598 0.0306 262.67);
+    --sidebar-border: oklch(0.8781 0.0233 84.59);
+    --sidebar-ring: oklch(0.5157 0.1086 157.99);
+    --success: oklch(0.5157 0.1086 157.99); /* credit green #1e7a4f */
+    --success-foreground: oklch(0.42 0.09 158);
+    --success-muted: oklch(0.9432 0.0174 159.11); /* credit tint #e3f0e8 */
+    --warning: oklch(0.6234 0.1234 77.39); /* amber #b07c18 */
+    --warning-foreground: oklch(0.46 0.09 77);
+    --warning-muted: oklch(0.9443 0.0306 88.37); /* amber tint #f5ecd6 */
+    --info: oklch(0.52 0.1 250.58);
+    --info-foreground: oklch(0.4 0.08 250.58);
+    --info-muted: oklch(0.93 0.02 250.58);
     --destructive-foreground: oklch(1 0 0);
-    --overlay: oklch(0 0 0 / 50%);
+    --overlay: oklch(0.2598 0.0306 262.67 / 50%);
 
-    /* Graph node/edge colors */
-    --graph-instrument: oklch(0.59 0.15 250);
-    --graph-account-type: oklch(0.59 0.15 145);
-    --graph-valuation-rule: oklch(0.75 0.15 85);
-    --graph-saga: oklch(0.59 0.15 295);
-    --graph-market-data: oklch(0.65 0.15 30);
-    --graph-organization: oklch(0.59 0.15 200);
-    --graph-internal-account: oklch(0.59 0.15 170);
-    --graph-mapping: oklch(0.72 0.15 60);
-    --graph-payment-rail: oklch(0.62 0.18 15);
-    --graph-operational-gateway: oklch(0.59 0.15 320);
-    --graph-provider-connection: oklch(0.59 0.15 230);
-    --graph-instruction-route: oklch(0.59 0.15 275);
-    --graph-party-type: oklch(0.63 0.15 105);
-    --graph-event-channel: oklch(0.65 0.15 55);
-    --graph-diff-added: oklch(0.59 0.15 145);
+    /* Graph node/edge colors — marketing cookbook viewer conventions:
+       instruments ink, accounts (CR) credit green, valuation amber,
+       sagas dark engine pills */
+    --graph-instrument: oklch(0.2598 0.0306 262.67); /* ink */
+    --graph-account-type: oklch(0.5157 0.1086 157.99); /* credit green */
+    --graph-valuation-rule: oklch(0.6234 0.1234 77.39); /* amber */
+    --graph-saga: oklch(0.2223 0.0295 263.69); /* engine #141b29 */
+    --graph-market-data: oklch(0.55 0.09 300);
+    --graph-organization: oklch(0.5 0.07 230);
+    --graph-internal-account: oklch(0.5 0.08 180);
+    --graph-mapping: oklch(0.58 0.09 60);
+    --graph-payment-rail: oklch(0.52 0.1 250.58);
+    --graph-operational-gateway: oklch(0.5 0.08 320);
+    --graph-provider-connection: oklch(0.52 0.09 210);
+    --graph-instruction-route: oklch(0.5 0.08 270);
+    --graph-party-type: oklch(0.55 0.09 105);
+    --graph-event-channel: oklch(0.58 0.1 50);
+    --graph-diff-added: oklch(0.5157 0.1086 157.99);
     --graph-diff-removed: oklch(0.577 0.245 27.325);
-    --graph-diff-modified: oklch(0.75 0.15 85);
-    --graph-diff-unchanged: oklch(0.554 0.046 257.417);
+    --graph-diff-modified: oklch(0.6234 0.1234 77.39);
+    --graph-diff-unchanged: oklch(0.4617 0.0428 267.73);
 
     /* Saga service palette — rotating colors for dynamically assigned services */
     --saga-service-1-bg: oklch(0.93 0.04 250);
@@ -140,69 +157,70 @@
     --saga-service-8-fg: oklch(0.45 0.15 340);
 }
 
+/* Dark mode = the marketing site's "engine" palette */
 .dark {
-    --background: oklch(0.129 0.042 264.695);
-    --foreground: oklch(0.984 0.003 247.858);
-    --card: oklch(0.208 0.042 265.755);
-    --card-foreground: oklch(0.984 0.003 247.858);
-    --popover: oklch(0.208 0.042 265.755);
-    --popover-foreground: oklch(0.984 0.003 247.858);
-    --primary: oklch(0.929 0.013 255.508);
-    --primary-foreground: oklch(0.208 0.042 265.755);
-    --secondary: oklch(0.279 0.041 260.031);
-    --secondary-foreground: oklch(0.984 0.003 247.858);
-    --muted: oklch(0.279 0.041 260.031);
-    --muted-foreground: oklch(0.75 0.04 256.788);
-    --accent: oklch(0.279 0.041 260.031);
-    --accent-foreground: oklch(0.984 0.003 247.858);
+    --background: oklch(0.2223 0.0295 263.69); /* engine #141b29 */
+    --foreground: oklch(0.8984 0.0198 260.17); /* engine text #d6deeb */
+    --card: oklch(0.1915 0.0262 263.66); /* engine surface #0e1420 */
+    --card-foreground: oklch(0.8984 0.0198 260.17);
+    --popover: oklch(0.1915 0.0262 263.66);
+    --popover-foreground: oklch(0.8984 0.0198 260.17);
+    --primary: oklch(0.8051 0.1516 156.31); /* engine green #5ddc96 */
+    --primary-foreground: oklch(0.1915 0.0262 263.66);
+    --secondary: oklch(0.298 0.0409 264.47); /* engine edge #232d42 */
+    --secondary-foreground: oklch(0.8984 0.0198 260.17);
+    --muted: oklch(0.298 0.0409 264.47);
+    --muted-foreground: oklch(0.6039 0.0432 267.67); /* engine dim #76819c */
+    --accent: oklch(0.298 0.0409 264.47);
+    --accent-foreground: oklch(0.8984 0.0198 260.17);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.551 0.027 264.364);
-    --chart-1: oklch(0.488 0.243 264.376);
-    --chart-2: oklch(0.696 0.17 162.48);
-    --chart-3: oklch(0.769 0.188 70.08);
-    --chart-4: oklch(0.627 0.265 303.9);
-    --chart-5: oklch(0.645 0.246 16.439);
-    --sidebar: oklch(0.208 0.042 265.755);
-    --sidebar-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-accent: oklch(0.279 0.041 260.031);
-    --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.551 0.027 264.364);
-    --success: oklch(0.65 0.18 145);
-    --success-foreground: oklch(0.85 0.08 145);
-    --success-muted: oklch(0.25 0.06 145);
-    --warning: oklch(0.75 0.18 85);
-    --warning-foreground: oklch(0.85 0.08 85);
-    --warning-muted: oklch(0.25 0.06 85);
-    --info: oklch(0.65 0.18 250);
-    --info-foreground: oklch(0.85 0.08 250);
-    --info-muted: oklch(0.25 0.06 250);
+    --border: oklch(0.298 0.0409 264.47);
+    --input: oklch(0.298 0.0409 264.47);
+    --ring: oklch(0.8051 0.1516 156.31);
+    --chart-1: oklch(0.8051 0.1516 156.31); /* engine green */
+    --chart-2: oklch(0.8341 0.141 85.43); /* engine amber #f2c14e */
+    --chart-3: oklch(0.7664 0.1103 250.58); /* engine blue #7cb8f7 */
+    --chart-4: oklch(0.6039 0.0432 267.67); /* engine dim */
+    --chart-5: oklch(0.72 0.08 200); /* teal */
+    --sidebar: oklch(0.1915 0.0262 263.66);
+    --sidebar-foreground: oklch(0.8984 0.0198 260.17);
+    --sidebar-primary: oklch(0.8051 0.1516 156.31);
+    --sidebar-primary-foreground: oklch(0.1915 0.0262 263.66);
+    --sidebar-accent: oklch(0.298 0.0409 264.47);
+    --sidebar-accent-foreground: oklch(0.8984 0.0198 260.17);
+    --sidebar-border: oklch(0.298 0.0409 264.47);
+    --sidebar-ring: oklch(0.8051 0.1516 156.31);
+    --success: oklch(0.8051 0.1516 156.31); /* engine green #5ddc96 */
+    --success-foreground: oklch(0.87 0.1 157);
+    --success-muted: oklch(0.3 0.05 157);
+    --warning: oklch(0.8341 0.141 85.43); /* engine amber #f2c14e */
+    --warning-foreground: oklch(0.88 0.08 86);
+    --warning-muted: oklch(0.3 0.05 86);
+    --info: oklch(0.7664 0.1103 250.58); /* engine blue #7cb8f7 */
+    --info-foreground: oklch(0.87 0.06 250.58);
+    --info-muted: oklch(0.3 0.05 250.58);
     --destructive-foreground: oklch(1 0 0);
     --overlay: oklch(0 0 0 / 60%);
 
     /* Graph node/edge colors */
-    --graph-instrument: oklch(0.65 0.18 250);
-    --graph-account-type: oklch(0.65 0.18 145);
-    --graph-valuation-rule: oklch(0.75 0.18 85);
-    --graph-saga: oklch(0.65 0.18 295);
-    --graph-market-data: oklch(0.72 0.18 30);
-    --graph-organization: oklch(0.65 0.18 200);
-    --graph-internal-account: oklch(0.65 0.18 170);
-    --graph-mapping: oklch(0.78 0.18 60);
-    --graph-payment-rail: oklch(0.68 0.21 15);
-    --graph-operational-gateway: oklch(0.65 0.18 320);
-    --graph-provider-connection: oklch(0.65 0.18 230);
-    --graph-instruction-route: oklch(0.65 0.18 275);
-    --graph-party-type: oklch(0.69 0.18 105);
-    --graph-event-channel: oklch(0.72 0.18 55);
-    --graph-diff-added: oklch(0.65 0.18 145);
+    --graph-instrument: oklch(0.8984 0.0198 260.17); /* engine text */
+    --graph-account-type: oklch(0.8051 0.1516 156.31); /* engine green */
+    --graph-valuation-rule: oklch(0.8341 0.141 85.43); /* engine amber */
+    --graph-saga: oklch(0.45 0.05 264); /* raised engine panel */
+    --graph-market-data: oklch(0.72 0.1 300);
+    --graph-organization: oklch(0.7 0.08 230);
+    --graph-internal-account: oklch(0.7 0.09 180);
+    --graph-mapping: oklch(0.75 0.09 60);
+    --graph-payment-rail: oklch(0.7664 0.1103 250.58);
+    --graph-operational-gateway: oklch(0.7 0.09 320);
+    --graph-provider-connection: oklch(0.72 0.09 210);
+    --graph-instruction-route: oklch(0.7 0.08 270);
+    --graph-party-type: oklch(0.74 0.09 105);
+    --graph-event-channel: oklch(0.75 0.1 50);
+    --graph-diff-added: oklch(0.8051 0.1516 156.31);
     --graph-diff-removed: oklch(0.704 0.191 22.216);
-    --graph-diff-modified: oklch(0.75 0.18 85);
-    --graph-diff-unchanged: oklch(0.704 0.04 256.788);
+    --graph-diff-modified: oklch(0.8341 0.141 85.43);
+    --graph-diff-unchanged: oklch(0.6039 0.0432 267.67);
 
     /* Saga service palette — rotating colors for dynamically assigned services */
     --saga-service-1-bg: oklch(0.22 0.06 250);
@@ -229,6 +247,15 @@
     }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    }
+
+  /* Display headings use Fraunces, mirroring the marketing site */
+  h1, h2, h3 {
+    font-family: var(--font-serif);
+    font-weight: 550;
+    letter-spacing: -0.01em;
     }
 
   /*

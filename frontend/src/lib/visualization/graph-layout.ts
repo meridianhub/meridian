@@ -7,11 +7,14 @@ export const NODE_WIDTH = 200
 export const NODE_BASE_HEIGHT = 40
 export const NODE_PADDING = 20
 
+// Edge colours follow the marketing cookbook viewer's encoding: ink for
+// dependencies, credit green for composition, dark saga tone for extends,
+// destructive only for genuine conflicts. Matches the on-page legend.
 export const EDGE_STYLES = {
-  registryDependencies: { stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: undefined },
-  composes_with: { stroke: '#22c55e', strokeWidth: 1.5, strokeDasharray: '6 3' },
-  extends: { stroke: '#8b5cf6', strokeWidth: 3, strokeDasharray: undefined },
-  conflicts_with: { stroke: '#ef4444', strokeWidth: 1.5, strokeDasharray: '4 4' },
+  registryDependencies: { stroke: 'var(--graph-instrument)', strokeWidth: 2, strokeDasharray: undefined },
+  composes_with: { stroke: 'var(--graph-account-type)', strokeWidth: 1.5, strokeDasharray: '6 3' },
+  extends: { stroke: 'var(--graph-saga)', strokeWidth: 3, strokeDasharray: undefined },
+  conflicts_with: { stroke: 'var(--destructive)', strokeWidth: 1.5, strokeDasharray: '4 4' },
 } as const
 
 export type RelationshipType = keyof typeof EDGE_STYLES

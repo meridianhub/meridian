@@ -95,7 +95,7 @@ const PatternNode = memo(function PatternNode({ data }: { data: PatternNodeData 
             className="flex flex-col items-center justify-center rounded-lg border-2 px-3 py-2 text-center transition-opacity duration-150"
             style={containerStyle}
           >
-            <span className="text-[10px] font-semibold leading-tight text-foreground truncate w-full">
+            <span className="font-mono text-[10px] font-semibold leading-tight text-foreground truncate w-full">
               {data.label}
             </span>
             {data.complexity > 0 && (

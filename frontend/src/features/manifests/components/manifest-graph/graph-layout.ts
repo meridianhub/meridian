@@ -46,7 +46,7 @@ export function buildReactFlowEdges(manifestEdges: ManifestEdge[]): Edge[] {
     style: MANIFEST_EDGE_STYLES[e.relationship] ?? {},
     markerEnd:
       e.relationship === 'converts_to' || e.relationship === 'allowed_by'
-        ? { type: 'arrowclosed' as const, color: (MANIFEST_EDGE_STYLES[e.relationship]?.stroke as string) ?? '#999' }
+        ? { type: 'arrowclosed' as const, color: (MANIFEST_EDGE_STYLES[e.relationship]?.stroke as string) ?? 'var(--muted-foreground)' }
         : undefined,
     data: { relationship: e.relationship },
   }))

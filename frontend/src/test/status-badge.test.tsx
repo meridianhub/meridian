@@ -117,7 +117,8 @@ describe('StatusBadge', () => {
   describe('position quality ladder', () => {
     it.each([
       ['ESTIMATE', 'warning'],
-      ['COEFFICIENT', 'info'],
+      // COEFFICIENT maps to ESTIMATE quality (ADR-0017): amber treatment
+      ['COEFFICIENT', 'warning'],
       ['ACTUAL', 'success'],
       ['REVISED', 'info'],
     ])('maps quality ladder %s to correct color', (status, color) => {

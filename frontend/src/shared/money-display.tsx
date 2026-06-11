@@ -107,5 +107,5 @@ export function MoneyDisplay({ amount, currency, precision, showSign }: MoneyDis
     [amount, currency, precision, showSign],
   )
 
-  return <span className="tabular-nums">{formatted}</span>
+  return <span className="font-mono tabular-nums">{formatted}</span>
 }

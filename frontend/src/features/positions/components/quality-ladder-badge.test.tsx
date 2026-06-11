@@ -58,10 +58,10 @@ describe('QualityLadderBadge', () => {
     expect(badge.className).toMatch(/success/)
   })
 
-  it('applies info token for COEFFICIENT quality', () => {
+  it('applies warning token for COEFFICIENT quality (estimate-quality data)', () => {
     render(<QualityLadderBadge quality="COEFFICIENT" />)
     const badge = screen.getByTestId('quality-ladder-badge')
-    expect(badge.className).toMatch(/info/)
+    expect(badge.className).toMatch(/warning/)
   })
 
   it('applies accent token for REVISED quality', () => {
