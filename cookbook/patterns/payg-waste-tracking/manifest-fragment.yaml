@@ -1,0 +1,102 @@
+instruments:
+  - code: WASTE_MOVEMENT
+    name: Waste Movement
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: movements
+      precision: 0
+  - code: TONNE_WASTE
+    name: Tonne of Waste
+    type: INSTRUMENT_TYPE_COMMODITY
+    dimensions:
+      unit: tonnes
+      precision: 3
+
+accountTypes:
+  - code: MOVEMENT_METERED
+    name: Metered Waste Movements
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [WASTE_MOVEMENT]
+    policies:
+      validation: "amount > 0"
+      bucketing: "attributes.billing_period + ':' + attributes.hazard_class"
+
+  - code: TONNAGE_METERED
+    name: Metered Waste Tonnage
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [TONNE_WASTE]
+    policies:
+      validation: "amount > 0"
+      bucketing: "attributes.billing_period + ':' + attributes.ewc_chapter"
+
+  - code: MOVEMENT_ALLOWANCE
+    name: Included Movement Allowance
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [WASTE_MOVEMENT]
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+
+  - code: TONNAGE_ALLOWANCE
+    name: Included Tonnage Allowance
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [TONNE_WASTE]
+    policies:
+      validation: "amount > 0"
+      bucketing: ""
+
+  - code: WASTE_BILLING
+    name: Customer Waste Billing Receivable
+    normalBalance: NORMAL_BALANCE_DEBIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: "amount > 0"
+      bucketing: "attributes.billing_period"
+
+  - code: REVENUE_WASTE
+    name: Waste Services Revenue
+    normalBalance: NORMAL_BALANCE_CREDIT
+    allowedInstruments: [GBP]
+    policies:
+      validation: ""
+      bucketing: "attributes.charge_type + ':' + attributes.billing_period"
+
+valuationRules:
+  - fromInstrument: WASTE_MOVEMENT
+    toInstrument: GBP
+    method: VALUATION_METHOD_FIXED
+    source: WASTE_MOVEMENT_STD_RATE
+  - fromInstrument: WASTE_MOVEMENT
+    toInstrument: GBP
+    method: VALUATION_METHOD_FIXED
+    source: WASTE_MOVEMENT_HAZ_RATE
+  - fromInstrument: TONNE_WASTE
+    toInstrument: GBP
+    method: VALUATION_METHOD_FIXED
+    source: WASTE_TONNE_RATE
+
+sagas:
+  - name: record_waste_movement
+    trigger: "webhook:waste_movement_completed"
+  - name: meter_billing
+    trigger: "event:position-keeping.transaction-captured.v1"
+    filter: "(event.instrument_code == 'WASTE_MOVEMENT' || event.instrument_code == 'TONNE_WASTE') && event.direction == 'DEBIT'"
+  - name: weighbridge_true_up
+    trigger: "webhook:weighbridge_actual"
+  - name: generate_waste_invoice
+    trigger: "scheduled:monthly_waste_billing"
+
+# The compliance system of record (e.g. a digital waste tracking app holding
+# waste transfer notes, hazardous consignment notes, and DEFRA submissions)
+# remains outside Meridian. It emits webhook events when a movement completes
+# and when weighbridge actuals arrive. Meridian holds the billing economy:
+# the meters, the allowances, the tariff, and the receivable.
+#
+# Allowances are ledger-native: the monthly invoice saga grants included
+# movements and tonnes as CREDIT balances on the allowance accounts, and the
+# meter_billing saga drains them before charging GBP overage. A billing outage
+# can never block a waste movement - the compliance system never waits on
+# this economy.
+#
+# Payment collection (charging the operator's card for the invoice) composes
+# with payment-gateway-stripe via the Financial Gateway, not shown here.

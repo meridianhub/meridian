@@ -388,6 +388,7 @@ var allEconomyPatterns = []string{
 	"phantom-cost-basis",
 	"tote-betting",
 	"payg-energy",
+	"payg-waste-tracking",
 	"default-deposit",
 	"default-withdrawal",
 	"default-payment-execution",
@@ -495,6 +496,7 @@ func TestEconomyPatterns_StarFilesExistForSagaPatterns(t *testing.T) {
 		"entity-distribution":      {"race_result_distribution.star"},
 		"phantom-cost-basis":       {"corporate_action_cost_adjustment.star"},
 		"payg-energy":              {"topup_waterfall.star", "consumption_block_tariff.star", "emergency_credit_activate.star", "whd_credit_apply.star"},
+		"payg-waste-tracking":      {"record_waste_movement.star", "meter_billing.star", "weighbridge_true_up.star", "generate_waste_invoice.star"},
 	}
 
 	for name, starFiles := range patternsWithStarFiles {

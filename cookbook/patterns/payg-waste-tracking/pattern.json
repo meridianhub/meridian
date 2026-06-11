@@ -1,0 +1,102 @@
+{
+    "$schema": "https://cookbook.meridianhub.org/schema/registry-item.json",
+    "name": "payg-waste-tracking",
+    "type": "registry:pattern",
+    "title": "Waste Tracking Usage Billing (PAYG)",
+    "description": "Hybrid base-plus-usage billing for digital waste tracking platforms. Meters completed waste movements and tonnage from a compliance system of record, drains monthly included allowances as ledger-native unit balances, charges overage with a hazardous-movement premium, and reconciles driver-declared tonnage against weighbridge actuals.",
+    "registryDependencies": [
+        "base-fiat-gbp"
+    ],
+    "categories": [
+        "waste",
+        "environmental-services",
+        "billing",
+        "metering"
+    ],
+    "meta": {
+        "complexity": 5,
+        "trigger": "mixed",
+        "design_pattern": "compute-metering",
+        "industries": [
+            "waste-management",
+            "environmental-services"
+        ],
+        "provides": {
+            "instruments": [
+                "WASTE_MOVEMENT",
+                "TONNE_WASTE"
+            ],
+            "account_types": [
+                "MOVEMENT_METERED",
+                "TONNAGE_METERED",
+                "MOVEMENT_ALLOWANCE",
+                "TONNAGE_ALLOWANCE",
+                "WASTE_BILLING",
+                "REVENUE_WASTE"
+            ],
+            "sagas": [
+                "record_waste_movement",
+                "meter_billing",
+                "weighbridge_true_up",
+                "generate_waste_invoice"
+            ],
+            "valuation_rules": [
+                "waste_movement_std",
+                "waste_movement_haz",
+                "waste_tonne"
+            ],
+            "triggers": [
+                "webhook:waste_movement_completed",
+                "webhook:weighbridge_actual",
+                "event:position-keeping.transaction-captured.v1",
+                "scheduled:monthly_waste_billing"
+            ]
+        },
+        "requires": {
+            "instruments": [
+                "GBP"
+            ],
+            "market_data": [
+                "WASTE_MOVEMENT_STD_RATE",
+                "WASTE_MOVEMENT_HAZ_RATE",
+                "WASTE_TONNE_RATE",
+                "WASTE_BASE_FEE",
+                "WASTE_INCLUDED_MOVEMENTS",
+                "WASTE_INCLUDED_TONNES"
+            ]
+        },
+        "composes_with": [
+            "payment-gateway-stripe",
+            "kyc-compliance"
+        ],
+        "conflicts_with": [],
+        "extends": []
+    },
+    "files": [
+        {
+            "path": "patterns/payg-waste-tracking/manifest-fragment.yaml",
+            "type": "registry:file",
+            "target": "~/manifest-fragment.yaml"
+        },
+        {
+            "path": "patterns/payg-waste-tracking/record_waste_movement.star",
+            "type": "registry:file",
+            "target": "~/sagas/record_waste_movement.star"
+        },
+        {
+            "path": "patterns/payg-waste-tracking/meter_billing.star",
+            "type": "registry:file",
+            "target": "~/sagas/meter_billing.star"
+        },
+        {
+            "path": "patterns/payg-waste-tracking/weighbridge_true_up.star",
+            "type": "registry:file",
+            "target": "~/sagas/weighbridge_true_up.star"
+        },
+        {
+            "path": "patterns/payg-waste-tracking/generate_waste_invoice.star",
+            "type": "registry:file",
+            "target": "~/sagas/generate_waste_invoice.star"
+        }
+    ]
+}

@@ -550,6 +550,17 @@ func buildSeedInputData() *starlark.Dict {
 
 	seeds := map[string]starlark.Value{
 		"account_id":           starlark.String("acc-001"),
+		"actual_tonnes":        starlark.String("0.9"),
+		"billing_account":      starlark.String("acc-billing"),
+		"declared_tonnes":      starlark.String("0.8"),
+		"ewc_chapter":          starlark.String("17"),
+		"is_estimated":         starlark.Bool(true),
+		"is_hazardous":         starlark.Bool(false),
+		"movement_account":     starlark.String("acc-movement"),
+		"movement_id":          starlark.String("mv-001"),
+		"tonnage_account":      starlark.String("acc-tonnage"),
+		"tonnes":               starlark.String("0.8"),
+		"weighbridge_ticket":   starlark.String("wb-001"),
 		"amount_cents":         starlark.MakeInt(10000),
 		"amount_per_unit":      starlark.String("0.15"),
 		"billing_period":       starlark.String("2026-03"),
