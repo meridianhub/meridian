@@ -8,6 +8,7 @@ import { useDocumentTitle } from '@/hooks/use-document-title'
 import { isBaseDomain, getTenantSlugFromSubdomain, formatSlugAsDisplayName } from '@/lib/tenant-utils'
 import { ProviderButton } from '@/components/auth/provider-button'
 import { AuthDivider } from '@/components/auth/auth-divider'
+import { MeridianMark } from '@/components/layout/logo'
 
 function isBareDomain(): boolean {
   return isBaseDomain(window.location.hostname)
@@ -102,6 +103,7 @@ export function LoginPage() {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="w-full max-w-sm space-y-6 px-4 text-center">
+          <MeridianMark className="mx-auto size-10 text-foreground" />
           <h1 className="text-2xl font-semibold">{consoleName}</h1>
           <p className="mt-2 text-muted-foreground">
             Please access your organization&apos;s login page at:
@@ -124,12 +126,13 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center">
       <div className="w-full max-w-sm space-y-6 px-4">
         <div className="text-center">
+          <MeridianMark className="mx-auto mb-4 size-10 text-foreground" />
           <h1 className="text-2xl font-semibold">{consoleName}</h1>
           <p className="mt-2 text-muted-foreground">Please sign in to continue.</p>
         </div>
 
         {justRegistered && (
-          <p role="status" className="rounded-md bg-green-50 px-4 py-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+          <p role="status" className="rounded-md border border-success/40 bg-success-muted px-4 py-3 text-sm text-success-foreground">
             Account created. Sign in to get started.
           </p>
         )}

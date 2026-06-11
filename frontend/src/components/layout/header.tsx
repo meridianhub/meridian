@@ -11,6 +11,7 @@ import { useTenantContext } from '@/contexts/tenant-context'
 import { formatSlugAsDisplayName } from '@/lib/tenant-utils'
 import { TenantSelector } from '@/components/layout/tenant-selector'
 import { ThemeToggle } from '@/components/layout/theme-toggle'
+import { MeridianMark } from '@/components/layout/logo'
 
 interface HeaderProps {
   onMenuToggle: () => void
@@ -50,7 +51,8 @@ export function Header({ onMenuToggle, sidebarOpen, sidebarId }: HeaderProps) {
       </Button>
 
       <div className="flex items-center gap-2">
-        <span className="font-semibold text-foreground">{brandName}</span>
+        <MeridianMark className="size-7 shrink-0 text-foreground" />
+        <span className="font-serif font-semibold text-foreground">{brandName}</span>
       </div>
 
       <div className="ml-auto flex items-center gap-4">

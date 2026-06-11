@@ -33,9 +33,10 @@ const STATUS_MAP: Record<string, StatusVariant> = {
   APPLIED: 'success',
   PARTIAL: 'warning',
   ROLLED_BACK: 'warning',
-  // Position quality ladder
+  // Position quality ladder — estimate-quality data is amber, actuals are
+  // credit green (ADR-0017: COEFFICIENT maps to ESTIMATE quality)
   ESTIMATE: 'warning',
-  COEFFICIENT: 'info',
+  COEFFICIENT: 'warning',
   ACTUAL: 'success',
   REVISED: 'info',
   // Invoice statuses

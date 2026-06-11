@@ -1,19 +1,12 @@
-<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <g transform="translate(16,16)">
-    <!-- Outer circle -->
-    <circle cx="0" cy="0" r="14" fill="none" stroke="#1a365d" stroke-width="2.5"/>
-    <!-- Meridian lines -->
-    <ellipse cx="0" cy="0" rx="5" ry="14" fill="none" stroke="#1a365d" stroke-width="1.5" opacity="0.7"/>
-    <ellipse cx="0" cy="0" rx="10" ry="14" fill="none" stroke="#1a365d" stroke-width="1.5" opacity="0.6"/>
-    <!-- Equator -->
-    <ellipse cx="0" cy="0" rx="14" ry="5" fill="none" stroke="#1a365d" stroke-width="1.5" opacity="0.7"/>
-    <!-- Central hub -->
-    <circle cx="0" cy="0" r="3" fill="#1a365d"/>
-    <circle cx="0" cy="0" r="1.5" fill="#38a169"/>
-    <!-- Corner nodes -->
-    <circle cx="10" cy="0" r="2" fill="#38a169"/>
-    <circle cx="-10" cy="0" r="2" fill="#38a169"/>
-    <circle cx="0" cy="10" r="2" fill="#38a169"/>
-    <circle cx="0" cy="-10" r="2" fill="#38a169"/>
-  </g>
+<svg width="32" height="32" viewBox="0 0 50 50" xmlns="http://www.w3.org/2000/svg">
+  <!-- Butterfly ledger mark on a paper tile so it reads on dark browser chrome.
+       Strokes are slightly heavier than the header mark for 16px legibility.
+       Body = the meridian line; left wings outlined = debit, right wings
+       filled credit green = credit. -->
+  <rect width="50" height="50" rx="11" fill="#faf7f1"/>
+  <line x1="25" y1="7" x2="25" y2="43" stroke="#1c2433" stroke-width="2.8" stroke-linecap="round"/>
+  <path d="M22.5 23 C15 11, 5.5 7.5, 4.5 13 C3.5 19.5, 11 26, 22.5 27.5 Z" fill="none" stroke="#1c2433" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="M22.5 30.5 C15.5 30, 9.5 34, 10.5 38.5 C11.5 42.5, 19 41.5, 22.5 34.5 Z" fill="none" stroke="#1c2433" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="M27.5 23 C35 11, 44.5 7.5, 45.5 13 C46.5 19.5, 39 26, 27.5 27.5 Z" fill="#1e7a4f" stroke="#1e7a4f" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="M27.5 30.5 C34.5 30, 40.5 34, 39.5 38.5 C38.5 42.5, 31 41.5, 27.5 34.5 Z" fill="#1e7a4f" stroke="#1e7a4f" stroke-width="2.6" stroke-linejoin="round"/>
 </svg>

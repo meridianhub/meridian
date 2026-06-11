@@ -16,8 +16,10 @@ const QUALITY_LEVELS: Record<QualityLevel, QualityConfig> = {
     label: 'Estimate',
   },
   COEFFICIENT: {
+    // COEFFICIENT is a data source mapping to ESTIMATE quality (ADR-0017),
+    // so it takes the amber estimate-quality treatment
     icon: TrendingUp,
-    colorClass: 'text-info-foreground bg-info-muted border-info/30',
+    colorClass: 'text-warning-foreground bg-warning-muted border-warning/30',
     label: 'Coefficient',
   },
   ACTUAL: {
