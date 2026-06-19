@@ -454,6 +454,18 @@ func buildCookbookPredeclared(t *testing.T, schemaReg *schema.Registry) starlark
 		"gpu_hours":          starlark.Float(1.0),
 		"gpu_type":           starlark.String("A100"),
 		"job_id":             starlark.String("job-test"),
+		// Waste tracking patterns
+		"movement_id":        starlark.String("mv-test"),
+		"movement_account":   starlark.String("acct-movement"),
+		"tonnage_account":    starlark.String("acct-tonnage"),
+		"tonnes":             starlark.Float(0.8),
+		"is_hazardous":       starlark.Bool(false),
+		"is_estimated":       starlark.Bool(true),
+		"ewc_chapter":        starlark.String("17"),
+		"declared_tonnes":    starlark.Float(0.8),
+		"actual_tonnes":      starlark.Float(0.9),
+		"weighbridge_ticket": starlark.String("wb-test"),
+		"billing_account":    starlark.String("acct-billing"),
 		// Phantom cost basis / corporate actions
 		"amount_per_unit": starlark.Float(1.0),
 		"ex_date":         starlark.String("2026-01-01"),
