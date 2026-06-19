@@ -1,6 +1,6 @@
 # Hotspot: `scripts/demo.sh`
 
-_First flagged: 2026-06-04. Last seen: 2026-06-08. Status: persistent._
+_First flagged: 2026-06-04. Last seen: 2026-06-19. Status: persistent._
 
 ## Current metrics
 
@@ -15,7 +15,7 @@ _First flagged: 2026-06-04. Last seen: 2026-06-08. Status: persistent._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-06-08 | 1113 | 118.0 | 6 | persistent |
+| 2026-06-19 | 1113 | 118.0 | 6 | persistent |
 
 ## Briefing for editing this file
 

@@ -66,3 +66,14 @@
 [Full report](./assess-report.md)
 
 ---
+## 2026-06-19 (v1.46.2)
+
+- **Files scored:** 4088
+- **AI Readiness:** 7.5 / 8 (Exemplary / AI-Native)
+- **Instructions grade:** A
+- **Hotspot transitions:** 0 graduated, 0 regressed, 0 new, 10 persistent
+- **Top action:** Independently review scripts/doctor.sh's co-introduced test, then split the 803-line accretion-only script into sourced modules
+
+[Full report](./assess-report.md)
+
+---

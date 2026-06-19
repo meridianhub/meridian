@@ -1,6 +1,6 @@
 # Hotspot: `services/current-account/service/grpc_service_test.go`
 
-_First flagged: 2026-05-22. Last seen: 2026-06-08. Status: persistent._
+_First flagged: 2026-05-22. Last seen: 2026-06-19. Status: persistent._
 
 ## Current metrics
 
@@ -15,7 +15,7 @@ _First flagged: 2026-05-22. Last seen: 2026-06-08. Status: persistent._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-06-08 | 1427 | 138.0 | 27 | persistent |
+| 2026-06-19 | 1427 | 138.0 | 27 | persistent |
 
 ## Briefing for editing this file
 
