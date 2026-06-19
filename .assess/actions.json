@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "actions": [
+    {
+      "rank": 1,
+      "action": "Independently review scripts/doctor.sh's co-introduced test, then split the 803-line accretion-only script into sourced modules",
+      "layer": 5,
+      "effort": "medium",
+      "files": [
+        "scripts/doctor.sh"
+      ],
+      "first_step": "Open scripts/doctor.sh (803 LOC, at the 800 watch line, accretion-only); confirm its test was written against intended behaviour, not the script's own output",
+      "done_when": "A human has signed off the test as independent; doctor.sh is split so no single file exceeds the 800-line ratchet; go test ./tests/architecture -run Size stays green",
+      "scope_fence": "Only scripts/doctor.sh + its test + any extracted scripts/doctor.d/*.sh; no behaviour change to the health checks themselves"
+    },
+    {
+      "rank": 2,
+      "action": "Split api/jsonschema/manifest.v1.schema.json (1593 LOC, accretion-only) into $ref-linked sub-schemas",
+      "layer": 2,
+      "effort": "medium",
+      "files": [
+        "api/jsonschema/manifest.v1.schema.json"
+      ],
+      "first_step": "Extract repeated definition blocks into $defs / referenced files and re-point with $ref",
+      "done_when": "The schema validates identically (manifest validation tests pass) and no single schema file exceeds ~800 LOC",
+      "scope_fence": "Only the schema files + $ref wiring; do not change any validation semantics or accepted manifest shapes"
+    },
+    {
+      "rank": 3,
+      "action": "Delete the obsolete bare t.Skip markers that cap L5, and action the stale TODO markers in cmd/meridian/main.go",
+      "layer": 5,
+      "effort": "small",
+      "files": [
+        "cmd/meridian/main.go"
+      ],
+      "first_step": "Remove repository_test.go:381/420 skips (database constraints now prevent corrupted currency data, survived 22 edits); fix-or-delete grpc_service_test.go:2438 (known-flaky idempotency, survived 17); ticket-or-delete the cmd/meridian/main.go markers",
+      "done_when": "No bare (unlinked) skip survives in the named files; go test ./... green",
+      "scope_fence": "Only delete skips whose guarded scenario is genuinely obsolete or whose flake is fixed; keep legitimate short-mode / Kafka-availability conditional skips"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Hotspot: `frontend/src/App.tsx`
 
-_First flagged: 2026-05-29. Last seen: 2026-06-08. Status: persistent._
+_First flagged: 2026-05-29. Last seen: 2026-06-19. Status: persistent._
 
 ## Current metrics
 
@@ -15,7 +15,7 @@ _First flagged: 2026-05-29. Last seen: 2026-06-08. Status: persistent._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-06-08 | 289 | 91.0 | 66 | persistent |
+| 2026-06-19 | 289 | 91.0 | 66 | persistent |
 
 ## Briefing for editing this file
 
@@ -25,5 +25,4 @@ Hotspot (persistent). 289 LOC, max cyclomatic complexity 91.0, 66 commits in chu
 
 ## Suggested actions
 
-- Request human (non-author) review of the co-located tests - code and tests born in the same commit may verify internal consistency, not independent behaviour
-
+This file is flagged but outside this run's Top 3. See the report's Top 3 Actions, or run a focused /assess pass for file-specific guidance.

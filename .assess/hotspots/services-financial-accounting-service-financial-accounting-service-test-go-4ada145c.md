@@ -1,6 +1,6 @@
 # Hotspot: `services/financial-accounting/service/financial_accounting_service_test.go`
 
-_First flagged: 2026-06-04. Last seen: 2026-06-08. Status: persistent._
+_First flagged: 2026-06-04. Last seen: 2026-06-19. Status: persistent._
 
 ## Current metrics
 
@@ -15,7 +15,7 @@ _First flagged: 2026-06-04. Last seen: 2026-06-08. Status: persistent._
 
 | Run date | LOC | CCN | Commits | Status |
 |----------|-----|-----|---------|--------|
-| 2026-06-08 | 1943 | 116.0 | 11 | persistent |
+| 2026-06-19 | 1943 | 116.0 | 11 | persistent |
 
 ## Briefing for editing this file
 

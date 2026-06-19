@@ -1,25 +1,25 @@
 {
-  "plugin_version": "1.38.3",
-  "files_scored": 4050,
+  "plugin_version": "1.46.2",
+  "files_scored": 4088,
   "scoring_coverage": {
-    "lizard": 3313,
-    "scc": 737
+    "lizard": 3350,
+    "scc": 738
   },
   "churn_window": "commits (last 12mo)",
   "churn_degenerate": false,
   "loc": {
     "p50": 134.0,
-    "p95": 597.0999999999995,
+    "p95": 597.2999999999993,
     "max": 3144.0,
-    "total": 802688
+    "total": 811031
   },
   "est_tokens": {
-    "p50": 1402.0,
-    "p95": 6298.099999999999,
+    "p50": 1412.0,
+    "p95": 6298.299999999999,
     "max": 38671.0,
-    "total": 8693895,
+    "total": 8789937,
     "budget": {
-      "total": 8693895,
+      "total": 8789937,
       "budget": 200000,
       "budget_basis": "estimate (~4 chars/token, documented default)",
       "chars_per_token": 4,
@@ -28,11 +28,11 @@
       "over_budget_subtrees": [
         {
           "path": "services",
-          "est_tokens": 4701638
+          "est_tokens": 4782291
         },
         {
           "path": "shared",
-          "est_tokens": 1110056
+          "est_tokens": 1123267
         },
         {
           "path": "docs",
@@ -40,7 +40,7 @@
         },
         {
           "path": "frontend",
-          "est_tokens": 775859
+          "est_tokens": 777886
         },
         {
           "path": "api",
@@ -56,13 +56,13 @@
   "ccn": {
     "basis": "file-aggregate",
     "p50": 14.0,
-    "p95": 74.54999999999973,
+    "p95": 74.0,
     "max": 336.0
   },
   "fn_ccn": {
     "basis": "per-function",
     "source": "lizard-only",
-    "function_count": 47452,
+    "function_count": 48106,
     "p50": 1.0,
     "p95": 6.0,
     "max": 84.0

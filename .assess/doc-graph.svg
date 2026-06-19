@@ -710,513 +710,513 @@
 <line x1="718.3" y1="904.3" x2="451.1" y2="893.9" stroke="#9aa0a6" stroke-width="1.2" opacity="0.6" marker-end="url(#arrow)"/>
 <line x1="718.3" y1="904.3" x2="657.3" y2="922.7" stroke="#9aa0a6" stroke-width="1.2" opacity="0.6" marker-end="url(#arrow)"/>
 <circle cx="740.1" cy="798.2" r="7.3" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>.githooks/README.md
-108 lines · in 1 · out 0 · reachable · 10d stale, subject churn 2</title></circle>
-<circle cx="723.1" cy="810.5" r="13.1" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>.github/claude-review-instructions.md
-800 lines · in 1 · out 0 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="666.9" cy="632.8" r="5.0" fill="#fef1de" stroke="#0072B2" stroke-width="3.5"><title>AGENTS.md
-10 lines · in 0 · out 1 · entry · 10d stale, subject churn 8696</title></circle>
-<circle cx="722.9" cy="699.9" r="7.8" fill="#ef6749" stroke="#b8b8b8" stroke-width="1.0"><title>CHANGELOG.md
-141 lines · in 1 · out 4 · reachable · 124d stale, subject churn 8696</title></circle>
-<circle cx="705.0" cy="821.4" r="5.2" fill="#f4744e" stroke="#b8b8b8" stroke-width="1.0"><title>CLA.md
-15 lines · in 1 · out 0 · reachable · 116d stale, subject churn 8696</title></circle>
-<circle cx="530.9" cy="663.7" r="12.2" fill="#fff7ec" stroke="#0072B2" stroke-width="3.5"><title>CLAUDE.md
-650 lines · in 1 · out 6 · entry · 0d stale, subject churn 8696</title></circle>
+108 lines · in 1 · out 0 · reachable · 21d stale, subject churn 2</title></circle>
+<circle cx="723.1" cy="810.5" r="13.1" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>.github/claude-review-instructions.md
+800 lines · in 1 · out 0 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="666.9" cy="632.8" r="5.0" fill="#feebcf" stroke="#0072B2" stroke-width="3.5"><title>AGENTS.md
+10 lines · in 0 · out 1 · entry · 21d stale, subject churn 8751</title></circle>
+<circle cx="722.9" cy="699.9" r="7.8" fill="#ec5e43" stroke="#b8b8b8" stroke-width="1.0"><title>CHANGELOG.md
+141 lines · in 1 · out 4 · reachable · 135d stale, subject churn 8751</title></circle>
+<circle cx="705.0" cy="821.4" r="5.2" fill="#f16d4b" stroke="#b8b8b8" stroke-width="1.0"><title>CLA.md
+15 lines · in 1 · out 0 · reachable · 127d stale, subject churn 8751</title></circle>
+<circle cx="530.9" cy="663.7" r="12.2" fill="#fef1de" stroke="#0072B2" stroke-width="3.5"><title>CLAUDE.md
+650 lines · in 1 · out 6 · entry · 10d stale, subject churn 8751</title></circle>
 <circle cx="686.0" cy="830.6" r="6.9" fill="#800000" stroke="#b8b8b8" stroke-width="1.0"><title>CODE_OF_CONDUCT.md
-81 lines · in 1 · out 1 · reachable · 200d stale, subject churn 8696</title></circle>
-<circle cx="644.1" cy="760.7" r="15.3" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>CONTRIBUTING.md
-1232 lines · in 3 · out 6 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="572.1" cy="530.5" r="8.6" fill="#d3d2d7" stroke="#0072B2" stroke-width="3.5"><title>README.md
-206 lines · in 1 · out 4 · entry · 0d stale, subject churn 400</title></circle>
-<circle cx="706.7" cy="909.1" r="9.4" fill="#f06a4a" stroke="#b8b8b8" stroke-width="1.0"><title>SECURITY.md
-280 lines · in 2 · out 3 · reachable · 122d stale, subject churn 8696</title></circle>
+81 lines · in 1 · out 1 · reachable · 211d stale, subject churn 8751</title></circle>
+<circle cx="644.1" cy="760.7" r="15.3" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>CONTRIBUTING.md
+1232 lines · in 3 · out 6 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="572.1" cy="530.5" r="8.6" fill="#d3d2d6" stroke="#0072B2" stroke-width="3.5"><title>README.md
+206 lines · in 1 · out 4 · entry · 11d stale, subject churn 400</title></circle>
+<circle cx="706.7" cy="909.1" r="9.4" fill="#ee6347" stroke="#b8b8b8" stroke-width="1.0"><title>SECURITY.md
+280 lines · in 2 · out 3 · reachable · 133d stale, subject churn 8751</title></circle>
 <circle cx="666.4" cy="838.1" r="9.6" fill="#d0cdd2" stroke="#b8b8b8" stroke-width="1.0"><title>api/proto/README.md
-307 lines · in 3 · out 1 · reachable · 178d stale, subject churn 159</title></circle>
+307 lines · in 3 · out 1 · reachable · 189d stale, subject churn 159</title></circle>
 <circle cx="544.6" cy="763.5" r="6.0" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>cookbook/README.md
-37 lines · in 2 · out 2 · reachable · 0d stale, subject churn 14</title></circle>
-<circle cx="646.1" cy="843.9" r="9.5" fill="#fc9763" stroke="#b8b8b8" stroke-width="1.0"><title>cookbook/docs/authoring-components.md
-288 lines · in 1 · out 0 · reachable · 95d stale, subject churn 8696</title></circle>
-<circle cx="625.4" cy="847.9" r="11.2" fill="#fca36d" stroke="#b8b8b8" stroke-width="1.0"><title>cookbook/docs/authoring-patterns.md
-495 lines · in 1 · out 2 · reachable · 88d stale, subject churn 8696</title></circle>
+37 lines · in 2 · out 2 · reachable · 11d stale, subject churn 14</title></circle>
+<circle cx="646.1" cy="843.9" r="9.5" fill="#fb8c58" stroke="#b8b8b8" stroke-width="1.0"><title>cookbook/docs/authoring-components.md
+288 lines · in 1 · out 0 · reachable · 106d stale, subject churn 8751</title></circle>
+<circle cx="625.4" cy="847.9" r="11.2" fill="#fc9964" stroke="#b8b8b8" stroke-width="1.0"><title>cookbook/docs/authoring-patterns.md
+495 lines · in 1 · out 2 · reachable · 99d stale, subject churn 8751</title></circle>
 <circle cx="604.5" cy="850.1" r="5.5" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>deploy/README.md
-23 lines · in 1 · out 4 · reachable · 0d stale, subject churn 4</title></circle>
+23 lines · in 1 · out 4 · reachable · 11d stale, subject churn 4</title></circle>
 <circle cx="694.9" cy="913.4" r="9.5" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>deploy/demo/README.md
-290 lines · in 1 · out 0 · reachable · 83d stale, subject churn 10</title></circle>
-<circle cx="682.9" cy="917.3" r="9.6" fill="#fa8756" stroke="#b8b8b8" stroke-width="1.0"><title>deploy/demo/cloudflare-setup-checklist.md
-300 lines · in 1 · out 0 · reachable · 104d stale, subject churn 8696</title></circle>
-<circle cx="670.8" cy="920.7" r="7.2" fill="#fca06b" stroke="#b8b8b8" stroke-width="1.0"><title>deploy/demo/dex-identity-migration-plan.md
-97 lines · in 1 · out 0 · reachable · 90d stale, subject churn 8696</title></circle>
-<circle cx="658.6" cy="923.6" r="9.5" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>deploy/demo/pg-migration-compatibility-report.md
-290 lines · in 1 · out 0 · reachable · 102d stale, subject churn 8696</title></circle>
-<circle cx="583.4" cy="850.4" r="5.4" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>deployments/k8s/README.md
-20 lines · in 1 · out 2 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="646.3" cy="926.0" r="8.5" fill="#bf100a" stroke="#b8b8b8" stroke-width="1.0"><title>deployments/k8s/audit-consumer/README.md
-197 lines · in 2 · out 0 · reachable · 167d stale, subject churn 8696</title></circle>
+290 lines · in 1 · out 0 · reachable · 94d stale, subject churn 10</title></circle>
+<circle cx="682.9" cy="917.3" r="9.6" fill="#f77f53" stroke="#b8b8b8" stroke-width="1.0"><title>deploy/demo/cloudflare-setup-checklist.md
+300 lines · in 1 · out 0 · reachable · 115d stale, subject churn 8751</title></circle>
+<circle cx="670.8" cy="920.7" r="7.2" fill="#fc9661" stroke="#b8b8b8" stroke-width="1.0"><title>deploy/demo/dex-identity-migration-plan.md
+97 lines · in 1 · out 0 · reachable · 101d stale, subject churn 8751</title></circle>
+<circle cx="658.6" cy="923.6" r="9.5" fill="#f88254" stroke="#b8b8b8" stroke-width="1.0"><title>deploy/demo/pg-migration-compatibility-report.md
+290 lines · in 1 · out 0 · reachable · 113d stale, subject churn 8751</title></circle>
+<circle cx="583.4" cy="850.4" r="5.4" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>deployments/k8s/README.md
+20 lines · in 1 · out 2 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="646.3" cy="926.0" r="8.5" fill="#be0f09" stroke="#b8b8b8" stroke-width="1.0"><title>deployments/k8s/audit-consumer/README.md
+197 lines · in 2 · out 0 · reachable · 177d stale, subject churn 8751</title></circle>
 <circle cx="633.9" cy="928.0" r="8.2" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>deployments/k8s/policies/tests/README.md
-174 lines · in 1 · out 0 · reachable · 159d stale, subject churn 1</title></circle>
-<circle cx="462.5" cy="707.3" r="7.3" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/README.md
-107 lines · in 1 · out 52 · reachable · 0d stale, subject churn 8696</title></circle>
+174 lines · in 1 · out 0 · reachable · 170d stale, subject churn 1</title></circle>
+<circle cx="462.5" cy="707.3" r="7.3" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/README.md
+107 lines · in 1 · out 52 · reachable · 11d stale, subject churn 8751</title></circle>
 <circle cx="621.4" cy="929.5" r="6.4" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0001-record-architecture-decisions.md
-54 lines · in 2 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
-<circle cx="562.4" cy="848.9" r="12.7" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0002-microservices-per-bian-domain.md
-731 lines · in 30 · out 10 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="608.9" cy="930.4" r="11.4" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0003-database-schema-migrations.md
-525 lines · in 10 · out 5 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="541.6" cy="845.6" r="14.7" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0004-event-schema-evolution.md
-1115 lines · in 16 · out 4 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="596.3" cy="930.9" r="12.8" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0005-adapter-pattern-layer-translation.md
-757 lines · in 22 · out 2 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="583.7" cy="930.9" r="13.2" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0006-tilt-local-development.md
-812 lines · in 5 · out 2 · reachable · 10d stale, subject churn 8696</title></circle>
+54 lines · in 2 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
+<circle cx="562.4" cy="848.9" r="12.7" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0002-microservices-per-bian-domain.md
+731 lines · in 30 · out 10 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="608.9" cy="930.4" r="11.4" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0003-database-schema-migrations.md
+525 lines · in 10 · out 5 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="541.6" cy="845.6" r="14.7" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0004-event-schema-evolution.md
+1115 lines · in 16 · out 4 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="596.3" cy="930.9" r="12.8" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0005-adapter-pattern-layer-translation.md
+757 lines · in 22 · out 2 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="583.7" cy="930.9" r="13.2" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0006-tilt-local-development.md
+812 lines · in 5 · out 2 · reachable · 21d stale, subject churn 8751</title></circle>
 <circle cx="571.2" cy="930.4" r="8.7" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0007-raw-yaml-over-helm-for-initial-development.md
-216 lines · in 1 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
+216 lines · in 1 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
 <circle cx="521.1" cy="840.5" r="10.4" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0008-defensive-testing-standards.md
-402 lines · in 2 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
-<circle cx="501.2" cy="833.6" r="13.2" fill="#c0120b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0009-application-level-audit-logging.md
-813 lines · in 10 · out 1 · reachable · 166d stale, subject churn 8696</title></circle>
-<circle cx="558.6" cy="929.5" r="9.9" fill="#b90905" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0010-grpc-client-side-load-balancing.md
-331 lines · in 4 · out 0 · reachable · 171d stale, subject churn 8696</title></circle>
-<circle cx="546.2" cy="928.0" r="10.2" fill="#fc9964" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0011-iso-20022-compliance-via-adapter-layer.md
-368 lines · in 1 · out 2 · reachable · 94d stale, subject churn 8696</title></circle>
-<circle cx="533.8" cy="926.1" r="10.5" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0012-lien-based-fund-reservation.md
-411 lines · in 2 · out 2 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="521.4" cy="923.6" r="13.1" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0013-generic-asset-quantity-types.md
-804 lines · in 15 · out 3 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="509.2" cy="920.7" r="13.2" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0014-financial-instrument-reference-data.md
-821 lines · in 15 · out 3 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="497.1" cy="917.3" r="9.6" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0015-standard-service-directory-structure.md
-306 lines · in 14 · out 6 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="485.1" cy="913.5" r="9.5" fill="#b10000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0016-tenant-id-naming-strategy.md
-295 lines · in 8 · out 0 · reachable · 176d stale, subject churn 8696</title></circle>
-<circle cx="473.4" cy="909.1" r="15.9" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0017-temporal-quality-ladder.md
-1375 lines · in 7 · out 4 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="461.7" cy="904.3" r="14.3" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0018-settlement-reconciliation.md
-1027 lines · in 4 · out 5 · reachable · 0d stale, subject churn 8696</title></circle>
+402 lines · in 2 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
+<circle cx="501.2" cy="833.6" r="13.2" fill="#be0f09" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0009-application-level-audit-logging.md
+813 lines · in 10 · out 1 · reachable · 177d stale, subject churn 8751</title></circle>
+<circle cx="558.6" cy="929.5" r="9.9" fill="#b70604" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0010-grpc-client-side-load-balancing.md
+331 lines · in 4 · out 0 · reachable · 182d stale, subject churn 8751</title></circle>
+<circle cx="546.2" cy="928.0" r="10.2" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0011-iso-20022-compliance-via-adapter-layer.md
+368 lines · in 1 · out 2 · reachable · 105d stale, subject churn 8751</title></circle>
+<circle cx="533.8" cy="926.1" r="10.5" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0012-lien-based-fund-reservation.md
+411 lines · in 2 · out 2 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="521.4" cy="923.6" r="13.1" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0013-generic-asset-quantity-types.md
+804 lines · in 15 · out 3 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="509.2" cy="920.7" r="13.2" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0014-financial-instrument-reference-data.md
+821 lines · in 15 · out 3 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="497.1" cy="917.3" r="9.6" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0015-standard-service-directory-structure.md
+306 lines · in 14 · out 6 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="485.1" cy="913.5" r="9.5" fill="#af0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0016-tenant-id-naming-strategy.md
+295 lines · in 8 · out 0 · reachable · 187d stale, subject churn 8751</title></circle>
+<circle cx="473.4" cy="909.1" r="15.9" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0017-temporal-quality-ladder.md
+1375 lines · in 7 · out 4 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="461.7" cy="904.3" r="14.3" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0018-settlement-reconciliation.md
+1027 lines · in 4 · out 5 · reachable · 11d stale, subject churn 8751</title></circle>
 <circle cx="450.3" cy="899.1" r="10.1" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0019-resilient-client-patterns.md
-355 lines · in 5 · out 2 · reachable · 173d stale, subject churn 10</title></circle>
+355 lines · in 5 · out 2 · reachable · 184d stale, subject churn 10</title></circle>
 <circle cx="439.1" cy="893.4" r="9.0" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0020-per-service-audit-workers.md
-246 lines · in 6 · out 3 · reachable · 10d stale, subject churn 6</title></circle>
-<circle cx="428.1" cy="887.3" r="13.7" fill="#cb2115" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0021-kyc-aml-verification-provider-architecture.md
-906 lines · in 2 · out 5 · reachable · 158d stale, subject churn 8696</title></circle>
-<circle cx="417.4" cy="880.8" r="11.3" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0022-instrument-successor-lineage.md
-520 lines · in 1 · out 3 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="406.9" cy="873.9" r="8.4" fill="#d7301f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0023-balance-delegation-to-position-keeping.md
-190 lines · in 10 · out 5 · reachable · 150d stale, subject churn 8696</title></circle>
-<circle cx="396.7" cy="866.5" r="9.7" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0024-internal-bank-account-service.md
-315 lines · in 3 · out 3 · reachable · 102d stale, subject churn 8696</title></circle>
-<circle cx="386.8" cy="858.8" r="8.7" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0025-clearing-purpose-specialization.md
-212 lines · in 1 · out 2 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="377.2" cy="850.7" r="9.3" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0026-canonical-ingestion-contract.md
-275 lines · in 5 · out 2 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="367.9" cy="842.2" r="10.5" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0027-market-information-management.md
-411 lines · in 2 · out 2 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="482.0" cy="825.0" r="13.8" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0028-starlark-saga-cel-valuation.md
-932 lines · in 16 · out 9 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="359.0" cy="833.3" r="7.7" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0029-settlement-scheduler-architecture.md
-129 lines · in 1 · out 1 · reachable · 118d stale, subject churn 8696</title></circle>
-<circle cx="350.4" cy="824.2" r="8.1" fill="#f4754f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0030-kyc-aml-provider-selection.md
-162 lines · in 1 · out 3 · reachable · 115d stale, subject churn 8696</title></circle>
-<circle cx="342.2" cy="814.6" r="7.1" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0031-getbalance-nil-guard-retention.md
-91 lines · in 1 · out 2 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="334.4" cy="804.8" r="8.7" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0032-vanguard-json-transcoding-gateway.md
-217 lines · in 3 · out 2 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="326.9" cy="794.7" r="10.1" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0033-event-triggered-sagas.md
-355 lines · in 3 · out 6 · reachable · 10d stale, subject churn 8696</title></circle>
+246 lines · in 6 · out 3 · reachable · 21d stale, subject churn 6</title></circle>
+<circle cx="428.1" cy="887.3" r="13.7" fill="#c81c12" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0021-kyc-aml-verification-provider-architecture.md
+906 lines · in 2 · out 5 · reachable · 169d stale, subject churn 8751</title></circle>
+<circle cx="417.4" cy="880.8" r="11.3" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0022-instrument-successor-lineage.md
+520 lines · in 1 · out 3 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="406.9" cy="873.9" r="8.4" fill="#d32b1c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0023-balance-delegation-to-position-keeping.md
+190 lines · in 10 · out 5 · reachable · 161d stale, subject churn 8751</title></circle>
+<circle cx="396.7" cy="866.5" r="9.7" fill="#f88254" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0024-internal-bank-account-service.md
+315 lines · in 3 · out 3 · reachable · 113d stale, subject churn 8751</title></circle>
+<circle cx="386.8" cy="858.8" r="8.7" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0025-clearing-purpose-specialization.md
+212 lines · in 1 · out 2 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="377.2" cy="850.7" r="9.3" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0026-canonical-ingestion-contract.md
+275 lines · in 5 · out 2 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="367.9" cy="842.2" r="10.5" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0027-market-information-management.md
+411 lines · in 2 · out 2 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="482.0" cy="825.0" r="13.8" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0028-starlark-saga-cel-valuation.md
+932 lines · in 16 · out 9 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="359.0" cy="833.3" r="7.7" fill="#f06a4a" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0029-settlement-scheduler-architecture.md
+129 lines · in 1 · out 1 · reachable · 129d stale, subject churn 8751</title></circle>
+<circle cx="350.4" cy="824.2" r="8.1" fill="#f26e4b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0030-kyc-aml-provider-selection.md
+162 lines · in 1 · out 3 · reachable · 126d stale, subject churn 8751</title></circle>
+<circle cx="342.2" cy="814.6" r="7.1" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0031-getbalance-nil-guard-retention.md
+91 lines · in 1 · out 2 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="334.4" cy="804.8" r="8.7" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0032-vanguard-json-transcoding-gateway.md
+217 lines · in 3 · out 2 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="326.9" cy="794.7" r="10.1" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0033-event-triggered-sagas.md
+355 lines · in 3 · out 6 · reachable · 21d stale, subject churn 8751</title></circle>
 <circle cx="319.9" cy="784.3" r="8.2" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0034-position-compaction-strategy.md
-174 lines · in 1 · out 1 · reachable · 94d stale, subject churn 7</title></circle>
+174 lines · in 1 · out 1 · reachable · 104d stale, subject churn 7</title></circle>
 <circle cx="313.3" cy="773.6" r="7.8" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0035-multi-asset-purity.md
-140 lines · in 5 · out 0 · reachable · 93d stale, subject churn 2</title></circle>
-<circle cx="307.1" cy="762.7" r="8.2" fill="#fca771" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0036-embedded-dex-identity.md
-171 lines · in 1 · out 0 · reachable · 86d stale, subject churn 8696</title></circle>
-<circle cx="301.3" cy="751.5" r="9.1" fill="#fdc892" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0037-scheduler-attribution-design.md
-250 lines · in 1 · out 0 · reachable · 62d stale, subject churn 8696</title></circle>
-<circle cx="463.6" cy="814.8" r="8.7" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/README.md
-211 lines · in 4 · out 38 · reachable · 10d stale, subject churn 8696</title></circle>
+140 lines · in 5 · out 0 · reachable · 104d stale, subject churn 2</title></circle>
+<circle cx="307.1" cy="762.7" r="8.2" fill="#fc9c67" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0036-embedded-dex-identity.md
+171 lines · in 1 · out 0 · reachable · 97d stale, subject churn 8751</title></circle>
+<circle cx="301.3" cy="751.5" r="9.1" fill="#fdc08a" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/0037-scheduler-attribution-design.md
+250 lines · in 1 · out 0 · reachable · 73d stale, subject churn 8751</title></circle>
+<circle cx="463.6" cy="814.8" r="8.7" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/README.md
+211 lines · in 4 · out 38 · reachable · 21d stale, subject churn 8751</title></circle>
 <circle cx="295.9" cy="740.2" r="7.1" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/adr/template.md
-92 lines · in 1 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
-<circle cx="446.1" cy="803.0" r="9.3" fill="#fcae78" stroke="#b8b8b8" stroke-width="1.0"><title>docs/analysis/cmd-coverage-assessment.md
-267 lines · in 1 · out 0 · reachable · 82d stale, subject churn 8696</title></circle>
+92 lines · in 1 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
+<circle cx="446.1" cy="803.0" r="9.3" fill="#fca36d" stroke="#b8b8b8" stroke-width="1.0"><title>docs/analysis/cmd-coverage-assessment.md
+267 lines · in 1 · out 0 · reachable · 93d stale, subject churn 8751</title></circle>
 <circle cx="429.8" cy="789.7" r="9.7" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>docs/api/saga-validation.md
-314 lines · in 1 · out 0 · reachable · 70d stale, subject churn 105</title></circle>
-<circle cx="414.6" cy="775.0" r="13.5" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/api-contracts/current-account-contract.md
-864 lines · in 5 · out 6 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="400.8" cy="759.1" r="15.8" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/api-contracts/financial-accounting-contract.md
-1341 lines · in 3 · out 4 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="388.5" cy="742.1" r="16.7" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/api-contracts/position-keeping-contract.md
-1563 lines · in 3 · out 5 · reachable · 10d stale, subject churn 8696</title></circle>
+314 lines · in 1 · out 0 · reachable · 81d stale, subject churn 105</title></circle>
+<circle cx="414.6" cy="775.0" r="13.5" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/api-contracts/current-account-contract.md
+864 lines · in 5 · out 6 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="400.8" cy="759.1" r="15.8" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/api-contracts/financial-accounting-contract.md
+1341 lines · in 3 · out 4 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="388.5" cy="742.1" r="16.7" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/api-contracts/position-keeping-contract.md
+1563 lines · in 3 · out 5 · reachable · 21d stale, subject churn 8751</title></circle>
 <circle cx="377.6" cy="724.0" r="18.6" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/bian-service-boundaries.md
-2073 lines · in 13 · out 6 · reachable · 0d stale, subject churn 44</title></circle>
+2073 lines · in 13 · out 6 · reachable · 11d stale, subject churn 44</title></circle>
 <circle cx="368.4" cy="705.0" r="7.8" fill="#d0d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/boundary-migration-plan.md
-139 lines · in 2 · out 4 · reachable · 174d stale, subject churn 44</title></circle>
+139 lines · in 2 · out 4 · reachable · 185d stale, subject churn 44</title></circle>
 <circle cx="360.9" cy="685.4" r="14.4" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/data-model.md
-1048 lines · in 5 · out 7 · reachable · 10d stale, subject churn 44</title></circle>
+1048 lines · in 5 · out 7 · reachable · 21d stale, subject churn 44</title></circle>
 <circle cx="355.1" cy="665.1" r="16.6" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/event-driven-architecture.md
-1546 lines · in 8 · out 4 · reachable · 0d stale, subject churn 44</title></circle>
+1546 lines · in 8 · out 4 · reachable · 11d stale, subject churn 44</title></circle>
 <circle cx="480.3" cy="1079.4" r="8.1" fill="#d1d1d6" stroke="#1a1a1a" stroke-width="1.8" stroke-dasharray="3,2"><title>docs/architecture/self-referential-test-review.md
-165 lines · in 0 · out 0 · orphan · 0d stale, subject churn 44</title></circle>
+165 lines · in 0 · out 0 · orphan · 11d stale, subject churn 44</title></circle>
 <circle cx="351.1" cy="644.4" r="12.7" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/service-coupling-analysis.md
-737 lines · in 15 · out 6 · reachable · 0d stale, subject churn 44</title></circle>
-<circle cx="348.9" cy="623.5" r="12.5" fill="#d1d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/starlark-saga-architecture.md
-695 lines · in 9 · out 4 · reachable · 69d stale, subject churn 44</title></circle>
-<circle cx="429.1" cy="613.6" r="11.8" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture-layers.md
-592 lines · in 22 · out 5 · reachable · 0d stale, subject churn 8696</title></circle>
+737 lines · in 15 · out 6 · reachable · 11d stale, subject churn 44</title></circle>
+<circle cx="348.9" cy="623.5" r="12.5" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture/starlark-saga-architecture.md
+695 lines · in 9 · out 4 · reachable · 80d stale, subject churn 44</title></circle>
+<circle cx="429.1" cy="613.6" r="11.8" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/architecture-layers.md
+592 lines · in 22 · out 5 · reachable · 10d stale, subject churn 8751</title></circle>
 <circle cx="291.0" cy="728.6" r="10.2" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/ARCHITECTURE.md
-371 lines · in 2 · out 0 · reachable · 95d stale, subject churn 44</title></circle>
-<circle cx="286.6" cy="716.8" r="8.5" fill="#fc9763" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/DEMO_GUIDE.md
-195 lines · in 3 · out 0 · reachable · 95d stale, subject churn 8696</title></circle>
-<circle cx="348.6" cy="602.4" r="6.0" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/README.md
-40 lines · in 1 · out 9 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="282.6" cy="704.9" r="9.7" fill="#fc9763" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/audit-analysis-findings.md
-315 lines · in 1 · out 0 · reachable · 95d stale, subject churn 8696</title></circle>
-<circle cx="279.1" cy="692.9" r="12.1" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/authentication-integration.md
-636 lines · in 1 · out 1 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="276.1" cy="680.7" r="10.4" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/database-per-service-migration.md
-395 lines · in 2 · out 4 · reachable · 64d stale, subject churn 8696</title></circle>
+371 lines · in 2 · out 0 · reachable · 105d stale, subject churn 44</title></circle>
+<circle cx="286.6" cy="716.8" r="8.5" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/DEMO_GUIDE.md
+195 lines · in 3 · out 0 · reachable · 105d stale, subject churn 8751</title></circle>
+<circle cx="348.6" cy="602.4" r="6.0" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/README.md
+40 lines · in 1 · out 9 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="282.6" cy="704.9" r="9.7" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/audit-analysis-findings.md
+315 lines · in 1 · out 0 · reachable · 105d stale, subject churn 8751</title></circle>
+<circle cx="279.1" cy="692.9" r="12.1" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/authentication-integration.md
+636 lines · in 1 · out 1 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="276.1" cy="680.7" r="10.4" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/database-per-service-migration.md
+395 lines · in 2 · out 4 · reachable · 75d stale, subject churn 8751</title></circle>
 <circle cx="273.5" cy="668.4" r="10.0" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/immutability-audit.md
-352 lines · in 1 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
-<circle cx="271.4" cy="656.0" r="11.1" fill="#fc9763" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/panic-audit-inventory.md
-481 lines · in 2 · out 0 · reachable · 95d stale, subject churn 8696</title></circle>
+352 lines · in 1 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
+<circle cx="271.4" cy="656.0" r="11.1" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/panic-audit-inventory.md
+481 lines · in 2 · out 0 · reachable · 105d stale, subject churn 8751</title></circle>
 <circle cx="269.9" cy="643.5" r="9.1" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/rbac-testing-guide.md
-254 lines · in 1 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
+254 lines · in 1 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
 <circle cx="268.8" cy="631.0" r="7.9" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/archive/task-8-service-integration.md
-147 lines · in 1 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
+147 lines · in 1 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
 <circle cx="350.1" cy="581.4" r="8.8" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>docs/audit/frontend-backend-gaps.md
-222 lines · in 1 · out 0 · reachable · 102d stale, subject churn 55</title></circle>
+222 lines · in 1 · out 0 · reachable · 113d stale, subject churn 57</title></circle>
 <circle cx="353.4" cy="560.6" r="7.2" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>docs/audit/multi-asset-purity.md
-101 lines · in 1 · out 0 · reachable · 93d stale, subject churn 55</title></circle>
-<circle cx="358.5" cy="540.1" r="10.5" fill="#fdc58f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/audits/tenant-isolation-audit-2026-04-04.md
-405 lines · in 2 · out 0 · reachable · 65d stale, subject churn 8696</title></circle>
-<circle cx="365.4" cy="520.2" r="7.1" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/claude-code-skills.md
-92 lines · in 2 · out 13 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="374.0" cy="501.0" r="7.5" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/coupling-visualization-example.md
-116 lines · in 1 · out 2 · reachable · 201d stale, subject churn 8696</title></circle>
-<circle cx="457.1" cy="518.1" r="10.8" fill="#fde6c3" stroke="#b8b8b8" stroke-width="1.0"><title>docs/data-flows.md
-448 lines · in 6 · out 0 · reachable · 28d stale, subject churn 8696</title></circle>
-<circle cx="384.2" cy="482.6" r="9.7" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/demos/multi-organization-settlement.md
-313 lines · in 1 · out 3 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="396.0" cy="465.1" r="11.2" fill="#c1130c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/development/audit-adding-new-service.md
-508 lines · in 2 · out 4 · reachable · 165d stale, subject churn 8696</title></circle>
-<circle cx="409.3" cy="448.8" r="6.5" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/README.md
-59 lines · in 1 · out 21 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="424.0" cy="433.6" r="12.2" fill="#ef6749" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/adding-starlark-service-bindings.md
-653 lines · in 7 · out 3 · reachable · 124d stale, subject churn 8696</title></circle>
+101 lines · in 1 · out 0 · reachable · 104d stale, subject churn 57</title></circle>
+<circle cx="358.5" cy="540.1" r="10.5" fill="#fdbe87" stroke="#b8b8b8" stroke-width="1.0"><title>docs/audits/tenant-isolation-audit-2026-04-04.md
+405 lines · in 2 · out 0 · reachable · 76d stale, subject churn 8751</title></circle>
+<circle cx="365.4" cy="520.2" r="7.1" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/claude-code-skills.md
+92 lines · in 2 · out 13 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="374.0" cy="501.0" r="7.5" fill="#800000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/coupling-visualization-example.md
+116 lines · in 1 · out 2 · reachable · 211d stale, subject churn 8751</title></circle>
+<circle cx="457.1" cy="518.1" r="10.8" fill="#fddfb6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/data-flows.md
+448 lines · in 6 · out 0 · reachable · 38d stale, subject churn 8751</title></circle>
+<circle cx="384.2" cy="482.6" r="9.7" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/demos/multi-organization-settlement.md
+313 lines · in 1 · out 3 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="396.0" cy="465.1" r="11.2" fill="#bf100a" stroke="#b8b8b8" stroke-width="1.0"><title>docs/development/audit-adding-new-service.md
+508 lines · in 2 · out 4 · reachable · 176d stale, subject churn 8751</title></circle>
+<circle cx="409.3" cy="448.8" r="6.5" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/README.md
+59 lines · in 1 · out 21 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="424.0" cy="433.6" r="12.2" fill="#ec5e43" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/adding-starlark-service-bindings.md
+653 lines · in 7 · out 3 · reachable · 135d stale, subject churn 8751</title></circle>
 <circle cx="268.1" cy="618.4" r="11.6" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/ai-native-codebase-architecture.md
-559 lines · in 1 · out 2 · reachable · 80d stale, subject churn 4</title></circle>
-<circle cx="268.0" cy="605.9" r="9.1" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/calling-meridian-apis.md
-256 lines · in 2 · out 4 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="268.4" cy="593.3" r="8.9" fill="#ce2417" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/circuit-breaker-usage.md
-230 lines · in 3 · out 0 · reachable · 157d stale, subject churn 8696</title></circle>
-<circle cx="269.2" cy="580.8" r="8.2" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/cli-tools.md
-171 lines · in 1 · out 4 · reachable · 102d stale, subject churn 8696</title></circle>
-<circle cx="270.6" cy="568.3" r="8.6" fill="#a60000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/coupling-analysis.md
-201 lines · in 1 · out 0 · reachable · 182d stale, subject churn 8696</title></circle>
-<circle cx="272.4" cy="555.9" r="9.0" fill="#fcb07a" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/error-conventions.md
-245 lines · in 3 · out 0 · reachable · 81d stale, subject churn 8696</title></circle>
-<circle cx="274.7" cy="543.5" r="9.4" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/financial-accounting-proto.md
-285 lines · in 1 · out 2 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="277.5" cy="531.3" r="12.1" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/manifest-design-patterns.md
-641 lines · in 4 · out 4 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="280.8" cy="519.1" r="12.5" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/multi-asset-integration.md
-696 lines · in 1 · out 6 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="284.5" cy="507.1" r="17.6" fill="#fdc993" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/new-bian-service-checklist.md
-1790 lines · in 4 · out 14 · reachable · 61d stale, subject churn 8696</title></circle>
-<circle cx="288.7" cy="495.3" r="7.5" fill="#fcb07a" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/proto-conventions.md
-117 lines · in 1 · out 0 · reachable · 81d stale, subject churn 8696</title></circle>
-<circle cx="293.4" cy="483.6" r="10.1" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/repository-conventions.md
-359 lines · in 3 · out 2 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="298.5" cy="472.1" r="9.7" fill="#f16b4a" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/saga-validation.md
-309 lines · in 5 · out 4 · reachable · 121d stale, subject churn 8696</title></circle>
-<circle cx="304.1" cy="460.9" r="8.1" fill="#fcb07a" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/service-file-conventions.md
-166 lines · in 1 · out 2 · reachable · 81d stale, subject churn 8696</title></circle>
-<circle cx="310.1" cy="449.8" r="12.1" fill="#fc9763" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/starlark-built-ins-reference.md
-642 lines · in 2 · out 3 · reachable · 95d stale, subject churn 8696</title></circle>
-<circle cx="316.5" cy="439.0" r="14.2" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/starlark-style-guide.md
-999 lines · in 9 · out 3 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="323.4" cy="428.5" r="9.5" fill="#fc9964" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/testcontainers-usage.md
-297 lines · in 3 · out 0 · reachable · 94d stale, subject churn 8696</title></circle>
-<circle cx="330.6" cy="418.2" r="9.8" fill="#fcb07a" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/value-types.md
-321 lines · in 3 · out 1 · reachable · 81d stale, subject churn 8696</title></circle>
-<circle cx="439.9" cy="419.8" r="9.7" fill="#cb2115" stroke="#b8b8b8" stroke-width="1.0"><title>docs/integrations/kyc-aml-providers.md
-315 lines · in 1 · out 0 · reachable · 158d stale, subject churn 8696</title></circle>
+559 lines · in 1 · out 2 · reachable · 91d stale, subject churn 4</title></circle>
+<circle cx="268.0" cy="605.9" r="9.1" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/calling-meridian-apis.md
+256 lines · in 2 · out 4 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="268.4" cy="593.3" r="8.9" fill="#ca1f14" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/circuit-breaker-usage.md
+230 lines · in 3 · out 0 · reachable · 168d stale, subject churn 8751</title></circle>
+<circle cx="269.2" cy="580.8" r="8.2" fill="#f88254" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/cli-tools.md
+171 lines · in 1 · out 4 · reachable · 113d stale, subject churn 8751</title></circle>
+<circle cx="270.6" cy="568.3" r="8.6" fill="#a20000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/coupling-analysis.md
+201 lines · in 1 · out 0 · reachable · 193d stale, subject churn 8751</title></circle>
+<circle cx="272.4" cy="555.9" r="9.0" fill="#fca46f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/error-conventions.md
+245 lines · in 3 · out 0 · reachable · 92d stale, subject churn 8751</title></circle>
+<circle cx="274.7" cy="543.5" r="9.4" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/financial-accounting-proto.md
+285 lines · in 1 · out 2 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="277.5" cy="531.3" r="12.1" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/manifest-design-patterns.md
+641 lines · in 4 · out 4 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="280.8" cy="519.1" r="12.5" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/multi-asset-integration.md
+696 lines · in 1 · out 6 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="284.5" cy="507.1" r="17.6" fill="#fdc28b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/new-bian-service-checklist.md
+1790 lines · in 4 · out 14 · reachable · 72d stale, subject churn 8751</title></circle>
+<circle cx="288.7" cy="495.3" r="7.5" fill="#fca46f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/proto-conventions.md
+117 lines · in 1 · out 0 · reachable · 92d stale, subject churn 8751</title></circle>
+<circle cx="293.4" cy="483.6" r="10.1" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/repository-conventions.md
+359 lines · in 3 · out 2 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="298.5" cy="472.1" r="9.7" fill="#ef6548" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/saga-validation.md
+309 lines · in 5 · out 4 · reachable · 132d stale, subject churn 8751</title></circle>
+<circle cx="304.1" cy="460.9" r="8.1" fill="#fca46f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/service-file-conventions.md
+166 lines · in 1 · out 2 · reachable · 92d stale, subject churn 8751</title></circle>
+<circle cx="310.1" cy="449.8" r="12.1" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/starlark-built-ins-reference.md
+642 lines · in 2 · out 3 · reachable · 105d stale, subject churn 8751</title></circle>
+<circle cx="316.5" cy="439.0" r="14.2" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/starlark-style-guide.md
+999 lines · in 9 · out 3 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="323.4" cy="428.5" r="9.5" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/testcontainers-usage.md
+297 lines · in 3 · out 0 · reachable · 105d stale, subject churn 8751</title></circle>
+<circle cx="330.6" cy="418.2" r="9.8" fill="#fca46f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/guides/value-types.md
+321 lines · in 3 · out 1 · reachable · 92d stale, subject churn 8751</title></circle>
+<circle cx="439.9" cy="419.8" r="9.7" fill="#c81c12" stroke="#b8b8b8" stroke-width="1.0"><title>docs/integrations/kyc-aml-providers.md
+315 lines · in 1 · out 0 · reachable · 169d stale, subject churn 8751</title></circle>
 <circle cx="456.9" cy="407.5" r="9.1" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/local-documentation.md
-249 lines · in 2 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
-<circle cx="475.0" cy="396.6" r="8.0" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/mapping-layer/README.md
-151 lines · in 1 · out 2 · reachable · 10d stale, subject churn 8696</title></circle>
+249 lines · in 2 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
+<circle cx="475.0" cy="396.6" r="8.0" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/mapping-layer/README.md
+151 lines · in 1 · out 2 · reachable · 21d stale, subject churn 8751</title></circle>
 <circle cx="338.2" cy="408.2" r="8.3" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/mapping-layer/examples.md
-177 lines · in 1 · out 0 · reachable · 106d stale, subject churn 8</title></circle>
-<circle cx="346.3" cy="398.6" r="7.4" fill="#f88355" stroke="#b8b8b8" stroke-width="1.0"><title>docs/mapping-layer/troubleshooting.md
-114 lines · in 1 · out 0 · reachable · 106d stale, subject churn 8696</title></circle>
-<circle cx="494.0" cy="387.4" r="9.7" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/operations/audit-monitoring.md
-315 lines · in 3 · out 4 · reachable · 70d stale, subject churn 8696</title></circle>
+177 lines · in 1 · out 0 · reachable · 117d stale, subject churn 8</title></circle>
+<circle cx="346.3" cy="398.6" r="7.4" fill="#f67c51" stroke="#b8b8b8" stroke-width="1.0"><title>docs/mapping-layer/troubleshooting.md
+114 lines · in 1 · out 0 · reachable · 117d stale, subject churn 8751</title></circle>
+<circle cx="494.0" cy="387.4" r="9.7" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/operations/audit-monitoring.md
+315 lines · in 3 · out 4 · reachable · 81d stale, subject churn 8751</title></circle>
 <circle cx="535.9" cy="457.3" r="10.6" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/patterns.md
-426 lines · in 11 · out 0 · reachable · 28d stale, subject churn 8</title></circle>
-<circle cx="354.7" cy="389.2" r="24.0" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/001-universal-asset-system.md
-3868 lines · in 6 · out 2 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="363.4" cy="380.2" r="14.3" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/002-internal-bank-account.md
-1025 lines · in 4 · out 5 · reachable · 99d stale, subject churn 8696</title></circle>
-<circle cx="372.5" cy="371.5" r="10.9" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/003-meridian-edge.md
-455 lines · in 1 · out 3 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="381.9" cy="363.2" r="17.7" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/004-market-information-management.md
-1824 lines · in 3 · out 8 · reachable · 99d stale, subject churn 8696</title></circle>
-<circle cx="391.7" cy="355.3" r="16.6" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/005-durable-execution-engine.md
-1542 lines · in 4 · out 3 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="401.7" cy="347.8" r="18.7" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/006-starlark-saga-orchestration-core.md
-2103 lines · in 8 · out 3 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="412.1" cy="340.6" r="14.3" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/007-starlark-typed-service-clients.md
-1031 lines · in 2 · out 0 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="422.7" cy="333.9" r="16.3" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/008-starlark-service-bindings.md
-1462 lines · in 4 · out 6 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="433.5" cy="327.6" r="14.8" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/009-production-readiness-review.md
-1122 lines · in 1 · out 2 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="444.6" cy="321.7" r="11.9" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/010-starlark-testing-framework.md
-610 lines · in 1 · out 0 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="456.0" cy="316.2" r="21.8" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/011-valuation-service.md
-3063 lines · in 2 · out 6 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="467.5" cy="311.2" r="11.2" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/012-codebase-health-audit.md
-503 lines · in 1 · out 0 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="479.2" cy="306.7" r="15.8" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/013-reconciliation-service.md
-1341 lines · in 2 · out 2 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="491.1" cy="302.6" r="15.5" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/014-control-plane.md
-1269 lines · in 4 · out 3 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="503.1" cy="298.9" r="15.5" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/015-stripe-connect.md
-1281 lines · in 1 · out 5 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="515.3" cy="295.8" r="13.7" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/016-market-data-dynamic-pricing.md
-917 lines · in 2 · out 0 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="527.6" cy="293.1" r="11.7" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/017-reconciliation-grpc-wiring.md
-575 lines · in 4 · out 0 · reachable · 102d stale, subject churn 8696</title></circle>
-<circle cx="539.9" cy="290.9" r="9.2" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/018-current-account-withdrawal-persistence.md
-266 lines · in 1 · out 3 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="552.4" cy="289.2" r="9.1" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/019-internal-bank-account-position-keeping-client.md
-254 lines · in 1 · out 4 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="564.9" cy="288.0" r="10.6" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/020-party-kyc-aml-provider-integration.md
-417 lines · in 2 · out 3 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="577.4" cy="287.2" r="11.2" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/021-platform-scheduler.md
-508 lines · in 1 · out 0 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="590.0" cy="287.0" r="12.7" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/022-org-scoped-accounts.md
-740 lines · in 1 · out 5 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="602.5" cy="287.2" r="15.5" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/023-product-directory.md
-1279 lines · in 2 · out 0 · reachable · 99d stale, subject churn 8696</title></circle>
-<circle cx="615.1" cy="288.0" r="14.4" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/024-structured-inbound-mapping.md
-1055 lines · in 1 · out 0 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="627.6" cy="289.2" r="13.8" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/025-real-time-event-streaming.md
-929 lines · in 2 · out 0 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="640.0" cy="290.9" r="20.5" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/026-operations-console-ui.md
-2621 lines · in 1 · out 0 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="652.4" cy="293.1" r="15.4" fill="#fa8857" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/027-mcp-server.md
-1258 lines · in 2 · out 3 · reachable · 103d stale, subject churn 8696</title></circle>
-<circle cx="664.7" cy="295.8" r="9.6" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/028-asset-agnostic-accounts.md
-298 lines · in 1 · out 3 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="676.9" cy="298.9" r="17.7" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/029-operational-gateway.md
-1826 lines · in 1 · out 0 · reachable · 99d stale, subject churn 8696</title></circle>
-<circle cx="688.9" cy="302.6" r="13.6" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/030-asyncapi-specification.md
-883 lines · in 2 · out 3 · reachable · 99d stale, subject churn 8696</title></circle>
-<circle cx="700.8" cy="306.7" r="12.6" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/031-identity-access-management.md
-719 lines · in 2 · out 4 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="712.5" cy="311.2" r="14.6" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/032-event-driven-valuation-saga.md
-1089 lines · in 1 · out 5 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="724.0" cy="316.2" r="10.5" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/033-gateway-architecture.md
-412 lines · in 2 · out 0 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="735.3" cy="321.7" r="12.6" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/034-frontend-service-alignment.md
-720 lines · in 1 · out 0 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="746.4" cy="327.6" r="12.8" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/035-economy-cookbook.md
-747 lines · in 2 · out 0 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="757.3" cy="333.9" r="12.7" fill="#fc9964" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/036-cookbook-browser.md
-733 lines · in 2 · out 0 · reachable · 94d stale, subject churn 8696</title></circle>
-<circle cx="767.9" cy="340.6" r="8.9" fill="#fc9964" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/037-multi-asset-purity.md
-236 lines · in 1 · out 3 · reachable · 94d stale, subject churn 8696</title></circle>
-<circle cx="778.2" cy="347.8" r="12.0" fill="#fc9a65" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/038-manifest-business-model-visualization.md
-618 lines · in 1 · out 3 · reachable · 93d stale, subject churn 8696</title></circle>
-<circle cx="788.3" cy="355.3" r="17.5" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/039-meridian-vm.md
-1755 lines · in 1 · out 0 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="798.0" cy="363.2" r="11.2" fill="#fc9f69" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/040-handler-schema-alignment.md
-498 lines · in 1 · out 0 · reachable · 91d stale, subject churn 8696</title></circle>
-<circle cx="807.5" cy="371.5" r="11.5" fill="#fca06b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/041-economy-generator.md
-544 lines · in 1 · out 0 · reachable · 90d stale, subject churn 8696</title></circle>
-<circle cx="816.6" cy="380.2" r="12.4" fill="#fca06b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/042-economy-ide.md
-684 lines · in 1 · out 0 · reachable · 90d stale, subject churn 8696</title></circle>
-<circle cx="825.3" cy="389.2" r="10.6" fill="#fca36d" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/043-mcp-manifest-tenant-isolation.md
-425 lines · in 2 · out 0 · reachable · 88d stale, subject churn 8696</title></circle>
-<circle cx="833.7" cy="398.6" r="10.9" fill="#fca973" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/044-auth-flow-architecture.md
-463 lines · in 3 · out 3 · reachable · 85d stale, subject churn 8696</title></circle>
-<circle cx="841.7" cy="408.2" r="13.6" fill="#fcac76" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/045-manifest-as-sole-source-of-truth.md
-894 lines · in 1 · out 0 · reachable · 84d stale, subject churn 8696</title></circle>
-<circle cx="849.4" cy="418.2" r="11.1" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/046-economy-visualization-completeness.md
-493 lines · in 1 · out 0 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="856.6" cy="428.5" r="8.8" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/047-security-audit-status.md
-220 lines · in 1 · out 1 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="863.5" cy="439.0" r="10.4" fill="#fcad77" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/047-security-audit.md
-391 lines · in 2 · out 2 · reachable · 83d stale, subject churn 8696</title></circle>
-<circle cx="869.9" cy="449.8" r="8.1" fill="#fcae78" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/048-test-coverage-80.md
-164 lines · in 1 · out 0 · reachable · 82d stale, subject churn 8696</title></circle>
-<circle cx="875.9" cy="460.8" r="12.5" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/049-codebase-consistency.md
-700 lines · in 1 · out 4 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="881.5" cy="472.1" r="8.4" fill="#fcb780" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/050-demo-sandbox.md
-184 lines · in 2 · out 0 · reachable · 77d stale, subject churn 8696</title></circle>
-<circle cx="886.6" cy="483.6" r="10.2" fill="#fcba83" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/051-party-navigation.md
-371 lines · in 1 · out 0 · reachable · 76d stale, subject churn 8696</title></circle>
-<circle cx="891.2" cy="495.3" r="12.3" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/052-email-platform.md
-672 lines · in 2 · out 0 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="895.4" cy="507.1" r="8.8" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/053-auth-email-flows.md
-226 lines · in 3 · out 0 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="899.2" cy="519.1" r="8.8" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/054-billing-ui.md
-220 lines · in 1 · out 0 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="902.5" cy="531.2" r="8.2" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/055-tenant-branding.md
-172 lines · in 1 · out 0 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="905.3" cy="543.5" r="11.1" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/056-correspondence-service.md
-481 lines · in 1 · out 3 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="907.6" cy="555.8" r="10.2" fill="#fdc28b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/057-convergent-manifest-apply.md
-371 lines · in 1 · out 0 · reachable · 68d stale, subject churn 8696</title></circle>
-<circle cx="909.4" cy="568.3" r="10.1" fill="#fdc28b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/058-full-economy-visibility.md
-357 lines · in 1 · out 0 · reachable · 68d stale, subject churn 8696</title></circle>
-<circle cx="910.8" cy="580.7" r="10.1" fill="#fdc48d" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/059-asset-agnostic-posting-layer.md
-360 lines · in 1 · out 0 · reachable · 66d stale, subject churn 8696</title></circle>
-<circle cx="911.6" cy="593.3" r="10.4" fill="#fdc790" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/060-per-tenant-scheduled-execution.md
-399 lines · in 1 · out 0 · reachable · 63d stale, subject churn 8696</title></circle>
-<circle cx="912.0" cy="605.8" r="10.0" fill="#fdc790" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/061-mcp-auth-session-unification.md
-350 lines · in 1 · out 0 · reachable · 63d stale, subject churn 8696</title></circle>
-<circle cx="911.9" cy="618.4" r="9.9" fill="#fdd8a8" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/062-self-service-onboarding-readiness.md
-339 lines · in 1 · out 3 · reachable · 44d stale, subject churn 8696</title></circle>
-<circle cx="911.3" cy="631.0" r="6.7" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/064-assess-2026-06-04-ai-readiness-closure.md
-70 lines · in 1 · out 0 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="513.6" cy="379.9" r="10.4" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/README.md
-394 lines · in 2 · out 67 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="533.9" cy="374.1" r="11.3" fill="#fa8756" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/cockroachdb-migration-audit.md
-522 lines · in 3 · out 0 · reachable · 104d stale, subject churn 8696</title></circle>
-<circle cx="237.5" cy="278.8" r="6.9" fill="#fff7ec" stroke="#1a1a1a" stroke-width="1.8" stroke-dasharray="3,2"><title>docs/reports/dead-code-audit-2026-06.md
-81 lines · in 0 · out 0 · orphan · 0d stale, subject churn 8696</title></circle>
-<circle cx="554.6" cy="370.1" r="8.8" fill="#e34b33" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/market-information-go-live-readiness.md
-226 lines · in 1 · out 0 · reachable · 138d stale, subject churn 8696</title></circle>
-<circle cx="575.5" cy="367.9" r="11.5" fill="#e34b33" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/market-information-integration.md
-539 lines · in 1 · out 0 · reachable · 138d stale, subject churn 8696</title></circle>
-<circle cx="596.6" cy="367.6" r="8.6" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/market-information-traceability.md
-206 lines · in 1 · out 0 · reachable · 102d stale, subject churn 8696</title></circle>
-<circle cx="617.6" cy="369.1" r="13.2" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/saga-handler-audit.md
-817 lines · in 1 · out 0 · reachable · 102d stale, subject churn 8696</title></circle>
-<circle cx="638.4" cy="372.4" r="8.2" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/README.md
-171 lines · in 1 · out 13 · reachable · 10d stale, subject churn 8696</title></circle>
-<circle cx="910.1" cy="643.5" r="11.7" fill="#b90905" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/disaster-recovery.md
-579 lines · in 4 · out 0 · reachable · 171d stale, subject churn 8696</title></circle>
-<circle cx="908.6" cy="655.9" r="7.9" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/email-infrastructure.md
-146 lines · in 1 · out 0 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="906.5" cy="668.3" r="11.0" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/event-router.md
-470 lines · in 1 · out 4 · reachable · 10d stale, subject churn 8696</title></circle>
+426 lines · in 11 · out 0 · reachable · 38d stale, subject churn 8</title></circle>
+<circle cx="354.7" cy="389.2" r="24.0" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/001-universal-asset-system.md
+3868 lines · in 6 · out 2 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="363.4" cy="380.2" r="14.3" fill="#fa8756" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/002-internal-bank-account.md
+1025 lines · in 4 · out 5 · reachable · 110d stale, subject churn 8751</title></circle>
+<circle cx="372.5" cy="371.5" r="10.9" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/003-meridian-edge.md
+455 lines · in 1 · out 3 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="381.9" cy="363.2" r="17.7" fill="#fa8756" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/004-market-information-management.md
+1824 lines · in 3 · out 8 · reachable · 110d stale, subject churn 8751</title></circle>
+<circle cx="391.7" cy="355.3" r="16.6" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/005-durable-execution-engine.md
+1542 lines · in 4 · out 3 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="401.7" cy="347.8" r="18.7" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/006-starlark-saga-orchestration-core.md
+2103 lines · in 8 · out 3 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="412.1" cy="340.6" r="14.3" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/007-starlark-typed-service-clients.md
+1031 lines · in 2 · out 0 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="422.7" cy="333.9" r="16.3" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/008-starlark-service-bindings.md
+1462 lines · in 4 · out 6 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="433.5" cy="327.6" r="14.8" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/009-production-readiness-review.md
+1122 lines · in 1 · out 2 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="444.6" cy="321.7" r="11.9" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/010-starlark-testing-framework.md
+610 lines · in 1 · out 0 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="456.0" cy="316.2" r="21.8" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/011-valuation-service.md
+3063 lines · in 2 · out 6 · reachable · 10d stale, subject churn 8751</title></circle>
+<circle cx="467.5" cy="311.2" r="11.2" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/012-codebase-health-audit.md
+503 lines · in 1 · out 0 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="479.2" cy="306.7" r="15.8" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/013-reconciliation-service.md
+1341 lines · in 2 · out 2 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="491.1" cy="302.6" r="15.5" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/014-control-plane.md
+1269 lines · in 4 · out 3 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="503.1" cy="298.9" r="15.5" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/015-stripe-connect.md
+1281 lines · in 1 · out 5 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="515.3" cy="295.8" r="13.7" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/016-market-data-dynamic-pricing.md
+917 lines · in 2 · out 0 · reachable · 10d stale, subject churn 8751</title></circle>
+<circle cx="527.6" cy="293.1" r="11.7" fill="#f88254" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/017-reconciliation-grpc-wiring.md
+575 lines · in 4 · out 0 · reachable · 113d stale, subject churn 8751</title></circle>
+<circle cx="539.9" cy="290.9" r="9.2" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/018-current-account-withdrawal-persistence.md
+266 lines · in 1 · out 3 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="552.4" cy="289.2" r="9.1" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/019-internal-bank-account-position-keeping-client.md
+254 lines · in 1 · out 4 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="564.9" cy="288.0" r="10.6" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/020-party-kyc-aml-provider-integration.md
+417 lines · in 2 · out 3 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="577.4" cy="287.2" r="11.2" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/021-platform-scheduler.md
+508 lines · in 1 · out 0 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="590.0" cy="287.0" r="12.7" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/022-org-scoped-accounts.md
+740 lines · in 1 · out 5 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="602.5" cy="287.2" r="15.5" fill="#fa8756" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/023-product-directory.md
+1279 lines · in 2 · out 0 · reachable · 110d stale, subject churn 8751</title></circle>
+<circle cx="615.1" cy="288.0" r="14.4" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/024-structured-inbound-mapping.md
+1055 lines · in 1 · out 0 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="627.6" cy="289.2" r="13.8" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/025-real-time-event-streaming.md
+929 lines · in 2 · out 0 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="640.0" cy="290.9" r="20.5" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/026-operations-console-ui.md
+2621 lines · in 1 · out 0 · reachable · 10d stale, subject churn 8751</title></circle>
+<circle cx="652.4" cy="293.1" r="15.4" fill="#f88153" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/027-mcp-server.md
+1258 lines · in 2 · out 3 · reachable · 114d stale, subject churn 8751</title></circle>
+<circle cx="664.7" cy="295.8" r="9.6" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/028-asset-agnostic-accounts.md
+298 lines · in 1 · out 3 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="676.9" cy="298.9" r="17.7" fill="#fa8756" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/029-operational-gateway.md
+1826 lines · in 1 · out 0 · reachable · 110d stale, subject churn 8751</title></circle>
+<circle cx="688.9" cy="302.6" r="13.6" fill="#fa8756" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/030-asyncapi-specification.md
+883 lines · in 2 · out 3 · reachable · 110d stale, subject churn 8751</title></circle>
+<circle cx="700.8" cy="306.7" r="12.6" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/031-identity-access-management.md
+719 lines · in 2 · out 4 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="712.5" cy="311.2" r="14.6" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/032-event-driven-valuation-saga.md
+1089 lines · in 1 · out 5 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="724.0" cy="316.2" r="10.5" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/033-gateway-architecture.md
+412 lines · in 2 · out 0 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="735.3" cy="321.7" r="12.6" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/034-frontend-service-alignment.md
+720 lines · in 1 · out 0 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="746.4" cy="327.6" r="12.8" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/035-economy-cookbook.md
+747 lines · in 2 · out 0 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="757.3" cy="333.9" r="12.7" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/036-cookbook-browser.md
+733 lines · in 2 · out 0 · reachable · 105d stale, subject churn 8751</title></circle>
+<circle cx="767.9" cy="340.6" r="8.9" fill="#fc905c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/037-multi-asset-purity.md
+236 lines · in 1 · out 3 · reachable · 104d stale, subject churn 8751</title></circle>
+<circle cx="778.2" cy="347.8" r="12.0" fill="#fc905c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/038-manifest-business-model-visualization.md
+618 lines · in 1 · out 3 · reachable · 104d stale, subject churn 8751</title></circle>
+<circle cx="788.3" cy="355.3" r="17.5" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/039-meridian-vm.md
+1755 lines · in 1 · out 0 · reachable · 10d stale, subject churn 8751</title></circle>
+<circle cx="798.0" cy="363.2" r="11.2" fill="#fc9661" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/040-handler-schema-alignment.md
+498 lines · in 1 · out 0 · reachable · 101d stale, subject churn 8751</title></circle>
+<circle cx="807.5" cy="371.5" r="11.5" fill="#fc9661" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/041-economy-generator.md
+544 lines · in 1 · out 0 · reachable · 101d stale, subject churn 8751</title></circle>
+<circle cx="816.6" cy="380.2" r="12.4" fill="#fc9661" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/042-economy-ide.md
+684 lines · in 1 · out 0 · reachable · 101d stale, subject churn 8751</title></circle>
+<circle cx="825.3" cy="389.2" r="10.6" fill="#fc9964" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/043-mcp-manifest-tenant-isolation.md
+425 lines · in 2 · out 0 · reachable · 99d stale, subject churn 8751</title></circle>
+<circle cx="833.7" cy="398.6" r="10.9" fill="#fc9f69" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/044-auth-flow-architecture.md
+463 lines · in 3 · out 3 · reachable · 96d stale, subject churn 8751</title></circle>
+<circle cx="841.7" cy="408.2" r="13.6" fill="#fca06b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/045-manifest-as-sole-source-of-truth.md
+894 lines · in 1 · out 0 · reachable · 95d stale, subject churn 8751</title></circle>
+<circle cx="849.4" cy="418.2" r="11.1" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/046-economy-visualization-completeness.md
+493 lines · in 1 · out 0 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="856.6" cy="428.5" r="8.8" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/047-security-audit-status.md
+220 lines · in 1 · out 1 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="863.5" cy="439.0" r="10.4" fill="#fca16c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/047-security-audit.md
+391 lines · in 2 · out 2 · reachable · 94d stale, subject churn 8751</title></circle>
+<circle cx="869.9" cy="449.8" r="8.1" fill="#fca36d" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/048-test-coverage-80.md
+164 lines · in 1 · out 0 · reachable · 93d stale, subject churn 8751</title></circle>
+<circle cx="875.9" cy="460.8" r="12.5" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/049-codebase-consistency.md
+700 lines · in 1 · out 4 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="881.5" cy="472.1" r="8.4" fill="#fcac76" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/050-demo-sandbox.md
+184 lines · in 2 · out 0 · reachable · 88d stale, subject churn 8751</title></circle>
+<circle cx="886.6" cy="483.6" r="10.2" fill="#fcad77" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/051-party-navigation.md
+371 lines · in 1 · out 0 · reachable · 87d stale, subject churn 8751</title></circle>
+<circle cx="891.2" cy="495.3" r="12.3" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/052-email-platform.md
+672 lines · in 2 · out 0 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="895.4" cy="507.1" r="8.8" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/053-auth-email-flows.md
+226 lines · in 3 · out 0 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="899.2" cy="519.1" r="8.8" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/054-billing-ui.md
+220 lines · in 1 · out 0 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="902.5" cy="531.2" r="8.2" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/055-tenant-branding.md
+172 lines · in 1 · out 0 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="905.3" cy="543.5" r="11.1" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/056-correspondence-service.md
+481 lines · in 1 · out 3 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="907.6" cy="555.8" r="10.2" fill="#fdbb84" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/057-convergent-manifest-apply.md
+371 lines · in 1 · out 0 · reachable · 79d stale, subject churn 8751</title></circle>
+<circle cx="909.4" cy="568.3" r="10.1" fill="#fdbb84" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/058-full-economy-visibility.md
+357 lines · in 1 · out 0 · reachable · 79d stale, subject churn 8751</title></circle>
+<circle cx="910.8" cy="580.7" r="10.1" fill="#fdbd86" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/059-asset-agnostic-posting-layer.md
+360 lines · in 1 · out 0 · reachable · 77d stale, subject churn 8751</title></circle>
+<circle cx="911.6" cy="593.3" r="10.4" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/060-per-tenant-scheduled-execution.md
+399 lines · in 1 · out 0 · reachable · 74d stale, subject churn 8751</title></circle>
+<circle cx="912.0" cy="605.8" r="10.0" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/061-mcp-auth-session-unification.md
+350 lines · in 1 · out 0 · reachable · 74d stale, subject churn 8751</title></circle>
+<circle cx="911.9" cy="618.4" r="9.9" fill="#fdd29c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/062-self-service-onboarding-readiness.md
+339 lines · in 1 · out 3 · reachable · 55d stale, subject churn 8751</title></circle>
+<circle cx="911.3" cy="631.0" r="6.7" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/064-assess-2026-06-04-ai-readiness-closure.md
+70 lines · in 1 · out 0 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="513.6" cy="379.9" r="10.4" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/prd/README.md
+394 lines · in 2 · out 67 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="533.9" cy="374.1" r="11.3" fill="#f77f53" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/cockroachdb-migration-audit.md
+522 lines · in 3 · out 0 · reachable · 115d stale, subject churn 8751</title></circle>
+<circle cx="237.5" cy="278.8" r="6.9" fill="#fef0dd" stroke="#1a1a1a" stroke-width="1.8" stroke-dasharray="3,2"><title>docs/reports/dead-code-audit-2026-06.md
+81 lines · in 0 · out 0 · orphan · 11d stale, subject churn 8751</title></circle>
+<circle cx="554.6" cy="370.1" r="8.8" fill="#e0442e" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/market-information-go-live-readiness.md
+226 lines · in 1 · out 0 · reachable · 149d stale, subject churn 8751</title></circle>
+<circle cx="575.5" cy="367.9" r="11.5" fill="#e0442e" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/market-information-integration.md
+539 lines · in 1 · out 0 · reachable · 149d stale, subject churn 8751</title></circle>
+<circle cx="596.6" cy="367.6" r="8.6" fill="#f88254" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/market-information-traceability.md
+206 lines · in 1 · out 0 · reachable · 113d stale, subject churn 8751</title></circle>
+<circle cx="617.6" cy="369.1" r="13.2" fill="#f88254" stroke="#b8b8b8" stroke-width="1.0"><title>docs/reports/saga-handler-audit.md
+817 lines · in 1 · out 0 · reachable · 113d stale, subject churn 8751</title></circle>
+<circle cx="638.4" cy="372.4" r="8.2" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/README.md
+171 lines · in 1 · out 13 · reachable · 21d stale, subject churn 8751</title></circle>
+<circle cx="910.1" cy="643.5" r="11.7" fill="#b70604" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/disaster-recovery.md
+579 lines · in 4 · out 0 · reachable · 182d stale, subject churn 8751</title></circle>
+<circle cx="908.6" cy="655.9" r="7.9" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/email-infrastructure.md
+146 lines · in 1 · out 0 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="906.5" cy="668.3" r="11.0" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/event-router.md
+470 lines · in 1 · out 4 · reachable · 21d stale, subject churn 8751</title></circle>
 <circle cx="903.9" cy="680.6" r="10.4" fill="#800000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/incident-response.md
-390 lines · in 6 · out 0 · reachable · 200d stale, subject churn 8696</title></circle>
-<circle cx="900.9" cy="692.8" r="13.1" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/internal-account-operations.md
-806 lines · in 1 · out 4 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="897.4" cy="704.9" r="11.2" fill="#fff7ec" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/market-information-operations.md
-500 lines · in 1 · out 1 · reachable · 0d stale, subject churn 8696</title></circle>
-<circle cx="1052.2" cy="468.9" r="8.6" fill="#fff7ec" stroke="#1a1a1a" stroke-width="1.8" stroke-dasharray="3,2"><title>docs/runbooks/mutation-testing.md
-204 lines · in 0 · out 0 · orphan · 0d stale, subject churn 8696</title></circle>
-<circle cx="893.4" cy="716.8" r="10.2" fill="#f4774f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/party-kyc-verification.md
-377 lines · in 1 · out 0 · reachable · 114d stale, subject churn 8696</title></circle>
-<circle cx="889.0" cy="728.6" r="12.9" fill="#fdc18b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/production-deployment.md
-772 lines · in 2 · out 4 · reachable · 69d stale, subject churn 8696</title></circle>
+390 lines · in 6 · out 0 · reachable · 211d stale, subject churn 8751</title></circle>
+<circle cx="900.9" cy="692.8" r="13.1" fill="#fef0dd" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/internal-account-operations.md
+806 lines · in 1 · out 4 · reachable · 11d stale, subject churn 8751</title></circle>
+<circle cx="897.4" cy="704.9" r="11.2" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/market-information-operations.md
+500 lines · in 1 · out 1 · reachable · 10d stale, subject churn 8751</title></circle>
+<circle cx="1052.2" cy="468.9" r="8.6" fill="#fef0dd" stroke="#1a1a1a" stroke-width="1.8" stroke-dasharray="3,2"><title>docs/runbooks/mutation-testing.md
+204 lines · in 0 · out 0 · orphan · 11d stale, subject churn 8751</title></circle>
+<circle cx="893.4" cy="716.8" r="10.2" fill="#f2704c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/party-kyc-verification.md
+377 lines · in 1 · out 0 · reachable · 125d stale, subject churn 8751</title></circle>
+<circle cx="889.0" cy="728.6" r="12.9" fill="#fcba83" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/production-deployment.md
+772 lines · in 2 · out 4 · reachable · 80d stale, subject churn 8751</title></circle>
 <circle cx="884.1" cy="740.1" r="11.5" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/saga-failure-recovery.md
-543 lines · in 7 · out 1 · reachable · 10d stale, subject churn 33</title></circle>
-<circle cx="878.7" cy="751.5" r="9.2" fill="#fc9763" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/saga-validation-failure.md
-264 lines · in 2 · out 3 · reachable · 95d stale, subject churn 8696</title></circle>
-<circle cx="658.9" cy="377.5" r="12.6" fill="#ef6749" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/troubleshooting-saga-handlers.md
-721 lines · in 5 · out 4 · reachable · 124d stale, subject churn 8696</title></circle>
-<circle cx="635.4" cy="454.5" r="8.7" fill="#fde6c3" stroke="#b8b8b8" stroke-width="1.0"><title>docs/saga-handler-loading.md
-213 lines · in 3 · out 0 · reachable · 28d stale, subject churn 8696</title></circle>
-<circle cx="678.8" cy="384.4" r="13.2" fill="#fdc68f" stroke="#b8b8b8" stroke-width="1.0"><title>docs/saga-service-catalog.md
-823 lines · in 3 · out 0 · reachable · 64d stale, subject churn 8696</title></circle>
-<circle cx="698.0" cy="393.0" r="10.3" fill="#b60403" stroke="#b8b8b8" stroke-width="1.0"><title>docs/secrets-management.md
-388 lines · in 1 · out 0 · reachable · 173d stale, subject churn 8696</title></circle>
-<circle cx="716.4" cy="403.2" r="7.6" fill="#fcad77" stroke="#b8b8b8" stroke-width="1.0"><title>docs/security/pgx-tenant-audit.md
-126 lines · in 1 · out 0 · reachable · 83d stale, subject churn 8696</title></circle>
-<circle cx="717.5" cy="510.7" r="8.9" fill="#fde6c3" stroke="#b8b8b8" stroke-width="1.0"><title>docs/service-readme-template.md
-230 lines · in 7 · out 1 · reachable · 28d stale, subject churn 8696</title></circle>
+543 lines · in 7 · out 1 · reachable · 21d stale, subject churn 33</title></circle>
+<circle cx="878.7" cy="751.5" r="9.2" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/saga-validation-failure.md
+264 lines · in 2 · out 3 · reachable · 105d stale, subject churn 8751</title></circle>
+<circle cx="658.9" cy="377.5" r="12.6" fill="#ec5e43" stroke="#b8b8b8" stroke-width="1.0"><title>docs/runbooks/troubleshooting-saga-handlers.md
+721 lines · in 5 · out 4 · reachable · 135d stale, subject churn 8751</title></circle>
+<circle cx="635.4" cy="454.5" r="8.7" fill="#fddfb6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/saga-handler-loading.md
+213 lines · in 3 · out 0 · reachable · 38d stale, subject churn 8751</title></circle>
+<circle cx="678.8" cy="384.4" r="13.2" fill="#fdbf88" stroke="#b8b8b8" stroke-width="1.0"><title>docs/saga-service-catalog.md
+823 lines · in 3 · out 0 · reachable · 75d stale, subject churn 8751</title></circle>
+<circle cx="698.0" cy="393.0" r="10.3" fill="#b40101" stroke="#b8b8b8" stroke-width="1.0"><title>docs/secrets-management.md
+388 lines · in 1 · out 0 · reachable · 184d stale, subject churn 8751</title></circle>
+<circle cx="716.4" cy="403.2" r="7.6" fill="#fca16c" stroke="#b8b8b8" stroke-width="1.0"><title>docs/security/pgx-tenant-audit.md
+126 lines · in 1 · out 0 · reachable · 94d stale, subject churn 8751</title></circle>
+<circle cx="717.5" cy="510.7" r="8.9" fill="#fddfb6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/service-readme-template.md
+230 lines · in 7 · out 1 · reachable · 38d stale, subject churn 8751</title></circle>
 <circle cx="733.9" cy="415.0" r="9.9" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>docs/services/party/verification-guide.md
-339 lines · in 1 · out 0 · reachable · 114d stale, subject churn 1</title></circle>
-<circle cx="750.2" cy="428.3" r="12.9" fill="#fef1de" stroke="#b8b8b8" stroke-width="1.0"><title>docs/spec/saga-contract.md
-767 lines · in 2 · out 1 · reachable · 10d stale, subject churn 8696</title></circle>
+339 lines · in 1 · out 0 · reachable · 125d stale, subject churn 1</title></circle>
+<circle cx="750.2" cy="428.3" r="12.9" fill="#feebcf" stroke="#b8b8b8" stroke-width="1.0"><title>docs/spec/saga-contract.md
+767 lines · in 2 · out 1 · reachable · 21d stale, subject churn 8751</title></circle>
 <circle cx="765.4" cy="443.0" r="10.4" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/testing/CHAOS_TESTING.md
-399 lines · in 1 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
+399 lines · in 1 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
 <circle cx="779.2" cy="458.9" r="10.2" fill="#7f0000" stroke="#b8b8b8" stroke-width="1.0"><title>docs/testing/COVERAGE_ANALYSIS.md
-373 lines · in 2 · out 0 · reachable · 201d stale, subject churn 8696</title></circle>
-<circle cx="791.5" cy="475.9" r="8.5" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>docs/tilt-fast-startup.md
-198 lines · in 1 · out 1 · reachable · 70d stale, subject churn 8696</title></circle>
-<circle cx="802.4" cy="494.0" r="6.0" fill="#d8d7d9" stroke="#b8b8b8" stroke-width="1.0"><title>frontend/README.md
-38 lines · in 1 · out 1 · reachable · 0d stale, subject churn 1480</title></circle>
-<circle cx="873.0" cy="762.7" r="8.8" fill="#fca06b" stroke="#b8b8b8" stroke-width="1.0"><title>frontend/docs/tenant-subdomain-routing.md
-227 lines · in 1 · out 0 · reachable · 90d stale, subject churn 8696</title></circle>
-<circle cx="618.5" cy="1010.5" r="7.6" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>http/README.md
-124 lines · in 1 · out 2 · reachable · 96d stale, subject churn 8696</title></circle>
+373 lines · in 2 · out 0 · reachable · 212d stale, subject churn 8751</title></circle>
+<circle cx="791.5" cy="475.9" r="8.5" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>docs/tilt-fast-startup.md
+198 lines · in 1 · out 1 · reachable · 81d stale, subject churn 8751</title></circle>
+<circle cx="802.4" cy="494.0" r="6.0" fill="#d8d6d7" stroke="#b8b8b8" stroke-width="1.0"><title>frontend/README.md
+38 lines · in 1 · out 1 · reachable · 11d stale, subject churn 1494</title></circle>
+<circle cx="873.0" cy="762.7" r="8.8" fill="#fc9661" stroke="#b8b8b8" stroke-width="1.0"><title>frontend/docs/tenant-subdomain-routing.md
+227 lines · in 1 · out 0 · reachable · 101d stale, subject churn 8751</title></circle>
+<circle cx="618.5" cy="1010.5" r="7.6" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>http/README.md
+124 lines · in 1 · out 2 · reachable · 107d stale, subject churn 8751</title></circle>
 <circle cx="811.6" cy="513.0" r="10.0" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>scripts/README.md
-347 lines · in 2 · out 3 · reachable · 0d stale, subject churn 97</title></circle>
+347 lines · in 2 · out 3 · reachable · 11d stale, subject churn 97</title></circle>
 <circle cx="866.8" cy="773.6" r="8.4" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>scripts/kafka-tests/README.md
-189 lines · in 1 · out 3 · reachable · 70d stale, subject churn 3</title></circle>
+189 lines · in 1 · out 3 · reachable · 81d stale, subject churn 3</title></circle>
 <circle cx="750.9" cy="604.4" r="15.6" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/README.md
-1291 lines · in 7 · out 16 · reachable · 0d stale, subject churn 1</title></circle>
+1291 lines · in 7 · out 16 · reachable · 11d stale, subject churn 1</title></circle>
 <circle cx="819.1" cy="532.6" r="10.5" fill="#d2d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/api-gateway/README.md
-413 lines · in 3 · out 5 · reachable · 28d stale, subject churn 225</title></circle>
+413 lines · in 3 · out 5 · reachable · 38d stale, subject churn 226</title></circle>
 <circle cx="217.0" cy="760.1" r="8.4" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/audit-worker/README.md
-188 lines · in 1 · out 6 · reachable · 27d stale, subject churn 50</title></circle>
-<circle cx="824.9" cy="552.9" r="8.7" fill="#d3d3d7" stroke="#b8b8b8" stroke-width="1.0"><title>services/control-plane/README.md
-218 lines · in 2 · out 2 · reachable · 0d stale, subject churn 546</title></circle>
-<circle cx="331.0" cy="300.9" r="8.5" fill="#fc9460" stroke="#b8b8b8" stroke-width="1.0"><title>services/control-plane/internal/applier/testdata/tenant-saga-examples/README.md
-197 lines · in 1 · out 0 · reachable · 96d stale, subject churn 8696</title></circle>
-<circle cx="860.1" cy="784.3" r="9.0" fill="#d4d4d7" stroke="#b8b8b8" stroke-width="1.0"><title>services/current-account/README.md
-238 lines · in 4 · out 4 · reachable · 0d stale, subject churn 706</title></circle>
+188 lines · in 1 · out 6 · reachable · 38d stale, subject churn 50</title></circle>
+<circle cx="824.9" cy="552.9" r="8.7" fill="#d3d3d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/control-plane/README.md
+218 lines · in 2 · out 2 · reachable · 11d stale, subject churn 553</title></circle>
+<circle cx="331.0" cy="300.9" r="8.5" fill="#fb8b58" stroke="#b8b8b8" stroke-width="1.0"><title>services/control-plane/internal/applier/testdata/tenant-saga-examples/README.md
+197 lines · in 1 · out 0 · reachable · 107d stale, subject churn 8751</title></circle>
+<circle cx="860.1" cy="784.3" r="9.0" fill="#d4d3d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/current-account/README.md
+238 lines · in 4 · out 4 · reachable · 11d stale, subject churn 709</title></circle>
 <circle cx="828.9" cy="573.6" r="8.1" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/event-router/README.md
-165 lines · in 3 · out 3 · reachable · 0d stale, subject churn 69</title></circle>
-<circle cx="853.1" cy="794.7" r="7.1" fill="#fc9763" stroke="#b8b8b8" stroke-width="1.0"><title>services/event-router/k8s/README.md
-91 lines · in 1 · out 0 · reachable · 95d stale, subject churn 8696</title></circle>
-<circle cx="845.6" cy="804.8" r="8.7" fill="#d3d2d7" stroke="#b8b8b8" stroke-width="1.0"><title>services/financial-accounting/README.md
-211 lines · in 2 · out 4 · reachable · 0d stale, subject churn 365</title></circle>
-<circle cx="831.1" cy="594.5" r="8.4" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/financial-gateway/README.md
-189 lines · in 1 · out 5 · reachable · 28d stale, subject churn 74</title></circle>
-<circle cx="831.4" cy="615.6" r="8.1" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/forecasting/README.md
-166 lines · in 1 · out 2 · reachable · 27d stale, subject churn 72</title></circle>
+165 lines · in 3 · out 3 · reachable · 11d stale, subject churn 69</title></circle>
+<circle cx="853.1" cy="794.7" r="7.1" fill="#fc8f5b" stroke="#b8b8b8" stroke-width="1.0"><title>services/event-router/k8s/README.md
+91 lines · in 1 · out 0 · reachable · 105d stale, subject churn 8751</title></circle>
+<circle cx="845.6" cy="804.8" r="8.7" fill="#d3d2d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/financial-accounting/README.md
+211 lines · in 2 · out 4 · reachable · 11d stale, subject churn 367</title></circle>
+<circle cx="831.1" cy="594.5" r="8.4" fill="#d1d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/financial-gateway/README.md
+189 lines · in 1 · out 5 · reachable · 38d stale, subject churn 74</title></circle>
+<circle cx="831.4" cy="615.6" r="8.1" fill="#d1d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/forecasting/README.md
+166 lines · in 1 · out 2 · reachable · 38d stale, subject churn 72</title></circle>
 <circle cx="829.9" cy="636.6" r="9.1" fill="#d1d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/identity/README.md
-250 lines · in 1 · out 1 · reachable · 27d stale, subject churn 156</title></circle>
+250 lines · in 1 · out 1 · reachable · 38d stale, subject churn 156</title></circle>
 <circle cx="826.6" cy="657.4" r="8.9" fill="#d2d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/internal-account/README.md
-232 lines · in 2 · out 6 · reachable · 0d stale, subject churn 192</title></circle>
+232 lines · in 2 · out 6 · reachable · 11d stale, subject churn 194</title></circle>
 <circle cx="837.8" cy="814.6" r="8.1" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/internal-account/benchmarks/README.md
-165 lines · in 1 · out 0 · reachable · 102d stale, subject churn 10</title></circle>
+165 lines · in 1 · out 0 · reachable · 113d stale, subject churn 10</title></circle>
 <circle cx="829.6" cy="824.1" r="8.7" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/internal-account/examples/README.md
-212 lines · in 1 · out 0 · reachable · 102d stale, subject churn 8</title></circle>
+212 lines · in 1 · out 0 · reachable · 113d stale, subject churn 8</title></circle>
 <circle cx="821.5" cy="677.9" r="8.9" fill="#d2d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/market-information/README.md
-234 lines · in 1 · out 1 · reachable · 27d stale, subject churn 221</title></circle>
-<circle cx="814.6" cy="697.8" r="10.7" fill="#d2d2d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/mcp-server/README.md
-435 lines · in 1 · out 7 · reachable · 0d stale, subject churn 222</title></circle>
-<circle cx="821.0" cy="833.3" r="7.8" fill="#fa8857" stroke="#b8b8b8" stroke-width="1.0"><title>services/mcp-server/internal/resources/docs/cel-reference.md
-139 lines · in 1 · out 0 · reachable · 103d stale, subject churn 8696</title></circle>
-<circle cx="812.1" cy="842.2" r="7.3" fill="#fa8857" stroke="#b8b8b8" stroke-width="1.0"><title>services/mcp-server/internal/resources/docs/starlark-guide.md
-104 lines · in 1 · out 0 · reachable · 103d stale, subject churn 8696</title></circle>
+234 lines · in 1 · out 1 · reachable · 38d stale, subject churn 222</title></circle>
+<circle cx="814.6" cy="697.8" r="10.7" fill="#d2d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/mcp-server/README.md
+435 lines · in 1 · out 7 · reachable · 11d stale, subject churn 222</title></circle>
+<circle cx="821.0" cy="833.3" r="7.8" fill="#f88153" stroke="#b8b8b8" stroke-width="1.0"><title>services/mcp-server/internal/resources/docs/cel-reference.md
+139 lines · in 1 · out 0 · reachable · 114d stale, subject churn 8751</title></circle>
+<circle cx="812.1" cy="842.2" r="7.3" fill="#f88153" stroke="#b8b8b8" stroke-width="1.0"><title>services/mcp-server/internal/resources/docs/starlark-guide.md
+104 lines · in 1 · out 0 · reachable · 114d stale, subject churn 8751</title></circle>
 <circle cx="806.0" cy="717.0" r="8.9" fill="#d1d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/operational-gateway/README.md
-235 lines · in 1 · out 4 · reachable · 28d stale, subject churn 126</title></circle>
+235 lines · in 1 · out 4 · reachable · 38d stale, subject churn 127</title></circle>
 <circle cx="802.8" cy="850.6" r="9.3" fill="#d2d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/party/README.md
-272 lines · in 1 · out 1 · reachable · 27d stale, subject churn 280</title></circle>
-<circle cx="793.2" cy="858.8" r="8.4" fill="#d3d2d7" stroke="#b8b8b8" stroke-width="1.0"><title>services/payment-order/README.md
-185 lines · in 1 · out 3 · reachable · 0d stale, subject churn 429</title></circle>
-<circle cx="803.0" cy="267.5" r="7.1" fill="#ea5b40" stroke="#b8b8b8" stroke-width="1.0"><title>services/payment-order/service/HANDLER_ARCHITECTURE.md
-90 lines · in 1 · out 0 · reachable · 130d stale, subject churn 8696</title></circle>
-<circle cx="783.3" cy="866.5" r="8.8" fill="#d3d2d7" stroke="#b8b8b8" stroke-width="1.0"><title>services/position-keeping/README.md
-220 lines · in 3 · out 4 · reachable · 0d stale, subject churn 431</title></circle>
+272 lines · in 1 · out 1 · reachable · 38d stale, subject churn 281</title></circle>
+<circle cx="793.2" cy="858.8" r="8.4" fill="#d3d2d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/payment-order/README.md
+185 lines · in 1 · out 3 · reachable · 11d stale, subject churn 433</title></circle>
+<circle cx="803.0" cy="267.5" r="7.1" fill="#e7533a" stroke="#b8b8b8" stroke-width="1.0"><title>services/payment-order/service/HANDLER_ARCHITECTURE.md
+90 lines · in 1 · out 0 · reachable · 141d stale, subject churn 8751</title></circle>
+<circle cx="783.3" cy="866.5" r="8.8" fill="#d3d2d6" stroke="#b8b8b8" stroke-width="1.0"><title>services/position-keeping/README.md
+220 lines · in 3 · out 4 · reachable · 11d stale, subject churn 433</title></circle>
 <circle cx="795.8" cy="735.4" r="8.4" fill="#d2d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/reconciliation/README.md
-186 lines · in 1 · out 3 · reachable · 27d stale, subject churn 282</title></circle>
-<circle cx="784.0" cy="752.9" r="9.3" fill="#d3d2d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/reference-data/README.md
-268 lines · in 2 · out 1 · reachable · 27d stale, subject churn 370</title></circle>
+186 lines · in 1 · out 3 · reachable · 38d stale, subject churn 284</title></circle>
+<circle cx="784.0" cy="752.9" r="9.3" fill="#d3d1d4" stroke="#b8b8b8" stroke-width="1.0"><title>services/reference-data/README.md
+268 lines · in 2 · out 1 · reachable · 38d stale, subject churn 376</title></circle>
 <circle cx="773.1" cy="873.9" r="8.7" fill="#d2d1d5" stroke="#b8b8b8" stroke-width="1.0"><title>services/tenant/README.md
-215 lines · in 1 · out 1 · reachable · 25d stale, subject churn 295</title></circle>
-<circle cx="770.7" cy="769.2" r="7.0" fill="#d7d6d9" stroke="#b8b8b8" stroke-width="1.0"><title>shared/README.md
-88 lines · in 1 · out 3 · reachable · 0d stale, subject churn 1126</title></circle>
-<circle cx="762.7" cy="880.8" r="12.2" fill="#fdc089" stroke="#b8b8b8" stroke-width="1.0"><title>shared/domain/money/PRECISION_GUARANTEES.md
-647 lines · in 1 · out 1 · reachable · 70d stale, subject churn 8696</title></circle>
+215 lines · in 1 · out 1 · reachable · 36d stale, subject churn 297</title></circle>
+<circle cx="770.7" cy="769.2" r="7.0" fill="#d6d5d7" stroke="#b8b8b8" stroke-width="1.0"><title>shared/README.md
+88 lines · in 1 · out 3 · reachable · 11d stale, subject churn 1131</title></circle>
+<circle cx="762.7" cy="880.8" r="12.2" fill="#fcb982" stroke="#b8b8b8" stroke-width="1.0"><title>shared/domain/money/PRECISION_GUARANTEES.md
+647 lines · in 1 · out 1 · reachable · 81d stale, subject churn 8751</title></circle>
 <circle cx="751.9" cy="887.3" r="10.0" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>shared/platform/audit/README.md
-344 lines · in 3 · out 5 · reachable · 140d stale, subject churn 55</title></circle>
+344 lines · in 3 · out 5 · reachable · 151d stale, subject churn 57</title></circle>
 <circle cx="740.9" cy="893.4" r="6.6" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>shared/platform/bootstrap/README.md
-65 lines · in 1 · out 1 · reachable · 140d stale, subject churn 33</title></circle>
-<circle cx="980.6" cy="706.0" r="8.6" fill="#cb2115" stroke="#b8b8b8" stroke-width="1.0"><title>shared/platform/bootstrap/SHUTDOWN_USAGE.md
-205 lines · in 1 · out 0 · reachable · 158d stale, subject churn 8696</title></circle>
+65 lines · in 1 · out 1 · reachable · 151d stale, subject churn 33</title></circle>
+<circle cx="980.6" cy="706.0" r="8.6" fill="#c81c12" stroke="#b8b8b8" stroke-width="1.0"><title>shared/platform/bootstrap/SHUTDOWN_USAGE.md
+205 lines · in 1 · out 0 · reachable · 169d stale, subject churn 8751</title></circle>
 <circle cx="729.7" cy="899.1" r="9.7" fill="#d1d0d5" stroke="#b8b8b8" stroke-width="1.0"><title>shared/platform/observability/README.md
-318 lines · in 1 · out 0 · reachable · 140d stale, subject churn 47</title></circle>
+318 lines · in 1 · out 0 · reachable · 151d stale, subject churn 47</title></circle>
 <circle cx="756.0" cy="784.4" r="5.6" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>tests/README.md
-26 lines · in 1 · out 1 · reachable · 0d stale, subject churn 131</title></circle>
+26 lines · in 1 · out 1 · reachable · 11d stale, subject churn 131</title></circle>
 <circle cx="718.3" cy="904.3" r="9.1" fill="#d1d1d6" stroke="#b8b8b8" stroke-width="1.0"><title>tests/audit-e2e/README.md
-255 lines · in 1 · out 3 · reachable · 102d stale, subject churn 4</title></circle>
+255 lines · in 1 · out 3 · reachable · 113d stale, subject churn 4</title></circle>
 
 <text x="590" y="40" font-size="24" font-weight="600" text-anchor="middle">Doc map — 254 docs, 703 links, 4 islands</text>
 <text x="590" y="66" font-size="14" fill="#555" text-anchor="middle">1% orphaned · 99% reachable from the entry point</text>
