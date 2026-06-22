@@ -71,7 +71,7 @@ jobs:
 
       - name: Checkout code
         if: steps.gate.outputs.run == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # This job only reads the repo and runs gremlins; it never pushes, so
           # there is no need to leave git credentials on disk for later steps.
