@@ -54,7 +54,7 @@ func buildManifestValidateTool(client ManifestApplier) Tool {
 				},
 				"tenant_id": map[string]interface{}{
 					"type":        "string",
-					"description": "Required for amend mode. The tenant whose manifest to compare against.",
+					"description": "The tenant whose manifest to compare against, for amend mode. Under an authenticated session it must match the authenticated tenant; if omitted, the authenticated tenant is used.",
 				},
 			},
 			"required": []interface{}{"manifest"},
@@ -88,14 +88,20 @@ func handleManifestValidate(ctx context.Context, client ManifestApplier, params 
 		// can be validated without comparing against any existing tenant state.
 		skipImmutabilityChecks = true
 	case "amend":
-		if p.TenantID == "" {
+		// Reconcile the client-supplied tenant_id with the authenticated tenant.
+		// A mismatch under an authenticated (OAuth/JWT) context is rejected.
+		effectiveTenant, err := resolveTenantID(ctx, p.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		if effectiveTenant == "" {
 			return map[string]interface{}{
 				"error":   "tenant_id is required when mode is 'amend'",
 				"message": "Provide a tenant_id to validate against the tenant's existing manifest.",
 			}, nil
 		}
 		// Inject tenant context so the control plane validates against the correct tenant's state.
-		ctx = tenant.WithTenant(ctx, tenant.TenantID(p.TenantID))
+		ctx = tenant.WithTenant(ctx, tenant.TenantID(effectiveTenant))
 	default:
 		return map[string]interface{}{
 			"error":   "invalid mode: " + p.Mode,

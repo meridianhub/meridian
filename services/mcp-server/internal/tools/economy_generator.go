@@ -81,7 +81,7 @@ func buildEconomyGenerateContextTool(client EconomyGeneratorClient) Tool {
 				},
 				"tenant_id": map[string]interface{}{
 					"type":        "string",
-					"description": "Tenant identifier. Required when include_current_economy is true.",
+					"description": "Tenant identifier, used when include_current_economy is true. Under an authenticated session it must match the authenticated tenant; if omitted, the authenticated tenant is used.",
 				},
 			},
 			"required": []interface{}{"description"},
@@ -107,7 +107,14 @@ func handleEconomyGenerateContext(ctx context.Context, client EconomyGeneratorCl
 		return mcperrors.FormatGRPCError(err), nil
 	}
 
-	if p.IncludeCurrentEconomy && p.TenantID == "" {
+	// Reconcile the client-supplied tenant_id with the authenticated tenant.
+	// A mismatch under an authenticated (OAuth/JWT) context is rejected.
+	effectiveTenant, err := resolveTenantID(ctx, p.TenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	if p.IncludeCurrentEconomy && effectiveTenant == "" {
 		return map[string]interface{}{
 			"error":   "tenant_id is required when include_current_economy is true",
 			"message": "Provide a tenant_id to include the current economy in the context.",
@@ -121,7 +128,7 @@ func handleEconomyGenerateContext(ctx context.Context, client EconomyGeneratorCl
 		Description:           p.Description,
 		ExcludePatterns:       excludePatterns,
 		IncludeCurrentEconomy: p.IncludeCurrentEconomy,
-		TenantId:              p.TenantID,
+		TenantId:              effectiveTenant,
 	}
 
 	resp, err := client.GetGenerationContext(ctx, req)
@@ -187,7 +194,7 @@ func buildEconomyGenerateTool(client EconomyGeneratorClient) Tool {
 				},
 				"tenant_id": map[string]interface{}{
 					"type":        "string",
-					"description": "Tenant identifier. Required when mode is 'amend'.",
+					"description": "Tenant identifier, used when mode is 'amend'. Under an authenticated session it must match the authenticated tenant; if omitted, the authenticated tenant is used.",
 				},
 				"preferences": map[string]interface{}{
 					"type":        "object",
@@ -290,7 +297,14 @@ func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, p
 		return mcperrors.FormatGRPCError(err), nil
 	}
 
-	mode, errResp := resolveGenerationMode(p.Mode, p.TenantID)
+	// Reconcile the client-supplied tenant_id with the authenticated tenant.
+	// A mismatch under an authenticated (OAuth/JWT) context is rejected.
+	effectiveTenant, err := resolveTenantID(ctx, p.TenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	mode, errResp := resolveGenerationMode(p.Mode, effectiveTenant)
 	if errResp != nil {
 		return errResp, nil
 	}
@@ -298,7 +312,7 @@ func handleEconomyGenerate(ctx context.Context, client EconomyGeneratorClient, p
 	req := &controlplanev1.GenerateManifestRequest{
 		Description:      p.Description,
 		Mode:             mode,
-		TenantId:         p.TenantID,
+		TenantId:         effectiveTenant,
 		MaxFixIterations: p.MaxFixIterations,
 	}
 
