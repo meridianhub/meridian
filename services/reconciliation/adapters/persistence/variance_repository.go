@@ -36,6 +36,13 @@ type VarianceEntity struct {
 	ResolvedBy     *string         `gorm:"column:resolved_by;size:100"`
 	ResolvedAt     *time.Time      `gorm:"column:resolved_at"`
 	Attributes     JSONMap         `gorm:"column:attributes;type:jsonb"`
+
+	// BusinessRunID and BusinessSnapshotID are populated read-only on retrieval via
+	// joins to settlement_run.run_id and settlement_snapshot.snapshot_id. They are not
+	// stored columns: variance.run_id and variance.snapshot_id hold surrogate PKs (FK
+	// targets), while the domain layer and API work in business identifiers.
+	BusinessRunID      uuid.UUID `gorm:"->;column:business_run_id"`
+	BusinessSnapshotID uuid.UUID `gorm:"->;column:business_snapshot_id"`
 }
 
 // TableName returns the table name for the variance entity.
@@ -74,15 +81,21 @@ func (r *VarianceRepository) isInTransaction() bool {
 	return ok && committer != nil
 }
 
-// Create persists a new Variance.
+// Create persists a new Variance. The variance's domain RunID and SnapshotID are
+// business identifiers; they are resolved to the settlement_run and settlement_snapshot
+// surrogate PKs before being written to the run_id and snapshot_id FK columns.
 func (r *VarianceRepository) Create(ctx context.Context, variance *domain.Variance) error {
-	entity := toVarianceEntity(variance)
+	entities := []VarianceEntity{*toVarianceEntity(variance)}
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Create(entity).Error
+		if err := assignVarianceSurrogates(tx, entities, []*domain.Variance{variance}); err != nil {
+			return err
+		}
+		return tx.Create(&entities[0]).Error
 	})
 }
 
-// CreateBatch persists multiple variances atomically.
+// CreateBatch persists multiple variances atomically. Each variance's business RunID
+// and SnapshotID are resolved to surrogate PKs for the FK columns.
 func (r *VarianceRepository) CreateBatch(ctx context.Context, variances []*domain.Variance) error {
 	if len(variances) == 0 {
 		return nil
@@ -94,8 +107,61 @@ func (r *VarianceRepository) CreateBatch(ctx context.Context, variances []*domai
 	}
 
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		if err := assignVarianceSurrogates(tx, entities, variances); err != nil {
+			return err
+		}
 		return tx.CreateInBatches(entities, 100).Error
 	})
+}
+
+// assignVarianceSurrogates resolves each variance's business RunID and SnapshotID to
+// the settlement_run and settlement_snapshot surrogate PKs and writes them into the
+// entity's FK columns, caching resolutions to minimize lookups within a batch.
+func assignVarianceSurrogates(tx *gorm.DB, entities []VarianceEntity, variances []*domain.Variance) error {
+	runCache := make(map[uuid.UUID]uuid.UUID)
+	snapCache := make(map[uuid.UUID]uuid.UUID)
+	for i := range entities {
+		runSurrogate, err := cachedResolve(runCache, variances[i].RunID, tx, resolveRunSurrogate)
+		if err != nil {
+			return err
+		}
+		snapSurrogate, err := cachedResolve(snapCache, variances[i].SnapshotID, tx, resolveSnapshotSurrogate)
+		if err != nil {
+			return err
+		}
+		entities[i].RunID = runSurrogate
+		entities[i].SnapshotID = snapSurrogate
+	}
+	return nil
+}
+
+// cachedResolve returns the surrogate for a business ID, resolving via fn and caching
+// the result so repeated business IDs in a batch issue a single lookup.
+func cachedResolve(
+	cache map[uuid.UUID]uuid.UUID,
+	businessID uuid.UUID,
+	tx *gorm.DB,
+	fn func(*gorm.DB, uuid.UUID) (uuid.UUID, error),
+) (uuid.UUID, error) {
+	if surrogate, ok := cache[businessID]; ok {
+		return surrogate, nil
+	}
+	surrogate, err := fn(tx, businessID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	cache[businessID] = surrogate
+	return surrogate, nil
+}
+
+// varianceReadQuery builds a query that joins settlement_run and settlement_snapshot so
+// the business run_id and snapshot_id are projected into the entity, keeping the domain
+// model and API in business identifiers rather than surrogate PKs.
+func varianceReadQuery(tx *gorm.DB) *gorm.DB {
+	return tx.Model(&VarianceEntity{}).
+		Select(`"variance".*, "settlement_run"."run_id" AS business_run_id, "settlement_snapshot"."snapshot_id" AS business_snapshot_id`).
+		Joins(`JOIN "settlement_run" ON "settlement_run"."id" = "variance"."run_id"`).
+		Joins(`JOIN "settlement_snapshot" ON "settlement_snapshot"."id" = "variance"."snapshot_id"`)
 }
 
 // FindByID retrieves a Variance by its VarianceID.
@@ -104,7 +170,7 @@ func (r *VarianceRepository) FindByID(ctx context.Context, varianceID uuid.UUID)
 	var queryErr error
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		result := tx.Where("variance_id = ?", varianceID).First(&entity)
+		result := varianceReadQuery(tx).Where(`"variance"."variance_id" = ?`, varianceID).First(&entity)
 		if result.Error != nil {
 			queryErr = result.Error
 			return result.Error
@@ -121,13 +187,16 @@ func (r *VarianceRepository) FindByID(ctx context.Context, varianceID uuid.UUID)
 	return toVarianceDomain(&entity), nil
 }
 
-// FindByRunID retrieves all variances for a settlement run.
+// FindByRunID retrieves all variances for a settlement run, keyed by the business run
+// identifier. The join filters on settlement_run.run_id, so an unknown run yields an
+// empty slice.
 func (r *VarianceRepository) FindByRunID(ctx context.Context, runID uuid.UUID) ([]*domain.Variance, error) {
 	var entities []VarianceEntity
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Where("run_id = ?", runID).
-			Order("created_at ASC").
+		return varianceReadQuery(tx).
+			Where(`"settlement_run"."run_id" = ?`, runID).
+			Order(`"variance"."created_at" ASC`).
 			Find(&entities).Error
 	})
 	if err != nil {
@@ -170,10 +239,18 @@ func (r *VarianceRepository) Update(ctx context.Context, variance *domain.Varian
 	return nil
 }
 
-// DeleteByRunID removes all variances for a given settlement run.
+// DeleteByRunID removes all variances for a given settlement run, keyed by the business
+// run identifier. An unknown run is a no-op.
 func (r *VarianceRepository) DeleteByRunID(ctx context.Context, runID uuid.UUID) error {
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Where("run_id = ?", runID).Delete(&VarianceEntity{}).Error
+		surrogate, err := resolveRunSurrogate(tx, runID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		return tx.Where("run_id = ?", surrogate).Delete(&VarianceEntity{}).Error
 	})
 }
 
@@ -182,19 +259,19 @@ func (r *VarianceRepository) List(ctx context.Context, filter domain.VarianceFil
 	var entities []VarianceEntity
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		query := tx.Model(&VarianceEntity{})
+		query := varianceReadQuery(tx)
 
 		if filter.RunID != nil {
-			query = query.Where("run_id = ?", *filter.RunID)
+			query = query.Where(`"settlement_run"."run_id" = ?`, *filter.RunID)
 		}
 		if filter.AccountID != nil {
-			query = query.Where("account_id = ?", *filter.AccountID)
+			query = query.Where(`"variance"."account_id" = ?`, *filter.AccountID)
 		}
 		if filter.Status != nil {
-			query = query.Where("status = ?", string(*filter.Status))
+			query = query.Where(`"variance"."status" = ?`, string(*filter.Status))
 		}
 		if filter.Reason != nil {
-			query = query.Where("reason = ?", string(*filter.Reason))
+			query = query.Where(`"variance"."reason" = ?`, string(*filter.Reason))
 		}
 
 		limit := filter.Limit
@@ -210,7 +287,7 @@ func (r *VarianceRepository) List(ctx context.Context, filter domain.VarianceFil
 			query = query.Offset(filter.Offset)
 		}
 
-		return query.Order("created_at DESC").Find(&entities).Error
+		return query.Order(`"variance"."created_at" DESC`).Find(&entities).Error
 	})
 	if err != nil {
 		return nil, err
@@ -278,12 +355,15 @@ func toVarianceEntity(v *domain.Variance) *VarianceEntity {
 	return entity
 }
 
-// toVarianceDomain converts a persistence entity to a domain Variance.
+// toVarianceDomain converts a persistence entity to a domain Variance. RunID and
+// SnapshotID are taken from the business identifiers projected via the read-path joins
+// (settlement_run.run_id and settlement_snapshot.snapshot_id), not the surrogate FKs
+// stored in the run_id and snapshot_id columns.
 func toVarianceDomain(e *VarianceEntity) *domain.Variance {
 	v := &domain.Variance{
 		VarianceID:     e.VarianceID,
-		RunID:          e.RunID,
-		SnapshotID:     e.SnapshotID,
+		RunID:          e.BusinessRunID,
+		SnapshotID:     e.BusinessSnapshotID,
 		AccountID:      e.AccountID,
 		InstrumentCode: e.InstrumentCode,
 		ExpectedAmount: e.ExpectedAmount,

@@ -17,10 +17,11 @@ import (
 // --- Variance-specific mock repos (distinct from snapshot_capturer mocks) ---
 
 type vdRunRepo struct {
-	runs     map[uuid.UUID]*domain.SettlementRun
-	listRuns []*domain.SettlementRun
-	findErr  error
-	listErr  error
+	runs       map[uuid.UUID]*domain.SettlementRun
+	listRuns   []*domain.SettlementRun
+	lastFilter domain.RunFilter
+	findErr    error
+	listErr    error
 }
 
 func newVdRunRepo() *vdRunRepo { return &vdRunRepo{runs: make(map[uuid.UUID]*domain.SettlementRun)} }
@@ -46,7 +47,8 @@ func (m *vdRunRepo) Update(_ context.Context, run *domain.SettlementRun) error {
 	return nil
 }
 
-func (m *vdRunRepo) List(_ context.Context, _ domain.RunFilter) ([]*domain.SettlementRun, error) {
+func (m *vdRunRepo) List(_ context.Context, filter domain.RunFilter) ([]*domain.SettlementRun, error) {
+	m.lastFilter = filter
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
@@ -378,6 +380,35 @@ func TestDetectVariances_FindPreviousSnapshotsFails(t *testing.T) {
 	_, err := vd.DetectVariances(context.Background(), run.RunID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to find previous snapshots")
+}
+
+func TestFindPreviousSnapshots_SelectsBaselineByValidTime(t *testing.T) {
+	// A run whose physical CreatedAt is much later than its settlement period,
+	// simulating a run recorded well after the period it reconciles.
+	run := testhelpers.NewSettlementRun(t)
+	require.NoError(t, run.Start())
+	run.CreatedAt = run.PeriodEnd.Add(120 * time.Hour)
+
+	runRepo := newVdRunRepo()
+	runRepo.runs[run.RunID] = run
+	vd := NewVarianceDetector(runRepo, newVdSnapRepo(), &vdVarianceRepo{})
+
+	_, err := vd.findPreviousSnapshots(context.Background(), run)
+	require.NoError(t, err)
+
+	f := runRepo.lastFilter
+	// Baseline selection must be driven by valid time (the settlement period),
+	// never the physical CreatedAt (transaction time).
+	require.NotNil(t, f.FromDate)
+	require.NotNil(t, f.ToDate)
+	assert.Equal(t, run.PeriodStart, *f.FromDate, "lower bound must be the settlement period start")
+	assert.Equal(t, run.PeriodEnd, *f.ToDate, "upper bound must be the settlement period end")
+	assert.NotEqual(t, run.CreatedAt, *f.ToDate, "must not select the baseline by physical CreatedAt")
+
+	require.NotNil(t, f.AccountID)
+	assert.Equal(t, run.AccountID, *f.AccountID)
+	require.NotNil(t, f.Status)
+	assert.Equal(t, domain.RunStatusCompleted, *f.Status)
 }
 
 func TestClassifyVarianceReason_NoPrevious(t *testing.T) {

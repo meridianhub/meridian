@@ -16,53 +16,47 @@ import (
 	"gorm.io/gorm"
 )
 
-// seedRunAndSnapshot creates prerequisite settlement_run and snapshot records,
-// returning the surrogate IDs needed for variance FK references.
-func seedRunAndSnapshot(ctx context.Context, t *testing.T, db *gorm.DB, runBusinessID, snapshotBusinessID uuid.UUID) (runSurrogateID, snapshotSurrogateID uuid.UUID) {
+// seedRunAndSnapshot creates prerequisite settlement_run and snapshot records and
+// returns the business identifiers (settlement_run.run_id, settlement_snapshot.snapshot_id)
+// that the repositories accept and return. The snapshot's run_id FK is wired to the run's
+// surrogate PK internally, as production requires.
+func seedRunAndSnapshot(ctx context.Context, t *testing.T, db *gorm.DB, runBusinessID, snapshotBusinessID uuid.UUID) (runID, snapshotID uuid.UUID) {
 	t.Helper()
 	tid := tenant.TenantID("test-tenant-01")
 	quoted := fmt.Sprintf("%q", tid.SchemaName())
 
-	// Insert settlement_run and capture surrogate ID
+	// Insert settlement_run.
 	err := db.WithContext(ctx).Exec(
 		fmt.Sprintf(`INSERT INTO %s."settlement_run" (run_id, account_id, scope, settlement_type, period_start, period_end, initiated_by) VALUES (?, 'ACC-001', 'ACCOUNT', 'DAILY', NOW() - INTERVAL '1 day', NOW(), 'system')`, quoted),
 		runBusinessID,
 	).Error
 	require.NoError(t, err)
 
-	var runIDStr string
+	// Resolve the run surrogate PK to wire the snapshot FK correctly.
+	var runSurrogateStr string
 	err = db.WithContext(ctx).Raw(
 		fmt.Sprintf(`SELECT id::text FROM %s."settlement_run" WHERE run_id = ?`, quoted),
 		runBusinessID,
-	).Scan(&runIDStr).Error
+	).Scan(&runSurrogateStr).Error
 	require.NoError(t, err)
-	runSurrogateID, err = uuid.Parse(runIDStr)
+	runSurrogateID, err := uuid.Parse(runSurrogateStr)
 	require.NoError(t, err)
 
-	// Insert settlement_snapshot and capture surrogate ID
+	// Insert settlement_snapshot with the run surrogate PK as its FK.
 	err = db.WithContext(ctx).Exec(
 		fmt.Sprintf(`INSERT INTO %s."settlement_snapshot" (snapshot_id, run_id, account_id, instrument_code, expected_balance, actual_balance, variance_amount, source_system, captured_at) VALUES (?, ?, 'ACC-001', 'GBP', 100.00, 90.00, -10.00, 'test', NOW())`, quoted),
 		snapshotBusinessID, runSurrogateID,
 	).Error
 	require.NoError(t, err)
 
-	var snapIDStr string
-	err = db.WithContext(ctx).Raw(
-		fmt.Sprintf(`SELECT id::text FROM %s."settlement_snapshot" WHERE snapshot_id = ?`, quoted),
-		snapshotBusinessID,
-	).Scan(&snapIDStr).Error
-	require.NoError(t, err)
-	snapshotSurrogateID, err = uuid.Parse(snapIDStr)
-	require.NoError(t, err)
-
-	return runSurrogateID, snapshotSurrogateID
+	return runBusinessID, snapshotBusinessID
 }
 
-func newTestVariance(t *testing.T, runSurrogateID, snapshotSurrogateID uuid.UUID) *domain.Variance {
+func newTestVariance(t *testing.T, runID, snapshotID uuid.UUID) *domain.Variance {
 	t.Helper()
 	v, err := domain.NewVariance(
-		runSurrogateID,
-		snapshotSurrogateID,
+		runID,
+		snapshotID,
 		"ACC-001",
 		"GBP",
 		decimal.NewFromFloat(100.00),
@@ -102,6 +96,45 @@ func TestVarianceRepository_Create(t *testing.T) {
 	assert.Empty(t, found.ResolutionNote)
 	assert.Empty(t, found.ResolvedBy)
 	assert.Nil(t, found.ResolvedAt)
+}
+
+func TestVarianceRepository_Create_StoresSurrogateFKs(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewVarianceRepository(db)
+	ctx := tenantCtx()
+
+	runBusinessID, snapBusinessID := uuid.New(), uuid.New()
+	runID, snapshotID := seedRunAndSnapshot(ctx, t, db, runBusinessID, snapBusinessID)
+
+	v := newTestVariance(t, runID, snapshotID)
+	require.NoError(t, repo.Create(ctx, v))
+
+	// Domain round-trips the business identifiers (the client-facing API values).
+	found, err := repo.FindByID(ctx, v.VarianceID)
+	require.NoError(t, err)
+	assert.Equal(t, runBusinessID, found.RunID, "domain RunID must be the business run identifier")
+	assert.Equal(t, snapBusinessID, found.SnapshotID, "domain SnapshotID must be the business snapshot identifier")
+
+	// Stored FK columns hold surrogate PKs so fk_variance_run/fk_variance_snapshot resolve.
+	tid := tenant.TenantID("test-tenant-01")
+	quoted := fmt.Sprintf("%q", tid.SchemaName())
+
+	scan := func(query string, arg interface{}) string {
+		var out string
+		require.NoError(t, db.WithContext(ctx).Raw(fmt.Sprintf(query, quoted), arg).Scan(&out).Error)
+		return out
+	}
+	storedRunID := scan(`SELECT run_id::text FROM %s."variance" WHERE variance_id = ?`, v.VarianceID)
+	storedSnapshotID := scan(`SELECT snapshot_id::text FROM %s."variance" WHERE variance_id = ?`, v.VarianceID)
+	runSurrogate := scan(`SELECT id::text FROM %s."settlement_run" WHERE run_id = ?`, runBusinessID)
+	snapSurrogate := scan(`SELECT id::text FROM %s."settlement_snapshot" WHERE snapshot_id = ?`, snapBusinessID)
+
+	assert.Equal(t, runSurrogate, storedRunID, "variance.run_id must store the settlement_run surrogate PK")
+	assert.Equal(t, snapSurrogate, storedSnapshotID, "variance.snapshot_id must store the settlement_snapshot surrogate PK")
+	assert.NotEqual(t, runBusinessID.String(), storedRunID, "variance.run_id must not store the business id")
+	assert.NotEqual(t, snapBusinessID.String(), storedSnapshotID, "variance.snapshot_id must not store the business id")
 }
 
 func TestVarianceRepository_CreateBatch(t *testing.T) {
