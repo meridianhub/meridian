@@ -31,6 +31,7 @@ const (
 var (
 	ErrInstructionRepoNil           = errors.New("instruction repository cannot be nil")
 	ErrConnectionRepoNil            = errors.New("connection repository cannot be nil")
+	ErrRouteResolverNil             = errors.New("route resolver cannot be nil")
 	ErrEventPublishingPartialConfig = errors.New("event publishing is partially configured")
 )
 
@@ -40,6 +41,7 @@ type OperationalGatewayService struct {
 	instructionRepo     ports.InstructionRepository
 	instructionRepoImpl *persistence.InstructionRepository
 	connectionRepo      ports.ConnectionRepository
+	routeResolver       ports.RouteResolver
 	db                  *gorm.DB
 	eventPublisher      ports.InstructionEventPublisher
 	logger              *slog.Logger
@@ -54,9 +56,14 @@ type ProviderConnectionService struct {
 }
 
 // NewOperationalGatewayService creates a new OperationalGatewayService.
+//
+// The routeResolver is used at ingest time to resolve the provider connection for an
+// instruction from its configured route, so the dispatch worker never has to rely on a
+// caller-supplied connection id.
 func NewOperationalGatewayService(
 	instructionRepo ports.InstructionRepository,
 	connectionRepo ports.ConnectionRepository,
+	routeResolver ports.RouteResolver,
 	logger *slog.Logger,
 ) (*OperationalGatewayService, error) {
 	if instructionRepo == nil {
@@ -65,12 +72,16 @@ func NewOperationalGatewayService(
 	if connectionRepo == nil {
 		return nil, ErrConnectionRepoNil
 	}
+	if routeResolver == nil {
+		return nil, ErrRouteResolverNil
+	}
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 	return &OperationalGatewayService{
 		instructionRepo: instructionRepo,
 		connectionRepo:  connectionRepo,
+		routeResolver:   routeResolver,
 		logger:          logger,
 	}, nil
 }
@@ -187,10 +198,28 @@ func (s *OperationalGatewayService) DispatchInstruction(
 		return nil, status.Error(codes.Internal, "invalid tenant context")
 	}
 
+	// Resolve the route so the instruction carries the provider connection id from its
+	// configured route rather than a placeholder. Without a route, the instruction can never
+	// be dispatched, so reject it at ingest instead of persisting a doomed instruction.
+	route, err := s.routeResolver.Resolve(ctx, tenantUUID.String(), req.InstructionType)
+	if err != nil {
+		if errors.Is(err, ports.ErrRouteNotFound) {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"no route configured for instruction type %q", req.InstructionType)
+		}
+		// The resolver returns a gRPC status error for disallowed types (e.g. payment.*);
+		// propagate it verbatim so the caller sees the precise reason.
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		s.logger.Error("failed to resolve route", "instruction_type", req.InstructionType, "error", err)
+		return nil, status.Error(codes.Internal, "failed to resolve dispatch route")
+	}
+
 	instruction, err := domain.NewInstruction(
 		tenantUUID,
 		req.InstructionType,
-		uuid.Nil.String(),
+		route.ConnectionID,
 		structToMap(req.Payload),
 		buildInstructionOptions(req)...,
 	)

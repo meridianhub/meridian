@@ -164,7 +164,8 @@ func buildGRPCServer(
 		return nil, fmt.Errorf("failed to build grpc server: %w", err)
 	}
 
-	gatewaySvc, err := service.NewOperationalGatewayService(instructionRepo, connectionRepo, logger)
+	routeResolver := persistence.NewDBRouteResolver(routeRepo)
+	gatewaySvc, err := service.NewOperationalGatewayService(instructionRepo, connectionRepo, routeResolver, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gateway service: %w", err)
 	}

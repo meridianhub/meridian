@@ -188,6 +188,29 @@ func (m *mockConnectionRepo) UpdateHealth(_ context.Context, conn *domain.Provid
 	return nil
 }
 
+// mockRouteResolver is an in-memory implementation of ports.RouteResolver for testing.
+// By default it resolves every non-payment instruction type to testRouteConnectionID.
+type mockRouteResolver struct {
+	resolve func(ctx context.Context, tenantID string, instructionType string) (*ports.InstructionRoute, error)
+}
+
+// testRouteConnectionID is the connection id returned by the default mock route resolver.
+const testRouteConnectionID = "conn-primary-1"
+
+func newMockRouteResolver() *mockRouteResolver {
+	return &mockRouteResolver{}
+}
+
+func (m *mockRouteResolver) Resolve(ctx context.Context, tenantID string, instructionType string) (*ports.InstructionRoute, error) {
+	if m.resolve != nil {
+		return m.resolve(ctx, tenantID, instructionType)
+	}
+	return &ports.InstructionRoute{
+		InstructionType: instructionType,
+		ConnectionID:    testRouteConnectionID,
+	}, nil
+}
+
 // ========== Test helpers ==========
 
 // tenantContext returns a context with the given tenant ID attached.
@@ -206,7 +229,7 @@ func newTestOGService(t *testing.T) (*OperationalGatewayService, *mockInstructio
 	t.Helper()
 	instRepo := newMockInstructionRepo()
 	connRepo := newMockConnectionRepo()
-	svc, err := NewOperationalGatewayService(instRepo, connRepo, nil)
+	svc, err := NewOperationalGatewayService(instRepo, connRepo, newMockRouteResolver(), nil)
 	require.NoError(t, err)
 	return svc, instRepo, connRepo
 }
@@ -714,13 +737,18 @@ func TestListConnections_MissingTenant(t *testing.T) {
 // ========== Constructor tests ==========
 
 func TestNewOperationalGatewayService_NilRepo(t *testing.T) {
-	_, err := NewOperationalGatewayService(nil, newMockConnectionRepo(), nil)
+	_, err := NewOperationalGatewayService(nil, newMockConnectionRepo(), newMockRouteResolver(), nil)
 	assert.ErrorIs(t, err, ErrInstructionRepoNil)
 }
 
 func TestNewOperationalGatewayService_NilConnRepo(t *testing.T) {
-	_, err := NewOperationalGatewayService(newMockInstructionRepo(), nil, nil)
+	_, err := NewOperationalGatewayService(newMockInstructionRepo(), nil, newMockRouteResolver(), nil)
 	assert.ErrorIs(t, err, ErrConnectionRepoNil)
+}
+
+func TestNewOperationalGatewayService_NilRouteResolver(t *testing.T) {
+	_, err := NewOperationalGatewayService(newMockInstructionRepo(), newMockConnectionRepo(), nil, nil)
+	assert.ErrorIs(t, err, ErrRouteResolverNil)
 }
 
 func TestNewProviderConnectionService_NilConnRepo(t *testing.T) {

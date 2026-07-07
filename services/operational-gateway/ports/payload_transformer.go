@@ -21,6 +21,15 @@ type InstructionRoute struct {
 	// InstructionType is the type of instruction this route handles (e.g., "payment_order.create").
 	InstructionType string
 
+	// ConnectionID is the primary ProviderConnection UUID this route dispatches to.
+	// It is the source of truth for connection selection at dispatch time; the dispatch
+	// worker looks up the connection by this id rather than any value stored on the instruction.
+	ConnectionID string
+
+	// FallbackConnectionID is an optional secondary ProviderConnection UUID used when the
+	// primary connection is unavailable (missing or circuit open). Empty string means no fallback.
+	FallbackConnectionID string
+
 	// HTTPMethod is the HTTP verb for the outbound request (e.g., "POST", "PUT").
 	HTTPMethod string
 

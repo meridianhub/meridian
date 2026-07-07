@@ -178,26 +178,30 @@ func (w *DispatchWorker) processBatch(ctx context.Context) {
 }
 
 // processInstruction dispatches a single instruction through the full flow:
-// resolve route -> look up connection -> check circuit breaker -> dispatch -> handle outcome.
+// resolve route -> select connection (primary, then fallback) -> dispatch -> handle outcome.
 //
 // The instruction arrives already in DISPATCHING state (set by FetchDispatchable).
 func (w *DispatchWorker) processInstruction(ctx context.Context, instr *domain.Instruction) error {
-	route, conn, err := w.resolveRouteAndConnection(ctx, instr)
+	route, err := w.resolveRoute(ctx, instr)
 	if err != nil {
 		return err
 	}
-	// handleFailure returns nil error after marking instruction as failed.
-	// In that case route and conn are nil - nothing more to do.
-	if route == nil || conn == nil {
+	// resolveRoute returns (nil, nil) after marking the instruction failed (route not found).
+	if route == nil {
 		return nil
 	}
 
-	// Check circuit breaker.
-	if !conn.IsAvailable() {
-		return w.handleRetryOrFail(ctx, instr, conn, "circuit breaker open", "CIRCUIT_OPEN")
+	conn, err := w.selectConnection(ctx, instr, route)
+	if err != nil {
+		return err
+	}
+	// selectConnection returns (nil, nil) after marking the instruction failed or scheduling a
+	// retry (no usable connection). Nothing more to do this cycle.
+	if conn == nil {
+		return nil
 	}
 
-	// Dispatch to external provider.
+	// conn is guaranteed available (circuit closed or half-open) at this point.
 	result := w.dispatcher.Dispatch(ctx, instr, conn, route)
 
 	// Handle transport-level error (no response received).
@@ -211,27 +215,101 @@ func (w *DispatchWorker) processInstruction(ctx context.Context, instr *domain.I
 	return w.handleDispatchOutcome(ctx, instr, conn, result)
 }
 
-// resolveRouteAndConnection resolves the route and provider connection for the instruction.
-// Returns a permanent failure (via handleFailure) for missing route/connection, or a transient
-// error for DB/network issues so the stuck-instruction reaper can retry.
-func (w *DispatchWorker) resolveRouteAndConnection(ctx context.Context, instr *domain.Instruction) (*ports.InstructionRoute, *domain.ProviderConnection, error) {
+// resolveRoute resolves the dispatch route for the instruction.
+// Returns (nil, nil) after marking the instruction permanently failed when no route is
+// configured (ROUTE_NOT_FOUND), or a transient error for DB/network issues so the
+// stuck-instruction reaper can retry later.
+func (w *DispatchWorker) resolveRoute(ctx context.Context, instr *domain.Instruction) (*ports.InstructionRoute, error) {
 	route, err := w.routeResolver.Resolve(ctx, instr.TenantID.String(), instr.InstructionType)
 	if err != nil {
 		if errors.Is(err, ports.ErrRouteNotFound) {
-			return nil, nil, w.handleFailure(ctx, instr, fmt.Sprintf("route resolution failed: %v", err), "ROUTE_NOT_FOUND")
+			return nil, w.handleFailure(ctx, instr, fmt.Sprintf("route resolution failed: %v", err), "ROUTE_NOT_FOUND")
 		}
-		return nil, nil, fmt.Errorf("route resolution transient error: %w", err)
+		return nil, fmt.Errorf("route resolution transient error: %w", err)
+	}
+	return route, nil
+}
+
+// selectConnection returns a usable provider connection for the instruction, honoring the
+// route's primary ConnectionID and falling back to FallbackConnectionID when the primary is
+// unavailable (not found, or circuit open). The returned connection is guaranteed available.
+//
+// Return contract:
+//   - (conn, nil): a usable, available connection to dispatch with.
+//   - (nil, nil):  the instruction was terminally handled (marked failed) or scheduled for
+//     retry; the caller should stop processing it this cycle.
+//   - (nil, err):  a transient error (DB/network); the caller should propagate so the
+//     stuck-instruction reaper retries later.
+func (w *DispatchWorker) selectConnection(ctx context.Context, instr *domain.Instruction, route *ports.InstructionRoute) (*domain.ProviderConnection, error) {
+	tenantID := instr.TenantID.String()
+
+	candidates := []struct {
+		label string
+		id    string
+	}{
+		{"primary", route.ConnectionID},
+	}
+	if route.FallbackConnectionID != "" && route.FallbackConnectionID != route.ConnectionID {
+		candidates = append(candidates, struct {
+			label string
+			id    string
+		}{"fallback", route.FallbackConnectionID})
 	}
 
-	conn, err := w.connectionRepo.FindByID(ctx, instr.TenantID.String(), instr.ProviderConnectionID)
+	// firstUnavailable is the first connection that exists but whose circuit is open. It is used
+	// to drive a retry (the circuit may recover) and to source the backoff RetryPolicy.
+	var firstUnavailable *domain.ProviderConnection
+
+	for _, candidate := range candidates {
+		conn, found, err := w.lookupConnection(ctx, tenantID, candidate.id)
+		if err != nil {
+			return nil, fmt.Errorf("%s connection lookup transient error: %w", candidate.label, err)
+		}
+		if !found {
+			continue // not configured or not found — treat as unavailable, try next candidate
+		}
+		if conn.IsAvailable() {
+			if candidate.label == "fallback" {
+				w.logger.WarnContext(ctx, "primary connection unavailable; dispatching via fallback",
+					"instruction_id", instr.ID,
+					"primary_connection_id", route.ConnectionID,
+					"fallback_connection_id", route.FallbackConnectionID,
+				)
+			}
+			return conn, nil
+		}
+		if firstUnavailable == nil {
+			firstUnavailable = conn
+		}
+	}
+
+	// No usable connection. If at least one exists but its circuit is open, retry (it may
+	// recover); otherwise the connection is genuinely missing and this is a permanent failure.
+	if firstUnavailable != nil {
+		return nil, w.handleRetryOrFail(ctx, instr, firstUnavailable,
+			"provider connection unavailable: circuit open", "CIRCUIT_OPEN")
+	}
+	return nil, w.handleFailure(ctx, instr,
+		fmt.Sprintf("no provider connection available for route (connection_id=%q, fallback_connection_id=%q)",
+			route.ConnectionID, route.FallbackConnectionID),
+		"CONNECTION_NOT_FOUND")
+}
+
+// lookupConnection fetches a connection by id. It returns found=false (with a nil connection and
+// nil error) when the id is empty or the connection does not exist, so the caller can fall through
+// to a fallback candidate. Any other error is transient and returned to the caller.
+func (w *DispatchWorker) lookupConnection(ctx context.Context, tenantID, connectionID string) (*domain.ProviderConnection, bool, error) {
+	if connectionID == "" {
+		return nil, false, nil
+	}
+	conn, err := w.connectionRepo.FindByID(ctx, tenantID, connectionID)
 	if err != nil {
 		if errors.Is(err, ports.ErrConnectionNotFound) {
-			return nil, nil, w.handleFailure(ctx, instr, fmt.Sprintf("connection lookup failed: %v", err), "CONNECTION_NOT_FOUND")
+			return nil, false, nil
 		}
-		return nil, nil, fmt.Errorf("connection lookup transient error: %w", err)
+		return nil, false, err
 	}
-
-	return route, conn, nil
+	return conn, true, nil
 }
 
 // handleDispatchError records a transport-level failure on the connection and retries or fails.
