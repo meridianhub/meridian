@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
@@ -115,6 +116,10 @@ func (m *mockInstructionRepo) FetchDispatchable(_ context.Context, _ ports.Fetch
 }
 
 func (m *mockInstructionRepo) FindExpired(_ context.Context, _ int) ([]*domain.Instruction, error) {
+	return nil, nil
+}
+
+func (m *mockInstructionRepo) FindStuckDispatching(_ context.Context, _ time.Duration, _ int) ([]*domain.Instruction, error) {
 	return nil, nil
 }
 

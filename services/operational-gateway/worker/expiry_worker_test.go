@@ -44,11 +44,35 @@ func retryingExpiredInstruction() *domain.Instruction {
 	return instr
 }
 
+// stuckDispatchingInstruction creates a DISPATCHING instruction that has exceeded its lease.
+func stuckDispatchingInstruction() *domain.Instruction {
+	stale := time.Now().Add(-30 * time.Minute)
+	return &domain.Instruction{
+		ID:                   uuid.New(),
+		TenantID:             testTenantID(),
+		InstructionType:      "kyc.verify",
+		ProviderConnectionID: "conn-123",
+		Payload:              map[string]any{"amount": "100.00"},
+		Priority:             domain.PriorityNormal,
+		Status:               domain.InstructionStatusDispatching,
+		DispatchedAt:         &stale,
+		MaxAttempts:          3,
+		AttemptCount:         1,
+		Attempts:             []domain.InstructionAttempt{},
+		Version:              1,
+		CreatedAt:            time.Now().Add(-1 * time.Hour),
+		UpdatedAt:            stale,
+	}
+}
+
 // mockExpiryRepo is a minimal mock satisfying ports.InstructionRepository for expiry worker tests.
 type mockExpiryRepo struct {
 	mockInstructionRepo
 	findExpired      func(ctx context.Context, batchSize int) ([]*domain.Instruction, error)
 	findExpiredCalls int
+	findStuck        func(ctx context.Context, leaseTimeout time.Duration, batchSize int) ([]*domain.Instruction, error)
+	findStuckCalls   int
+	lastLeaseTimeout time.Duration
 }
 
 func (m *mockExpiryRepo) FindExpired(ctx context.Context, batchSize int) ([]*domain.Instruction, error) {
@@ -61,10 +85,27 @@ func (m *mockExpiryRepo) FindExpired(ctx context.Context, batchSize int) ([]*dom
 	return nil, nil
 }
 
+func (m *mockExpiryRepo) FindStuckDispatching(ctx context.Context, leaseTimeout time.Duration, batchSize int) ([]*domain.Instruction, error) {
+	m.mu.Lock()
+	m.findStuckCalls++
+	m.lastLeaseTimeout = leaseTimeout
+	m.mu.Unlock()
+	if m.findStuck != nil {
+		return m.findStuck(ctx, leaseTimeout, batchSize)
+	}
+	return nil, nil
+}
+
 func (m *mockExpiryRepo) getFindExpiredCalls() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.findExpiredCalls
+}
+
+func (m *mockExpiryRepo) getLastLeaseTimeout() time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastLeaseTimeout
 }
 
 // --- Tests ---
@@ -75,7 +116,84 @@ func TestNewExpiryWorker_AppliesDefaults(t *testing.T) {
 
 	assert.Equal(t, defaultExpiryScanInterval, w.config.ScanInterval)
 	assert.Equal(t, defaultExpiryBatchSize, w.config.BatchSize)
+	assert.Equal(t, defaultLeaseTimeout, w.config.LeaseTimeout)
 	assert.NotNil(t, w.logger)
+}
+
+// TestExpiryWorker_ReapStuckDispatching_ReclaimsToRetrying verifies a DISPATCHING instruction
+// whose lease has expired and which still has attempts remaining is reclaimed to RETRYING and
+// made eligible for immediate re-dispatch.
+func TestExpiryWorker_ReapStuckDispatching_ReclaimsToRetrying(t *testing.T) {
+	stuck := stuckDispatchingInstruction()
+	stuck.AttemptCount = 1
+	stuck.MaxAttempts = 3
+
+	repo := &mockExpiryRepo{
+		findStuck: func(_ context.Context, _ time.Duration, _ int) ([]*domain.Instruction, error) {
+			return []*domain.Instruction{stuck}, nil
+		},
+	}
+	w := NewExpiryWorker(repo, ExpiryWorkerConfig{}, nil)
+
+	w.reapStuckDispatching(context.Background())
+
+	saved := repo.getSavedInstructions()
+	require.Len(t, saved, 1)
+	assert.Equal(t, domain.InstructionStatusRetrying, saved[0].Status)
+	assert.Nil(t, saved[0].NextRetryAt, "reclaimed instruction should retry immediately")
+	assert.Equal(t, defaultLeaseTimeout, repo.getLastLeaseTimeout())
+}
+
+// TestExpiryWorker_ReapStuckDispatching_ExhaustedMarksFailed verifies a stuck DISPATCHING
+// instruction with no remaining attempts is marked FAILED rather than retried forever.
+func TestExpiryWorker_ReapStuckDispatching_ExhaustedMarksFailed(t *testing.T) {
+	stuck := stuckDispatchingInstruction()
+	stuck.AttemptCount = 3
+	stuck.MaxAttempts = 3
+
+	repo := &mockExpiryRepo{
+		findStuck: func(_ context.Context, _ time.Duration, _ int) ([]*domain.Instruction, error) {
+			return []*domain.Instruction{stuck}, nil
+		},
+	}
+	w := NewExpiryWorker(repo, ExpiryWorkerConfig{}, nil)
+
+	w.reapStuckDispatching(context.Background())
+
+	saved := repo.getSavedInstructions()
+	require.Len(t, saved, 1)
+	assert.Equal(t, domain.InstructionStatusFailed, saved[0].Status)
+	assert.Equal(t, leaseExpiredReason, saved[0].FailureReason)
+}
+
+// TestExpiryWorker_ReapStuckDispatching_NoStuckRowsNoSave verifies the reaper does not persist
+// anything when there are no stuck DISPATCHING instructions.
+func TestExpiryWorker_ReapStuckDispatching_NoStuckRowsNoSave(t *testing.T) {
+	repo := &mockExpiryRepo{
+		findStuck: func(_ context.Context, _ time.Duration, _ int) ([]*domain.Instruction, error) {
+			return nil, nil
+		},
+	}
+	w := NewExpiryWorker(repo, ExpiryWorkerConfig{}, nil)
+
+	w.reapStuckDispatching(context.Background())
+
+	assert.Empty(t, repo.getSavedInstructions())
+}
+
+// TestExpiryWorker_ReclaimInstruction_SkipsNonDispatching verifies an instruction that is no
+// longer DISPATCHING (e.g. concurrently progressed) is left untouched.
+func TestExpiryWorker_ReclaimInstruction_SkipsNonDispatching(t *testing.T) {
+	repo := &mockExpiryRepo{}
+	w := NewExpiryWorker(repo, ExpiryWorkerConfig{}, nil)
+
+	instr := stuckDispatchingInstruction()
+	instr.Status = domain.InstructionStatusDelivered
+
+	outcome := w.reclaimInstruction(context.Background(), instr)
+
+	assert.Equal(t, reclaimSkipped, outcome)
+	assert.Empty(t, repo.getSavedInstructions())
 }
 
 func TestNewExpiryWorker_RespectsCustomConfig(t *testing.T) {

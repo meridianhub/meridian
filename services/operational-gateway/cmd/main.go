@@ -224,6 +224,7 @@ func buildWorkers(
 		worker.ExpiryWorkerConfig{
 			ScanInterval: cfg.ExpiryWorker.ScanInterval,
 			BatchSize:    cfg.ExpiryWorker.BatchSize,
+			LeaseTimeout: cfg.ExpiryWorker.LeaseTimeout,
 		},
 		logger,
 	)

@@ -41,6 +41,9 @@ type ExpiryWorkerConfig struct {
 	ScanInterval time.Duration
 	// BatchSize is the maximum number of expired instructions to process per scan.
 	BatchSize int
+	// LeaseTimeout is how long an instruction may remain in DISPATCHING before the expiry
+	// worker treats it as stuck (crashed worker) and reclaims it for another attempt.
+	LeaseTimeout time.Duration
 }
 
 // LoadConfig loads configuration from environment variables with sensible defaults.
@@ -56,6 +59,7 @@ func LoadConfig() Config {
 		ExpiryWorker: ExpiryWorkerConfig{
 			ScanInterval: env.GetEnvAsDuration("EXPIRY_WORKER_SCAN_INTERVAL", 30*time.Second),
 			BatchSize:    env.GetEnvAsInt("EXPIRY_WORKER_BATCH_SIZE", 100),
+			LeaseTimeout: env.GetEnvAsDuration("EXPIRY_WORKER_LEASE_TIMEOUT", 5*time.Minute),
 		},
 	}
 }
