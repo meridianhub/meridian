@@ -259,8 +259,11 @@ func (h *ApplyManifestHandler) recordAndFinalize(
 		response.SequenceNumber = snapshot.SequenceNumber
 	}
 
-	// Save to version store for future diffs
-	if h.versionStore != nil {
+	// Persist to the legacy version store only when no history service is wired.
+	// When the history service is present it is the single source of truth
+	// (versioned, sequence-assigned via recordHistory above), so writing here too
+	// would produce a duplicate, unsequenced (sequence-0) row for the same apply.
+	if h.historyService == nil && h.versionStore != nil {
 		if err := h.versionStore.Save(ctx, req.GetManifest(), req.GetAppliedBy()); err != nil {
 			logger.Error("failed to save manifest version to differ store", "error", err)
 		}

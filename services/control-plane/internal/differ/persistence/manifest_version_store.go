@@ -36,10 +36,14 @@ func NewPostgresManifestVersionStore(pool *pgxpool.Pool) *PostgresManifestVersio
 func (s *PostgresManifestVersionStore) GetLatestApplied(ctx context.Context) (*differ.ManifestVersion, error) {
 	var result *differ.ManifestVersion
 	err := s.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		// Restrict to successfully applied versions and order by sequence number so
+		// the diff baseline is the latest good manifest. The history service records
+		// FAILED/PARTIAL rows in this same table; those must never become a baseline.
 		row := tx.QueryRow(ctx, `
 			SELECT id, version, manifest_json, applied_at, applied_by
 			FROM manifest_version
-			ORDER BY applied_at DESC
+			WHERE apply_status = 'APPLIED'
+			ORDER BY sequence_number DESC, applied_at DESC
 			LIMIT 1
 		`)
 
