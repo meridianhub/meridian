@@ -107,6 +107,18 @@ func (m *mockAuthServiceClient) ValidateAPIKey(_ context.Context, _ *controlplan
 	return m.response, m.err
 }
 
+// funcAuthServiceClient is a mock that computes its response from the request,
+// allowing tests to distinguish between different plaintext keys.
+type funcAuthServiceClient struct {
+	fn        func(req *controlplanev1.ValidateAPIKeyRequest) (*controlplanev1.ValidateAPIKeyResponse, error)
+	callCount atomic.Int32
+}
+
+func (m *funcAuthServiceClient) ValidateAPIKey(_ context.Context, req *controlplanev1.ValidateAPIKeyRequest, _ ...grpc.CallOption) (*controlplanev1.ValidateAPIKeyResponse, error) {
+	m.callCount.Add(1)
+	return m.fn(req)
+}
+
 // mockSlugResolver is a mock for the SlugResolver interface.
 type mockSlugResolver struct {
 	tenantID tenant.TenantID
@@ -241,6 +253,119 @@ func TestRPCAPIKeyValidator_Validate(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "resolve tenant slug")
 	})
+}
+
+// TestRPCAPIKeyValidator_CacheKeyedOnFullKey verifies that the validation cache
+// is keyed on a hash of the full key rather than the truncated prefix. Two keys
+// that share the same pk_{slug}_{first 8 entropy chars} prefix must not collide.
+func TestRPCAPIKeyValidator_CacheKeyedOnFullKey(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Both keys share the prefix "pk_acme_abc12345".
+	const legitKey = "pk_acme_abc12345LEGITIMATEKEY"
+	const forgedKey = "pk_acme_abc12345FORGEDKEYVALUE"
+
+	// Sanity check: the two keys really do share the truncated prefix.
+	_, legitPrefix, ok := ParsePrefixedKey(legitKey)
+	require.True(t, ok)
+	_, forgedPrefix, ok := ParsePrefixedKey(forgedKey)
+	require.True(t, ok)
+	require.Equal(t, legitPrefix, forgedPrefix, "test keys must share the truncated prefix")
+
+	t.Run("distinct keys sharing a prefix do not collide in cache", func(t *testing.T) {
+		client := &funcAuthServiceClient{
+			fn: func(req *controlplanev1.ValidateAPIKeyRequest) (*controlplanev1.ValidateAPIKeyResponse, error) {
+				return &controlplanev1.ValidateAPIKeyResponse{
+					Valid:    req.GetPlaintextKey() == legitKey,
+					TenantId: "test_tenant",
+					Identity: "Alice",
+				}, nil
+			},
+		}
+		resolver := &mockSlugResolver{tenantID: tenant.MustNewTenantID("test_tenant")}
+
+		v := NewRPCAPIKeyValidator(RPCValidatorConfig{
+			Client:       client,
+			SlugResolver: resolver,
+			CacheTTL:     5 * time.Minute,
+			Logger:       logger,
+		})
+		defer v.Close()
+
+		// Validate the legitimate key: valid, and cached.
+		res, err := v.Validate(context.Background(), legitKey)
+		require.NoError(t, err)
+		assert.True(t, res.Valid)
+
+		// The forged key shares the prefix but is a different full key. With
+		// prefix-based caching it would collide and read the legitimate result.
+		res, err = v.Validate(context.Background(), forgedKey)
+		require.NoError(t, err)
+		assert.False(t, res.Valid, "forged key sharing a prefix must not authenticate from cache")
+
+		// Both keys must have triggered their own RPC validation.
+		assert.Equal(t, int32(2), client.callCount.Load())
+	})
+
+	t.Run("negative cache entry does not poison a legitimate key", func(t *testing.T) {
+		client := &funcAuthServiceClient{
+			fn: func(req *controlplanev1.ValidateAPIKeyRequest) (*controlplanev1.ValidateAPIKeyResponse, error) {
+				return &controlplanev1.ValidateAPIKeyResponse{
+					Valid:    req.GetPlaintextKey() == legitKey,
+					TenantId: "test_tenant",
+					Identity: "Alice",
+				}, nil
+			},
+		}
+		resolver := &mockSlugResolver{tenantID: tenant.MustNewTenantID("test_tenant")}
+
+		v := NewRPCAPIKeyValidator(RPCValidatorConfig{
+			Client:       client,
+			SlugResolver: resolver,
+			CacheTTL:     5 * time.Minute,
+			Logger:       logger,
+		})
+		defer v.Close()
+
+		// A forged key sharing the prefix is validated first and cached as invalid.
+		res, err := v.Validate(context.Background(), forgedKey)
+		require.NoError(t, err)
+		assert.False(t, res.Valid)
+
+		// The legitimate key must not inherit the negative cache entry.
+		res, err = v.Validate(context.Background(), legitKey)
+		require.NoError(t, err)
+		assert.True(t, res.Valid, "legitimate key must not be poisoned by a forged key's negative cache entry")
+	})
+}
+
+// TestRPCAPIKeyValidator_CacheIndexPerInstance verifies that the cache index is
+// derived under a per-validator-instance secret: it is stable within one
+// validator but differs across instances for the same input, confirming the
+// keyed HMAC (not a bare hash) is actually applied.
+func TestRPCAPIKeyValidator_CacheIndexPerInstance(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	newValidator := func() *RPCAPIKeyValidator {
+		return NewRPCAPIKeyValidator(RPCValidatorConfig{
+			Client:       &mockAuthServiceClient{},
+			SlugResolver: &mockSlugResolver{},
+			Logger:       logger,
+		})
+	}
+
+	v1 := newValidator()
+	defer v1.Close()
+	v2 := newValidator()
+	defer v2.Close()
+
+	const key = "pk_acme_abc12345xyz67890abcdef"
+
+	// Stable within one instance.
+	assert.Equal(t, v1.cacheIndex(key), v1.cacheIndex(key))
+	// Different across instances (per-instance secret applied).
+	assert.NotEqual(t, v1.cacheIndex(key), v2.cacheIndex(key))
+	// The index is not the plaintext key.
+	assert.NotEqual(t, key, v1.cacheIndex(key))
 }
 
 func TestRPCAPIKeyValidator_AllowRequest(t *testing.T) {

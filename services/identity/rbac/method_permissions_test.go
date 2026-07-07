@@ -36,8 +36,6 @@ func TestMethodPermissions_AllEntriesHaveRolesOrPublic(t *testing.T) {
 func TestMethodPermissions_PublicMethods(t *testing.T) {
 	publicMethods := []string{
 		"/meridian.identity.v1.IdentityService/Authenticate",
-		"/meridian.identity.v1.IdentityService/RequestPasswordReset",
-		"/meridian.identity.v1.IdentityService/CompletePasswordReset",
 		"/meridian.identity.v1.IdentityService/AcceptInvitation",
 	}
 	for _, method := range publicMethods {
@@ -48,6 +46,26 @@ func TestMethodPermissions_PublicMethods(t *testing.T) {
 		}
 		if !perm.Public {
 			t.Errorf("method %s should be marked Public", method)
+		}
+	}
+}
+
+// TestMethodPermissions_NoGRPCPasswordReset guards against reintroducing the
+// insecure unauthenticated gRPC password-reset endpoints. Password reset is
+// handled exclusively by the api-gateway HTTP flow.
+func TestMethodPermissions_NoGRPCPasswordReset(t *testing.T) {
+	removed := []string{
+		"/meridian.identity.v1.IdentityService/RequestPasswordReset",
+		"/meridian.identity.v1.IdentityService/CompletePasswordReset",
+	}
+	for _, method := range removed {
+		if _, ok := rbac.MethodPermissions.Permissions[method]; ok {
+			t.Errorf("method %s must not be present in the RBAC permission map", method)
+		}
+		for _, expected := range rbac.ExpectedMethods {
+			if expected == method {
+				t.Errorf("method %s must not be present in ExpectedMethods", method)
+			}
 		}
 	}
 }

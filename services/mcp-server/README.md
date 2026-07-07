@@ -345,10 +345,19 @@ validator.
 
 ### Tenant isolation
 
-The MCP server is a single-tenant process. `MERIDIAN_API_KEY` is forwarded as a
-Bearer token on every outgoing gRPC call. The `api-gateway` uses this key to
-resolve the tenant and enforce boundaries — no tool call can reach a different
-tenant's data.
+In stdio / API-key mode the MCP server is a single-tenant process.
+`MERIDIAN_API_KEY` is forwarded as a Bearer token on every outgoing gRPC call.
+The `api-gateway` uses this key to resolve the tenant and enforce boundaries — no
+tool call can reach a different tenant's data.
+
+In HTTP mode with `MCP_OAUTH_ENABLED=true`, the bearer token's tenant claim is
+authoritative: `auth.BearerMiddleware` injects it into the request context, and
+tools that accept a `tenant_id` parameter (`meridian_manifest_validate`,
+`meridian_economy_generate`, `meridian_economy_generate_context`) reconcile the
+supplied value against it. A `tenant_id` that differs from the authenticated
+tenant is rejected with `PermissionDenied`; an omitted `tenant_id` falls back to
+the authenticated tenant. This prevents a caller authenticated for one tenant
+from reaching another tenant's data by supplying an arbitrary `tenant_id`.
 
 ### Plan-hash binding
 

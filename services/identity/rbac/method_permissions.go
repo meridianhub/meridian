@@ -43,12 +43,6 @@ var MethodPermissions = auth.MethodRBACConfig{
 		"/meridian.identity.v1.IdentityService/Authenticate": {
 			Public: true,
 		},
-		"/meridian.identity.v1.IdentityService/RequestPasswordReset": {
-			Public: true,
-		},
-		"/meridian.identity.v1.IdentityService/CompletePasswordReset": {
-			Public: true,
-		},
 		"/meridian.identity.v1.IdentityService/AcceptInvitation": {
 			Public: true,
 		},
@@ -75,8 +69,6 @@ var ExpectedMethods = []string{
 	"/meridian.identity.v1.IdentityService/Authenticate",
 	"/meridian.identity.v1.IdentityService/SetPassword",
 	"/meridian.identity.v1.IdentityService/ChangePassword",
-	"/meridian.identity.v1.IdentityService/RequestPasswordReset",
-	"/meridian.identity.v1.IdentityService/CompletePasswordReset",
 	"/meridian.identity.v1.IdentityService/GrantRole",
 	"/meridian.identity.v1.IdentityService/RevokeRole",
 	"/meridian.identity.v1.IdentityService/ListRoleAssignments",

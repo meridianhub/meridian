@@ -417,6 +417,136 @@ func TestIntegration_GetAccountBalance_AllBalanceTypes(t *testing.T) {
 	}
 }
 
+// createSingleEntryLog persists a new position log containing exactly one
+// transaction entry, mirroring how current-account records every deposit or
+// withdrawal as its own FinancialPositionLog.
+func createSingleEntryLog(
+	t *testing.T,
+	ctx context.Context,
+	repo *persistence.PostgresRepository,
+	accountID string,
+	amount int64,
+	direction domain.PostingDirection,
+	currency domain.Currency,
+	reference string,
+) {
+	t.Helper()
+
+	entry, err := domain.NewTransactionLogEntry(
+		uuid.New(),
+		accountID,
+		domain.MustNewMoney(decimal.NewFromInt(amount), currency),
+		direction,
+		time.Now().UTC(),
+		"transaction",
+		reference,
+		domain.TransactionSourceManual,
+	)
+	require.NoError(t, err)
+
+	log, err := domain.NewFinancialPositionLog(accountID, entry, nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctx, log))
+}
+
+// TestIntegration_GetAccountBalance_AggregatesAcrossMultipleLogs is the
+// regression test for MON-1: the balance must sum every entry across ALL of the
+// account's position logs, not just the most recent one.
+func TestIntegration_GetAccountBalance_AggregatesAcrossMultipleLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := SetupBalanceIntegrationTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-MULTI-LOG-001"
+
+	// Three sequential deposits, each recorded as a SEPARATE position log.
+	// Before the fix, only the newest log (25) was read, so the balance was 25.
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 100, domain.PostingDirectionDebit, domain.CurrencyGBP, "DEP-1")
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 50, domain.PostingDirectionDebit, domain.CurrencyGBP, "DEP-2")
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 25, domain.PostingDirectionDebit, domain.CurrencyGBP, "DEP-3")
+
+	for _, bt := range []positionkeepingv1.BalanceType{
+		positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+		positionkeepingv1.BalanceType_BALANCE_TYPE_LEDGER,
+		positionkeepingv1.BalanceType_BALANCE_TYPE_CLOSING,
+	} {
+		t.Run(bt.String(), func(t *testing.T) {
+			req := &positionkeepingv1.GetAccountBalanceRequest{
+				AccountId:   accountID,
+				BalanceType: bt,
+			}
+
+			resp, err := tc.Service.GetAccountBalance(ctx, req)
+			require.NoError(t, err)
+			assert.Equal(t, "175.00", resp.Amount.Amount,
+				"balance must aggregate all three deposit logs (100 + 50 + 25)")
+			assert.Equal(t, "GBP", resp.Amount.InstrumentCode)
+		})
+	}
+}
+
+// TestIntegration_GetAccountBalance_MixedCreditsDebitsAcrossLogs verifies that
+// credits and debits spread across multiple logs net correctly.
+func TestIntegration_GetAccountBalance_MixedCreditsDebitsAcrossLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := SetupBalanceIntegrationTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-MULTI-LOG-MIXED-001"
+
+	// Deposits (DEBIT increases balance) and withdrawals (CREDIT decreases it),
+	// each as a separate log. Net: 1000 + 500 - 200 - 300 = 1000.
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 1000, domain.PostingDirectionDebit, domain.CurrencyGBP, "DEP-1")
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 500, domain.PostingDirectionDebit, domain.CurrencyGBP, "DEP-2")
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 200, domain.PostingDirectionCredit, domain.CurrencyGBP, "WD-1")
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 300, domain.PostingDirectionCredit, domain.CurrencyGBP, "WD-2")
+
+	req := &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   accountID,
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+	}
+
+	resp, err := tc.Service.GetAccountBalance(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, "1000.00", resp.Amount.Amount)
+}
+
+// TestIntegration_GetAccountBalance_NetsToZeroAcrossLogs verifies an account
+// whose credits exactly offset its debits reports a zero balance in the correct
+// instrument (not a NotFound).
+func TestIntegration_GetAccountBalance_NetsToZeroAcrossLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tc := SetupBalanceIntegrationTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	accountID := "ACC-MULTI-LOG-ZERO-001"
+
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 400, domain.PostingDirectionDebit, domain.CurrencyGBP, "DEP-1")
+	createSingleEntryLog(t, ctx, tc.Repo, accountID, 400, domain.PostingDirectionCredit, domain.CurrencyGBP, "WD-1")
+
+	req := &positionkeepingv1.GetAccountBalanceRequest{
+		AccountId:   accountID,
+		BalanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
+	}
+
+	resp, err := tc.Service.GetAccountBalance(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, "0.00", resp.Amount.Amount)
+	assert.Equal(t, "GBP", resp.Amount.InstrumentCode)
+}
+
 func TestIntegration_GetAccountBalance_WithLiens(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

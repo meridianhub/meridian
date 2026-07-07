@@ -3,9 +3,7 @@ package service_test
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,38 +29,15 @@ func (m *MockCurrentAccountClient) GetActiveAmountBlocks(ctx context.Context, ac
 	return args.Get(0).([]domain.AmountBlock), args.Error(1)
 }
 
-// createTestLogWithEntries creates a test FinancialPositionLog with transaction entries.
-// Uses DEBIT entries to add to the balance (since DEBIT = add, CREDIT = subtract in this model).
-func createTestLogWithEntries(t *testing.T, accountID string, amount decimal.Decimal, currency domain.Currency) *domain.FinancialPositionLog {
-	t.Helper()
-
-	// For positive amounts, use DEBIT entries (which add to balance)
-	// For negative amounts, use CREDIT entries (which subtract from balance)
-	var direction domain.PostingDirection
-	var entryAmount decimal.Decimal
-	if amount.IsNegative() {
-		direction = domain.PostingDirectionCredit
-		entryAmount = amount.Neg()
-	} else {
-		direction = domain.PostingDirectionDebit
-		entryAmount = amount
-	}
-
-	entry, err := domain.NewTransactionLogEntry(
-		uuid.New(),
-		accountID,
-		domain.MustNewMoney(entryAmount, currency),
-		direction,
-		time.Now(),
-		"test transaction",
-		"REF-001",
-		domain.TransactionSourceManual,
+// expectAccountBalance configures the repository mock to return an aggregated
+// net movement for an account, exactly as SumAccountBalances would after summing
+// every transaction entry across all of the account's position logs.
+func expectAccountBalance(repo *MockRepository, accountID string, amount decimal.Decimal, currency domain.Currency) {
+	money := domain.MustNewMoney(amount, currency)
+	repo.On("SumAccountBalances", mock.Anything, accountID).Return(
+		[]domain.AccountInstrumentBalance{{Instrument: money.Instrument, NetMovement: money}},
+		true, nil,
 	)
-	require.NoError(t, err)
-
-	log, err := domain.NewFinancialPositionLog(accountID, entry, nil)
-	require.NoError(t, err)
-	return log
 }
 
 // TestGetAccountBalance_Success tests successful balance retrieval for all 7 balance types
@@ -78,8 +53,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 			balanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_OPENING,
 			setupMocks: func(repo *MockRepository, _ *MockCurrentAccountClient) {
 				// Log with DEBIT 1000 entry (adds to balance)
-				log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-				repo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+				expectAccountBalance(repo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 			},
 			expectAmount: 0, // Opening balance is 0 (passed to LogBalanceComputer)
 		},
@@ -88,8 +62,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 			balanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CURRENT,
 			setupMocks: func(repo *MockRepository, _ *MockCurrentAccountClient) {
 				// Log with DEBIT 500 entry (adds to balance)
-				log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(500), domain.CurrencyGBP)
-				repo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+				expectAccountBalance(repo, "test-account", decimal.NewFromInt(500), domain.CurrencyGBP)
 			},
 			expectAmount: 500, // 0 (opening) + 500 (DEBIT entry) = 500
 		},
@@ -98,8 +71,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 			balanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_CLOSING,
 			setupMocks: func(repo *MockRepository, _ *MockCurrentAccountClient) {
 				// Log with DEBIT 750 entry
-				log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(750), domain.CurrencyGBP)
-				repo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+				expectAccountBalance(repo, "test-account", decimal.NewFromInt(750), domain.CurrencyGBP)
 			},
 			expectAmount: 750, // Closing balance at current time
 		},
@@ -108,8 +80,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 			balanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_LEDGER,
 			setupMocks: func(repo *MockRepository, _ *MockCurrentAccountClient) {
 				// Log with DEBIT 800 entry
-				log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(800), domain.CurrencyGBP)
-				repo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+				expectAccountBalance(repo, "test-account", decimal.NewFromInt(800), domain.CurrencyGBP)
 			},
 			expectAmount: 800, // Sum of entries (ledger balance ignores opening)
 		},
@@ -117,8 +88,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 			name:        "returns reserve balance with zero liens",
 			balanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_RESERVE,
 			setupMocks: func(repo *MockRepository, client *MockCurrentAccountClient) {
-				log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-				repo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+				expectAccountBalance(repo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 				client.On("GetActiveAmountBlocks", mock.Anything, "test-account").Return([]domain.AmountBlock{}, nil)
 			},
 			expectAmount: 0, // No liens
@@ -127,8 +97,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 			name:        "returns available balance",
 			balanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_AVAILABLE,
 			setupMocks: func(repo *MockRepository, client *MockCurrentAccountClient) {
-				log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-				repo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+				expectAccountBalance(repo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 				client.On("GetActiveAmountBlocks", mock.Anything, "test-account").Return([]domain.AmountBlock{}, nil)
 			},
 			expectAmount: 1000, // Current (1000) - Reserve (0) + Overdraft (0)
@@ -137,8 +106,7 @@ func TestGetAccountBalance_Success(t *testing.T) {
 			name:        "returns free balance",
 			balanceType: positionkeepingv1.BalanceType_BALANCE_TYPE_FREE,
 			setupMocks: func(repo *MockRepository, client *MockCurrentAccountClient) {
-				log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-				repo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+				expectAccountBalance(repo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 				client.On("GetActiveAmountBlocks", mock.Anything, "test-account").Return([]domain.AmountBlock{}, nil)
 			},
 			expectAmount: 1000, // Current (1000) - Reserve (0)
@@ -258,13 +226,13 @@ func TestGetAccountBalance_NotFound(t *testing.T) {
 		{
 			name: "returns NotFound when repository returns ErrNotFound",
 			setupMocks: func(repo *MockRepository) {
-				repo.On("FindByAccountID", mock.Anything, "nonexistent-account").Return(nil, domain.ErrNotFound)
+				repo.On("SumAccountBalances", mock.Anything, "nonexistent-account").Return(nil, false, nil)
 			},
 		},
 		{
 			name: "returns NotFound when no logs exist for account",
 			setupMocks: func(repo *MockRepository) {
-				repo.On("FindByAccountID", mock.Anything, "nonexistent-account").Return([]*domain.FinancialPositionLog{}, nil)
+				repo.On("SumAccountBalances", mock.Anything, "nonexistent-account").Return(nil, false, nil)
 			},
 		},
 	}
@@ -316,8 +284,7 @@ func TestGetAccountBalance_CurrencyFilter(t *testing.T) {
 		mockEventPublisher := domain.NewInMemoryEventPublisher()
 		mockIdempotency := new(MockIdempotencyService)
 
-		log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-		mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+		expectAccountBalance(mockRepo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 
 		svc, err := service.NewPositionKeepingService(
 			mockRepo,
@@ -350,8 +317,7 @@ func TestGetAccountBalance_CurrencyFilter(t *testing.T) {
 		mockEventPublisher := domain.NewInMemoryEventPublisher()
 		mockIdempotency := new(MockIdempotencyService)
 
-		log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-		mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+		expectAccountBalance(mockRepo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 
 		svc, err := service.NewPositionKeepingService(
 			mockRepo,
@@ -388,7 +354,7 @@ func TestGetAccountBalance_RepositoryFailure(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return(nil, assert.AnError)
+	mockRepo.On("SumAccountBalances", mock.Anything, "test-account").Return(nil, false, assert.AnError)
 
 	svc, err := service.NewPositionKeepingService(
 		mockRepo,
@@ -430,8 +396,7 @@ func TestGetAccountBalance_NoCurrentAccountClient(t *testing.T) {
 			mockEventPublisher := domain.NewInMemoryEventPublisher()
 			mockIdempotency := new(MockIdempotencyService)
 
-			log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-			mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+			expectAccountBalance(mockRepo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 
 			// Create service WITHOUT CurrentAccountClient
 			svc, err := service.NewPositionKeepingService(
@@ -470,8 +435,7 @@ func TestGetAccountBalances_Success(t *testing.T) {
 	mockIdempotency := new(MockIdempotencyService)
 	mockCurrentAccount := new(MockCurrentAccountClient)
 
-	log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-	mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+	expectAccountBalance(mockRepo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 	mockCurrentAccount.On("GetActiveAmountBlocks", mock.Anything, "test-account").Return([]domain.AmountBlock{}, nil)
 
 	svc, err := service.NewPositionKeepingService(
@@ -521,8 +485,7 @@ func TestGetAccountBalances_WithoutCurrentAccountClient(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-	mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+	expectAccountBalance(mockRepo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 
 	// Create service WITHOUT CurrentAccountClient
 	svc, err := service.NewPositionKeepingService(
@@ -604,8 +567,7 @@ func TestGetAccountBalances_CurrencyFilter(t *testing.T) {
 		mockEventPublisher := domain.NewInMemoryEventPublisher()
 		mockIdempotency := new(MockIdempotencyService)
 
-		log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-		mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+		expectAccountBalance(mockRepo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 
 		svc, err := service.NewPositionKeepingService(
 			mockRepo,
@@ -637,8 +599,7 @@ func TestGetAccountBalances_CurrencyFilter(t *testing.T) {
 		mockEventPublisher := domain.NewInMemoryEventPublisher()
 		mockIdempotency := new(MockIdempotencyService)
 
-		log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-		mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+		expectAccountBalance(mockRepo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 
 		svc, err := service.NewPositionKeepingService(
 			mockRepo,
@@ -673,7 +634,7 @@ func TestGetAccountBalances_NotFound(t *testing.T) {
 	mockEventPublisher := domain.NewInMemoryEventPublisher()
 	mockIdempotency := new(MockIdempotencyService)
 
-	mockRepo.On("FindByAccountID", mock.Anything, "nonexistent-account").Return([]*domain.FinancialPositionLog{}, nil)
+	mockRepo.On("SumAccountBalances", mock.Anything, "nonexistent-account").Return(nil, false, nil)
 
 	svc, err := service.NewPositionKeepingService(
 		mockRepo,
@@ -707,8 +668,7 @@ func TestGetAccountBalance_WithLiens(t *testing.T) {
 	mockIdempotency := new(MockIdempotencyService)
 	mockCurrentAccount := new(MockCurrentAccountClient)
 
-	log := createTestLogWithEntries(t, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
-	mockRepo.On("FindByAccountID", mock.Anything, "test-account").Return([]*domain.FinancialPositionLog{log}, nil)
+	expectAccountBalance(mockRepo, "test-account", decimal.NewFromInt(1000), domain.CurrencyGBP)
 
 	// Configure mock to return liens totaling 200 GBP
 	liens := []domain.AmountBlock{

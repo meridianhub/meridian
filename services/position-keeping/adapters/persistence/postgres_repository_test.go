@@ -371,6 +371,40 @@ func TestPostgresRepository_FindByAccountID(t *testing.T) {
 	assert.Equal(t, 0, len(logs))
 }
 
+func TestPostgresRepository_SumAccountBalances(t *testing.T) {
+	tc := setupTestContainer(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// Two logs for the same account, each a single DEBIT of 100.50 GBP.
+	// The aggregate must sum both logs: 100.50 + 100.50 = 201.00.
+	log1 := createTestLog(t, testAccountID)
+	log2 := createTestLog(t, testAccountID)
+	otherLog := createTestLog(t, "GB33BUKB20201555555556")
+
+	require.NoError(t, tc.repo.Create(ctx, log1))
+	require.NoError(t, tc.repo.Create(ctx, log2))
+	require.NoError(t, tc.repo.Create(ctx, otherLog))
+
+	t.Run("aggregates net movement across all logs for the account", func(t *testing.T) {
+		balances, hasLogs, err := tc.repo.SumAccountBalances(ctx, testAccountID)
+		require.NoError(t, err)
+		assert.True(t, hasLogs)
+		require.Len(t, balances, 1)
+		assert.Equal(t, string(domain.CurrencyGBP), balances[0].Instrument.Code)
+		assert.True(t, balances[0].NetMovement.Amount.Equal(decimal.NewFromInt(201)),
+			"net movement = %s, want 201", balances[0].NetMovement.Amount)
+	})
+
+	t.Run("account with no logs reports hasLogs=false", func(t *testing.T) {
+		balances, hasLogs, err := tc.repo.SumAccountBalances(ctx, "GB33BUKB20201555555999")
+		require.NoError(t, err)
+		assert.False(t, hasLogs)
+		assert.Empty(t, balances)
+	})
+}
+
 func TestPostgresRepository_Update(t *testing.T) {
 	tc := setupTestContainer(t)
 	defer tc.cleanup(t)

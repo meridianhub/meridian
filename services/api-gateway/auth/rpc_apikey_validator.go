@@ -2,6 +2,10 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +19,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
+
+func mustRandomBytes(n int) []byte {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("auth: failed to initialize API-key index secret: %v", err))
+	}
+	return b
+}
 
 // ErrNotPrefixedKey is returned when the API key is not in the pk_{slug}_{entropy} format.
 // Callers should fall back to legacy API key validation.
@@ -42,11 +54,16 @@ type RPCAPIKeyValidator struct {
 	slugResolver SlugResolver
 	logger       *slog.Logger
 
+	// cacheKeySecret is a random secret generated once at construction, used to
+	// derive opaque HMAC cache/rate-limiter indices from API keys. It never
+	// leaves the process and is unique per validator instance.
+	cacheKeySecret []byte
+
 	// Cache for validation results
 	cache    sync.Map // map[string]*cachedValidation
 	cacheTTL time.Duration
 
-	// Per-key rate limiters (keyed by API key prefix for RPC-validated keys)
+	// Per-key rate limiters (keyed by an HMAC index of the full key, see cacheIndex)
 	limiters  sync.Map // map[string]*rpcRateLimiterEntry
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
@@ -108,6 +125,7 @@ func NewRPCAPIKeyValidator(config RPCValidatorConfig) *RPCAPIKeyValidator {
 		client:             config.Client,
 		slugResolver:       config.SlugResolver,
 		logger:             config.Logger,
+		cacheKeySecret:     mustRandomBytes(32),
 		cacheTTL:           config.CacheTTL,
 		cleanupInterval:    config.CleanupInterval,
 		limiterIdleTimeout: config.LimiterIdleTimeout,
@@ -118,6 +136,24 @@ func NewRPCAPIKeyValidator(config RPCValidatorConfig) *RPCAPIKeyValidator {
 	go v.cleanupLoop()
 
 	return v
+}
+
+// cacheIndex derives an opaque, non-reversible index for the full API key using
+// HMAC-SHA-256 under this validator's per-instance secret.
+//
+// The validation cache and per-key rate limiters are keyed on this index so
+// that entries are scoped to the exact full key without retaining the plaintext
+// key in memory. Keying on the truncated prefix (pk_{slug}_{first 8 entropy
+// chars}) would let a forged key that shares a legitimate key's prefix read the
+// legitimate key's cached validation result - authenticating on the prefix
+// alone - or poison it with a negative result. This is a keyed MAC used purely
+// as an in-memory lookup index, not a password hash, and is never persisted or
+// logged; the per-instance secret also prevents an observer of cache indices
+// from precomputing them for candidate keys.
+func (v *RPCAPIKeyValidator) cacheIndex(apiKey string) string {
+	mac := hmac.New(sha256.New, v.cacheKeySecret)
+	mac.Write([]byte(apiKey))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // Close stops the background cleanup goroutine.
@@ -171,8 +207,15 @@ func (v *RPCAPIKeyValidator) Validate(ctx context.Context, apiKey string) (*APIK
 		return nil, ErrNotPrefixedKey
 	}
 
+	// Cache is keyed on an HMAC index of the full key, not the truncated prefix,
+	// so a forged key that shares a legitimate key's prefix cannot read (or
+	// poison) the legitimate key's cached result. The index binds to the exact
+	// full key without retaining the plaintext key in memory; entries are held
+	// in process memory only and expire after cacheTTL.
+	cacheKey := v.cacheIndex(apiKey)
+
 	// Check cache first
-	if cached := v.getCached(keyPrefix); cached != nil {
+	if cached := v.getCached(cacheKey); cached != nil {
 		return cached, nil
 	}
 
@@ -203,21 +246,30 @@ func (v *RPCAPIKeyValidator) Validate(ctx context.Context, apiKey string) (*APIK
 		RateLimitRPS: resp.GetRateLimitRps(),
 	}
 
-	// Cache the result (even if invalid, to prevent brute force)
-	v.setCache(keyPrefix, result)
+	// Cache the result, including invalid results. Because the negative cache
+	// entry is scoped to the exact full key's index, it only absorbs repeated
+	// attempts with that same key - it prevents one bad key from re-hitting the
+	// control plane on every request, but it is NOT brute-force or flood
+	// control: each distinct key (valid or not) is a fresh cache miss and drives
+	// its own validation RPC. It also cannot affect any other key that happens
+	// to share this key's prefix.
+	v.setCache(cacheKey, result)
 
 	return result, nil
 }
 
-// AllowRequest checks if the given key prefix is within its rate limit.
-func (v *RPCAPIKeyValidator) AllowRequest(keyPrefix string, rateLimitRPS int32) bool {
+// AllowRequest checks if the given rate-limit key is within its rate limit.
+// The rate-limit key should be the HMAC index of the full key (see
+// cacheIndex) so that two distinct keys sharing a truncated prefix do not
+// share a rate-limit bucket.
+func (v *RPCAPIKeyValidator) AllowRequest(rateKey string, rateLimitRPS int32) bool {
 	if rateLimitRPS <= 0 {
 		rateLimitRPS = 100 // default
 	}
 
 	now := time.Now()
 
-	value, loaded := v.limiters.Load(keyPrefix)
+	value, loaded := v.limiters.Load(rateKey)
 	if loaded {
 		entry, ok := value.(*rpcRateLimiterEntry)
 		if !ok {
@@ -235,7 +287,7 @@ func (v *RPCAPIKeyValidator) AllowRequest(keyPrefix string, rateLimitRPS int32) 
 		lastAccess: now,
 	}
 
-	actual, loaded := v.limiters.LoadOrStore(keyPrefix, entry)
+	actual, loaded := v.limiters.LoadOrStore(rateKey, entry)
 	if loaded {
 		existingEntry, ok := actual.(*rpcRateLimiterEntry)
 		if !ok {

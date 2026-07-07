@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -43,20 +44,9 @@ func (s *PositionKeepingService) GetAccountBalance(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid balance_type: %v", err)
 	}
 
-	log, openingBalance, currency, err := s.loadLogForBalance(ctx, req.GetAccountId())
+	lbc, err := s.loadBalanceComputer(ctx, req.GetAccountId(), req.GetInstrumentCode())
 	if err != nil {
 		return nil, err
-	}
-
-	if req.GetInstrumentCode() != "" {
-		if currency.Code != req.GetInstrumentCode() {
-			return nil, status.Errorf(codes.NotFound, "no balance found for instrument: %s", req.GetInstrumentCode())
-		}
-	}
-
-	lbc, err := domain.NewLogBalanceComputer(log, openingBalance, s.currentAccountClient)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create balance computer: %v", err)
 	}
 
 	balance, err := s.computeBalance(ctx, lbc, balanceType)
@@ -84,20 +74,9 @@ func (s *PositionKeepingService) GetAccountBalances(
 		return nil, status.Errorf(codes.InvalidArgument, "account_id is required")
 	}
 
-	log, openingBalance, currency, err := s.loadLogForBalance(ctx, req.GetAccountId())
+	lbc, err := s.loadBalanceComputer(ctx, req.GetAccountId(), req.GetInstrumentCode())
 	if err != nil {
 		return nil, err
-	}
-
-	if req.GetInstrumentCode() != "" {
-		if currency.Code != req.GetInstrumentCode() {
-			return nil, status.Errorf(codes.NotFound, "no balances found for instrument: %s", req.GetInstrumentCode())
-		}
-	}
-
-	lbc, err := domain.NewLogBalanceComputer(log, openingBalance, s.currentAccountClient)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create balance computer: %v", err)
 	}
 
 	asOf := time.Now().UTC()
@@ -123,43 +102,117 @@ func (s *PositionKeepingService) GetAccountBalances(
 	}, nil
 }
 
-// loadLogForBalance loads the first position log for an account and resolves
-// the opening balance for balance computation. Returns a gRPC status error on failure.
-func (s *PositionKeepingService) loadLogForBalance(
+// loadBalanceComputer aggregates the account's net transaction movement across
+// ALL of its position logs and returns a LogBalanceComputer that computes every
+// BIAN balance type over the aggregated position.
+//
+// Each account transaction (deposit, withdrawal, settlement, ...) is recorded as
+// a separate FinancialPositionLog, so a correct balance must sum every entry of
+// every log - not just the most recent log. The summation is performed by the
+// repository as a single SQL aggregate query (the balance read hot path) and
+// materialized here as a synthetic single-entry log so the existing
+// LogBalanceComputer logic is reused unchanged.
+func (s *PositionKeepingService) loadBalanceComputer(
 	ctx context.Context,
 	accountID string,
-) (*domain.FinancialPositionLog, domain.Money, domain.Instrument, error) {
-	logs, err := s.repository.FindByAccountID(ctx, accountID)
+	instrumentCode string,
+) (*domain.LogBalanceComputer, error) {
+	balances, hasLogs, err := s.repository.SumAccountBalances(ctx, accountID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, domain.Money{}, domain.Instrument{}, status.Errorf(codes.NotFound, "account not found: %s", accountID)
-		}
-		return nil, domain.Money{}, domain.Instrument{}, status.Errorf(codes.Internal, "failed to retrieve position logs: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to aggregate account balances: %v", err)
 	}
 
-	if len(logs) == 0 {
-		return nil, domain.Money{}, domain.Instrument{}, status.Errorf(codes.NotFound, "no position logs found for account: %s", accountID)
+	if !hasLogs {
+		return nil, status.Errorf(codes.NotFound, "no position logs found for account: %s", accountID)
 	}
 
-	log := logs[0]
-	openingBalance, currency := resolveOpeningBalance(log)
-	return log, openingBalance, currency, nil
+	netMovement, err := resolveAggregateInstrument(balances, instrumentCode)
+	if err != nil {
+		return nil, err
+	}
+
+	aggregateLog, err := buildAggregateLog(accountID, netMovement)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to build aggregate position log: %v", err)
+	}
+
+	// The opening balance passed to the computer is ZERO: opening balances are
+	// recorded as transaction entries and are therefore already included in the
+	// aggregated net movement. The instrument carries through so that a zero
+	// balance still reports the correct instrument.
+	openingBalance := domain.NewQty[domain.Monetary](decimal.Zero, netMovement.Instrument)
+
+	lbc, err := domain.NewLogBalanceComputer(aggregateLog, openingBalance, s.currentAccountClient)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create balance computer: %v", err)
+	}
+
+	return lbc, nil
 }
 
-// resolveOpeningBalance determines the opening balance and currency for balance computation.
-// If the log was created with NewFinancialPositionLogWithOpeningBalance, the opening balance
-// is already represented by a transaction entry, so we return ZERO to avoid double-counting.
-func resolveOpeningBalance(log *domain.FinancialPositionLog) (domain.Money, domain.Instrument) {
-	if log.HasOpeningBalance() {
-		currency := log.OpeningBalance.Instrument
-		return domain.NewQty[domain.Monetary](decimal.Zero, currency), currency
+// resolveAggregateInstrument selects the aggregated net movement for the balance
+// query. When instrumentCode is provided, the matching instrument's movement is
+// returned (or NotFound if the account holds no balance in that instrument).
+// When instrumentCode is empty, the account must hold exactly one instrument; a
+// multi-instrument account requires the caller to disambiguate.
+func resolveAggregateInstrument(
+	balances []domain.AccountInstrumentBalance,
+	instrumentCode string,
+) (domain.Money, error) {
+	if instrumentCode != "" {
+		for _, b := range balances {
+			if b.Instrument.Code == instrumentCode {
+				return b.NetMovement, nil
+			}
+		}
+		return domain.Money{}, status.Errorf(codes.NotFound, "no balance found for instrument: %s", instrumentCode)
 	}
-	if len(log.TransactionLogEntries) > 0 {
-		currency := log.TransactionLogEntries[0].Amount.Instrument
-		return domain.NewQty[domain.Monetary](decimal.Zero, currency), currency
+
+	switch len(balances) {
+	case 0:
+		// The account has logs but no transaction entries (e.g. a zero opening
+		// balance). Report a zero balance in the platform default instrument.
+		return domain.MustNewMoney(decimal.Zero, domain.CurrencyGBP), nil
+	case 1:
+		return balances[0].NetMovement, nil
+	default:
+		return domain.Money{}, status.Errorf(codes.InvalidArgument, "account holds multiple instruments; instrument_code is required")
 	}
-	openingBalance := domain.MustNewMoney(decimal.Zero, domain.CurrencyGBP)
-	return openingBalance, openingBalance.Instrument
+}
+
+// buildAggregateLog constructs a synthetic FinancialPositionLog whose net
+// movement equals the aggregated movement across all of the account's logs. A
+// positive movement is represented as a single DEBIT entry, a negative movement
+// as a single CREDIT entry, and a zero movement as a log with no entries. This
+// lets the existing LogBalanceComputer derive every BIAN balance type from one
+// representative position.
+func buildAggregateLog(accountID string, netMovement domain.Money) (*domain.FinancialPositionLog, error) {
+	if netMovement.IsZero() {
+		return domain.NewFinancialPositionLog(accountID, nil, nil)
+	}
+
+	direction := domain.PostingDirectionDebit
+	amount := netMovement
+	if netMovement.IsNegative() {
+		direction = domain.PostingDirectionCredit
+		amount = netMovement.Negate()
+	}
+
+	entry, err := domain.NewTransactionLogEntry(
+		uuid.New(),
+		accountID,
+		amount,
+		direction,
+		time.Now().UTC(),
+		"aggregated net movement",
+		"",
+		domain.TransactionSourceManual,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return domain.NewFinancialPositionLog(accountID, entry, nil)
 }
 
 // computeBalance computes the specified balance type using the LogBalanceComputer.
