@@ -595,6 +595,66 @@ func TestPostgresRegistry_ValidateAttributes(t *testing.T) {
 	})
 }
 
+// TestPostgresRegistry_ValidateAttributes_TenantCacheIsolation guards against
+// DAT-6: the compiled-CEL-program cache key must be scoped by tenant.
+// Two tenants defining the same instrument code+version with different
+// validation logic must never observe each other's compiled program.
+func TestPostgresRegistry_ValidateAttributes_TenantCacheIsolation(t *testing.T) {
+	reg, pool := setupTestRegistry(t)
+	ctxA := setupTenantContext(t, pool, "cel-cache-tenant-a")
+	ctxB := setupTenantContext(t, pool, "cel-cache-tenant-b")
+
+	// Same code+version in both tenant schemas, but opposite validation rules.
+	defA := &registry.InstrumentDefinition{
+		Code:                   "SHARED",
+		Version:                1,
+		Dimension:              registry.DimensionMonetary,
+		Precision:              2,
+		ValidationExpression:   `parse_int(amount) > 0`,
+		ErrorMessageExpression: `"tenant-a rejected: " + amount`,
+	}
+	require.NoError(t, reg.CreateDraft(ctxA, defA))
+	require.NoError(t, reg.ActivateInstrument(ctxA, "SHARED", 1))
+
+	defB := &registry.InstrumentDefinition{
+		Code:                   "SHARED",
+		Version:                1,
+		Dimension:              registry.DimensionMonetary,
+		Precision:              2,
+		ValidationExpression:   `parse_int(amount) < 0`,
+		ErrorMessageExpression: `"tenant-b rejected: " + amount`,
+	}
+	require.NoError(t, reg.CreateDraft(ctxB, defB))
+	require.NoError(t, reg.ActivateInstrument(ctxB, "SHARED", 1))
+
+	// Populate tenant A's cache entry first.
+	resultA, err := reg.ValidateAttributes(ctxA, "SHARED", 1, registry.AttributeBag{Amount: "100"})
+	require.NoError(t, err)
+	assert.True(t, resultA.Valid, "tenant A: positive amount should pass tenant A's rule")
+
+	// Tenant B validating the same code+version+amount must apply its OWN
+	// rule, not the cached program compiled for tenant A. Pre-fix, this
+	// would incorrectly return Valid=true (tenant A's compiled program).
+	resultB, err := reg.ValidateAttributes(ctxB, "SHARED", 1, registry.AttributeBag{Amount: "100"})
+	require.NoError(t, err)
+	assert.False(t, resultB.Valid, "tenant B: positive amount must fail tenant B's rule, not reuse tenant A's cached program")
+	assert.Contains(t, resultB.ErrorMessage, "tenant-b rejected")
+
+	// Tenant B's own valid case confirms its rule (and error-message
+	// expression) compiled and cached correctly under its own key.
+	resultB2, err := reg.ValidateAttributes(ctxB, "SHARED", 1, registry.AttributeBag{Amount: "-50"})
+	require.NoError(t, err)
+	assert.True(t, resultB2.Valid, "tenant B: negative amount should pass tenant B's rule")
+
+	// Same-tenant caching still works: repeated calls for tenant A keep
+	// applying tenant A's rule and error message after tenant B populated
+	// cache entries for the same code+version.
+	resultA2, err := reg.ValidateAttributes(ctxA, "SHARED", 1, registry.AttributeBag{Amount: "-50"})
+	require.NoError(t, err)
+	assert.False(t, resultA2.Valid, "tenant A: negative amount must still fail tenant A's rule")
+	assert.Contains(t, resultA2.ErrorMessage, "tenant-a rejected")
+}
+
 func TestPostgresRegistry_CELCompilationAtCreation(t *testing.T) {
 	reg, pool := setupTestRegistry(t)
 	ctx := setupTenantContext(t, pool, "test-tenant-9")
