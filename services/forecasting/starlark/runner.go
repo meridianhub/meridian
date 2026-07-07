@@ -173,10 +173,16 @@ func (r *ForecastRunner) ExecuteStrategy(ctx context.Context, input StrategyInpu
 		return nil, err
 	}
 
+	// Truncate to whole seconds - single source of truth for both the script
+	// context (ctx["now"] is formatted as RFC3339, which already drops any
+	// sub-second component) and granularity validation below. Without this,
+	// production's time.Now() sub-second precision desyncs the two, causing
+	// spurious ErrGranularityMismatch failures.
 	now := input.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
+	now = now.Truncate(time.Second)
 
 	horizon := time.Duration(input.HorizonHours) * time.Hour
 	granularity := time.Duration(input.GranularityHours) * time.Hour
