@@ -55,7 +55,8 @@ type MarketPriceObservation struct {
 //   - sourceID cannot be nil UUID
 //   - resolutionKey cannot be empty
 //   - unit cannot be empty
-//   - validFrom must be before validTo
+//   - validFrom must be before validTo, unless validTo is the zero value
+//     (which denotes open-ended validity and persists as NULL)
 //   - qualityLevel must be valid
 //   - trustLevel must be between 0 and 100
 //   - causationID cannot be nil UUID
@@ -85,7 +86,9 @@ func NewMarketPriceObservation(
 	if unit == "" {
 		return MarketPriceObservation{}, ErrUnitRequired
 	}
-	if !validFrom.Before(validTo) {
+	// A zero validTo denotes open-ended validity (no end date); it persists as NULL.
+	// Only enforce ordering when an explicit end is provided.
+	if !validTo.IsZero() && !validFrom.Before(validTo) {
 		return MarketPriceObservation{}, ErrInvalidTemporalBounds
 	}
 	if !qualityLevel.IsValid() {

@@ -146,6 +146,9 @@ func (bc *batchContext) validateCEL(dataset domain.DataSetDefinition, source dom
 		return ""
 	}
 
+	// valid_to for CEL validation only (far-future sentinel so `valid_from < valid_to`
+	// holds for open-ended observations). The persisted valid_to is left NULL instead,
+	// so supersession can match open-ended periods. Do not align this with that NULL.
 	validTo := time.Now().Add(100 * 365 * 24 * time.Hour)
 	if entry.ValidTo != nil {
 		validTo = entry.ValidTo.AsTime()
@@ -259,7 +262,10 @@ func (bc *batchContext) processSingleObservation(ctx context.Context, entry *pb.
 
 	value, _ := decimal.NewFromString(entry.Value)
 	qualityLevel := protoQualityLevelToDomain(entry.Quality)
-	validTo := time.Now().Add(100 * 365 * 24 * time.Hour)
+	// Omitted valid_to means open-ended validity; persist the zero value (stored as
+	// NULL) rather than a non-deterministic now+100y so quality supersession still
+	// matches two open-ended observations for the same period. See observation_record.go.
+	var validTo time.Time
 	if entry.ValidTo != nil {
 		validTo = entry.ValidTo.AsTime()
 	}
