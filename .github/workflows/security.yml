@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Set up Go
       uses: actions/setup-go@v6
@@ -80,7 +80,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Set up Go
       uses: actions/setup-go@v6
@@ -130,7 +130,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Run Trivy vulnerability scanner (repo scan)
       uses: aquasecurity/trivy-action@v0.36.0
@@ -160,7 +160,7 @@ jobs:
     needs: [govulncheck, gosec]  # Only scan image if code passes security checks
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Set up buf
       uses: bufbuild/buf-action@v1
@@ -203,7 +203,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Dependency Review
       uses: actions/dependency-review-action@v5
@@ -228,7 +228,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Set up buf
       uses: bufbuild/buf-action@v1
@@ -276,7 +276,7 @@ jobs:
     timeout-minutes: 10
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0  # Full history for secret scanning
 
