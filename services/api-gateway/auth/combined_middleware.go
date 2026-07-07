@@ -162,9 +162,9 @@ func (m *CombinedAuthMiddleware) handleRPCAPIKeyAuth(w http.ResponseWriter, r *h
 	}
 
 	// Check per-key rate limit using the rate_limit_rps from the validation
-	// result. The limiter is keyed on the exact full key so that distinct keys
-	// sharing a truncated prefix do not share a rate-limit bucket.
-	if !m.rpcValidator.AllowRequest(apiKey, result.RateLimitRPS) {
+	// result. The limiter is keyed on the HMAC index of the full key so that
+	// distinct keys sharing a truncated prefix do not share a rate-limit bucket.
+	if !m.rpcValidator.AllowRequest(apiKeyCacheIndex(apiKey), result.RateLimitRPS) {
 		m.logger.Warn("rate limit exceeded",
 			slog.String("identity", result.Identity),
 			slog.String("path", r.URL.Path),

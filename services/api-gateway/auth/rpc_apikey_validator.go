@@ -2,6 +2,10 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +19,37 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
+
+// apiKeyIndexSecret is a per-process random secret used to derive opaque cache
+// and rate-limiter indices from API keys via HMAC. It never leaves the process
+// and is regenerated on each start; the cache and limiters are in-memory only,
+// so a fresh secret per process is fine.
+var apiKeyIndexSecret = mustRandomBytes(32)
+
+func mustRandomBytes(n int) []byte {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("auth: failed to initialize API-key index secret: %v", err))
+	}
+	return b
+}
+
+// apiKeyCacheIndex derives an opaque, non-reversible index for the full API key
+// using HMAC-SHA-256 under a per-process secret.
+//
+// The validation cache and per-key rate limiters are keyed on this index so
+// that entries are scoped to the exact full key without retaining the plaintext
+// key in memory. Keying on the truncated prefix (pk_{slug}_{first 8 entropy
+// chars}) would let a forged key that shares a legitimate key's prefix read the
+// legitimate key's cached validation result - authenticating on the prefix
+// alone - or poison it with a negative result. This is a keyed MAC used purely
+// as an in-memory lookup index, not a password hash, and is never persisted or
+// logged.
+func apiKeyCacheIndex(apiKey string) string {
+	mac := hmac.New(sha256.New, apiKeyIndexSecret)
+	mac.Write([]byte(apiKey))
+	return hex.EncodeToString(mac.Sum(nil))
+}
 
 // ErrNotPrefixedKey is returned when the API key is not in the pk_{slug}_{entropy} format.
 // Callers should fall back to legacy API key validation.
@@ -46,7 +81,7 @@ type RPCAPIKeyValidator struct {
 	cache    sync.Map // map[string]*cachedValidation
 	cacheTTL time.Duration
 
-	// Per-key rate limiters (keyed by the exact full key for RPC-validated keys)
+	// Per-key rate limiters (keyed by an HMAC index of the full key, see apiKeyCacheIndex)
 	limiters  sync.Map // map[string]*rpcRateLimiterEntry
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
@@ -171,12 +206,12 @@ func (v *RPCAPIKeyValidator) Validate(ctx context.Context, apiKey string) (*APIK
 		return nil, ErrNotPrefixedKey
 	}
 
-	// Cache is keyed on the exact full key, not the truncated prefix, so a
-	// forged key that shares a legitimate key's prefix cannot read (or poison)
-	// the legitimate key's cached result. Exact-match keying gives perfect
-	// collision resistance without hashing the secret; entries are held in
-	// process memory only and expire after cacheTTL.
-	cacheKey := apiKey
+	// Cache is keyed on an HMAC index of the full key, not the truncated prefix,
+	// so a forged key that shares a legitimate key's prefix cannot read (or
+	// poison) the legitimate key's cached result. The index binds to the exact
+	// full key without retaining the plaintext key in memory; entries are held
+	// in process memory only and expire after cacheTTL.
+	cacheKey := apiKeyCacheIndex(apiKey)
 
 	// Check cache first
 	if cached := v.getCached(cacheKey); cached != nil {
@@ -211,16 +246,17 @@ func (v *RPCAPIKeyValidator) Validate(ctx context.Context, apiKey string) (*APIK
 	}
 
 	// Cache the result (even if invalid, to prevent brute force). The negative
-	// cache entry is scoped to the exact full key, so it cannot affect any
-	// other key that happens to share this key's prefix.
+	// cache entry is scoped to the exact full key's index, so it cannot affect
+	// any other key that happens to share this key's prefix.
 	v.setCache(cacheKey, result)
 
 	return result, nil
 }
 
 // AllowRequest checks if the given rate-limit key is within its rate limit.
-// The rate-limit key should be the exact full key so that two distinct keys
-// sharing a truncated prefix do not share a rate-limit bucket.
+// The rate-limit key should be the HMAC index of the full key (see
+// apiKeyCacheIndex) so that two distinct keys sharing a truncated prefix do not
+// share a rate-limit bucket.
 func (v *RPCAPIKeyValidator) AllowRequest(rateKey string, rateLimitRPS int32) bool {
 	if rateLimitRPS <= 0 {
 		rateLimitRPS = 100 // default

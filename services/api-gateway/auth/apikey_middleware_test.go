@@ -533,8 +533,6 @@ func TestAPIKeyMiddleware_MultipleAPIKeys(t *testing.T) {
 	}
 }
 
-// TestAPIKeyMiddleware_ZeroConfigValues verifies that zero config values
-// are replaced with defaults.
 // TestAPIKeyMiddleware_ConstantTimeLookup verifies that the constant-time key
 // lookup returns the correct identity for exact matches and rejects near-misses
 // such as prefixes and superstrings of configured keys.
@@ -572,6 +570,8 @@ func TestAPIKeyMiddleware_ConstantTimeLookup(t *testing.T) {
 	}
 }
 
+// TestAPIKeyMiddleware_ZeroConfigValues verifies that zero config values
+// are replaced with defaults.
 func TestAPIKeyMiddleware_ZeroConfigValues(t *testing.T) {
 	config := APIKeyConfig{
 		APIKeys: map[string]string{"key": "identity"},
