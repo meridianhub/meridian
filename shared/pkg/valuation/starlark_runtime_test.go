@@ -69,6 +69,47 @@ result = valuate(ctx)
 	assert.Equal(t, decimal.NewFromFloat(35.0), resp.ValuedAmount.Amount)
 }
 
+func TestStarlarkRuntime_Execute_InputAmountRetainsDecimalPrecision(t *testing.T) {
+	// A value with more significant digits than float64 can represent (~15-17):
+	// round-tripping the input amount through float64 would corrupt it. The identity
+	// script passes ctx["input_quantity"]["amount"] straight to valued_amount, so the
+	// output must equal the input exactly.
+	highPrecision := decimal.RequireFromString("12345678901234.12345678901234567")
+
+	runtime := valuation.NewStarlarkRuntime(valuation.StarlarkRuntimeConfig{
+		Timeout: 5 * time.Second,
+	})
+
+	script := `
+input = ctx["input_quantity"]
+result = {
+    "valued_amount": input["amount"],
+    "instrument": input["instrument"],
+}
+`
+
+	req := &valuation.Request{
+		RequestID: uuid.New(),
+		MethodID:  uuid.New(),
+		Quantity: valuation.Quantity{
+			Amount:         highPrecision,
+			InstrumentCode: "GBP",
+		},
+		AccountID:   uuid.New(),
+		PartyID:     uuid.New(),
+		KnowledgeAt: time.Now(),
+	}
+
+	resp, err := runtime.Execute(context.Background(), script, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.True(t, resp.ValuedAmount.Amount.Equal(highPrecision),
+		"expected exact %s, got %s (precision lost)", highPrecision, resp.ValuedAmount.Amount)
+	// Guard against a float64 round-trip specifically: the inexact float value must differ.
+	assert.False(t, resp.ValuedAmount.Amount.Equal(decimal.NewFromFloat(highPrecision.InexactFloat64())),
+		"amount matches the float64 approximation, precision was lost")
+}
+
 func TestStarlarkRuntime_Execute_Timeout(t *testing.T) {
 	t.Skip("Starlark timeout enforcement requires thread interruption hooks - deferred for future implementation")
 	// Starlark execution is atomic (no built-in cancellation points)

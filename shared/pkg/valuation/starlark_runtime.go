@@ -214,9 +214,14 @@ func (r *defaultStarlarkRuntime) buildScriptContext(req *Request) map[string]int
 	ctx["party_id"] = req.PartyID.String()
 	ctx["knowledge_at"] = req.KnowledgeAt.Format(time.RFC3339)
 
-	// Add input quantity
+	// Add input quantity.
+	// Amount is exposed as its exact decimal string, never a float64: monetary math
+	// must stay decimal end-to-end. Round-tripping through float64 loses precision,
+	// and parseResult reconstructs the decimal exactly via decimal.NewFromString.
+	// Scripts delegate arithmetic to CEL via run_policy (see the Decimal/quantity
+	// builtins, which also represent amounts as strings).
 	ctx["input_quantity"] = map[string]interface{}{
-		"amount":     req.Quantity.Amount.InexactFloat64(),
+		"amount":     req.Quantity.Amount.String(),
 		"instrument": req.Quantity.InstrumentCode,
 		"attributes": req.Quantity.Attributes,
 	}
