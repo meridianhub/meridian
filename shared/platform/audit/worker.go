@@ -7,8 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Errors are defined in errors.go for centralized error management.
@@ -325,18 +328,13 @@ func (w *Worker) processBatchWithCount(ctx context.Context) (int, error) {
 		RecordProcessingDuration(time.Since(start).Seconds())
 	}()
 
-	var entries []AuditOutbox
-
-	// Fetch pending entries, ordered by creation time for FIFO processing
-	result := w.db.WithContext(ctx).
-		Table(w.outboxTable()).
-		Where("status = ?", StatusPending).
-		Order("created_at ASC").
-		Limit(w.batchSize).
-		Find(&entries)
-
-	if result.Error != nil {
-		return 0, fmt.Errorf("failed to fetch pending entries: %w", result.Error)
+	// Fetch and claim pending entries, ordered by creation time for FIFO processing.
+	// FOR UPDATE SKIP LOCKED lets concurrent worker instances (multiple replicas
+	// polling the same outbox table) claim disjoint sets of rows without blocking
+	// on each other, preventing the same entry from being double-published.
+	entries, err := w.claimPendingEntries(ctx)
+	if err != nil {
+		return 0, err
 	}
 
 	// Record batch size and outbox depth metrics
@@ -389,6 +387,52 @@ func (w *Worker) processBatchWithCount(ctx context.Context) (int, error) {
 	}
 
 	return processedCount, nil
+}
+
+// claimPendingEntries selects up to batchSize pending entries, ordered by creation
+// time for FIFO processing, and immediately claims them by setting their status to
+// 'processing' within the same transaction.
+//
+// The SELECT uses FOR UPDATE SKIP LOCKED: rows already locked by another worker's
+// concurrent claim are skipped rather than blocking this query, and skipped rows are
+// simply left for that other worker (or a later poll) to handle. Combined with the
+// in-transaction status update, this guarantees no two worker instances can ever
+// claim the same outbox entry, eliminating double-publishing under horizontal scaling.
+func (w *Worker) claimPendingEntries(ctx context.Context) ([]AuditOutbox, error) {
+	var entries []AuditOutbox
+
+	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Table(w.outboxTable()).
+			Where("status = ?", StatusPending).
+			Order("created_at ASC").
+			Limit(w.batchSize).
+			Find(&entries).Error; err != nil {
+			return fmt.Errorf("failed to fetch pending entries: %w", err)
+		}
+
+		if len(entries) == 0 {
+			return nil
+		}
+
+		ids := make([]uuid.UUID, len(entries))
+		for i, entry := range entries {
+			ids[i] = entry.ID
+		}
+
+		if err := tx.Table(w.outboxTable()).
+			Where("id IN ?", ids).
+			Update("status", StatusProcessing).Error; err != nil {
+			return fmt.Errorf("failed to claim pending entries: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return entries, nil
 }
 
 // processEntry processes a single audit outbox entry.
