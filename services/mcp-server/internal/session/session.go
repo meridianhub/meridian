@@ -16,6 +16,13 @@ type Config struct {
 
 // Session combines plan caching and rate limiting for a single MCP session.
 // It is safe for concurrent use.
+//
+// The wired server (cmd/wire.go) uses Session only for its plan cache — the
+// plan-before-apply gate is intentionally shared across a single manifest
+// workflow. Request-level rate limiting is enforced separately by Manager,
+// which scopes an independent RateLimiter per tenant/session key so that one
+// caller's traffic can never exhaust another's quota; a single shared
+// Session's embedded limiter would not provide that isolation.
 type Session struct {
 	cache   *PlanCache
 	limiter *RateLimiter

@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	mcpauth "github.com/meridianhub/meridian/services/mcp-server/internal/auth"
+	"github.com/meridianhub/meridian/services/mcp-server/internal/tools"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/env"
 )
@@ -63,7 +64,10 @@ func run(logger *slog.Logger) error {
 
 	// Wire tools, resources, and prompts onto the server.
 	// cookbookFS is nil until the cookbook directory is embedded at build time.
-	cleanup, err := wireServer(srv, logger, nil)
+	// rateLimiter scopes limits per tenant/session (see session.Manager) and
+	// must be attached to the transport's context via tools.WithRateLimiter
+	// so addTool enforces it on every tool call.
+	cleanup, rateLimiter, err := wireServer(srv, logger, nil)
 	if err != nil {
 		return fmt.Errorf("wire server: %w", err)
 	}
@@ -73,20 +77,21 @@ func run(logger *slog.Logger) error {
 
 	switch transportMode {
 	case "stdio":
-		return runStdio(logger, srv)
+		return runStdio(logger, srv, rateLimiter)
 	case "http":
-		return runHTTP(logger, srv)
+		return runHTTP(logger, srv, rateLimiter)
 	default:
 		return bootstrap.Permanent(fmt.Errorf("%w: %s (expected stdio or http)", errUnknownTransport, transportMode))
 	}
 }
 
-func runStdio(logger *slog.Logger, srv *mcp.Server) error {
+func runStdio(logger *slog.Logger, srv *mcp.Server, rateLimiter tools.RateLimiter) error {
 	logger.Info("using stdio transport")
 
 	// For stdio, we run until stdin closes or we receive a signal.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ctx = tools.WithRateLimiter(ctx, rateLimiter)
 
 	sigChan, signalCleanup := bootstrap.SignalHandler()
 	defer signalCleanup()
@@ -175,16 +180,25 @@ func (p *passthroughIssuer) Issue(claims map[string]any) (string, error) {
 	return fmt.Sprintf("mcp-issued-%v", claims["client_id"]), nil
 }
 
-func runHTTP(logger *slog.Logger, srv *mcp.Server) error {
+// withRateLimiter attaches rl to each request's context before it reaches
+// next, so that addTool can enforce per-tenant/session limits on tool calls
+// handled by the streamable HTTP transport (see tools.WithRateLimiter).
+func withRateLimiter(rl tools.RateLimiter, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(tools.WithRateLimiter(r.Context(), rl)))
+	})
+}
+
+func runHTTP(logger *slog.Logger, srv *mcp.Server, rateLimiter tools.RateLimiter) error {
 	port := env.GetEnvOrDefault("MCP_PORT", "8090")
 	addr := fmt.Sprintf(":%s", port)
 
 	logger.Info("using streamable HTTP transport", "address", addr)
 
 	// The SDK's StreamableHTTPHandler creates sessions and transports internally.
-	streamableHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+	streamableHandler := withRateLimiter(rateLimiter, mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return srv
-	}, nil)
+	}, nil))
 
 	mux := http.NewServeMux()
 
