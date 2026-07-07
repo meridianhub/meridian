@@ -694,6 +694,68 @@ func TestValidateForecastPoints_Valid(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// --- Sub-second now / granularity consistency tests ---
+
+// DAT-4: production Now() carries sub-second precision. The script sees ctx["now"]
+// as an RFC3339 string (which drops the fractional component), but validation used
+// to compare against the untruncated Go time.Time - causing spurious
+// ErrGranularityMismatch failures on real (non-test) executions.
+func TestExecuteStrategy_SubSecondNow_GranularityAligned(t *testing.T) {
+	now := baseTime().Add(750 * time.Millisecond) // simulates production time.Now() precision
+
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+	runner := newTestRunner(t, mis, ref)
+
+	script := `
+def compute_forecast(ctx):
+    ts = add_seconds(ctx["now"], 3600)
+    return [{"timestamp": ts, "value": "1"}]
+`
+
+	points, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            script,
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		HorizonHours:      24,
+		GranularityHours:  1,
+		Now:               now,
+	})
+
+	require.NoError(t, err, "sub-second now must not cause spurious granularity mismatch")
+	require.Len(t, points, 1)
+	assert.Equal(t, now.Truncate(time.Second).Add(time.Hour), points[0].Timestamp)
+}
+
+// TestExecuteStrategy_SubSecondNow_BoundaryTruncatesDown confirms truncation rounds
+// down to the current second (not up to the next one) at the boundary edge.
+func TestExecuteStrategy_SubSecondNow_BoundaryTruncatesDown(t *testing.T) {
+	now := baseTime().Add(999 * time.Millisecond) // 1ms shy of the next whole second
+
+	mis := &mockMISClient{observations: map[string][]Observation{}}
+	ref := &mockRefDataClient{nodes: map[string]*ReferenceData{}}
+	runner := newTestRunner(t, mis, ref)
+
+	script := `
+def compute_forecast(ctx):
+    ts = add_seconds(ctx["now"], 3600)
+    return [{"timestamp": ts, "value": "1"}]
+`
+
+	points, err := runner.ExecuteStrategy(context.Background(), StrategyInput{
+		Script:            script,
+		InputDatasetCodes: []string{},
+		OutputDatasetCode: "TEST",
+		HorizonHours:      24,
+		GranularityHours:  1,
+		Now:               now,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, points, 1)
+	assert.Equal(t, baseTime().Add(time.Hour), points[0].Timestamp, "truncation must floor to the second, not round up")
+}
+
 // --- Empty data cold start handling ---
 
 func TestExecuteStrategy_EmptyObservations(t *testing.T) {
