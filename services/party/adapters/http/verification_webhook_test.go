@@ -474,6 +474,42 @@ func TestVerificationWebhookHandler_HandleWebhook_ProviderFromHeader(t *testing.
 	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
+func TestVerificationWebhookHandler_HandleWebhook_ZeroTimestamp(t *testing.T) {
+	// A webhook with a missing/zero timestamp must be rejected - it would
+	// otherwise bypass replay-protection (freshness and clock-drift checks).
+	secret := []byte("test-secret")
+	handler, err := NewVerificationWebhookHandler(VerificationWebhookHandlerConfig{
+		VerificationService: &mockVerificationService{},
+		HMACSecrets:         map[string][]byte{"default": secret},
+	})
+	require.NoError(t, err)
+
+	webhookReq := VerificationWebhookRequest{
+		VerificationID: "verify-123",
+		Status:         "APPROVED",
+		// Timestamp is zero value
+	}
+	body, err := json.Marshal(webhookReq)
+	require.NoError(t, err)
+
+	signature := GenerateWebhookSignature(body, secret)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/verification/default", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(WebhookSignatureHeader, signature)
+
+	rr := httptest.NewRecorder()
+	handler.HandleWebhook(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+	var resp VerificationWebhookResponse
+	err = json.NewDecoder(rr.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.False(t, resp.Acknowledged)
+	assert.Equal(t, ErrMissingTimestamp.Error(), resp.Error)
+}
+
 func TestVerificationWebhookHandler_HandleWebhook_ExpiredTimestamp(t *testing.T) {
 	secret := []byte("test-secret")
 	handler, err := NewVerificationWebhookHandler(VerificationWebhookHandlerConfig{

@@ -31,6 +31,7 @@ var (
 	ErrEmptyHMACSecret           = errors.New("HMAC secret cannot be empty")
 	ErrVerificationAlreadyDone   = errors.New("verification already in terminal state")
 	ErrEmptyProviderSecret       = errors.New("HMAC secret for provider cannot be empty")
+	ErrMissingTimestamp          = errors.New("webhook timestamp is required")
 )
 
 // WebhookSignatureHeader is the HTTP header containing the HMAC signature.
@@ -233,10 +234,14 @@ func (h *VerificationWebhookHandler) parseAndValidatePayload(w http.ResponseWrit
 }
 
 // checkTimestampFreshness validates the webhook timestamp to prevent replay attacks.
-// Returns true if the timestamp is valid or zero, false if it should be rejected.
+// Returns true if the timestamp is present and valid, false if it should be rejected.
+// A missing (zero-value) timestamp is rejected, since it would otherwise bypass
+// the freshness and clock-drift checks below.
 func (h *VerificationWebhookHandler) checkTimestampFreshness(w http.ResponseWriter, webhookReq *VerificationWebhookRequest, provider string) bool {
 	if webhookReq.Timestamp.IsZero() {
-		return true
+		h.logger.Warn("missing webhook timestamp", "provider", provider)
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrMissingTimestamp.Error())
+		return false
 	}
 
 	now := time.Now()

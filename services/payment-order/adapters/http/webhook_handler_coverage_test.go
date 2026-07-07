@@ -116,7 +116,8 @@ func TestWebhookHandler_HandleWebhook_PaymentOrderIDOnly(t *testing.T) {
 }
 
 func TestWebhookHandler_HandleWebhook_ZeroTimestamp(t *testing.T) {
-	// Test that a webhook with zero timestamp skips freshness check
+	// A webhook with a missing/zero timestamp must be rejected - it would
+	// otherwise bypass replay-protection (freshness and clock-drift checks).
 	secret := []byte("test-secret")
 	handler, err := NewWebhookHandler(WebhookHandlerConfig{
 		PaymentOrderService: &mockPaymentOrderService{},
@@ -141,7 +142,13 @@ func TestWebhookHandler_HandleWebhook_ZeroTimestamp(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.HandleWebhook(rr, req)
 
-	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+	var resp WebhookResponse
+	err = json.NewDecoder(rr.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.False(t, resp.Acknowledged)
+	assert.Equal(t, ErrMissingTimestamp.Error(), resp.Error)
 }
 
 func TestValidateSignature_InvalidHex(t *testing.T) {

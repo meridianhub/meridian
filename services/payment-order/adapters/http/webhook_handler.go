@@ -28,6 +28,7 @@ var (
 	ErrInvalidGatewayStatus   = errors.New("invalid gateway_status")
 	ErrTimestampExpired       = errors.New("webhook timestamp expired")
 	ErrTimestampFuture        = errors.New("webhook timestamp is in the future")
+	ErrMissingTimestamp       = errors.New("webhook timestamp is required")
 	ErrPaymentOrderService    = errors.New("payment order service error")
 	ErrNilPaymentOrderService = errors.New("payment order service cannot be nil")
 	ErrEmptyHMACSecret        = errors.New("HMAC secret cannot be empty")
@@ -185,9 +186,13 @@ func (h *WebhookHandler) parseAndValidateWebhookRequest(w http.ResponseWriter, b
 }
 
 // validateWebhookTimestamp validates timestamp freshness to prevent replay attacks.
+// A missing (zero-value) timestamp is rejected, since it would otherwise bypass
+// the freshness and clock-drift checks below.
 func (h *WebhookHandler) validateWebhookTimestamp(w http.ResponseWriter, timestamp time.Time) error {
 	if timestamp.IsZero() {
-		return nil
+		h.logger.Warn("missing webhook timestamp")
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrMissingTimestamp.Error())
+		return ErrMissingTimestamp
 	}
 	age := time.Since(timestamp)
 	if age > DefaultWebhookMaxAge {
