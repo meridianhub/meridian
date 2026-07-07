@@ -70,6 +70,7 @@ func compileSchema(schema map[string]interface{}) (*jsonschema.Schema, error) {
 // Input is validated against the tool's JSON Schema before the handler is called.
 func addTool(srv *mcp.Server, t Tool) {
 	handler := t.Handler // capture for closure
+	name, category := t.Name, t.Category
 	validator, err := compileSchema(t.InputSchema)
 	if err != nil {
 		panic(fmt.Sprintf("compile schema for tool %q: %v", t.Name, err))
@@ -79,6 +80,16 @@ func addTool(srv *mcp.Server, t Tool) {
 		Description: t.Description,
 		InputSchema: t.InputSchema,
 	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Enforce per-tenant/session rate limits before doing any work. The
+		// limiter is attached to ctx by the transport layer (see
+		// tools.WithRateLimiter); a request with none attached is unlimited.
+		if rl := rateLimiterFromContext(ctx); rl != nil {
+			key := rateLimitKey(ctx, req.Session)
+			if !rl.Allow(key, category) {
+				return mcputil.ErrorResult(fmt.Sprintf("rate limit exceeded for tool %q; try again shortly", name)), nil
+			}
+		}
+
 		// Validate input against JSON Schema.
 		args := req.Params.Arguments
 		if len(args) == 0 {

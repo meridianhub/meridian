@@ -36,9 +36,19 @@ import (
 //
 // cookbookFS provides the cookbook registry filesystem (may be nil to skip cookbook tools).
 //
-// Returns a cleanup function to close the gRPC connection (nil when no
-// connection was established).
-func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(), error) {
+// Returns a cleanup function (always non-nil — stops the rate limiter's
+// background eviction goroutine, and additionally closes the gRPC connection
+// once one has been established) and a RateLimiter that the caller must
+// attach to the transport's context via tools.WithRateLimiter so that
+// addTool enforces it on every tool call.
+func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(), tools.RateLimiter, error) {
+	// The rate limiter is scoped per tenant/session (see session.Manager) so
+	// that one caller's traffic can never exhaust another caller's quota. It
+	// is created once here, for the life of the process, and enforced by
+	// addTool for every tool registered below — local or gRPC-backed alike.
+	rateLimiter := session.NewManager(session.DefaultLimits())
+	cleanup := func() { rateLimiter.Close() }
+
 	// Prompts are always available (no external deps).
 	prompts.RegisterPrompts(srv)
 
@@ -72,14 +82,12 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 	resources.RegisterEmbeddedDocs(srv)
 
 	// Try to connect to the Meridian backend for remote tools.
-	var cleanup func()
-
 	authCfg, err := mcpauth.LoadFromEnv()
 	if err != nil {
 		logger.Warn("Meridian backend not configured — only local tools available", "error", err)
 		// Register manifest resource with nil client (placeholder).
 		resources.RegisterManifestResource(srv, nil)
-		return nil, nil //nolint:nilnil // partial availability is intentional
+		return cleanup, rateLimiter, nil
 	}
 
 	mc, err := clients.New(authCfg)
@@ -87,9 +95,9 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 		logger.Warn("failed to create gRPC clients — only local tools available", "error", err)
 		// Register manifest resource with nil client (placeholder).
 		resources.RegisterManifestResource(srv, nil)
-		return nil, nil //nolint:nilnil // partial availability is intentional
+		return cleanup, rateLimiter, nil
 	}
-	cleanup = func() { _ = mc.Close() }
+	cleanup = func() { _ = mc.Close(); rateLimiter.Close() }
 
 	logger.Info("gRPC clients connected", "target", authCfg.APIUrl)
 
@@ -119,6 +127,9 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 	})
 
 	// -- Economy tools (manifest plan/apply/history) --
+	// sess gates the plan-before-apply workflow only (StorePlan/ValidatePlan);
+	// rate limiting is handled separately by the per-tenant/session
+	// rateLimiter created above, not by sess's own (unused) embedded limiter.
 	sess := session.NewDefault()
 	tools.RegisterEconomyTools(srv, sess, tools.EconomyDeps{
 		Applier:   applyManifestAdapter{c: mc.ApplyManifest},
@@ -141,7 +152,7 @@ func wireServer(srv *mcp.Server, logger *slog.Logger, cookbookFS fs.FS) (func(),
 		InstructionWriter:  gatewayInstructionAdapter{c: mc.OperationalGateway},
 	})
 
-	return cleanup, nil
+	return cleanup, rateLimiter, nil
 }
 
 // ---------------------------------------------------------------------------
