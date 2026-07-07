@@ -220,11 +220,13 @@ func (r *dbRouteResolver) Resolve(ctx context.Context, tenantID string, instruct
 		return nil, err
 	}
 	return &ports.InstructionRoute{
-		InstructionType: route.InstructionType,
-		HTTPMethod:      route.HTTPMethod,
-		PathTemplate:    route.PathTemplate,
-		OutboundMapping: route.OutboundMapping,
-		InboundMapping:  route.InboundMapping,
+		InstructionType:      route.InstructionType,
+		ConnectionID:         route.ConnectionID,
+		FallbackConnectionID: route.FallbackConnectionID,
+		HTTPMethod:           route.HTTPMethod,
+		PathTemplate:         route.PathTemplate,
+		OutboundMapping:      route.OutboundMapping,
+		InboundMapping:       route.InboundMapping,
 	}, nil
 }
 
@@ -371,6 +373,32 @@ func (h *testHarness) seedRoute(t *testing.T, instructionType, connectionID, htt
 	return route
 }
 
+// seedRouteWithFallback creates an instruction route with both a primary and a fallback connection.
+func (h *testHarness) seedRouteWithFallback(t *testing.T, instructionType, connectionID, fallbackConnectionID, httpMethod, pathTemplate string) *domain.Route {
+	t.Helper()
+
+	route, err := domain.NewRoute(h.tenantID.String(), instructionType, connectionID)
+	require.NoError(t, err)
+	route.FallbackConnectionID = fallbackConnectionID
+	route.HTTPMethod = httpMethod
+	route.PathTemplate = pathTemplate
+
+	err = h.routeRepo.Upsert(context.Background(), route)
+	require.NoError(t, err)
+
+	return route
+}
+
+// tripConnectionCircuit opens the circuit breaker on a connection and persists the change,
+// marking it unavailable for dispatch.
+func (h *testHarness) tripConnectionCircuit(t *testing.T, conn *domain.ProviderConnection) {
+	t.Helper()
+
+	conn.TripCircuit()
+	err := h.connectionRepo.UpdateHealth(context.Background(), conn)
+	require.NoError(t, err)
+}
+
 // createInstruction creates an instruction in PENDING state and saves it.
 // providerConnectionID should be the real connection ID from seedConnection.
 func (h *testHarness) createInstruction(t *testing.T, instructionType string, providerConnectionID string, opts ...domain.InstructionOption) *domain.Instruction {
@@ -452,6 +480,119 @@ func TestInstructionLifecycle_HappyPath(t *testing.T) {
 	assert.Equal(t, domain.InstructionStatusDelivered, delivered.Status)
 	assert.Equal(t, 1, delivered.AttemptCount)
 	assert.NotNil(t, delivered.DispatchedAt)
+}
+
+// TestDispatch_UsesRouteConnection_IgnoresInstructionField is the regression test for PAY-1.
+// The instruction is created carrying a DIFFERENT connection id than the one on its route.
+// Dispatch must reach the provider behind the route's connection, proving the worker sources the
+// connection from the route rather than the (previously placeholder) instruction field.
+func TestDispatch_UsesRouteConnection_IgnoresInstructionField(t *testing.T) {
+	var routeProviderCalled atomic.Bool
+	routeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		routeProviderCalled.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+	}))
+	defer routeServer.Close()
+
+	wrongServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("the instruction's own connection must not be used for dispatch")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer wrongServer.Close()
+
+	h := setupHarness(t, routeServer, worker.DispatchWorkerConfig{
+		BatchSize:    10,
+		PollInterval: 100 * time.Millisecond,
+	}, worker.ExpiryWorkerConfig{})
+
+	// routeConn is what the route points at; wrongConn is what the instruction field carries.
+	routeConn := h.seedConnection(t, routeServer.URL)
+	wrongConn := h.seedConnection(t, wrongServer.URL)
+	h.seedRoute(t, "device.route-conn", routeConn.ConnectionID, "POST", "/v1/payments")
+
+	instr := h.createInstruction(t, "device.route-conn", wrongConn.ConnectionID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.dispatchWorker.Start(ctx)
+	defer h.dispatchWorker.Stop()
+
+	delivered := h.waitForStatus(t, instr.ID, domain.InstructionStatusDelivered, 10*time.Second)
+	assert.Equal(t, domain.InstructionStatusDelivered, delivered.Status)
+	assert.True(t, routeProviderCalled.Load(), "provider behind the route's connection should have been reached")
+}
+
+// TestDispatch_FallbackConnection_WhenPrimaryUnavailable verifies that when the primary
+// connection's circuit is open, the worker dispatches via the route's fallback connection.
+func TestDispatch_FallbackConnection_WhenPrimaryUnavailable(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+	}))
+	defer mockServer.Close()
+
+	h := setupHarness(t, mockServer, worker.DispatchWorkerConfig{
+		BatchSize:    10,
+		PollInterval: 100 * time.Millisecond,
+	}, worker.ExpiryWorkerConfig{})
+
+	primary := h.seedConnection(t, mockServer.URL)
+	h.tripConnectionCircuit(t, primary) // primary is unhealthy (circuit open)
+	fallback := h.seedConnection(t, mockServer.URL)
+
+	h.seedRouteWithFallback(t, "device.fallback", primary.ConnectionID, fallback.ConnectionID, "POST", "/v1/payments")
+
+	instr := h.createInstruction(t, "device.fallback", primary.ConnectionID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.dispatchWorker.Start(ctx)
+	defer h.dispatchWorker.Stop()
+
+	delivered := h.waitForStatus(t, instr.ID, domain.InstructionStatusDelivered, 10*time.Second)
+	assert.Equal(t, domain.InstructionStatusDelivered, delivered.Status)
+	// Attribution: the persisted instruction must record the fallback connection actually used,
+	// not the primary id set at ingest.
+	assert.Equal(t, fallback.ConnectionID, delivered.ProviderConnectionID,
+		"delivered instruction should be attributed to the fallback connection")
+	assert.NotEqual(t, primary.ConnectionID, delivered.ProviderConnectionID)
+}
+
+// TestDispatch_FailsWhenNoConnectionAvailable verifies graceful failure when neither the primary
+// nor the fallback connection is available (both circuits open).
+func TestDispatch_FailsWhenNoConnectionAvailable(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("provider should not be called when no connection is available")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockServer.Close()
+
+	h := setupHarness(t, mockServer, worker.DispatchWorkerConfig{
+		BatchSize:    10,
+		PollInterval: 100 * time.Millisecond,
+	}, worker.ExpiryWorkerConfig{})
+
+	primary := h.seedConnection(t, mockServer.URL)
+	h.tripConnectionCircuit(t, primary)
+	fallback := h.seedConnection(t, mockServer.URL)
+	h.tripConnectionCircuit(t, fallback)
+
+	h.seedRouteWithFallback(t, "device.no-conn", primary.ConnectionID, fallback.ConnectionID, "POST", "/v1/payments")
+
+	// MaxAttempts=1 so the instruction fails immediately rather than retrying.
+	instr := h.createInstruction(t, "device.no-conn", primary.ConnectionID, domain.WithMaxAttempts(1))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.dispatchWorker.Start(ctx)
+	defer h.dispatchWorker.Stop()
+
+	failed := h.waitForStatus(t, instr.ID, domain.InstructionStatusFailed, 10*time.Second)
+	assert.Equal(t, domain.InstructionStatusFailed, failed.Status)
+	assert.Equal(t, "CIRCUIT_OPEN", failed.ErrorCode)
 }
 
 func TestInstructionLifecycle_RetryOnTransientFailure(t *testing.T) {

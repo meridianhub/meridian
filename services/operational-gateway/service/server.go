@@ -31,6 +31,7 @@ const (
 var (
 	ErrInstructionRepoNil           = errors.New("instruction repository cannot be nil")
 	ErrConnectionRepoNil            = errors.New("connection repository cannot be nil")
+	ErrRouteResolverNil             = errors.New("route resolver cannot be nil")
 	ErrEventPublishingPartialConfig = errors.New("event publishing is partially configured")
 )
 
@@ -40,6 +41,7 @@ type OperationalGatewayService struct {
 	instructionRepo     ports.InstructionRepository
 	instructionRepoImpl *persistence.InstructionRepository
 	connectionRepo      ports.ConnectionRepository
+	routeResolver       ports.RouteResolver
 	db                  *gorm.DB
 	eventPublisher      ports.InstructionEventPublisher
 	logger              *slog.Logger
@@ -54,9 +56,14 @@ type ProviderConnectionService struct {
 }
 
 // NewOperationalGatewayService creates a new OperationalGatewayService.
+//
+// The routeResolver is used at ingest time to resolve the provider connection for an
+// instruction from its configured route, so the dispatch worker never has to rely on a
+// caller-supplied connection id.
 func NewOperationalGatewayService(
 	instructionRepo ports.InstructionRepository,
 	connectionRepo ports.ConnectionRepository,
+	routeResolver ports.RouteResolver,
 	logger *slog.Logger,
 ) (*OperationalGatewayService, error) {
 	if instructionRepo == nil {
@@ -65,12 +72,16 @@ func NewOperationalGatewayService(
 	if connectionRepo == nil {
 		return nil, ErrConnectionRepoNil
 	}
+	if routeResolver == nil {
+		return nil, ErrRouteResolverNil
+	}
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 	return &OperationalGatewayService{
 		instructionRepo: instructionRepo,
 		connectionRepo:  connectionRepo,
+		routeResolver:   routeResolver,
 		logger:          logger,
 	}, nil
 }
@@ -167,6 +178,34 @@ func (s *OperationalGatewayService) saveInstructionWithEvent(
 	})
 }
 
+// resolveRouteForDispatch resolves the route for an instruction type at ingest so the instruction
+// can carry its provider connection id. Resolver errors are mapped to gRPC status errors: a missing
+// route becomes FailedPrecondition (the instruction could never be dispatched), an existing gRPC
+// status error (e.g. disallowed payment.* types) is propagated verbatim, and any other error
+// becomes Internal.
+func (s *OperationalGatewayService) resolveRouteForDispatch(ctx context.Context, tenantID, instructionType string) (*ports.InstructionRoute, error) {
+	route, err := s.routeResolver.Resolve(ctx, tenantID, instructionType)
+	if err != nil {
+		if errors.Is(err, ports.ErrRouteNotFound) {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"no route configured for instruction type %q", instructionType)
+		}
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		s.logger.Error("failed to resolve route", "instruction_type", instructionType, "error", err)
+		return nil, status.Error(codes.Internal, "failed to resolve dispatch route")
+	}
+	// A route with no connection assigned is a server-side configuration error, not a client
+	// error. Surface it as FailedPrecondition before constructing the instruction so it is not
+	// misreported as an InvalidArgument from domain.NewInstruction's empty-connection check.
+	if route.ConnectionID == "" {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"route for instruction type %q has no provider connection configured", instructionType)
+	}
+	return route, nil
+}
+
 // DispatchInstruction accepts a new instruction and queues it for dispatch.
 func (s *OperationalGatewayService) DispatchInstruction(
 	ctx context.Context,
@@ -187,10 +226,18 @@ func (s *OperationalGatewayService) DispatchInstruction(
 		return nil, status.Error(codes.Internal, "invalid tenant context")
 	}
 
+	// Resolve the route so the instruction carries the provider connection id from its
+	// configured route rather than a placeholder. Without a route, the instruction can never
+	// be dispatched, so reject it at ingest instead of persisting a doomed instruction.
+	route, err := s.resolveRouteForDispatch(ctx, tenantUUID.String(), req.InstructionType)
+	if err != nil {
+		return nil, err
+	}
+
 	instruction, err := domain.NewInstruction(
 		tenantUUID,
 		req.InstructionType,
-		uuid.Nil.String(),
+		route.ConnectionID,
 		structToMap(req.Payload),
 		buildInstructionOptions(req)...,
 	)

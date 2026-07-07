@@ -8,6 +8,7 @@ import (
 	commonpb "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	opgatewayv1 "github.com/meridianhub/meridian/api/proto/meridian/operational_gateway/v1"
 	"github.com/meridianhub/meridian/services/operational-gateway/domain"
+	"github.com/meridianhub/meridian/services/operational-gateway/ports"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -19,7 +20,7 @@ import (
 // ========== Constructor nil-logger fallback tests ==========
 
 func TestNewOperationalGatewayService_NilLogger_UsesDefault(t *testing.T) {
-	svc, err := NewOperationalGatewayService(newMockInstructionRepo(), newMockConnectionRepo(), nil)
+	svc, err := NewOperationalGatewayService(newMockInstructionRepo(), newMockConnectionRepo(), newMockRouteResolver(), nil)
 	require.NoError(t, err)
 	assert.NotNil(t, svc)
 	assert.NotNil(t, svc.logger)
@@ -132,4 +133,92 @@ func TestDispatchInstruction_WithMetadata(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, resp.Instruction.Id)
+}
+
+// ========== DispatchInstruction route resolution (PAY-1) ==========
+
+// TestDispatchInstruction_CarriesRouteConnectionID verifies the persisted instruction carries the
+// provider connection id resolved from its route, not a placeholder like uuid.Nil.
+func TestDispatchInstruction_CarriesRouteConnectionID(t *testing.T) {
+	instRepo := newMockInstructionRepo()
+	connRepo := newMockConnectionRepo()
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, instructionType string) (*ports.InstructionRoute, error) {
+			return &ports.InstructionRoute{InstructionType: instructionType, ConnectionID: "kyc-conn-42"}, nil
+		},
+	}
+	svc, err := NewOperationalGatewayService(instRepo, connRepo, resolver, nil)
+	require.NoError(t, err)
+
+	ctx := tenantContext("test-tenant")
+	payload, _ := structpb.NewStruct(map[string]any{"device_id": "dev-001"})
+
+	resp, err := svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
+		InstructionType: "kyc.verify",
+		Payload:         payload,
+		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "carry-key"},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "kyc-conn-42", resp.Instruction.ProviderConnectionId)
+	assert.NotEqual(t, uuid.Nil.String(), resp.Instruction.ProviderConnectionId)
+}
+
+// TestDispatchInstruction_NoRoute_Rejected verifies dispatch is rejected at ingest when no route
+// is configured for the instruction type, rather than persisting an undispatchable instruction.
+func TestDispatchInstruction_NoRoute_Rejected(t *testing.T) {
+	instRepo := newMockInstructionRepo()
+	connRepo := newMockConnectionRepo()
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, _ string) (*ports.InstructionRoute, error) {
+			return nil, ports.ErrRouteNotFound
+		},
+	}
+	svc, err := NewOperationalGatewayService(instRepo, connRepo, resolver, nil)
+	require.NoError(t, err)
+
+	ctx := tenantContext("test-tenant")
+	payload, _ := structpb.NewStruct(map[string]any{"device_id": "dev-001"})
+
+	_, err = svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
+		InstructionType: "device.command",
+		Payload:         payload,
+		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "no-route-key"},
+	})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+
+	// Nothing should have been persisted.
+	assert.Empty(t, instRepo.instructions)
+}
+
+// TestDispatchInstruction_RouteWithEmptyConnectionID_Rejected verifies that a route which resolves
+// but has no provider connection assigned is rejected as FailedPrecondition (a server-side
+// configuration error), not misreported as an InvalidArgument client error, and is not persisted.
+func TestDispatchInstruction_RouteWithEmptyConnectionID_Rejected(t *testing.T) {
+	instRepo := newMockInstructionRepo()
+	connRepo := newMockConnectionRepo()
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, instructionType string) (*ports.InstructionRoute, error) {
+			return &ports.InstructionRoute{InstructionType: instructionType, ConnectionID: ""}, nil
+		},
+	}
+	svc, err := NewOperationalGatewayService(instRepo, connRepo, resolver, nil)
+	require.NoError(t, err)
+
+	ctx := tenantContext("test-tenant")
+	payload, _ := structpb.NewStruct(map[string]any{"device_id": "dev-001"})
+
+	_, err = svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
+		InstructionType: "device.command",
+		Payload:         payload,
+		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "empty-conn-key"},
+	})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Empty(t, instRepo.instructions)
 }

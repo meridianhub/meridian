@@ -92,15 +92,16 @@ func (r *InstructionRepository) saveInTx(ctx context.Context, tx *gorm.DB, inst 
 	updateResult := tx.WithContext(ctx).Model(&InstructionEntity{}).
 		Where("id = ? AND version = ?", entity.ID, expectedVersion).
 		Updates(map[string]interface{}{
-			"status":         entity.Status,
-			"attempt_count":  entity.AttemptCount,
-			"next_retry_at":  entity.NextRetryAt,
-			"dispatched_at":  entity.DispatchedAt,
-			"completed_at":   entity.CompletedAt,
-			"failure_reason": entity.FailureReason,
-			"error_code":     entity.ErrorCode,
-			"version":        newVersion,
-			"updated_at":     entity.UpdatedAt,
+			"status":                 entity.Status,
+			"provider_connection_id": entity.ProviderConnectionID,
+			"attempt_count":          entity.AttemptCount,
+			"next_retry_at":          entity.NextRetryAt,
+			"dispatched_at":          entity.DispatchedAt,
+			"completed_at":           entity.CompletedAt,
+			"failure_reason":         entity.FailureReason,
+			"error_code":             entity.ErrorCode,
+			"version":                newVersion,
+			"updated_at":             entity.UpdatedAt,
 		})
 
 	if updateResult.Error != nil {

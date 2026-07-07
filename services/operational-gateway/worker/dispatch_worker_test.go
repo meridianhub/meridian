@@ -157,6 +157,7 @@ func testConnection() *domain.ProviderConnection {
 func testRoute() *ports.InstructionRoute {
 	return &ports.InstructionRoute{
 		InstructionType: "payment_order.create",
+		ConnectionID:    "conn-123",
 		HTTPMethod:      "POST",
 		PathTemplate:    "/v1/payments",
 	}
@@ -842,6 +843,225 @@ func TestDispatchWorker_PassesBatchSizeToFetch(t *testing.T) {
 
 	w.Stop()
 	assert.Equal(t, 25, capturedLimit)
+}
+
+// TestProcessInstruction_UsesRouteConnectionID verifies the connection is looked up by the
+// route's ConnectionID, not the (possibly stale/placeholder) instruction field. Regression
+// guard for PAY-1: instructions were dispatched against uuid.Nil connection ids.
+func TestProcessInstruction_UsesRouteConnectionID(t *testing.T) {
+	instr := dispatchingInstruction()
+	instr.ProviderConnectionID = uuid.Nil.String() // simulate the old broken ingest behavior
+	conn := testConnection()
+	conn.ConnectionID = "route-conn-abc"
+
+	route := testRoute()
+	route.ConnectionID = "route-conn-abc"
+
+	var lookedUpID string
+	instrRepo := &mockInstructionRepo{}
+	connRepo := &mockConnectionRepo{
+		findByID: func(_ context.Context, _, connectionID string) (*domain.ProviderConnection, error) {
+			lookedUpID = connectionID
+			if connectionID == "route-conn-abc" {
+				return conn, nil
+			}
+			return nil, ports.ErrConnectionNotFound
+		},
+	}
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, _ string) (*ports.InstructionRoute, error) {
+			return route, nil
+		},
+	}
+	dispatcher := &mockDispatcher{
+		dispatch: func(_ context.Context, _ *domain.Instruction, _ *domain.ProviderConnection, _ *ports.InstructionRoute) ports.DispatchResult {
+			return ports.DispatchResult{
+				StatusCode: 200,
+				Outcome:    &ports.InstructionOutcome{ExternalID: "ext-1", ProviderStatus: "ACCEPTED"},
+				Duration:   10 * time.Millisecond,
+			}
+		},
+	}
+
+	w := NewDispatchWorker(instrRepo, connRepo, resolver, dispatcher, DispatchWorkerConfig{}, nil)
+
+	err := w.processInstruction(context.Background(), instr)
+	require.NoError(t, err)
+
+	assert.Equal(t, "route-conn-abc", lookedUpID, "connection must be looked up by route's ConnectionID")
+	saved := instrRepo.getSavedInstructions()
+	require.Len(t, saved, 1)
+	assert.Equal(t, domain.InstructionStatusDelivered, saved[0].Status)
+	assert.Equal(t, "route-conn-abc", saved[0].ProviderConnectionID,
+		"instruction should be attributed to the route's connection, not the stale instruction field")
+}
+
+// TestProcessInstruction_FallbackConnection_UsedWhenPrimaryUnhealthy verifies that when the
+// primary connection's circuit is open, the worker dispatches via the fallback connection.
+func TestProcessInstruction_FallbackConnection_UsedWhenPrimaryUnhealthy(t *testing.T) {
+	instr := dispatchingInstruction()
+
+	primary := testConnection()
+	primary.ConnectionID = "primary-conn"
+	primary.CircuitState = domain.CircuitStateOpen // unhealthy
+
+	fallback := testConnection()
+	fallback.ConnectionID = "fallback-conn"
+	fallback.CircuitState = domain.CircuitStateClosed // healthy
+
+	route := testRoute()
+	route.ConnectionID = "primary-conn"
+	route.FallbackConnectionID = "fallback-conn"
+
+	var dispatchedConnID string
+	instrRepo := &mockInstructionRepo{}
+	connRepo := &mockConnectionRepo{
+		findByID: func(_ context.Context, _, connectionID string) (*domain.ProviderConnection, error) {
+			switch connectionID {
+			case "primary-conn":
+				return primary, nil
+			case "fallback-conn":
+				return fallback, nil
+			}
+			return nil, ports.ErrConnectionNotFound
+		},
+	}
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, _ string) (*ports.InstructionRoute, error) {
+			return route, nil
+		},
+	}
+	dispatcher := &mockDispatcher{
+		dispatch: func(_ context.Context, _ *domain.Instruction, conn *domain.ProviderConnection, _ *ports.InstructionRoute) ports.DispatchResult {
+			dispatchedConnID = conn.ConnectionID
+			return ports.DispatchResult{
+				StatusCode: 200,
+				Outcome:    &ports.InstructionOutcome{ExternalID: "ext-1", ProviderStatus: "ACCEPTED"},
+				Duration:   10 * time.Millisecond,
+			}
+		},
+	}
+
+	w := NewDispatchWorker(instrRepo, connRepo, resolver, dispatcher, DispatchWorkerConfig{}, nil)
+
+	err := w.processInstruction(context.Background(), instr)
+	require.NoError(t, err)
+
+	assert.Equal(t, "fallback-conn", dispatchedConnID, "dispatch should use the fallback connection")
+	saved := instrRepo.getSavedInstructions()
+	require.Len(t, saved, 1)
+	assert.Equal(t, domain.InstructionStatusDelivered, saved[0].Status)
+	// Attribution: the persisted instruction must record the fallback connection actually used,
+	// not the primary id set at ingest.
+	assert.Equal(t, "fallback-conn", saved[0].ProviderConnectionID,
+		"delivered instruction should be attributed to the fallback connection")
+}
+
+// TestProcessInstruction_BothConnectionsUnavailable_FailsGracefully verifies that when both the
+// primary and fallback connections have open circuits, the instruction is retried (and
+// eventually fails) rather than dispatched or left dangling.
+func TestProcessInstruction_BothConnectionsUnavailable_FailsGracefully(t *testing.T) {
+	instr := dispatchingInstruction()
+	instr.AttemptCount = 3 // retries exhausted, so it fails rather than retrying
+
+	primary := testConnection()
+	primary.ConnectionID = "primary-conn"
+	primary.CircuitState = domain.CircuitStateOpen
+
+	fallback := testConnection()
+	fallback.ConnectionID = "fallback-conn"
+	fallback.CircuitState = domain.CircuitStateOpen
+
+	route := testRoute()
+	route.ConnectionID = "primary-conn"
+	route.FallbackConnectionID = "fallback-conn"
+
+	dispatchCalled := false
+	instrRepo := &mockInstructionRepo{}
+	connRepo := &mockConnectionRepo{
+		findByID: func(_ context.Context, _, connectionID string) (*domain.ProviderConnection, error) {
+			switch connectionID {
+			case "primary-conn":
+				return primary, nil
+			case "fallback-conn":
+				return fallback, nil
+			}
+			return nil, ports.ErrConnectionNotFound
+		},
+	}
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, _ string) (*ports.InstructionRoute, error) {
+			return route, nil
+		},
+	}
+	dispatcher := &mockDispatcher{
+		dispatch: func(_ context.Context, _ *domain.Instruction, _ *domain.ProviderConnection, _ *ports.InstructionRoute) ports.DispatchResult {
+			dispatchCalled = true
+			return ports.DispatchResult{}
+		},
+	}
+
+	w := NewDispatchWorker(instrRepo, connRepo, resolver, dispatcher, DispatchWorkerConfig{}, nil)
+
+	err := w.processInstruction(context.Background(), instr)
+	require.NoError(t, err)
+
+	assert.False(t, dispatchCalled, "dispatch must not be attempted when no connection is available")
+	saved := instrRepo.getSavedInstructions()
+	require.Len(t, saved, 1)
+	assert.Equal(t, domain.InstructionStatusFailed, saved[0].Status)
+	assert.Equal(t, "CIRCUIT_OPEN", saved[0].ErrorCode)
+}
+
+// TestProcessInstruction_FallbackConnection_UsedWhenPrimaryMissing verifies fallback is used when
+// the primary connection cannot be found at all (not merely circuit-open).
+func TestProcessInstruction_FallbackConnection_UsedWhenPrimaryMissing(t *testing.T) {
+	instr := dispatchingInstruction()
+
+	fallback := testConnection()
+	fallback.ConnectionID = "fallback-conn"
+
+	route := testRoute()
+	route.ConnectionID = "missing-primary"
+	route.FallbackConnectionID = "fallback-conn"
+
+	var dispatchedConnID string
+	instrRepo := &mockInstructionRepo{}
+	connRepo := &mockConnectionRepo{
+		findByID: func(_ context.Context, _, connectionID string) (*domain.ProviderConnection, error) {
+			if connectionID == "fallback-conn" {
+				return fallback, nil
+			}
+			return nil, ports.ErrConnectionNotFound
+		},
+	}
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, _ string) (*ports.InstructionRoute, error) {
+			return route, nil
+		},
+	}
+	dispatcher := &mockDispatcher{
+		dispatch: func(_ context.Context, _ *domain.Instruction, conn *domain.ProviderConnection, _ *ports.InstructionRoute) ports.DispatchResult {
+			dispatchedConnID = conn.ConnectionID
+			return ports.DispatchResult{
+				StatusCode: 200,
+				Outcome:    &ports.InstructionOutcome{ExternalID: "ext-1", ProviderStatus: "ACCEPTED"},
+				Duration:   10 * time.Millisecond,
+			}
+		},
+	}
+
+	w := NewDispatchWorker(instrRepo, connRepo, resolver, dispatcher, DispatchWorkerConfig{}, nil)
+
+	err := w.processInstruction(context.Background(), instr)
+	require.NoError(t, err)
+
+	assert.Equal(t, "fallback-conn", dispatchedConnID)
+	saved := instrRepo.getSavedInstructions()
+	require.Len(t, saved, 1)
+	assert.Equal(t, domain.InstructionStatusDelivered, saved[0].Status)
+	assert.Equal(t, "fallback-conn", saved[0].ProviderConnectionID,
+		"delivered instruction should be attributed to the fallback connection")
 }
 
 func TestProcessInstruction_HalfOpenCircuit_AllowsDispatch(t *testing.T) {

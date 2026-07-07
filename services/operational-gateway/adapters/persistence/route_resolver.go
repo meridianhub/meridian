@@ -39,10 +39,12 @@ func (r *DBRouteResolver) Resolve(ctx context.Context, tenantID string, instruct
 	}
 
 	return &ports.InstructionRoute{
-		InstructionType: route.InstructionType,
-		HTTPMethod:      route.HTTPMethod,
-		PathTemplate:    route.PathTemplate,
-		OutboundMapping: route.OutboundMapping,
-		InboundMapping:  route.InboundMapping,
+		InstructionType:      route.InstructionType,
+		ConnectionID:         route.ConnectionID,
+		FallbackConnectionID: route.FallbackConnectionID,
+		HTTPMethod:           route.HTTPMethod,
+		PathTemplate:         route.PathTemplate,
+		OutboundMapping:      route.OutboundMapping,
+		InboundMapping:       route.InboundMapping,
 	}, nil
 }
