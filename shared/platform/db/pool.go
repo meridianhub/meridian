@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // Register pgx driver
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -39,14 +40,17 @@ func NewPostgresPool(ctx context.Context, cfg *Config) (*PostgresPool, error) {
 		return nil, fmt.Errorf("failed to create pool: %w", ErrConnectionStringEmpty)
 	}
 
-	// Build connection string with CockroachDB-specific parameters
-	connStr := cfg.ConnectionString
-
-	// Open connection using pgx driver
-	db, err := sql.Open("pgx", connStr)
+	// Parse the connection string into a pgx config so we can attach an
+	// AfterConnect hook. database/sql grows and replaces pooled connections
+	// over time (pool growth, reconnects after network blips, idle eviction),
+	// so session settings must be applied per-connection rather than once
+	// against whichever connection happened to serve the initial Exec calls.
+	connConfig, err := pgx.ParseConfig(cfg.ConnectionString)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database connection: %w", err)
+		return nil, fmt.Errorf("failed to parse connection string: %w", err)
 	}
+
+	db := stdlib.OpenDB(*connConfig, stdlib.OptionAfterConnect(sessionSettingsAfterConnect(cfg)))
 
 	// Configure connection pool
 	db.SetMaxOpenConns(cfg.MaxConnections)
@@ -54,36 +58,42 @@ func NewPostgresPool(ctx context.Context, cfg *Config) (*PostgresPool, error) {
 	db.SetConnMaxLifetime(cfg.MaxConnectionLifetime)
 	db.SetConnMaxIdleTime(cfg.MaxConnectionIdleTime)
 
-	// Verify initial connection
+	// Verify initial connection. This also exercises the AfterConnect hook,
+	// so a misconfigured session setting fails fast at startup.
 	if err := db.PingContext(ctx); err != nil {
 		// Ignore close error during cleanup - ping failure is the real issue
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	// Set session-level defaults
-	// Use serializable isolation for CockroachDB best practices
-	_, err = db.ExecContext(ctx, "SET default_transaction_isolation = 'serializable'")
-	if err != nil {
-		// Ignore close error during cleanup - isolation setting failure is the real issue
-		_ = db.Close()
-		return nil, fmt.Errorf("failed to set default transaction isolation: %w", err)
-	}
-
-	// Set statement timeout if configured
-	if cfg.StatementTimeout > 0 {
-		timeoutMs := cfg.StatementTimeout.Milliseconds()
-		_, err = db.ExecContext(ctx, fmt.Sprintf("SET statement_timeout = '%dms'", timeoutMs))
-		if err != nil {
-			// Ignore close error during cleanup - timeout setting failure is the real issue
-			_ = db.Close()
-			return nil, fmt.Errorf("failed to set statement timeout: %w", err)
-		}
-	}
-
 	return &PostgresPool{
 		db: db,
 	}, nil
+}
+
+// sessionSettingsAfterConnect returns a pgx AfterConnect hook that applies
+// the pool's session-level defaults (isolation level, statement timeout) to
+// every physical connection as it is established. Wiring this through
+// stdlib.OptionAfterConnect - rather than running SET once against the pool
+// after open - guarantees connections created later (pool growth beyond the
+// initial size, reconnects, idle eviction and replacement) also receive the
+// settings, not just the connection that served the first Exec call.
+func sessionSettingsAfterConnect(cfg *Config) func(ctx context.Context, conn *pgx.Conn) error {
+	return func(ctx context.Context, conn *pgx.Conn) error {
+		// Use serializable isolation for CockroachDB best practices
+		if _, err := conn.Exec(ctx, "SET default_transaction_isolation = 'serializable'"); err != nil {
+			return fmt.Errorf("failed to set default transaction isolation: %w", err)
+		}
+
+		if cfg.StatementTimeout > 0 {
+			timeoutMs := cfg.StatementTimeout.Milliseconds()
+			if _, err := conn.Exec(ctx, fmt.Sprintf("SET statement_timeout = '%dms'", timeoutMs)); err != nil {
+				return fmt.Errorf("failed to set statement timeout: %w", err)
+			}
+		}
+
+		return nil
+	}
 }
 
 // QueryContext executes a query that returns rows with context support.

@@ -948,3 +948,79 @@ func TestPostgresPool_Integration_MultiplePools(t *testing.T) {
 	}
 	assert.Error(t, err, "service_a should not see service_b's tables")
 }
+
+// TestPostgresPool_Integration_SessionSettingsAppliedToAllConnections verifies
+// that session settings (isolation level, statement timeout) reach every
+// connection in the pool - not just the connection that happened to serve the
+// initial setup Exec calls in NewPostgresPool. It forces database/sql to open
+// several distinct physical connections concurrently (each held open briefly
+// via pg_sleep) and checks the settings on each one individually.
+func TestPostgresPool_Integration_SessionSettingsAppliedToAllConnections(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test")
+	}
+
+	ctx := context.Background()
+	pool, cleanup := setupPostgresContainer(ctx, t)
+	defer cleanup()
+
+	require.NoError(t, pool.Ping(ctx), "database should be ready")
+
+	const concurrency = 6
+
+	type connSettings struct {
+		pid              int
+		isolation        string
+		statementTimeout string
+	}
+
+	results := make(chan connSettings, concurrency)
+	errs := make(chan error, concurrency)
+
+	var wg sync.WaitGroup
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			// pg_sleep holds this goroutine's connection open long enough
+			// that database/sql must open multiple distinct physical
+			// connections to serve all goroutines concurrently, exercising
+			// pool growth beyond the initial connection.
+			var pid int
+			var isolation, statementTimeout string
+			err := pool.QueryRowContext(ctx,
+				`SELECT pg_backend_pid(), current_setting('default_transaction_isolation'), current_setting('statement_timeout')
+				 FROM pg_sleep(0.3)`,
+			).Scan(&pid, &isolation, &statementTimeout)
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- connSettings{pid: pid, isolation: isolation, statementTimeout: statementTimeout}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err, "session settings query should succeed on every connection")
+	}
+
+	seenPIDs := make(map[int]bool)
+	count := 0
+	for r := range results {
+		count++
+		seenPIDs[r.pid] = true
+
+		assert.Equal(t, "serializable", r.isolation,
+			"connection (pid %d) should have serializable isolation applied", r.pid)
+		assert.NotEqual(t, "0", r.statementTimeout,
+			"connection (pid %d) should have a non-default statement timeout applied", r.pid)
+	}
+
+	require.Equal(t, concurrency, count, "expected a result from every goroutine")
+	require.Greater(t, len(seenPIDs), 1,
+		"expected multiple distinct pooled connections to be exercised, got %d unique pid(s)", len(seenPIDs))
+}
