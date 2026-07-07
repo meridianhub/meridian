@@ -51,6 +51,13 @@ func TestIPRateLimiter_CleanupEvictsStaleEntries(t *testing.T) {
 	assert.True(t, rl.Allow("10.0.0.1"), "a fresh bucket should be created after cleanup")
 }
 
+func TestIPRateLimiter_StopIsIdempotent(t *testing.T) {
+	rl := gateway.NewPerMinuteIPRateLimiter(10, 1)
+	// Calling Stop more than once must not panic.
+	rl.Stop()
+	assert.NotPanics(t, rl.Stop)
+}
+
 func TestNewIPRateLimiter_ClampsBurst(t *testing.T) {
 	// A burst below 1 is clamped to 1 so at least one request is always allowed.
 	rl := gateway.NewIPRateLimiter(0, 0)

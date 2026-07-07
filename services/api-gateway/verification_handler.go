@@ -62,10 +62,7 @@ func NewVerificationHandler(cfg VerificationHandlerConfig) (*VerificationHandler
 	if cfg.OutboxRepo == nil {
 		return nil, ErrVerificationOutboxRequired
 	}
-	limiter := cfg.IPRateLimiter
-	if limiter == nil {
-		limiter = NewPerMinuteIPRateLimiter(defaultResendVerificationPerMinute, defaultResendVerificationBurst)
-	}
+	limiter := resolveIPRateLimiter(cfg.IPRateLimiter, defaultResendVerificationPerMinute, defaultResendVerificationBurst)
 	return &VerificationHandler{
 		identityRepo:  cfg.IdentityRepo,
 		outboxRepo:    cfg.OutboxRepo,

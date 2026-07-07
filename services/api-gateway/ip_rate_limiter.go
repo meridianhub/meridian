@@ -22,6 +22,7 @@ type IPRateLimiter struct {
 	rate     rate.Limit
 	burst    int
 	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 type ipRateEntry struct {
@@ -55,6 +56,17 @@ func NewPerMinuteIPRateLimiter(perMinute, burst int) *IPRateLimiter {
 	return NewIPRateLimiter(rate.Limit(float64(perMinute)/60.0), burst)
 }
 
+// resolveIPRateLimiter returns the configured limiter when non-nil, otherwise a
+// new per-minute limiter built from the supplied defaults. It centralizes the
+// "use the injected limiter or fall back to a default" logic shared by the
+// unauthenticated handlers.
+func resolveIPRateLimiter(configured *IPRateLimiter, defaultPerMinute, defaultBurst int) *IPRateLimiter {
+	if configured != nil {
+		return configured
+	}
+	return NewPerMinuteIPRateLimiter(defaultPerMinute, defaultBurst)
+}
+
 // Allow reports whether the given IP is permitted to make a request now,
 // consuming one token from its bucket when permitted.
 func (rl *IPRateLimiter) Allow(ip string) bool {
@@ -85,9 +97,11 @@ func (rl *IPRateLimiter) Cleanup(maxAge time.Duration) {
 	}
 }
 
-// Stop halts the background cleanup goroutine.
+// Stop halts the background cleanup goroutine. It is safe to call more than once.
 func (rl *IPRateLimiter) Stop() {
-	close(rl.stop)
+	rl.stopOnce.Do(func() {
+		close(rl.stop)
+	})
 }
 
 // cleanupLoop evicts stale limiter entries every hour.

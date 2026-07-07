@@ -63,10 +63,7 @@ func NewPasswordResetHandler(cfg PasswordResetHandlerConfig) (*PasswordResetHand
 	if cfg.OutboxRepo == nil {
 		return nil, ErrPasswordResetOutboxRequired
 	}
-	limiter := cfg.IPRateLimiter
-	if limiter == nil {
-		limiter = NewPerMinuteIPRateLimiter(defaultForgotPasswordPerMinute, defaultForgotPasswordBurst)
-	}
+	limiter := resolveIPRateLimiter(cfg.IPRateLimiter, defaultForgotPasswordPerMinute, defaultForgotPasswordBurst)
 	return &PasswordResetHandler{
 		identityRepo:  cfg.IdentityRepo,
 		outboxRepo:    cfg.OutboxRepo,
