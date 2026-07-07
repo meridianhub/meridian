@@ -36,7 +36,7 @@ func buildManifestValidateTool(client ManifestApplier) Tool {
 		Category: CategorySimulate,
 		Description: "Validate a manifest YAML/JSON without applying it. " +
 			"Runs structural validation and returns any errors with paths and suggestions. " +
-			"Use mode='create' (default) for new economy validation or mode='amend' with tenant_id to validate against an existing tenant's manifest.",
+			"Use mode='create' (default) for new economy validation or mode='amend' to validate against an existing tenant's manifest (tenant_id defaults to the authenticated tenant).",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -49,7 +49,7 @@ func buildManifestValidateTool(client ManifestApplier) Tool {
 				},
 				"mode": map[string]interface{}{
 					"type":        "string",
-					"description": "Validation mode: 'create' (default) performs schema-only validation for new economies; 'amend' validates against the existing tenant's manifest.",
+					"description": "Validation mode: 'create' (default) performs schema-only validation for new economies; 'amend' validates against the existing tenant's manifest (tenant_id defaults to the authenticated tenant).",
 					"enum":        []interface{}{"create", "amend"},
 				},
 				"tenant_id": map[string]interface{}{

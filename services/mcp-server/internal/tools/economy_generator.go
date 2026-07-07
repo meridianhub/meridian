@@ -77,7 +77,7 @@ func buildEconomyGenerateContextTool(client EconomyGeneratorClient) Tool {
 				},
 				"include_current_economy": map[string]interface{}{
 					"type":        "boolean",
-					"description": "When true, includes the tenant's current manifest YAML in the response. Requires tenant_id.",
+					"description": "When true, includes the tenant's current manifest YAML in the response. Requires tenant_id unless an authenticated tenant is available.",
 				},
 				"tenant_id": map[string]interface{}{
 					"type":        "string",
@@ -179,7 +179,7 @@ func buildEconomyGenerateTool(client EconomyGeneratorClient) Tool {
 		Description: "Generate a tenant manifest from a natural language description using AI assistance. " +
 			"Produces a manifest YAML, validates it, and iterates to fix any validation errors. " +
 			"Does not apply the manifest — use meridian_manifest_plan and meridian_manifest_apply to deploy it. " +
-			"Use mode=amend with a tenant_id to incorporate changes into an existing economy.",
+			"Use mode=amend to incorporate changes into an existing economy (tenant_id defaults to the authenticated tenant).",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -189,7 +189,7 @@ func buildEconomyGenerateTool(client EconomyGeneratorClient) Tool {
 				},
 				"mode": map[string]interface{}{
 					"type":        "string",
-					"description": "Generation mode: 'create' (default) generates a fresh manifest; 'amend' incorporates changes into the existing manifest (requires tenant_id).",
+					"description": "Generation mode: 'create' (default) generates a fresh manifest; 'amend' incorporates changes into the existing manifest (requires tenant_id unless an authenticated tenant is available).",
 					"enum":        []interface{}{"create", "amend"},
 				},
 				"tenant_id": map[string]interface{}{
