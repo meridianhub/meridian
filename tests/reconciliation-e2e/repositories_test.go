@@ -89,6 +89,33 @@ func (r *gormRunRepository) Update(_ context.Context, run *domain.SettlementRun)
 	return nil
 }
 
+func (r *gormRunRepository) UpdateWithOutbox(_ context.Context, run *domain.SettlementRun, postFn func(tx *gorm.DB) error) error {
+	entity := toRunEntity(run)
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&settlementRunEntity{}).
+			Where("run_id = ? AND version = ?", entity.RunID, entity.Version-1).
+			Updates(map[string]interface{}{
+				"status":               entity.Status,
+				"completed_at":         entity.CompletedAt,
+				"variance_count":       entity.VarianceCount,
+				"failure_reason":       entity.FailureReason,
+				"last_completed_phase": entity.LastCompletedPhase,
+				"version":              entity.Version,
+				"updated_at":           time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrOptimisticLock
+		}
+		if postFn != nil {
+			return postFn(tx)
+		}
+		return nil
+	})
+}
+
 func (r *gormRunRepository) List(_ context.Context, filter domain.RunFilter) ([]*domain.SettlementRun, error) {
 	query := r.db.Model(&settlementRunEntity{})
 

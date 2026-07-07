@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 // mockVarianceLister implements VarianceLister for testing.
@@ -364,6 +365,16 @@ func (m *initiateRunRepoMock) Update(_ context.Context, run *domain.SettlementRu
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.runs[run.RunID] = run
+	return nil
+}
+
+func (m *initiateRunRepoMock) UpdateWithOutbox(ctx context.Context, run *domain.SettlementRun, postFn func(tx *gorm.DB) error) error {
+	if err := m.Update(ctx, run); err != nil {
+		return err
+	}
+	if postFn != nil {
+		return postFn(nil)
+	}
 	return nil
 }
 

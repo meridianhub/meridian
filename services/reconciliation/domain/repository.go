@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // SettlementRunRepository defines the contract for persisting and retrieving settlement runs.
@@ -21,6 +22,12 @@ type SettlementRunRepository interface {
 	// Returns ErrNotFound if the run doesn't exist.
 	// Returns ErrOptimisticLock if the version doesn't match.
 	Update(ctx context.Context, run *SettlementRun) error
+
+	// UpdateWithOutbox updates an existing SettlementRun and runs postFn within
+	// the same database transaction as the update, enabling atomic transactional
+	// outbox writes. If postFn returns an error, both the update and any outbox
+	// row it wrote are rolled back. A nil postFn behaves like Update.
+	UpdateWithOutbox(ctx context.Context, run *SettlementRun, postFn func(tx *gorm.DB) error) error
 
 	// List retrieves settlement runs matching the given filter with pagination.
 	List(ctx context.Context, filter RunFilter) ([]*SettlementRun, error)
@@ -104,6 +111,12 @@ type DisputeRepository interface {
 	// Create persists a new Dispute.
 	Create(ctx context.Context, dispute *Dispute) error
 
+	// CreateWithOutbox persists a new Dispute and runs postFn within the same
+	// database transaction as the insert, enabling atomic transactional outbox
+	// writes. If postFn returns an error, both the insert and any outbox row it
+	// wrote are rolled back. A nil postFn behaves like Create.
+	CreateWithOutbox(ctx context.Context, dispute *Dispute, postFn func(tx *gorm.DB) error) error
+
 	// FindByID retrieves a Dispute by its DisputeID.
 	// Returns ErrNotFound if the dispute doesn't exist.
 	FindByID(ctx context.Context, disputeID uuid.UUID) (*Dispute, error)
@@ -114,6 +127,12 @@ type DisputeRepository interface {
 	// Update updates an existing Dispute.
 	// Returns ErrNotFound if the dispute doesn't exist.
 	Update(ctx context.Context, dispute *Dispute) error
+
+	// UpdateWithOutbox updates an existing Dispute and runs postFn within the same
+	// database transaction as the update, enabling atomic transactional outbox
+	// writes. If postFn returns an error, both the update and any outbox row it
+	// wrote are rolled back. A nil postFn behaves like Update.
+	UpdateWithOutbox(ctx context.Context, dispute *Dispute, postFn func(tx *gorm.DB) error) error
 
 	// List retrieves disputes matching the given filter.
 	List(ctx context.Context, filter DisputeFilter) ([]*Dispute, error)

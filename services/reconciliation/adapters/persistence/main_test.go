@@ -20,6 +20,7 @@ var sharedDB *gorm.DB
 
 // allTables lists every table created in the tenant schema, in deletion order (children first).
 var allTables = []string{
+	"event_outbox",
 	"imbalance_trend",
 	"dispute",
 	"variance",
@@ -216,6 +217,27 @@ func runMigrations(db *gorm.DB) error {
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS "idx_it_trend_id" ON "imbalance_trend" ("trend_id");
 		CREATE UNIQUE INDEX IF NOT EXISTS "idx_it_instrument_code" ON "imbalance_trend" ("instrument_code");
+
+		CREATE TABLE IF NOT EXISTS "event_outbox" (
+			"id" uuid NOT NULL DEFAULT gen_random_uuid(),
+			"event_type" character varying(200) NOT NULL,
+			"aggregate_id" character varying(100) NOT NULL,
+			"aggregate_type" character varying(100) NOT NULL,
+			"event_payload" bytea NOT NULL,
+			"correlation_id" character varying(100) NULL,
+			"causation_id" character varying(100) NULL,
+			"status" character varying(20) NOT NULL DEFAULT 'pending',
+			"topic" character varying(200) NOT NULL,
+			"partition_key" character varying(200) NULL,
+			"created_at" timestamptz NOT NULL DEFAULT now(),
+			"processed_at" timestamptz NULL,
+			"retry_count" integer NOT NULL DEFAULT 0,
+			"last_error" text NULL,
+			"service_name" character varying(100) NOT NULL,
+			"tenant_id" character varying(100) NOT NULL,
+			PRIMARY KEY ("id")
+		);
+		CREATE INDEX IF NOT EXISTS "idx_event_outbox_polling" ON "event_outbox" ("status", "service_name", "created_at");
 
 		SET search_path TO public;
 	`

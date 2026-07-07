@@ -13,6 +13,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
 )
 
 const (
@@ -159,8 +160,6 @@ func (f *SettlementFinalizer) FinalizeSettlement(ctx context.Context, runID uuid
 		return err
 	}
 
-	f.publishLockEvent(ctx, run)
-
 	observability.SettlementFinalityTotal.WithLabelValues("SUCCESS").Inc()
 
 	f.logger.InfoContext(ctx, "settlement finalization completed",
@@ -224,17 +223,21 @@ func (f *SettlementFinalizer) markFinalized(ctx context.Context, run *domain.Set
 	if err := run.Finalize(); err != nil {
 		return fmt.Errorf("transitioning run %s to FINALIZED: %w", run.RunID, err)
 	}
-	if err := f.runRepo.Update(ctx, run); err != nil {
+	if err := f.runRepo.UpdateWithOutbox(ctx, run, f.lockEventOutboxFn(ctx, run)); err != nil {
 		return fmt.Errorf("persisting FINALIZED state for run %s: %w", run.RunID, err)
 	}
 
 	return nil
 }
 
-// publishLockEvent publishes a PositionLockRequestedEvent after successful finalization.
-func (f *SettlementFinalizer) publishLockEvent(ctx context.Context, run *domain.SettlementRun) {
+// lockEventOutboxFn returns a transaction callback that writes a
+// PositionLockRequestedEvent to the outbox within the run's FINALIZED update
+// transaction, making event delivery atomic with the domain write. Returns nil
+// when no event publisher is configured, in which case the update runs without
+// an outbox write.
+func (f *SettlementFinalizer) lockEventOutboxFn(ctx context.Context, run *domain.SettlementRun) func(tx *gorm.DB) error {
 	if f.publisher == nil {
-		return
+		return nil
 	}
 	event := PositionLockRequestedEvent{
 		RunID:       run.RunID.String(),
@@ -244,9 +247,8 @@ func (f *SettlementFinalizer) publishLockEvent(ctx context.Context, run *domain.
 		PeriodEnd:   run.PeriodEnd.Format(time.RFC3339),
 		Status:      "LOCKED",
 	}
-	if pubErr := f.publisher.Publish(ctx, messaging.TopicPositionLockRequested, event); pubErr != nil {
-		f.logger.WarnContext(ctx, "failed to publish PositionLockRequestedEvent",
-			"run_id", run.RunID, "error", pubErr)
+	return func(tx *gorm.DB) error {
+		return f.publisher.PublishTx(ctx, tx, messaging.TopicPositionLockRequested, event)
 	}
 }
 

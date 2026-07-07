@@ -47,9 +47,21 @@ func (r *DisputeRepository) isInTransaction() bool {
 
 // Create persists a new Dispute.
 func (r *DisputeRepository) Create(ctx context.Context, dispute *domain.Dispute) error {
+	return r.CreateWithOutbox(ctx, dispute, nil)
+}
+
+// CreateWithOutbox persists a new Dispute and runs postFn within the same
+// transaction, ensuring the domain write and any outbox row are atomic.
+func (r *DisputeRepository) CreateWithOutbox(ctx context.Context, dispute *domain.Dispute, postFn func(tx *gorm.DB) error) error {
 	entity := toDisputeEntity(dispute)
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Create(entity).Error
+		if err := tx.Create(entity).Error; err != nil {
+			return err
+		}
+		if postFn != nil {
+			return postFn(tx)
+		}
+		return nil
 	})
 }
 
@@ -94,6 +106,13 @@ func (r *DisputeRepository) FindByVarianceID(ctx context.Context, varianceID uui
 
 // Update updates an existing Dispute.
 func (r *DisputeRepository) Update(ctx context.Context, dispute *domain.Dispute) error {
+	return r.UpdateWithOutbox(ctx, dispute, nil)
+}
+
+// UpdateWithOutbox updates an existing Dispute and runs postFn within the same
+// transaction, ensuring the domain write and any outbox row are atomic.
+// postFn is only invoked when the update affects a row (the dispute exists).
+func (r *DisputeRepository) UpdateWithOutbox(ctx context.Context, dispute *domain.Dispute, postFn func(tx *gorm.DB) error) error {
 	entity := toDisputeEntity(dispute)
 	var rowsAffected int64
 
@@ -111,6 +130,12 @@ func (r *DisputeRepository) Update(ctx context.Context, dispute *domain.Dispute)
 			return result.Error
 		}
 		rowsAffected = result.RowsAffected
+		if rowsAffected == 0 {
+			return nil
+		}
+		if postFn != nil {
+			return postFn(tx)
+		}
 		return nil
 	})
 	if err != nil {

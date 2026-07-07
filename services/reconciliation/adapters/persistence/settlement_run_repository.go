@@ -107,6 +107,14 @@ func (r *SettlementRunRepository) FindByID(ctx context.Context, runID uuid.UUID)
 
 // Update updates an existing SettlementRun using optimistic locking.
 func (r *SettlementRunRepository) Update(ctx context.Context, run *domain.SettlementRun) error {
+	return r.UpdateWithOutbox(ctx, run, nil)
+}
+
+// UpdateWithOutbox updates an existing SettlementRun using optimistic locking and
+// runs postFn within the same transaction, ensuring the domain write and any
+// outbox row are atomic. postFn is only invoked when the update affects a row
+// (the run exists and the version matches).
+func (r *SettlementRunRepository) UpdateWithOutbox(ctx context.Context, run *domain.SettlementRun, postFn func(tx *gorm.DB) error) error {
 	entity := toSettlementRunEntity(run)
 	var rowsAffected int64
 
@@ -127,6 +135,12 @@ func (r *SettlementRunRepository) Update(ctx context.Context, run *domain.Settle
 			return result.Error
 		}
 		rowsAffected = result.RowsAffected
+		if rowsAffected == 0 {
+			return nil
+		}
+		if postFn != nil {
+			return postFn(tx)
+		}
 		return nil
 	})
 	if err != nil {

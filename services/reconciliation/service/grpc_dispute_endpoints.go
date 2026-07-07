@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 )
 
 // SagaRuntime defines the contract for invoking Starlark sagas.
@@ -22,7 +23,12 @@ type SagaRuntime interface {
 
 // EventPublisher defines the contract for publishing domain events.
 type EventPublisher interface {
+	// Publish writes the event to the outbox in its own transaction.
 	Publish(ctx context.Context, topic string, event interface{}) error
+
+	// PublishTx writes the event to the outbox within the provided transaction,
+	// making the outbox row atomic with the domain write on the same transaction.
+	PublishTx(ctx context.Context, tx *gorm.DB, topic string, event interface{}) error
 }
 
 // VarianceFinder retrieves variances for dispute validation.
@@ -129,13 +135,12 @@ func (s *AccountReconciliationService) InitiateDispute(
 		dispute.Attributes = req.GetAttributes()
 	}
 
-	if err := s.disputeRepo.Create(ctx, dispute); err != nil {
+	if err := s.disputeRepo.CreateWithOutbox(ctx, dispute, s.disputeCreatedOutboxFn(ctx, dispute)); err != nil {
 		slog.ErrorContext(ctx, "failed to create dispute", "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to create dispute: %v", err)
 	}
 
 	s.markVarianceDisputed(ctx, varianceID)
-	s.publishDisputeCreatedEvent(ctx, dispute)
 
 	return &reconciliationv1.InitiateDisputeResponse{
 		Dispute: toDisputeDetailProto(dispute),
@@ -168,10 +173,13 @@ func (s *AccountReconciliationService) markVarianceDisputed(ctx context.Context,
 	}
 }
 
-// publishDisputeCreatedEvent publishes a DisputeCreatedEvent to the outbox.
-func (s *AccountReconciliationService) publishDisputeCreatedEvent(ctx context.Context, dispute *domain.Dispute) {
+// disputeCreatedOutboxFn returns a transaction callback that writes a
+// DisputeCreatedEvent to the outbox within the dispute's insert transaction,
+// making event delivery atomic with the domain write. Returns nil when no
+// event publisher is configured (the insert then runs without an outbox write).
+func (s *AccountReconciliationService) disputeCreatedOutboxFn(ctx context.Context, dispute *domain.Dispute) func(tx *gorm.DB) error {
 	if s.eventPublisher == nil {
-		return
+		return nil
 	}
 	event := DisputeCreatedEvent{
 		DisputeID:  dispute.DisputeID.String(),
@@ -181,9 +189,8 @@ func (s *AccountReconciliationService) publishDisputeCreatedEvent(ctx context.Co
 		Reason:     dispute.Reason,
 		RaisedBy:   dispute.RaisedBy,
 	}
-	if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeCreated, event); err != nil {
-		slog.WarnContext(ctx, "failed to publish DisputeCreatedEvent",
-			"dispute_id", dispute.DisputeID, "error", err)
+	return func(tx *gorm.DB) error {
+		return s.eventPublisher.PublishTx(ctx, tx, messaging.TopicDisputeCreated, event)
 	}
 }
 
@@ -214,12 +221,10 @@ func (s *AccountReconciliationService) ControlDispute(
 		return nil, err
 	}
 
-	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
+	if err := s.disputeRepo.UpdateWithOutbox(ctx, dispute, s.disputeResolvedOutboxFn(ctx, dispute, action.String())); err != nil {
 		slog.ErrorContext(ctx, "failed to update dispute", "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to update dispute: %v", err)
 	}
-
-	s.publishDisputeResolvedEvent(ctx, dispute, action)
 
 	return &reconciliationv1.ControlDisputeResponse{
 		Dispute: toDisputeDetailProto(dispute),
@@ -281,16 +286,14 @@ func (s *AccountReconciliationService) invokeReconciliationAdjustment(ctx contex
 	}
 }
 
-// publishDisputeResolvedEvent publishes a DisputeResolvedEvent for terminal states.
-func (s *AccountReconciliationService) publishDisputeResolvedEvent(ctx context.Context, dispute *domain.Dispute, action reconciliationv1.DisputeControlAction) {
-	s.publishDisputeResolvedEventWithAction(ctx, dispute, action.String())
-}
-
-// publishDisputeResolvedEventWithAction publishes a DisputeResolvedEvent for terminal states
-// using the provided action string.
-func (s *AccountReconciliationService) publishDisputeResolvedEventWithAction(ctx context.Context, dispute *domain.Dispute, actionStr string) {
+// disputeResolvedOutboxFn returns a transaction callback that writes a
+// DisputeResolvedEvent to the outbox within the dispute's update transaction,
+// making event delivery atomic with the domain write. Returns nil when the
+// dispute is not in a final state or no event publisher is configured, in which
+// case the update runs without an outbox write.
+func (s *AccountReconciliationService) disputeResolvedOutboxFn(ctx context.Context, dispute *domain.Dispute, actionStr string) func(tx *gorm.DB) error {
 	if !dispute.Status.IsFinal() || s.eventPublisher == nil {
-		return
+		return nil
 	}
 	event := DisputeResolvedEvent{
 		DisputeID:  dispute.DisputeID.String(),
@@ -301,9 +304,8 @@ func (s *AccountReconciliationService) publishDisputeResolvedEventWithAction(ctx
 		Resolution: dispute.Resolution,
 		ResolvedBy: dispute.ResolvedBy,
 	}
-	if err := s.eventPublisher.Publish(ctx, messaging.TopicDisputeResolved, event); err != nil {
-		slog.WarnContext(ctx, "failed to publish DisputeResolvedEvent",
-			"dispute_id", dispute.DisputeID, "error", err)
+	return func(tx *gorm.DB) error {
+		return s.eventPublisher.PublishTx(ctx, tx, messaging.TopicDisputeResolved, event)
 	}
 }
 

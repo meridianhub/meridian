@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
 )
 
 // --- Mock PositionLockClient ---
@@ -85,6 +86,10 @@ func (m *mockFinalityPublisher) Publish(_ context.Context, topic string, event i
 	}
 	m.events = append(m.events, finalityEvent{topic: topic, event: event})
 	return nil
+}
+
+func (m *mockFinalityPublisher) PublishTx(ctx context.Context, _ *gorm.DB, topic string, event interface{}) error {
+	return m.Publish(ctx, topic, event)
 }
 
 func (m *mockFinalityPublisher) eventCount() int {
@@ -414,22 +419,24 @@ func TestFinalizeSettlement_SnapshotMarkFailureBlocksFinalization(t *testing.T) 
 	assert.NotEqual(t, domain.RunStatusFinalized, unchangedRun.Status)
 }
 
-func TestFinalizeSettlement_PublisherFailureNonFatal(t *testing.T) {
+func TestFinalizeSettlement_PublisherFailureRollsBack(t *testing.T) {
 	runRepo := newMockRunRepo()
 	snapRepo := &mockFinalSnapshotRepo{}
-	publisher := &mockFinalityPublisher{err: errors.New("kafka unavailable")}
+	publisher := &mockFinalityPublisher{err: errors.New("outbox write failed")}
 
 	run := newCompletedFinalRun(t)
 	_ = runRepo.Create(context.Background(), run)
 
 	finalizer := NewSettlementFinalizer(runRepo, snapRepo, nil, publisher, nil)
 	err := finalizer.FinalizeSettlement(serviceCtx(), run.RunID)
-	// Should succeed even if event publishing fails (non-fatal)
-	require.NoError(t, err)
-
-	// Run should still be FINALIZED
-	finalizedRun, _ := runRepo.FindByID(context.Background(), run.RunID)
-	assert.Equal(t, domain.RunStatusFinalized, finalizedRun.Status)
+	// The outbox write is atomic with the FINALIZED transition: if the event
+	// cannot be written, the whole update rolls back and finalization fails.
+	// (DB-level rollback of the persisted row is covered by the integration
+	// test; this mock shares the run pointer so its status field is not a
+	// reliable rollback signal.)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "persisting FINALIZED state")
+	assert.Equal(t, 0, publisher.eventCount())
 }
 
 func TestFinalizeSettlement_RunUpdateFailure(t *testing.T) {
