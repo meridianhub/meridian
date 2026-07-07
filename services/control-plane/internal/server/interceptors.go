@@ -34,10 +34,12 @@ var roleLevel = map[auth.Role]int{
 // IMPORTANT: All control-plane RPCs must be listed here. Unlisted control-plane
 // RPCs are denied by the fail-closed check in checkManifestRBAC.
 var manifestRoleRequirements = map[string]auth.Role{
-	// ManifestHistoryService - read-only, auditor level
+	// ManifestHistoryService - read-only queries are auditor level;
+	// RollbackManifest mutates the active manifest and requires admin.
 	"/meridian.control_plane.v1.ManifestHistoryService/GetCurrentManifest":   auth.RoleAuditor,
 	"/meridian.control_plane.v1.ManifestHistoryService/GetManifestVersion":   auth.RoleAuditor,
 	"/meridian.control_plane.v1.ManifestHistoryService/ListManifestVersions": auth.RoleAuditor,
+	"/meridian.control_plane.v1.ManifestHistoryService/RollbackManifest":     auth.RoleAdmin,
 
 	// ApplyManifestService - mutating, admin level
 	"/meridian.control_plane.v1.ApplyManifestService/ApplyManifest": auth.RoleAdmin,
@@ -122,8 +124,15 @@ func ManifestRBACStreamInterceptor() grpc.StreamServerInterceptor {
 func checkManifestRBAC(ctx context.Context, fullMethod string) error {
 	requiredRole, protected := manifestRoleRequirements[fullMethod]
 	if !protected {
-		// Fail closed: deny unlisted control-plane RPCs
+		// Fail closed: deny unlisted control-plane RPCs. Distinguish an anonymous
+		// caller from an authenticated one so the status code matches the
+		// mapped-method path and gRPC's canonical semantics: no principal yields
+		// Unauthenticated, an authenticated caller with no configured rule yields
+		// PermissionDenied.
 		if strings.HasPrefix(fullMethod, controlPlanePrefix) {
+			if _, ok := auth.GetClaimsFromContext(ctx); !ok {
+				return status.Error(codes.Unauthenticated, "authentication required")
+			}
 			return status.Errorf(codes.PermissionDenied,
 				"permission denied: no RBAC rule configured for %s", fullMethod)
 		}

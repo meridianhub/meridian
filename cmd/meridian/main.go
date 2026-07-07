@@ -34,6 +34,7 @@ import (
 	"github.com/meridianhub/meridian/internal/migrations"
 	"github.com/meridianhub/meridian/services"
 	gateway "github.com/meridianhub/meridian/services/api-gateway"
+	controlplaneservice "github.com/meridianhub/meridian/services/control-plane/service"
 	tenantprovisioner "github.com/meridianhub/meridian/services/tenant/provisioner"
 	tenantworker "github.com/meridianhub/meridian/services/tenant/worker"
 	"github.com/meridianhub/meridian/shared/pkg/dispatch"
@@ -250,8 +251,18 @@ func initInfrastructure(ctx context.Context, grpcPort int, logger *slog.Logger) 
 		return nil, fmt.Errorf("tracer: %w", err)
 	}
 
+	// The unified binary handles JWT authentication at the HTTP gateway edge and
+	// forwards verified identity as trusted gRPC metadata (WithoutAuth() here keeps
+	// the loopback gRPC server from re-validating tokens, which would break
+	// platform-layer services and unauthenticated internal self-calls). Manifest
+	// RBAC is layered on top: for control-plane RPCs the gateway-propagated identity
+	// is reconstructed into claims and the shared control-plane RBAC interceptor
+	// enforces role requirements (fail-closed for unauthenticated callers).
 	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
 		WithoutAuth().
+		WithUnaryInterceptor(GatewayManifestRBACUnaryInterceptor(controlplaneservice.ManifestRBACUnaryInterceptor())).
+		//nolint:contextcheck // stream interceptor propagates the enriched context via the wrapped ServerStream
+		WithStreamInterceptor(GatewayManifestRBACStreamInterceptor(controlplaneservice.ManifestRBACStreamInterceptor())).
 		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
 		conns.closeAll(logger)

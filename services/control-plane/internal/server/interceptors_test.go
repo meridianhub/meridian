@@ -72,6 +72,33 @@ func TestManifestRBACUnaryInterceptor_AuditorCannotApplyManifest(t *testing.T) {
 	assert.Contains(t, st.Message(), "auditor")
 }
 
+func TestManifestRBACUnaryInterceptor_AuditorCannotRollbackManifest(t *testing.T) {
+	interceptor := ManifestRBACUnaryInterceptor()
+	ctx := contextWithClaims([]string{"auditor"}, nil)
+
+	_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
+		FullMethod: "/meridian.control_plane.v1.ManifestHistoryService/RollbackManifest",
+	}, noopUnaryHandler)
+
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.PermissionDenied, st.Code())
+	assert.Contains(t, st.Message(), "admin role required")
+}
+
+func TestManifestRBACUnaryInterceptor_AdminCanRollbackManifest(t *testing.T) {
+	interceptor := ManifestRBACUnaryInterceptor()
+	ctx := contextWithClaims([]string{"admin"}, nil)
+
+	resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{
+		FullMethod: "/meridian.control_plane.v1.ManifestHistoryService/RollbackManifest",
+	}, noopUnaryHandler)
+
+	require.NoError(t, err)
+	assert.Equal(t, "ok", resp)
+}
+
 func TestManifestRBACUnaryInterceptor_AuditorCannotExecuteSaga(t *testing.T) {
 	interceptor := ManifestRBACUnaryInterceptor()
 	ctx := contextWithClaims([]string{"auditor"}, nil)
