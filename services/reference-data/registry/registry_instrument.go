@@ -293,7 +293,7 @@ func (r *PostgresRegistry) UpdateDefinition(ctx context.Context, code string, ve
 		}
 
 		// Invalidate cache for this instrument
-		r.invalidateCache(code, version)
+		r.invalidateCache(ctx, code, version)
 
 		return nil
 	})

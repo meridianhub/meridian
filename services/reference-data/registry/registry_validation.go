@@ -2,11 +2,14 @@ package registry
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/cel-go/cel"
+	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
 
 // ValidateAttributes executes the CEL validation expression against the provided attributes.
@@ -20,13 +23,13 @@ func (r *PostgresRegistry) ValidateAttributes(ctx context.Context, code string, 
 		return ValidationResult{Valid: true}, nil
 	}
 
-	prg, err := r.getOrCompileValidation(code, version, def.ValidationExpression)
+	prg, err := r.getOrCompileValidation(ctx, code, version, def.ValidationExpression)
 	if err != nil {
 		return ValidationResult{}, fmt.Errorf("failed to get validation program: %w", err)
 	}
 
 	input := r.buildCELInput(attrs)
-	return r.executeValidation(prg, input, def, code, version)
+	return r.executeValidation(ctx, prg, input, def, code, version)
 }
 
 // buildCELInput constructs the input map for CEL evaluation.
@@ -56,7 +59,7 @@ func (r *PostgresRegistry) buildCELInput(attrs AttributeBag) map[string]any {
 }
 
 // executeValidation runs the CEL program and handles the result.
-func (r *PostgresRegistry) executeValidation(prg cel.Program, input map[string]any, def *InstrumentDefinition, code string, version int) (ValidationResult, error) {
+func (r *PostgresRegistry) executeValidation(ctx context.Context, prg cel.Program, input map[string]any, def *InstrumentDefinition, code string, version int) (ValidationResult, error) {
 	result, _, err := prg.Eval(input)
 	if err != nil {
 		return ValidationResult{
@@ -77,19 +80,19 @@ func (r *PostgresRegistry) executeValidation(prg cel.Program, input map[string]a
 		return ValidationResult{Valid: true}, nil
 	}
 
-	errorMsg := r.getCustomErrorMessage(def, code, version, input)
+	errorMsg := r.getCustomErrorMessage(ctx, def, code, version, input)
 	return ValidationResult{Valid: false, ErrorMessage: errorMsg}, nil
 }
 
 const defaultValidationErrorMsg = "validation failed"
 
 // getCustomErrorMessage evaluates the error message expression if defined.
-func (r *PostgresRegistry) getCustomErrorMessage(def *InstrumentDefinition, code string, version int, input map[string]any) string {
+func (r *PostgresRegistry) getCustomErrorMessage(ctx context.Context, def *InstrumentDefinition, code string, version int, input map[string]any) string {
 	if def.ErrorMessageExpression == "" {
 		return defaultValidationErrorMsg
 	}
 
-	errorPrg, err := r.getOrCompileErrorMessage(code, version, def.ErrorMessageExpression)
+	errorPrg, err := r.getOrCompileErrorMessage(ctx, code, version, def.ErrorMessageExpression)
 	if err != nil {
 		return defaultValidationErrorMsg
 	}
@@ -133,9 +136,27 @@ func (r *PostgresRegistry) compileCELExpressions(def *InstrumentDefinition) erro
 	return nil
 }
 
+// celCacheKeyPrefix builds the tenant-and-instrument-scoped prefix shared by
+// every cache entry for a given (tenant, code, version, exprType) tuple.
+// Tenant id is included so that two tenants defining the same instrument
+// code/version with different CEL expressions never share a compiled
+// program - see DAT-6.
+func (r *PostgresRegistry) celCacheKeyPrefix(ctx context.Context, code string, version int, exprType string) string {
+	tenantID, _ := tenant.FromContext(ctx)
+	return fmt.Sprintf("%s:%s:%d:%s:", tenantID, code, version, exprType)
+}
+
+// celCacheKey builds the full cache key, including a hash of the expression
+// text so that updated expressions never collide with a stale cached
+// program for the same tenant/code/version/type.
+func (r *PostgresRegistry) celCacheKey(ctx context.Context, code string, version int, exprType, expr string) string {
+	exprHash := sha256.Sum256([]byte(expr))
+	return fmt.Sprintf("%s%x", r.celCacheKeyPrefix(ctx, code, version, exprType), exprHash)
+}
+
 // getOrCompileValidation gets a cached validation program or compiles one.
-func (r *PostgresRegistry) getOrCompileValidation(code string, version int, expr string) (cel.Program, error) {
-	cacheKey := fmt.Sprintf("%s:%d:validation", code, version)
+func (r *PostgresRegistry) getOrCompileValidation(ctx context.Context, code string, version int, expr string) (cel.Program, error) {
+	cacheKey := r.celCacheKey(ctx, code, version, "validation", expr)
 
 	r.programCacheMu.RLock()
 	prg, ok := r.programCache[cacheKey]
@@ -159,8 +180,8 @@ func (r *PostgresRegistry) getOrCompileValidation(code string, version int, expr
 }
 
 // getOrCompileErrorMessage gets a cached error message program or compiles one.
-func (r *PostgresRegistry) getOrCompileErrorMessage(code string, version int, expr string) (cel.Program, error) {
-	cacheKey := fmt.Sprintf("%s:%d:error", code, version)
+func (r *PostgresRegistry) getOrCompileErrorMessage(ctx context.Context, code string, version int, expr string) (cel.Program, error) {
+	cacheKey := r.celCacheKey(ctx, code, version, "error", expr)
 
 	r.programCacheMu.RLock()
 	prg, ok := r.programCache[cacheKey]
@@ -183,12 +204,26 @@ func (r *PostgresRegistry) getOrCompileErrorMessage(code string, version int, ex
 	return prg, nil
 }
 
-// invalidateCache removes cached programs for an instrument.
-func (r *PostgresRegistry) invalidateCache(code string, version int) {
+// invalidateCache removes cached programs for an instrument, scoped to the
+// tenant on ctx. Because cache keys include a hash of the expression text,
+// entries are removed by tenant:code:version:type prefix rather than by an
+// exact key match.
+func (r *PostgresRegistry) invalidateCache(ctx context.Context, code string, version int) {
+	prefixes := []string{
+		r.celCacheKeyPrefix(ctx, code, version, "validation"),
+		r.celCacheKeyPrefix(ctx, code, version, "error"),
+		r.celCacheKeyPrefix(ctx, code, version, "bucket"),
+	}
+
 	r.programCacheMu.Lock()
 	defer r.programCacheMu.Unlock()
 
-	delete(r.programCache, fmt.Sprintf("%s:%d:validation", code, version))
-	delete(r.programCache, fmt.Sprintf("%s:%d:error", code, version))
-	delete(r.programCache, fmt.Sprintf("%s:%d:bucket", code, version))
+	for key := range r.programCache {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(key, prefix) {
+				delete(r.programCache, key)
+				break
+			}
+		}
+	}
 }
