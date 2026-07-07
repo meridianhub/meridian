@@ -135,9 +135,11 @@ func TestGatewayManifestRBAC_AuthorizedRolesSucceed(t *testing.T) {
 }
 
 // A control-plane method that is NOT listed in the RBAC role map is denied
-// (fail-closed), even for an admin and regardless of whether identity metadata is
-// present or malformed. This guards the fail-closed default: adding a new
-// control-plane RPC without a role entry denies it rather than exposing it.
+// (fail-closed): an authenticated caller (even an admin, or one with malformed
+// roles) gets PermissionDenied, while an anonymous caller gets Unauthenticated -
+// matching the mapped-method path and gRPC canonical codes. This guards the
+// fail-closed default: adding a new control-plane RPC without a role entry denies
+// it rather than exposing it.
 func TestGatewayManifestRBAC_UnmappedControlPlaneFailsClosed(t *testing.T) {
 	interceptor := unaryInterceptor()
 	unmapped := "/meridian.control_plane.v1.ApplyManifestService/UnlistedFutureMethod"
@@ -149,8 +151,10 @@ func TestGatewayManifestRBAC_UnmappedControlPlaneFailsClosed(t *testing.T) {
 	})
 
 	t.Run("absent identity denied on unmapped method", func(t *testing.T) {
+		// An anonymous caller (no principal) yields Unauthenticated, matching the
+		// mapped-method path and gRPC canonical codes; still a hard fail-closed deny.
 		_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: unmapped}, okUnaryHandler)
-		assertPermissionDenied(t, err)
+		assertCode(t, err, codes.Unauthenticated)
 	})
 
 	t.Run("malformed roles denied on unmapped method", func(t *testing.T) {
