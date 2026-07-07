@@ -231,6 +231,20 @@ func (s *Service) handleSettledStatus(ctx context.Context, po *domain.PaymentOrd
 		return &updateResult{po: po, isIdempotent: true}, nil
 	}
 
+	// Guard: only an order in EXECUTING state can be settled. A SETTLED webhook
+	// arriving for any other non-terminal-completed state (e.g. FAILED after a
+	// REJECTED callback, or CANCELLED) is stale or duplicate - dropping it here
+	// prevents ledger entries from being posted for an order that was already
+	// rejected/failed/cancelled. Do NOT post ledger entries before this check.
+	if po.Status != domain.PaymentOrderStatusExecuting {
+		s.logger.Warn("dropping stale or late SETTLED callback - payment order not in EXECUTING state",
+			"payment_order_id", po.ID.String(),
+			"current_status", po.Status,
+			"correlation_id", po.CorrelationID)
+		poobservability.RecordIdempotentRequest("update_payment_order_settled_stale")
+		return &updateResult{po: po, isIdempotent: true}, nil
+	}
+
 	// Post ledger entries BEFORE completing the payment order
 	ledgerBookingID, err := s.postLedgerAndComplete(ctx, po)
 	if err != nil {

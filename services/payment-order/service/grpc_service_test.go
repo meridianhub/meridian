@@ -1348,6 +1348,151 @@ func TestUpdatePaymentOrder_PendingRejectsStaleCallbacks(t *testing.T) {
 	assert.Contains(t, st.Message(), "COMPLETED")
 }
 
+// TestUpdatePaymentOrder_SettledAfterRejected_DoesNotPostLedger verifies that a late
+// SETTLED webhook arriving after the order was already REJECTED (FAILED) is dropped
+// without posting any ledger entries. Regression test for the bug where
+// handleSettledStatus posted ledger entries before checking the order's state.
+func TestUpdatePaymentOrder_SettledAfterRejected_DoesNotPostLedger(t *testing.T) {
+	repo := NewMockRepository()
+	caClient := &MockCurrentAccountClient{
+		terminateLienResp: &currentaccountv1.TerminateLienResponse{
+			Lien: &currentaccountv1.Lien{
+				LienId: "lien-123",
+				Status: currentaccountv1.LienStatus_LIEN_STATUS_TERMINATED,
+			},
+		},
+	}
+	faClient := &MockFinancialAccountingClient{}
+	gwConfig := testGatewayAccountConfig()
+
+	svc := &Service{
+		repo:                      repo,
+		currentAccountClient:      caClient,
+		financialAccountingClient: faClient,
+		gatewayAccountConfig:      gwConfig,
+		idempotencyService:        NewMockIdempotencyService(),
+		logger:                    testLogger(),
+		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
+	}
+
+	// Create a payment order in EXECUTING state
+	amount, _ := domain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	_ = repo.Create(context.Background(), po)
+
+	// Gateway rejects the payment first
+	rejectReq := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_REJECTED,
+		GatewayMessage: "Insufficient funds at destination",
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "reject-key"},
+	}
+	rejectResp, err := svc.UpdatePaymentOrder(context.Background(), rejectReq)
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_FAILED, rejectResp.PaymentOrder.Status)
+
+	// A late SETTLED webhook arrives after the REJECTED callback was already processed
+	settledReq := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "late-settled-key"},
+	}
+	settledResp, err := svc.UpdatePaymentOrder(context.Background(), settledReq)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_FAILED, settledResp.PaymentOrder.Status,
+		"order must remain FAILED, not be pushed to COMPLETED by the late webhook")
+	assert.False(t, faClient.initiateCalled, "InitiateFinancialBookingLog must NOT be called for a late SETTLED callback on a FAILED order")
+	assert.False(t, faClient.captureCalled, "CaptureLedgerPosting (debit/credit) must NOT be called for a late SETTLED callback on a FAILED order")
+
+	// Verify persisted state was not mutated back to COMPLETED
+	persisted, err := repo.FindByID(context.Background(), po.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.PaymentOrderStatusFailed, persisted.Status)
+}
+
+// TestUpdatePaymentOrder_SettledOnFailed_DoesNotPostLedger verifies that a SETTLED
+// webhook for an order already in FAILED state (independent of how it got there) is
+// dropped silently with no ledger postings and no debit.
+func TestUpdatePaymentOrder_SettledOnFailed_DoesNotPostLedger(t *testing.T) {
+	repo := NewMockRepository()
+	faClient := &MockFinancialAccountingClient{}
+	gwConfig := testGatewayAccountConfig()
+	caClient := &MockCurrentAccountClient{}
+
+	svc := &Service{
+		repo:                      repo,
+		currentAccountClient:      caClient,
+		financialAccountingClient: faClient,
+		gatewayAccountConfig:      gwConfig,
+		idempotencyService:        NewMockIdempotencyService(),
+		logger:                    testLogger(),
+		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
+	}
+
+	amount, _ := domain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	require.NoError(t, po.Fail("gateway timeout", "GATEWAY_TIMEOUT"))
+	_ = repo.Create(context.Background(), po)
+
+	req := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "settled-on-failed-key"},
+	}
+
+	resp, err := svc.UpdatePaymentOrder(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_FAILED, resp.PaymentOrder.Status)
+	assert.False(t, faClient.initiateCalled, "InitiateFinancialBookingLog must NOT be called for SETTLED on a FAILED order")
+	assert.False(t, faClient.captureCalled, "CaptureLedgerPosting must NOT be called for SETTLED on a FAILED order - no debit without payment success")
+}
+
+// TestUpdatePaymentOrder_SettledOnCompleted_DoesNotPostLedgerAgain verifies the existing
+// idempotency guard (already-COMPLETED short circuit) also results in no additional
+// ledger postings, guarding against regressions that might reorder the checks.
+func TestUpdatePaymentOrder_SettledOnCompleted_DoesNotPostLedgerAgain(t *testing.T) {
+	repo := NewMockRepository()
+	faClient := &MockFinancialAccountingClient{}
+	gwConfig := testGatewayAccountConfig()
+	caClient := &MockCurrentAccountClient{}
+
+	svc := &Service{
+		repo:                      repo,
+		currentAccountClient:      caClient,
+		financialAccountingClient: faClient,
+		gatewayAccountConfig:      gwConfig,
+		idempotencyService:        NewMockIdempotencyService(),
+		logger:                    testLogger(),
+		orchestrator:              testOrchestrator(repo, caClient, faClient, gwConfig),
+	}
+
+	amount, _ := domain.NewMoney("GBP", 10000)
+	po, _ := domain.NewPaymentOrder("ACC-12345678", "GB82WEST12345698765432", amount, "test-key", uuid.New().String())
+	_ = po.Reserve("lien-123")
+	_ = po.Execute("gateway-ref-123")
+	require.NoError(t, po.Complete("existing-ledger-booking-id"))
+	_ = repo.Create(context.Background(), po)
+
+	req := &pb.UpdatePaymentOrderRequest{
+		PaymentOrderId: po.ID.String(),
+		GatewayStatus:  pb.GatewayStatus_GATEWAY_STATUS_SETTLED,
+		IdempotencyKey: &commonpb.IdempotencyKey{Key: "duplicate-settled-key"},
+	}
+
+	resp, err := svc.UpdatePaymentOrder(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Equal(t, pb.PaymentOrderStatus_PAYMENT_ORDER_STATUS_COMPLETED, resp.PaymentOrder.Status)
+	assert.False(t, faClient.initiateCalled, "InitiateFinancialBookingLog must NOT be called for a duplicate SETTLED webhook on an already-COMPLETED order")
+	assert.False(t, faClient.captureCalled, "CaptureLedgerPosting must NOT be called for a duplicate SETTLED webhook on an already-COMPLETED order")
+}
+
 // Test ListPaymentOrders
 func TestListPaymentOrders_Success(t *testing.T) {
 	repo := NewMockRepository()
