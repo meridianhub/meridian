@@ -34,10 +34,12 @@ var roleLevel = map[auth.Role]int{
 // IMPORTANT: All control-plane RPCs must be listed here. Unlisted control-plane
 // RPCs are denied by the fail-closed check in checkManifestRBAC.
 var manifestRoleRequirements = map[string]auth.Role{
-	// ManifestHistoryService - read-only, auditor level
+	// ManifestHistoryService - read-only queries are auditor level;
+	// RollbackManifest mutates the active manifest and requires admin.
 	"/meridian.control_plane.v1.ManifestHistoryService/GetCurrentManifest":   auth.RoleAuditor,
 	"/meridian.control_plane.v1.ManifestHistoryService/GetManifestVersion":   auth.RoleAuditor,
 	"/meridian.control_plane.v1.ManifestHistoryService/ListManifestVersions": auth.RoleAuditor,
+	"/meridian.control_plane.v1.ManifestHistoryService/RollbackManifest":     auth.RoleAdmin,
 
 	// ApplyManifestService - mutating, admin level
 	"/meridian.control_plane.v1.ApplyManifestService/ApplyManifest": auth.RoleAdmin,
