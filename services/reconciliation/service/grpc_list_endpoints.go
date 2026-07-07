@@ -128,15 +128,13 @@ func (s *AccountReconciliationService) UpdateDispute(
 		return nil, err
 	}
 
-	if err := s.disputeRepo.Update(ctx, dispute); err != nil {
+	if err := s.disputeRepo.UpdateWithOutbox(ctx, dispute, s.disputeResolvedOutboxFn(ctx, dispute, newStatus.String())); err != nil {
 		return nil, status.Error(codes.Internal, "failed to update dispute")
 	}
 
 	if newStatus == reconciliationv1.DisputeStatus_DISPUTE_STATUS_RESOLVED {
 		s.invokeReconciliationAdjustment(ctx, dispute)
 	}
-
-	s.publishDisputeResolvedEventWithAction(ctx, dispute, newStatus.String())
 
 	return &reconciliationv1.UpdateDisputeResponse{
 		Dispute: toDisputeDetailProto(dispute),

@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // --- Mock PositionDataProvider ---
@@ -73,6 +74,24 @@ func (m *mockRunRepo) Update(_ context.Context, run *domain.SettlementRun) error
 	defer m.mu.Unlock()
 	if m.updateErr != nil {
 		return m.updateErr
+	}
+	m.runs[run.RunID] = run
+	return nil
+}
+
+// UpdateWithOutbox models a transactional outbox write: the run is only
+// persisted if the outbox callback succeeds, mirroring the all-or-nothing
+// guarantee of the real GORM repository.
+func (m *mockRunRepo) UpdateWithOutbox(_ context.Context, run *domain.SettlementRun, postFn func(tx *gorm.DB) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+	if postFn != nil {
+		if err := postFn(nil); err != nil {
+			return err
+		}
 	}
 	m.runs[run.RunID] = run
 	return nil

@@ -39,20 +39,29 @@ func NewOutboxEventPublisher(db *gorm.DB, publisher *events.OutboxPublisher) *Ou
 }
 
 // Publish implements the service.EventPublisher interface.
-// It maps the topic and event to a protobuf message and writes it to the outbox.
+// It maps the topic and event to a protobuf message and writes it to the outbox
+// in its own transaction. Prefer PublishTx when the caller already holds a
+// transaction, so the outbox row is atomic with the domain write.
 func (p *OutboxEventPublisher) Publish(ctx context.Context, topic string, event interface{}) error {
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		switch topic {
-		case TopicDisputeCreated:
-			return p.publishDisputeCreated(ctx, tx, event)
-		case TopicDisputeResolved:
-			return p.publishDisputeResolved(ctx, tx, event)
-		case TopicPositionLockRequested:
-			return p.publishPositionLockRequested(ctx, tx, event)
-		default:
-			return fmt.Errorf("%w: %s", errUnsupportedTopic, topic)
-		}
+		return p.PublishTx(ctx, tx, topic, event)
 	})
+}
+
+// PublishTx maps the topic and event to a protobuf message and writes it to the
+// outbox within the provided transaction. This makes the outbox row atomic with
+// the domain mutation performed on the same transaction.
+func (p *OutboxEventPublisher) PublishTx(ctx context.Context, tx *gorm.DB, topic string, event interface{}) error {
+	switch topic {
+	case TopicDisputeCreated:
+		return p.publishDisputeCreated(ctx, tx, event)
+	case TopicDisputeResolved:
+		return p.publishDisputeResolved(ctx, tx, event)
+	case TopicPositionLockRequested:
+		return p.publishPositionLockRequested(ctx, tx, event)
+	default:
+		return fmt.Errorf("%w: %s", errUnsupportedTopic, topic)
+	}
 }
 
 // Close is a no-op for the outbox publisher (the outbox worker handles Kafka lifecycle).

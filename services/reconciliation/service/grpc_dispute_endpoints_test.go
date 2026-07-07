@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
 )
 
 // mockDisputeRepo implements domain.DisputeRepository for testing.
@@ -26,6 +27,16 @@ func newMockDisputeRepo() *mockDisputeRepo {
 
 func (m *mockDisputeRepo) Create(_ context.Context, d *domain.Dispute) error {
 	m.disputes[d.DisputeID] = d
+	return nil
+}
+
+func (m *mockDisputeRepo) CreateWithOutbox(ctx context.Context, d *domain.Dispute, postFn func(tx *gorm.DB) error) error {
+	if err := m.Create(ctx, d); err != nil {
+		return err
+	}
+	if postFn != nil {
+		return postFn(nil)
+	}
 	return nil
 }
 
@@ -53,6 +64,16 @@ func (m *mockDisputeRepo) Update(_ context.Context, d *domain.Dispute) error {
 		return domain.ErrNotFound
 	}
 	m.disputes[d.DisputeID] = d
+	return nil
+}
+
+func (m *mockDisputeRepo) UpdateWithOutbox(ctx context.Context, d *domain.Dispute, postFn func(tx *gorm.DB) error) error {
+	if err := m.Update(ctx, d); err != nil {
+		return err
+	}
+	if postFn != nil {
+		return postFn(nil)
+	}
 	return nil
 }
 
@@ -102,6 +123,11 @@ type mockEventPublisher struct {
 }
 
 func (m *mockEventPublisher) Publish(_ context.Context, _ string, event interface{}) error {
+	m.events = append(m.events, event)
+	return nil
+}
+
+func (m *mockEventPublisher) PublishTx(_ context.Context, _ *gorm.DB, _ string, event interface{}) error {
 	m.events = append(m.events, event)
 	return nil
 }

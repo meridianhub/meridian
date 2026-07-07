@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meridianhub/meridian/services/reconciliation/domain"
 	"github.com/stretchr/testify/assert"
+	"gorm.io/gorm"
 )
 
 // Minimal stubs for option tests.
@@ -41,6 +42,10 @@ func (stubSagaRuntime) InvokeSaga(_ context.Context, _ string, _ map[string]inte
 type stubEventPublisher struct{}
 
 func (stubEventPublisher) Publish(_ context.Context, _ string, _ interface{}) error { return nil }
+
+func (stubEventPublisher) PublishTx(_ context.Context, _ *gorm.DB, _ string, _ interface{}) error {
+	return nil
+}
 
 func TestWithDisputeRepository(t *testing.T) {
 	repo := stubDisputeRepo{}

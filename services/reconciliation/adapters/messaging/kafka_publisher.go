@@ -12,6 +12,7 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/events/topics"
 	"github.com/meridianhub/meridian/shared/platform/kafka"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"gorm.io/gorm"
 )
 
 // Topic aliases for reconciliation domain events.
@@ -149,6 +150,14 @@ func (p *KafkaPublisher) publishToTopic(ctx context.Context, topic string, event
 	return nil
 }
 
+// PublishTx publishes directly to Kafka, ignoring the transaction. This publisher
+// does not use the transactional outbox, so it cannot make delivery atomic with
+// the domain write; it is retained for the legacy direct-Kafka path. Prefer
+// OutboxEventPublisher for atomic delivery.
+func (p *KafkaPublisher) PublishTx(ctx context.Context, _ *gorm.DB, topic string, event interface{}) error {
+	return p.Publish(ctx, topic, event)
+}
+
 // Close flushes pending messages and closes the producer.
 func (p *KafkaPublisher) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -215,4 +224,10 @@ func (p *NoopPublisher) Publish(_ context.Context, topic string, _ interface{}) 
 		"topic", topic,
 	)
 	return nil
+}
+
+// PublishTx logs the event instead of publishing to Kafka. The transaction is
+// ignored because the no-op publisher performs no persistence.
+func (p *NoopPublisher) PublishTx(ctx context.Context, _ *gorm.DB, topic string, event interface{}) error {
+	return p.Publish(ctx, topic, event)
 }

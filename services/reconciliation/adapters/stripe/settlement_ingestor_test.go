@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	stripego "github.com/stripe/stripe-go/v82"
+	"gorm.io/gorm"
 )
 
 // mockRunRepo implements domain.SettlementRunRepository for testing.
@@ -57,6 +58,16 @@ func (m *mockRunRepo) Update(_ context.Context, run *domain.SettlementRun) error
 	}
 	m.updated = append(m.updated, run)
 	m.runs[run.RunID] = run
+	return nil
+}
+
+func (m *mockRunRepo) UpdateWithOutbox(ctx context.Context, run *domain.SettlementRun, postFn func(tx *gorm.DB) error) error {
+	if err := m.Update(ctx, run); err != nil {
+		return err
+	}
+	if postFn != nil {
+		return postFn(nil)
+	}
 	return nil
 }
 
