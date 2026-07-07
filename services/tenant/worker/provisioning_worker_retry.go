@@ -12,6 +12,7 @@ import (
 
 	"github.com/meridianhub/meridian/services/tenant/domain"
 	"github.com/meridianhub/meridian/services/tenant/observability"
+	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/defaults"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 )
@@ -223,6 +224,24 @@ func (w *ProvisioningWorker) calculateBackoffDelay(attempt int) time.Duration {
 	return delay
 }
 
+// retryableErrors are typed provisioning errors that are always transient and
+// should be retried regardless of their message text. Typed classification runs
+// before substring matching (see isRetryableError) so that an error whose message
+// happens to contain a permanent pattern is still classified by its type, not its
+// wording. For example, ErrSchemaVerificationFailed's message contains "not found"
+// which would otherwise match permanentPatterns and be misclassified as permanent.
+var retryableErrors = []error{
+	// ErrCircuitBreakerOpen: a tripped circuit breaker is transient - the service is
+	// skipped until the breaker transitions to half-open, then provisioning succeeds.
+	provisioner.ErrCircuitBreakerOpen,
+	// ErrCircuitBreakerTooManyRequests: half-open throttle rejecting requests; retry
+	// once the in-flight test requests complete.
+	provisioner.ErrCircuitBreakerTooManyRequests,
+	// ErrSchemaVerificationFailed: post-migration table verification can fail
+	// transiently while migrations are still settling; retrying re-verifies.
+	provisioner.ErrSchemaVerificationFailed,
+}
+
 // retryablePatterns are substrings in error messages that indicate transient errors
 // that are worth retrying. These typically include:
 //   - Lock contention: Atlas migration locks, database row locks, etc.
@@ -269,9 +288,11 @@ var permanentPatterns = []string{
 // Classification rules:
 //  1. Nil errors are never retryable (no error to retry)
 //  2. Context errors (Canceled, DeadlineExceeded) are never retryable
-//  3. Errors matching permanent patterns are never retryable
-//  4. Errors matching retryable patterns are retryable
-//  5. Unknown errors default to non-retryable (fail-safe behavior)
+//  3. Errors matching a typed retryableErrors entry are retryable (authoritative,
+//     checked before substring matching so message wording cannot misclassify them)
+//  4. Errors matching permanent patterns are never retryable
+//  5. Errors matching retryable patterns are retryable
+//  6. Unknown errors default to non-retryable (fail-safe behavior)
 //
 // The function uses case-insensitive substring matching on error messages.
 // For structured errors, it checks the full error chain via Error() string.
@@ -296,6 +317,15 @@ func isRetryableError(err error) bool {
 	// or the deadline was exceeded. Retrying won't help.
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
+	}
+
+	// Typed-error classification takes precedence over substring matching.
+	// These errors are authoritative about their own retryability regardless of
+	// message text (e.g. a wrapped ErrCircuitBreakerOpen or ErrSchemaVerificationFailed).
+	for _, retryable := range retryableErrors {
+		if errors.Is(err, retryable) {
+			return true
+		}
 	}
 
 	// Convert error to lowercase string for case-insensitive matching.

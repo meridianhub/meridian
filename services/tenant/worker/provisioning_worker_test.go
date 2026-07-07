@@ -1300,6 +1300,59 @@ func TestIsRetryableError_PermanentTakesPrecedence(t *testing.T) {
 	}
 }
 
+// TestIsRetryableError_CircuitBreakerOpenIsRetryable verifies that a tripped
+// circuit breaker (CTL-1) is classified as retryable via its typed error, even
+// when wrapped with additional context as the provisioner does in production.
+func TestIsRetryableError_CircuitBreakerOpenIsRetryable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"bare circuit breaker open", provisioner.ErrCircuitBreakerOpen},
+		{
+			"wrapped as provisioner returns it",
+			fmt.Errorf("%w: %s", provisioner.ErrCircuitBreakerOpen, "party, current-account"),
+		},
+		{"circuit breaker too many requests", provisioner.ErrCircuitBreakerTooManyRequests},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.True(t, isRetryableError(tt.err),
+				"a tripped circuit breaker is transient and should be retried")
+		})
+	}
+}
+
+// TestIsRetryableError_SchemaVerificationFailedIsRetryable verifies that a
+// schema-verification failure (LOW-3) is classified by its typed error rather
+// than its message text. Its message contains "not found", which matches the
+// permanent substring patterns; typed classification must win so the error is
+// treated as the transient failure it is.
+func TestIsRetryableError_SchemaVerificationFailedIsRetryable(t *testing.T) {
+	// Guard: the message really does contain a permanent pattern, so this test
+	// proves typed classification beats substring matching.
+	require.Contains(t, provisioner.ErrSchemaVerificationFailed.Error(), "not found")
+
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"bare schema verification failed", provisioner.ErrSchemaVerificationFailed},
+		{
+			"wrapped with tenant context",
+			fmt.Errorf("tenant %s: %w", "acme_bank", provisioner.ErrSchemaVerificationFailed),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.True(t, isRetryableError(tt.err),
+				"schema verification failure is transient and must not be misclassified as permanent")
+		})
+	}
+}
+
 // TestIsRetryableError_AtlasSpecificErrors verifies classification of
 // Atlas migration-specific error messages.
 func TestIsRetryableError_AtlasSpecificErrors(t *testing.T) {
