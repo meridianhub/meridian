@@ -3,6 +3,7 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -255,8 +256,11 @@ func (m *APIKeyMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Validate API key
-		identity, valid := m.config.APIKeys[apiKey]
+		// Validate API key using a constant-time comparison against every
+		// configured key. A plain map lookup is timing-attackable: the byte
+		// comparison short-circuits on the first mismatch, leaking how much of
+		// a guessed key matches a configured one.
+		identity, valid := m.lookupAPIKey(apiKey)
 		if !valid {
 			m.logger.Warn("invalid API key", "path", r.URL.Path)
 			writeJSONError(w, "invalid API key", http.StatusUnauthorized)
@@ -276,6 +280,32 @@ func (m *APIKeyMiddleware) Handler(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), APIKeyIdentityKey, identity)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// lookupAPIKey resolves an API key to its identity using a constant-time
+// comparison against every configured key.
+//
+// It deliberately avoids a map lookup (m.config.APIKeys[apiKey]) because the
+// underlying string comparison short-circuits on the first differing byte,
+// which leaks - via response timing - how many leading bytes of a guessed key
+// match a configured key, enabling byte-by-byte key recovery. Instead it
+// compares the presented key against all configured keys with
+// subtle.ConstantTimeCompare and does not break early, so the work performed is
+// independent of whether or where a match occurs.
+func (m *APIKeyMiddleware) lookupAPIKey(apiKey string) (string, bool) {
+	presented := []byte(apiKey)
+
+	var (
+		identity string
+		found    bool
+	)
+	for key, id := range m.config.APIKeys {
+		if subtle.ConstantTimeCompare(presented, []byte(key)) == 1 {
+			identity = id
+			found = true
+		}
+	}
+	return identity, found
 }
 
 // allowRequest checks if the request from the given API key should be allowed.

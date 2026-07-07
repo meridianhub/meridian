@@ -299,60 +299,9 @@ func TestIntegration_AcceptInvitation(t *testing.T) {
 	require.Error(t, err)
 }
 
-// --- RequestPasswordReset ---
-
-// TestIntegration_RequestPasswordReset verifies the full reset flow:
-// create identity → accept invitation → request reset → use token → new password works.
-func TestIntegration_RequestPasswordReset(t *testing.T) {
-	svc, _, ctx, cleanup := setupIdentityIntegrationTest(t)
-	defer cleanup()
-
-	inviterID := uuid.New()
-	authCtx := contextWithIntegrationAuth(ctx, inviterID, []string{"ADMIN"})
-
-	// Invite and activate user
-	inviteResp, err := svc.InviteUser(authCtx, &pb.InviteUserRequest{
-		Email: "reset@integration.test",
-	})
-	require.NoError(t, err)
-
-	_, err = svc.AcceptInvitation(ctx, &pb.AcceptInvitationRequest{
-		Token:    inviteResp.InvitationToken,
-		Password: "OldPassword1!",
-	})
-	require.NoError(t, err)
-
-	// Request password reset
-	resetResp, err := svc.RequestPasswordReset(ctx, &pb.RequestPasswordResetRequest{
-		Email: "reset@integration.test",
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "reset@integration.test", resetResp.Email)
-	assert.NotEmpty(t, resetResp.ResetToken)
-
-	// Complete password reset
-	_, err = svc.CompletePasswordReset(ctx, &pb.CompletePasswordResetRequest{
-		ResetToken:  resetResp.ResetToken,
-		NewPassword: "NewPassword1!",
-	})
-	require.NoError(t, err)
-
-	// Authenticate with new password
-	authResp, err := svc.Authenticate(ctx, &pb.AuthenticateRequest{
-		Email:    "reset@integration.test",
-		Password: "NewPassword1!",
-	})
-	require.NoError(t, err)
-	assert.True(t, authResp.Authenticated)
-
-	// Old password must no longer work
-	oldAuthResp, err := svc.Authenticate(ctx, &pb.AuthenticateRequest{
-		Email:    "reset@integration.test",
-		Password: "OldPassword1!",
-	})
-	require.NoError(t, err)
-	assert.False(t, oldAuthResp.Authenticated)
-}
+// Password reset is no longer exposed as a gRPC RPC. The end-to-end reset flow
+// (token issuance, out-of-band delivery, redemption) is owned by the api-gateway
+// HTTP handlers and covered by services/api-gateway/password_reset_handler_test.go.
 
 // --- LockAccount ---
 

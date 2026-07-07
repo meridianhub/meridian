@@ -26,19 +26,31 @@ var (
 
 // PasswordResetHandler handles password reset endpoints.
 type PasswordResetHandler struct {
-	identityRepo identitydomain.Repository
-	outboxRepo   email.OutboxRepository
-	baseDomain   string
-	logger       *slog.Logger
+	identityRepo  identitydomain.Repository
+	outboxRepo    email.OutboxRepository
+	ipRateLimiter *IPRateLimiter
+	baseDomain    string
+	logger        *slog.Logger
 }
 
 // PasswordResetHandlerConfig holds dependencies for creating a PasswordResetHandler.
 type PasswordResetHandlerConfig struct {
 	IdentityRepo identitydomain.Repository
 	OutboxRepo   email.OutboxRepository
-	BaseDomain   string
-	Logger       *slog.Logger
+	// IPRateLimiter throttles the unauthenticated forgot-password endpoint per
+	// client IP. When nil, a default limiter is applied.
+	IPRateLimiter *IPRateLimiter
+	BaseDomain    string
+	Logger        *slog.Logger
 }
+
+// defaultForgotPasswordPerMinute and defaultForgotPasswordBurst bound how often
+// a single client IP may hit the unauthenticated forgot-password endpoint before
+// any database lookup occurs. This limits email enumeration and DB-cost attacks.
+const (
+	defaultForgotPasswordPerMinute = 10
+	defaultForgotPasswordBurst     = 5
+)
 
 // NewPasswordResetHandler creates a handler for password reset endpoints.
 func NewPasswordResetHandler(cfg PasswordResetHandlerConfig) (*PasswordResetHandler, error) {
@@ -51,11 +63,13 @@ func NewPasswordResetHandler(cfg PasswordResetHandlerConfig) (*PasswordResetHand
 	if cfg.OutboxRepo == nil {
 		return nil, ErrPasswordResetOutboxRequired
 	}
+	limiter := resolveIPRateLimiter(cfg.IPRateLimiter, defaultForgotPasswordPerMinute, defaultForgotPasswordBurst)
 	return &PasswordResetHandler{
-		identityRepo: cfg.IdentityRepo,
-		outboxRepo:   cfg.OutboxRepo,
-		baseDomain:   cfg.BaseDomain,
-		logger:       cfg.Logger,
+		identityRepo:  cfg.IdentityRepo,
+		outboxRepo:    cfg.OutboxRepo,
+		ipRateLimiter: limiter,
+		baseDomain:    cfg.BaseDomain,
+		logger:        cfg.Logger,
 	}, nil
 }
 
@@ -79,6 +93,17 @@ func (h *PasswordResetHandler) HandleForgotPassword(w http.ResponseWriter, r *ht
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Rate limit per client IP before any database lookup to prevent email
+	// enumeration and database-cost attacks against the unauthenticated endpoint.
+	clientIP := getClientIP(r)
+	if !h.ipRateLimiter.Allow(clientIP) {
+		h.logger.WarnContext(r.Context(), "password-reset: forgot-password rate limited", "client_ip", clientIP)
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "too many requests, please try again later",
+		})
 		return
 	}
 

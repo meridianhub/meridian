@@ -58,8 +58,6 @@ of the Meridian architecture.
 | `IdentityService` | `Authenticate` | Validate email and password; returns identity and roles |
 | `IdentityService` | `SetPassword` | Set password (admin operation, no current-password check) |
 | `IdentityService` | `ChangePassword` | Change password with current-password verification |
-| `IdentityService` | `RequestPasswordReset` | Issue a time-limited reset token and queue email |
-| `IdentityService` | `CompletePasswordReset` | Redeem reset token and set new password |
 | `IdentityService` | `GrantRole` | Assign a role to an identity (caller must outrank target) |
 | `IdentityService` | `RevokeRole` | Remove a role assignment |
 | `IdentityService` | `ListRoleAssignments` | List all active role assignments for an identity |

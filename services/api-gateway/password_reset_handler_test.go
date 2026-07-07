@@ -25,10 +25,11 @@ import (
 func newPasswordResetHandler(t *testing.T, ir identitydomain.Repository, or email.OutboxRepository) *gateway.PasswordResetHandler {
 	t.Helper()
 	h, err := gateway.NewPasswordResetHandler(gateway.PasswordResetHandlerConfig{
-		IdentityRepo: ir,
-		OutboxRepo:   or,
-		BaseDomain:   "meridian.app",
-		Logger:       slog.Default(),
+		IdentityRepo:  ir,
+		OutboxRepo:    or,
+		BaseDomain:    "meridian.app",
+		IPRateLimiter: gateway.NewPerMinuteIPRateLimiter(100000, 100000),
+		Logger:        slog.Default(),
 	})
 	require.NoError(t, err)
 	return h
@@ -133,6 +134,55 @@ func TestForgotPassword_RateLimited(t *testing.T) {
 	// Timing-safe: returns 200 even when rate limited to avoid email enumeration.
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Empty(t, or.entries)
+}
+
+// TestForgotPassword_IPRateLimited verifies that the forgot-password endpoint
+// throttles per client IP before performing any database lookup, that the limit
+// is enforced after the configured burst, and that different IPs have
+// independent limits.
+func TestForgotPassword_IPRateLimited(t *testing.T) {
+	var lookups int
+	ir := &stubIdentityRepo{
+		findByEmailFn: func(_ context.Context, _ string) (*identitydomain.Identity, error) {
+			lookups++
+			return nil, identitydomain.ErrIdentityNotFound
+		},
+	}
+	or := &stubOutboxRepo{}
+	h, err := gateway.NewPasswordResetHandler(gateway.PasswordResetHandlerConfig{
+		IdentityRepo:  ir,
+		OutboxRepo:    or,
+		BaseDomain:    "meridian.app",
+		IPRateLimiter: gateway.NewPerMinuteIPRateLimiter(10, 3), // burst 3
+		Logger:        slog.Default(),
+	})
+	require.NoError(t, err)
+
+	post := func(ip string) int {
+		b, _ := json.Marshal(map[string]string{"email": "user@test.com", "tenant_id": "test_tenant"})
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/forgot-password", bytes.NewReader(b))
+		r.Header.Set("Content-Type", "application/json")
+		r.RemoteAddr = ip + ":12345"
+		w := httptest.NewRecorder()
+		h.HandleForgotPassword(w, r)
+		return w.Code
+	}
+
+	allowed, throttled := 0, 0
+	for i := 0; i < 20; i++ {
+		switch post("10.0.0.1") {
+		case http.StatusOK:
+			allowed++
+		case http.StatusTooManyRequests:
+			throttled++
+		}
+	}
+	assert.Equal(t, 3, allowed, "burst of 3 requests should be allowed")
+	assert.Equal(t, 17, throttled, "requests beyond the burst must be rate limited")
+	assert.Equal(t, 3, lookups, "database lookup must not run for throttled requests")
+
+	// A different IP has an independent limit.
+	assert.Equal(t, http.StatusOK, post("10.0.0.2"), "a different IP must not be throttled")
 }
 
 func TestForgotPassword_MissingFields(t *testing.T) {
