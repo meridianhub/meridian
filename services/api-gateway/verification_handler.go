@@ -24,19 +24,32 @@ var (
 
 // VerificationHandler handles email verification endpoints.
 type VerificationHandler struct {
-	identityRepo identitydomain.Repository
-	outboxRepo   email.OutboxRepository
-	baseDomain   string
-	logger       *slog.Logger
+	identityRepo  identitydomain.Repository
+	outboxRepo    email.OutboxRepository
+	ipRateLimiter *IPRateLimiter
+	baseDomain    string
+	logger        *slog.Logger
 }
 
 // VerificationHandlerConfig holds dependencies for creating a VerificationHandler.
 type VerificationHandlerConfig struct {
 	IdentityRepo identitydomain.Repository
 	OutboxRepo   email.OutboxRepository
-	BaseDomain   string
-	Logger       *slog.Logger
+	// IPRateLimiter throttles the unauthenticated resend-verification endpoint
+	// per client IP. When nil, a default limiter is applied.
+	IPRateLimiter *IPRateLimiter
+	BaseDomain    string
+	Logger        *slog.Logger
 }
+
+// defaultResendVerificationPerMinute and defaultResendVerificationBurst bound how
+// often a single client IP may hit the unauthenticated resend-verification
+// endpoint before any database lookup occurs. This limits email enumeration and
+// DB-cost attacks.
+const (
+	defaultResendVerificationPerMinute = 10
+	defaultResendVerificationBurst     = 5
+)
 
 // NewVerificationHandler creates a handler for email verification endpoints.
 func NewVerificationHandler(cfg VerificationHandlerConfig) (*VerificationHandler, error) {
@@ -49,11 +62,16 @@ func NewVerificationHandler(cfg VerificationHandlerConfig) (*VerificationHandler
 	if cfg.OutboxRepo == nil {
 		return nil, ErrVerificationOutboxRequired
 	}
+	limiter := cfg.IPRateLimiter
+	if limiter == nil {
+		limiter = NewPerMinuteIPRateLimiter(defaultResendVerificationPerMinute, defaultResendVerificationBurst)
+	}
 	return &VerificationHandler{
-		identityRepo: cfg.IdentityRepo,
-		outboxRepo:   cfg.OutboxRepo,
-		baseDomain:   cfg.BaseDomain,
-		logger:       cfg.Logger,
+		identityRepo:  cfg.IdentityRepo,
+		outboxRepo:    cfg.OutboxRepo,
+		ipRateLimiter: limiter,
+		baseDomain:    cfg.BaseDomain,
+		logger:        cfg.Logger,
 	}, nil
 }
 
@@ -167,6 +185,17 @@ func (h *VerificationHandler) HandleResendVerification(w http.ResponseWriter, r 
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Rate limit per client IP before any database lookup to prevent email
+	// enumeration and database-cost attacks against the unauthenticated endpoint.
+	clientIP := getClientIP(r)
+	if !h.ipRateLimiter.Allow(clientIP) {
+		h.logger.WarnContext(r.Context(), "verification: resend-verification rate limited", "client_ip", clientIP)
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "too many requests, please try again later",
+		})
 		return
 	}
 
