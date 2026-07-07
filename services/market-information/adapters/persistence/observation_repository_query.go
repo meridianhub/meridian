@@ -17,7 +17,8 @@ import (
 
 // Query retrieves observations matching the query criteria with cursor-based pagination.
 // Returns the observations, a next page token (empty if no more results), and any error.
-// Results are ordered by created_at descending (most recent first) for cursor consistency.
+// Results are ordered by valid_from descending (business/event time) for cursor consistency,
+// matching the ordering the forecasting MDS adapter relies on.
 // Returns ErrInvalidPageToken (wrapped as domain.ErrInvalidPageToken) if the pageToken format is invalid.
 func (r *ObservationRepository) Query(ctx context.Context, query domain.ObservationQuery) ([]domain.MarketPriceObservation, string, error) {
 	// Apply pagination defaults and limits
@@ -68,10 +69,12 @@ func (r *ObservationRepository) Query(ctx context.Context, query domain.Observat
 }
 
 // observationWithMeta pairs an observation with metadata needed for cursor pagination.
+// cursorTime is the ordering key encoded into the page token; it tracks valid_from
+// so pagination stays consistent with the valid_from-ordered query.
 type observationWithMeta struct {
-	obs       domain.MarketPriceObservation
-	createdAt time.Time
-	id        uuid.UUID
+	obs        domain.MarketPriceObservation
+	cursorTime time.Time
+	id         uuid.UUID
 }
 
 // buildObservationFilterQuery constructs the SQL query and args for observation filtering,
@@ -87,7 +90,7 @@ func buildObservationFilterQuery(
 		SELECT o.id, o.dataset_definition_id, o.data_source_id, o.resolution_key,
 			o.observed_at, o.valid_from, o.valid_to, o.created_at,
 			o.quality, o.numeric_value, o.text_value,
-			o.superseded_by, o.causation_id,
+			o.superseded_by, o.superseded_at, o.causation_id,
 			d.code as dataset_code,
 			s.trust_level
 		FROM market_price_observation o
@@ -105,7 +108,9 @@ func buildObservationFilterQuery(
 	}
 
 	if query.ObservedAfter != nil {
-		sqlQuery += fmt.Sprintf(" AND o.observed_at > $%d", argPos)
+		// Inclusive lower bound: an observation at exactly ObservedFrom must be
+		// returned (fixes off-by-one at period edges, e.g. ECB midnight timestamps).
+		sqlQuery += fmt.Sprintf(" AND o.observed_at >= $%d", argPos)
 		args = append(args, *query.ObservedAfter)
 		argPos++
 	}
@@ -126,13 +131,16 @@ func buildObservationFilterQuery(
 	}
 
 	if !cursorTime.IsZero() {
-		sqlQuery += fmt.Sprintf(" AND (date_trunc('second', o.created_at) < $%d OR (date_trunc('second', o.created_at) = $%d AND o.id < $%d))",
+		sqlQuery += fmt.Sprintf(" AND (date_trunc('second', o.valid_from) < $%d OR (date_trunc('second', o.valid_from) = $%d AND o.id < $%d))",
 			argPos, argPos+1, argPos+2)
 		args = append(args, cursorTime, cursorTime, cursorID)
 		argPos += 3
 	}
 
-	sqlQuery += " ORDER BY date_trunc('second', o.created_at) DESC, o.id DESC"
+	// Order by valid_from (business/event time) so consumers such as the forecasting
+	// MDS adapter receive observations ordered by when the value applies, not when the
+	// system recorded it. The cursor pages on the same key for stable pagination.
+	sqlQuery += " ORDER BY date_trunc('second', o.valid_from) DESC, o.id DESC"
 	sqlQuery += fmt.Sprintf(" LIMIT $%d", argPos)
 	args = append(args, pageSize+1)
 
@@ -148,9 +156,9 @@ func (r *ObservationRepository) scanObservationRows(rows pgx.Rows) ([]observatio
 			return nil, err
 		}
 		observations = append(observations, observationWithMeta{
-			obs:       obs,
-			createdAt: obs.CreatedAt(),
-			id:        obs.ID(),
+			obs:        obs,
+			cursorTime: obs.ValidFrom(),
+			id:         obs.ID(),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -166,7 +174,7 @@ func paginateObservations(observations []observationWithMeta, pageSize int) ([]d
 	if hasMore {
 		observations = observations[:pageSize]
 		last := observations[len(observations)-1]
-		nextPageToken = formatCursorToken(last.createdAt, last.id)
+		nextPageToken = formatCursorToken(last.cursorTime, last.id)
 	}
 
 	results := make([]domain.MarketPriceObservation, 0, len(observations))
@@ -281,11 +289,16 @@ func (r *ObservationRepository) queryObservationInSchema(ctx context.Context, da
 
 		// Bi-temporal query: find the best observation that was known at knowledgeBaseTime
 		// JOIN data_source for trust_level in ordering
+		// Bi-temporal as-of filter: return the observation that was authoritative at
+		// knowledgeBaseTime. A record qualifies if it was created at or before that
+		// time and was either never superseded or superseded strictly after it.
+		// Using superseded_at (not superseded_by IS NULL) reconstructs supersession
+		// state at query time rather than only the present state.
 		query := `
 			SELECT o.id, o.dataset_definition_id, o.data_source_id, o.resolution_key,
 				o.observed_at, o.valid_from, o.valid_to, o.created_at,
 				o.quality, o.numeric_value, o.text_value,
-				o.superseded_by, o.causation_id,
+				o.superseded_by, o.superseded_at, o.causation_id,
 				d.code as dataset_code,
 				s.trust_level
 			FROM market_price_observation o
@@ -293,8 +306,8 @@ func (r *ObservationRepository) queryObservationInSchema(ctx context.Context, da
 			JOIN data_source s ON o.data_source_id = s.id
 			WHERE o.dataset_definition_id = $1
 				AND o.resolution_key = $2
-				AND o.superseded_by IS NULL
 				AND o.created_at <= $3
+				AND (o.superseded_at IS NULL OR o.superseded_at > $3)
 			ORDER BY o.quality DESC, o.observed_at DESC, s.trust_level DESC, o.created_at DESC
 			LIMIT 1`
 
@@ -372,6 +385,7 @@ func (r *ObservationRepository) scanObservation(ctx context.Context, tx pgx.Tx, 
 		numericValue        decimal.NullDecimal
 		textValue           sql.NullString
 		supersededBy        uuid.NullUUID
+		supersededAt        sql.NullTime
 		causationID         uuid.NullUUID
 		dataSetCode         string
 		trustLevel          int
@@ -390,6 +404,7 @@ func (r *ObservationRepository) scanObservation(ctx context.Context, tx pgx.Tx, 
 		&numericValue,
 		&textValue,
 		&supersededBy,
+		&supersededAt,
 		&causationID,
 		&dataSetCode,
 		&trustLevel,
@@ -403,7 +418,7 @@ func (r *ObservationRepository) scanObservation(ctx context.Context, tx pgx.Tx, 
 
 	return r.buildObservation(
 		id, dataSourceID, resolutionKey, observedAt, validFrom, validTo,
-		createdAt, quality, numericValue, supersededBy, causationID,
+		createdAt, quality, numericValue, supersededBy, supersededAt, causationID,
 		dataSetCode, trustLevel,
 	), nil
 }
@@ -423,6 +438,7 @@ func (r *ObservationRepository) scanObservationFromRows(rows pgx.Rows) (domain.M
 		numericValue        decimal.NullDecimal
 		textValue           sql.NullString
 		supersededBy        uuid.NullUUID
+		supersededAt        sql.NullTime
 		causationID         uuid.NullUUID
 		dataSetCode         string
 		trustLevel          int
@@ -441,6 +457,7 @@ func (r *ObservationRepository) scanObservationFromRows(rows pgx.Rows) (domain.M
 		&numericValue,
 		&textValue,
 		&supersededBy,
+		&supersededAt,
 		&causationID,
 		&dataSetCode,
 		&trustLevel,
@@ -451,7 +468,7 @@ func (r *ObservationRepository) scanObservationFromRows(rows pgx.Rows) (domain.M
 
 	return r.buildObservation(
 		id, dataSourceID, resolutionKey, observedAt, validFrom, validTo,
-		createdAt, quality, numericValue, supersededBy, causationID,
+		createdAt, quality, numericValue, supersededBy, supersededAt, causationID,
 		dataSetCode, trustLevel,
 	), nil
 }
@@ -468,6 +485,7 @@ func (r *ObservationRepository) buildObservation(
 	quality int,
 	numericValue decimal.NullDecimal,
 	supersededBy uuid.NullUUID,
+	supersededAt sql.NullTime,
 	causationID uuid.NullUUID,
 	dataSetCode string,
 	trustLevel int,
@@ -499,6 +517,10 @@ func (r *ObservationRepository) buildObservation(
 	if supersededBy.Valid {
 		supersededByPtr := supersededBy.UUID
 		builder.WithSupersededBy(&supersededByPtr)
+	}
+	if supersededAt.Valid {
+		supersededAtPtr := supersededAt.Time
+		builder.WithSupersededAt(&supersededAtPtr)
 	}
 
 	// Set causation ID

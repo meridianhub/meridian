@@ -326,6 +326,7 @@ func createSchemaObservationTable(ctx context.Context, conn *pgxpool.Conn) error
 			numeric_value numeric NULL,
 			text_value text NULL,
 			superseded_by uuid NULL,
+			superseded_at timestamptz NULL,
 			causation_id uuid NULL,
 			PRIMARY KEY (id),
 			CONSTRAINT fk_observation_dataset_definition
@@ -355,6 +356,8 @@ func createSchemaIndexes(ctx context.Context, conn *pgxpool.Conn) error {
 			ON market_price_observation (resolution_key, quality DESC, observed_at DESC, created_at DESC)
 			WHERE superseded_by IS NULL;
 		CREATE INDEX idx_data_source_trust_level ON data_source (trust_level DESC);
+		CREATE INDEX idx_market_price_observation_valid_from_cursor
+			ON market_price_observation (valid_from DESC, id DESC);
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create indexes: %w", err)

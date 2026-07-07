@@ -82,6 +82,7 @@ CREATE TABLE market_price_observation (
     numeric_value numeric NULL,
     text_value text NULL,
     superseded_by uuid NULL,
+    superseded_at timestamptz NULL,
     causation_id uuid NULL,
     PRIMARY KEY (id),
     CONSTRAINT fk_observation_dataset_definition
@@ -124,6 +125,8 @@ CREATE INDEX idx_dataset_definition_cursor
     WHERE deleted_at IS NULL;
 CREATE INDEX idx_market_price_observation_cursor
     ON market_price_observation (created_at DESC, id DESC);
+CREATE INDEX idx_market_price_observation_valid_from_cursor
+    ON market_price_observation (valid_from DESC, id DESC);
 
 CREATE TABLE tenant_data_entitlements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

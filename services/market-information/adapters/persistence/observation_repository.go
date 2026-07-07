@@ -3,6 +3,7 @@ package persistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -89,29 +90,47 @@ func (r *ObservationRepository) Record(ctx context.Context, obs domain.MarketPri
 			return fmt.Errorf("failed to insert observation: %w", err)
 		}
 
-		// Mark lower quality observations as superseded
-		// Only supersede observations with lower quality for the same resolution key
-		supersedQuery := `
-			UPDATE market_price_observation
-			SET superseded_by = $1
-			WHERE dataset_definition_id = $2
-				AND resolution_key = $3
-				AND superseded_by IS NULL
-				AND id != $1
-				AND quality < $4`
-
-		_, err = tx.Exec(ctx, supersedQuery,
-			obs.ID(),
-			dataSetDefID,
-			obs.ResolutionKey(),
-			obs.QualityLevel().Int(),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to supersede lower quality observations: %w", err)
-		}
-
-		return nil
+		return r.supersedeLowerQualityInPeriod(ctx, tx, obs, dataSetDefID, validFrom, validTo)
 	})
+}
+
+// supersedeLowerQualityInPeriod marks lower-quality observations as superseded by obs.
+// Supersession is scoped to the SAME period (valid_from, valid_to): a higher-quality
+// observation for one period must not supersede observations for other periods in the
+// same series. valid_from/valid_to are nullable, so the period match uses IS NOT
+// DISTINCT FROM for null-safe equality (two NULL periods match). superseded_at records
+// the knowledge-time of the replacement (obs.CreatedAt()) for bi-temporal as-of queries.
+func (r *ObservationRepository) supersedeLowerQualityInPeriod(
+	ctx context.Context,
+	tx pgx.Tx,
+	obs domain.MarketPriceObservation,
+	dataSetDefID uuid.UUID,
+	validFrom, validTo sql.NullTime,
+) error {
+	supersedQuery := `
+		UPDATE market_price_observation
+		SET superseded_by = $1, superseded_at = $5
+		WHERE dataset_definition_id = $2
+			AND resolution_key = $3
+			AND superseded_by IS NULL
+			AND id != $1
+			AND quality < $4
+			AND valid_from IS NOT DISTINCT FROM $6
+			AND valid_to IS NOT DISTINCT FROM $7`
+
+	_, err := tx.Exec(ctx, supersedQuery,
+		obs.ID(),
+		dataSetDefID,
+		obs.ResolutionKey(),
+		obs.QualityLevel().Int(),
+		obs.CreatedAt(),
+		validFrom,
+		validTo,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to supersede lower quality observations: %w", err)
+	}
+	return nil
 }
 
 // FindByID retrieves an observation by its unique identifier.
@@ -124,7 +143,7 @@ func (r *ObservationRepository) FindByID(ctx context.Context, id uuid.UUID) (dom
 			SELECT o.id, o.dataset_definition_id, o.data_source_id, o.resolution_key,
 				o.observed_at, o.valid_from, o.valid_to, o.created_at,
 				o.quality, o.numeric_value, o.text_value,
-				o.superseded_by, o.causation_id,
+				o.superseded_by, o.superseded_at, o.causation_id,
 				d.code as dataset_code,
 				s.trust_level
 			FROM market_price_observation o

@@ -1083,3 +1083,172 @@ func TestObservationRepository_CountByDataset_NonExistentDataset(t *testing.T) {
 	_, err := tc.Repos.Observation.CountByDataset(ctx, "NON_EXISTENT_DATASET", false)
 	assert.ErrorIs(t, err, domain.ErrDataSetNotFound)
 }
+
+// recordObservationWithTimes records an observation with caller-controlled bi-temporal
+// times using the builder, bypassing NewMarketPriceObservation's time.Now() created_at.
+// This enables deterministic period-scoping, as-of, and ordering assertions.
+func recordObservationWithTimes(
+	t *testing.T,
+	tc *testhelpers.TestContainer,
+	sourceID uuid.UUID,
+	resolutionKey string,
+	quality domain.QualityLevel,
+	value decimal.Decimal,
+	observedAt, validFrom, validTo, createdAt time.Time,
+) domain.MarketPriceObservation {
+	t.Helper()
+	obs := domain.NewMarketPriceObservationBuilder().
+		WithID(uuid.New()).
+		WithDataSetCode("FX_RATE_TEST").
+		WithSourceID(sourceID).
+		WithResolutionKey(resolutionKey).
+		WithValue(value).
+		WithObservedAt(observedAt).
+		WithValidFrom(validFrom).
+		WithValidTo(validTo).
+		WithCreatedAt(createdAt).
+		WithQualityLevel(quality).
+		WithCausationID(uuid.New()).
+		Build()
+	require.NoError(t, tc.Repos.Observation.Record(context.Background(), obs))
+	return obs
+}
+
+// TestObservationRepository_Record_SupersessionScopedToPeriod verifies DAT-2: a
+// higher-quality observation supersedes only same-period lower-quality observations,
+// not observations for other periods in the same series (same resolution key).
+func TestObservationRepository_Record_SupersessionScopedToPeriod(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupTestDataSetAndSource(t, tc)
+
+	base := time.Now().Add(-72 * time.Hour)
+	day := 24 * time.Hour
+	price := decimal.NewFromFloat(1.10)
+
+	// Three ESTIMATE observations for the same resolution key, distinct periods.
+	p1 := recordObservationWithTimes(t, tc, source.ID(), "EUR/USD", domain.QualityLevelEstimate, price, base, base, base.Add(day), base)
+	p2 := recordObservationWithTimes(t, tc, source.ID(), "EUR/USD", domain.QualityLevelEstimate, price, base.Add(day), base.Add(day), base.Add(2*day), base.Add(time.Minute))
+	p3 := recordObservationWithTimes(t, tc, source.ID(), "EUR/USD", domain.QualityLevelEstimate, price, base.Add(2*day), base.Add(2*day), base.Add(3*day), base.Add(2*time.Minute))
+
+	// A higher-quality ACTUAL for period 1 only.
+	recordObservationWithTimes(t, tc, source.ID(), "EUR/USD", domain.QualityLevelActual, price, base, base, base.Add(day), base.Add(time.Hour))
+
+	// Only the period-1 estimate must be superseded.
+	got1, err := tc.Repos.Observation.FindByID(ctx, p1.ID())
+	require.NoError(t, err)
+	assert.NotNil(t, got1.SupersededBy(), "period-1 estimate must be superseded")
+
+	got2, err := tc.Repos.Observation.FindByID(ctx, p2.ID())
+	require.NoError(t, err)
+	assert.Nil(t, got2.SupersededBy(), "period-2 estimate must not leak supersession")
+
+	got3, err := tc.Repos.Observation.FindByID(ctx, p3.ID())
+	require.NoError(t, err)
+	assert.Nil(t, got3.SupersededBy(), "period-3 estimate must not leak supersession")
+
+	// Non-superseded query returns period-1 ACTUAL plus both untouched estimates.
+	resKey := "EUR/USD"
+	results, _, err := tc.Repos.Observation.Query(ctx, domain.ObservationQuery{
+		DataSetCode:   "FX_RATE_TEST",
+		ResolutionKey: &resKey,
+	})
+	require.NoError(t, err)
+	assert.Len(t, results, 3)
+}
+
+// TestObservationRepository_RetrieveObservation_AsOfSupersessionState verifies DAT-3:
+// bi-temporal as-of queries reconstruct supersession state at the query time, using
+// superseded_at rather than the present superseded_by IS NULL state.
+func TestObservationRepository_RetrieveObservation_AsOfSupersessionState(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupTestDataSetAndSource(t, tc)
+
+	base := time.Now().Add(-72 * time.Hour)
+	t1 := base                    // A becomes known
+	t2 := base.Add(2 * time.Hour) // B supersedes A
+	valA := decimal.NewFromFloat(1.05)
+	valB := decimal.NewFromFloat(1.09)
+
+	// A (ESTIMATE) known at t1; B (ACTUAL) supersedes it at t2 (B.created_at).
+	recordObservationWithTimes(t, tc, source.ID(), "AS_OF", domain.QualityLevelEstimate, valA, t1, t1, t1.Add(24*time.Hour), t1)
+	recordObservationWithTimes(t, tc, source.ID(), "AS_OF", domain.QualityLevelActual, valB, t1, t1, t1.Add(24*time.Hour), t2)
+
+	// As-of between t1 and t2: A was still authoritative.
+	asOfMid := base.Add(1 * time.Hour)
+	got, err := tc.Repos.Observation.RetrieveObservation(ctx, "FX_RATE_TEST", "AS_OF", asOfMid)
+	require.NoError(t, err)
+	assert.True(t, valA.Equal(got.Value()), "as-of before supersession must return A")
+
+	// As-of after t2: B is authoritative.
+	asOfLater := base.Add(3 * time.Hour)
+	got, err = tc.Repos.Observation.RetrieveObservation(ctx, "FX_RATE_TEST", "AS_OF", asOfLater)
+	require.NoError(t, err)
+	assert.True(t, valB.Equal(got.Value()), "as-of after supersession must return B")
+
+	// Present time: B is the current state.
+	got, err = tc.Repos.Observation.GetLatest(ctx, "FX_RATE_TEST", "AS_OF")
+	require.NoError(t, err)
+	assert.True(t, valB.Equal(got.Value()), "present query must return B")
+	assert.Nil(t, got.SupersededAt(), "current authoritative observation is not superseded")
+}
+
+// TestObservationRepository_Query_ObservedFromInclusive verifies LOW-5: ObservedFrom
+// is an inclusive lower bound, so an observation at exactly the boundary is returned.
+func TestObservationRepository_Query_ObservedFromInclusive(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupTestDataSetAndSource(t, tc)
+
+	// ECB-style midnight boundary timestamp.
+	boundary := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	recordObservationWithTimes(t, tc, source.ID(), "EUR/USD", domain.QualityLevelActual, decimal.NewFromFloat(1.07), boundary, boundary, boundary.Add(24*time.Hour), boundary)
+
+	from := boundary
+	results, _, err := tc.Repos.Observation.Query(ctx, domain.ObservationQuery{
+		DataSetCode:   "FX_RATE_TEST",
+		ObservedAfter: &from,
+	})
+	require.NoError(t, err)
+	assert.Len(t, results, 1, "observation at exactly ObservedFrom must be included")
+}
+
+// TestObservationRepository_Query_OrderedByValidFrom verifies LOW-6: results are ordered
+// by valid_from DESC (business time), not created_at, as the forecasting MDS adapter relies on.
+func TestObservationRepository_Query_OrderedByValidFrom(t *testing.T) {
+	tc := testhelpers.SetupTestContainer(t)
+	defer tc.Cleanup(t)
+
+	ctx := context.Background()
+	_, source := setupTestDataSetAndSource(t, tc)
+
+	base := time.Now().Add(-72 * time.Hour).Truncate(time.Second)
+	hour := time.Hour
+	price := decimal.NewFromFloat(1.20)
+
+	// created_at order is the reverse of valid_from order (out-of-order/backfilled reads).
+	vfLatest := base.Add(2 * hour)
+	vfMid := base.Add(1 * hour)
+	vfEarliest := base
+	recordObservationWithTimes(t, tc, source.ID(), "K_LATEST", domain.QualityLevelActual, price, vfLatest, vfLatest, vfLatest.Add(hour), base)                     // created first
+	recordObservationWithTimes(t, tc, source.ID(), "K_MID", domain.QualityLevelActual, price, vfMid, vfMid, vfMid.Add(hour), base.Add(hour))                       // created second
+	recordObservationWithTimes(t, tc, source.ID(), "K_EARLIEST", domain.QualityLevelActual, price, vfEarliest, vfEarliest, vfEarliest.Add(hour), base.Add(2*hour)) // created last
+
+	results, _, err := tc.Repos.Observation.Query(ctx, domain.ObservationQuery{
+		DataSetCode: "FX_RATE_TEST",
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	// Ordered by valid_from DESC regardless of created_at.
+	assert.Equal(t, vfLatest.Unix(), results[0].ValidFrom().Unix())
+	assert.Equal(t, vfMid.Unix(), results[1].ValidFrom().Unix())
+	assert.Equal(t, vfEarliest.Unix(), results[2].ValidFrom().Unix())
+}
