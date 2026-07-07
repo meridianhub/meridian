@@ -7,16 +7,15 @@
 package identityv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -2618,47 +2617,45 @@ func file_meridian_identity_v1_identity_proto_rawDescGZIP() []byte {
 	return file_meridian_identity_v1_identity_proto_rawDescData
 }
 
-var (
-	file_meridian_identity_v1_identity_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-	file_meridian_identity_v1_identity_proto_msgTypes  = make([]protoimpl.MessageInfo, 31)
-	file_meridian_identity_v1_identity_proto_goTypes   = []any{
-		(AuthenticationFailureReason)(0),    // 0: meridian.identity.v1.AuthenticationFailureReason
-		(IdentityStatus)(0),                 // 1: meridian.identity.v1.IdentityStatus
-		(Role)(0),                           // 2: meridian.identity.v1.Role
-		(*Identity)(nil),                    // 3: meridian.identity.v1.Identity
-		(*RoleAssignment)(nil),              // 4: meridian.identity.v1.RoleAssignment
-		(*Invitation)(nil),                  // 5: meridian.identity.v1.Invitation
-		(*CreateIdentityRequest)(nil),       // 6: meridian.identity.v1.CreateIdentityRequest
-		(*CreateIdentityResponse)(nil),      // 7: meridian.identity.v1.CreateIdentityResponse
-		(*RetrieveIdentityRequest)(nil),     // 8: meridian.identity.v1.RetrieveIdentityRequest
-		(*RetrieveIdentityResponse)(nil),    // 9: meridian.identity.v1.RetrieveIdentityResponse
-		(*UpdateIdentityRequest)(nil),       // 10: meridian.identity.v1.UpdateIdentityRequest
-		(*UpdateIdentityResponse)(nil),      // 11: meridian.identity.v1.UpdateIdentityResponse
-		(*ListIdentitiesRequest)(nil),       // 12: meridian.identity.v1.ListIdentitiesRequest
-		(*ListIdentitiesResponse)(nil),      // 13: meridian.identity.v1.ListIdentitiesResponse
-		(*AuthenticateRequest)(nil),         // 14: meridian.identity.v1.AuthenticateRequest
-		(*AuthenticateResponse)(nil),        // 15: meridian.identity.v1.AuthenticateResponse
-		(*SetPasswordRequest)(nil),          // 16: meridian.identity.v1.SetPasswordRequest
-		(*SetPasswordResponse)(nil),         // 17: meridian.identity.v1.SetPasswordResponse
-		(*ChangePasswordRequest)(nil),       // 18: meridian.identity.v1.ChangePasswordRequest
-		(*ChangePasswordResponse)(nil),      // 19: meridian.identity.v1.ChangePasswordResponse
-		(*GrantRoleRequest)(nil),            // 20: meridian.identity.v1.GrantRoleRequest
-		(*GrantRoleResponse)(nil),           // 21: meridian.identity.v1.GrantRoleResponse
-		(*RevokeRoleRequest)(nil),           // 22: meridian.identity.v1.RevokeRoleRequest
-		(*RevokeRoleResponse)(nil),          // 23: meridian.identity.v1.RevokeRoleResponse
-		(*ListRoleAssignmentsRequest)(nil),  // 24: meridian.identity.v1.ListRoleAssignmentsRequest
-		(*ListRoleAssignmentsResponse)(nil), // 25: meridian.identity.v1.ListRoleAssignmentsResponse
-		(*InviteUserRequest)(nil),           // 26: meridian.identity.v1.InviteUserRequest
-		(*InviteUserResponse)(nil),          // 27: meridian.identity.v1.InviteUserResponse
-		(*AcceptInvitationRequest)(nil),     // 28: meridian.identity.v1.AcceptInvitationRequest
-		(*AcceptInvitationResponse)(nil),    // 29: meridian.identity.v1.AcceptInvitationResponse
-		(*SuspendIdentityRequest)(nil),      // 30: meridian.identity.v1.SuspendIdentityRequest
-		(*SuspendIdentityResponse)(nil),     // 31: meridian.identity.v1.SuspendIdentityResponse
-		(*ReactivateIdentityRequest)(nil),   // 32: meridian.identity.v1.ReactivateIdentityRequest
-		(*ReactivateIdentityResponse)(nil),  // 33: meridian.identity.v1.ReactivateIdentityResponse
-		(*timestamppb.Timestamp)(nil),       // 34: google.protobuf.Timestamp
-	}
-)
+var file_meridian_identity_v1_identity_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_meridian_identity_v1_identity_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_meridian_identity_v1_identity_proto_goTypes = []any{
+	(AuthenticationFailureReason)(0),    // 0: meridian.identity.v1.AuthenticationFailureReason
+	(IdentityStatus)(0),                 // 1: meridian.identity.v1.IdentityStatus
+	(Role)(0),                           // 2: meridian.identity.v1.Role
+	(*Identity)(nil),                    // 3: meridian.identity.v1.Identity
+	(*RoleAssignment)(nil),              // 4: meridian.identity.v1.RoleAssignment
+	(*Invitation)(nil),                  // 5: meridian.identity.v1.Invitation
+	(*CreateIdentityRequest)(nil),       // 6: meridian.identity.v1.CreateIdentityRequest
+	(*CreateIdentityResponse)(nil),      // 7: meridian.identity.v1.CreateIdentityResponse
+	(*RetrieveIdentityRequest)(nil),     // 8: meridian.identity.v1.RetrieveIdentityRequest
+	(*RetrieveIdentityResponse)(nil),    // 9: meridian.identity.v1.RetrieveIdentityResponse
+	(*UpdateIdentityRequest)(nil),       // 10: meridian.identity.v1.UpdateIdentityRequest
+	(*UpdateIdentityResponse)(nil),      // 11: meridian.identity.v1.UpdateIdentityResponse
+	(*ListIdentitiesRequest)(nil),       // 12: meridian.identity.v1.ListIdentitiesRequest
+	(*ListIdentitiesResponse)(nil),      // 13: meridian.identity.v1.ListIdentitiesResponse
+	(*AuthenticateRequest)(nil),         // 14: meridian.identity.v1.AuthenticateRequest
+	(*AuthenticateResponse)(nil),        // 15: meridian.identity.v1.AuthenticateResponse
+	(*SetPasswordRequest)(nil),          // 16: meridian.identity.v1.SetPasswordRequest
+	(*SetPasswordResponse)(nil),         // 17: meridian.identity.v1.SetPasswordResponse
+	(*ChangePasswordRequest)(nil),       // 18: meridian.identity.v1.ChangePasswordRequest
+	(*ChangePasswordResponse)(nil),      // 19: meridian.identity.v1.ChangePasswordResponse
+	(*GrantRoleRequest)(nil),            // 20: meridian.identity.v1.GrantRoleRequest
+	(*GrantRoleResponse)(nil),           // 21: meridian.identity.v1.GrantRoleResponse
+	(*RevokeRoleRequest)(nil),           // 22: meridian.identity.v1.RevokeRoleRequest
+	(*RevokeRoleResponse)(nil),          // 23: meridian.identity.v1.RevokeRoleResponse
+	(*ListRoleAssignmentsRequest)(nil),  // 24: meridian.identity.v1.ListRoleAssignmentsRequest
+	(*ListRoleAssignmentsResponse)(nil), // 25: meridian.identity.v1.ListRoleAssignmentsResponse
+	(*InviteUserRequest)(nil),           // 26: meridian.identity.v1.InviteUserRequest
+	(*InviteUserResponse)(nil),          // 27: meridian.identity.v1.InviteUserResponse
+	(*AcceptInvitationRequest)(nil),     // 28: meridian.identity.v1.AcceptInvitationRequest
+	(*AcceptInvitationResponse)(nil),    // 29: meridian.identity.v1.AcceptInvitationResponse
+	(*SuspendIdentityRequest)(nil),      // 30: meridian.identity.v1.SuspendIdentityRequest
+	(*SuspendIdentityResponse)(nil),     // 31: meridian.identity.v1.SuspendIdentityResponse
+	(*ReactivateIdentityRequest)(nil),   // 32: meridian.identity.v1.ReactivateIdentityRequest
+	(*ReactivateIdentityResponse)(nil),  // 33: meridian.identity.v1.ReactivateIdentityResponse
+	(*timestamppb.Timestamp)(nil),       // 34: google.protobuf.Timestamp
+}
 var file_meridian_identity_v1_identity_proto_depIdxs = []int32{
 	1,  // 0: meridian.identity.v1.Identity.status:type_name -> meridian.identity.v1.IdentityStatus
 	34, // 1: meridian.identity.v1.Identity.last_login_at:type_name -> google.protobuf.Timestamp

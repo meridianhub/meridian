@@ -8,7 +8,6 @@ package identityv1
 
 import (
 	context "context"
-
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -443,55 +442,42 @@ type UnimplementedIdentityServiceServer struct{}
 func (UnimplementedIdentityServiceServer) CreateIdentity(context.Context, *CreateIdentityRequest) (*CreateIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateIdentity not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) RetrieveIdentity(context.Context, *RetrieveIdentityRequest) (*RetrieveIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RetrieveIdentity not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) UpdateIdentity(context.Context, *UpdateIdentityRequest) (*UpdateIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateIdentity not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) ListIdentities(context.Context, *ListIdentitiesRequest) (*ListIdentitiesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListIdentities not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Authenticate not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) SetPassword(context.Context, *SetPasswordRequest) (*SetPasswordResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetPassword not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ChangePassword not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) GrantRole(context.Context, *GrantRoleRequest) (*GrantRoleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GrantRole not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) RevokeRole(context.Context, *RevokeRoleRequest) (*RevokeRoleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RevokeRole not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) ListRoleAssignments(context.Context, *ListRoleAssignmentsRequest) (*ListRoleAssignmentsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRoleAssignments not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteUser not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AcceptInvitation not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) SuspendIdentity(context.Context, *SuspendIdentityRequest) (*SuspendIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SuspendIdentity not implemented")
 }
-
 func (UnimplementedIdentityServiceServer) ReactivateIdentity(context.Context, *ReactivateIdentityRequest) (*ReactivateIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReactivateIdentity not implemented")
 }
