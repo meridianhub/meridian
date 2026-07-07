@@ -8,6 +8,7 @@ package identityv1
 
 import (
 	context "context"
+
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -19,22 +20,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	IdentityService_CreateIdentity_FullMethodName        = "/meridian.identity.v1.IdentityService/CreateIdentity"
-	IdentityService_RetrieveIdentity_FullMethodName      = "/meridian.identity.v1.IdentityService/RetrieveIdentity"
-	IdentityService_UpdateIdentity_FullMethodName        = "/meridian.identity.v1.IdentityService/UpdateIdentity"
-	IdentityService_ListIdentities_FullMethodName        = "/meridian.identity.v1.IdentityService/ListIdentities"
-	IdentityService_Authenticate_FullMethodName          = "/meridian.identity.v1.IdentityService/Authenticate"
-	IdentityService_SetPassword_FullMethodName           = "/meridian.identity.v1.IdentityService/SetPassword"
-	IdentityService_ChangePassword_FullMethodName        = "/meridian.identity.v1.IdentityService/ChangePassword"
-	IdentityService_RequestPasswordReset_FullMethodName  = "/meridian.identity.v1.IdentityService/RequestPasswordReset"
-	IdentityService_CompletePasswordReset_FullMethodName = "/meridian.identity.v1.IdentityService/CompletePasswordReset"
-	IdentityService_GrantRole_FullMethodName             = "/meridian.identity.v1.IdentityService/GrantRole"
-	IdentityService_RevokeRole_FullMethodName            = "/meridian.identity.v1.IdentityService/RevokeRole"
-	IdentityService_ListRoleAssignments_FullMethodName   = "/meridian.identity.v1.IdentityService/ListRoleAssignments"
-	IdentityService_InviteUser_FullMethodName            = "/meridian.identity.v1.IdentityService/InviteUser"
-	IdentityService_AcceptInvitation_FullMethodName      = "/meridian.identity.v1.IdentityService/AcceptInvitation"
-	IdentityService_SuspendIdentity_FullMethodName       = "/meridian.identity.v1.IdentityService/SuspendIdentity"
-	IdentityService_ReactivateIdentity_FullMethodName    = "/meridian.identity.v1.IdentityService/ReactivateIdentity"
+	IdentityService_CreateIdentity_FullMethodName      = "/meridian.identity.v1.IdentityService/CreateIdentity"
+	IdentityService_RetrieveIdentity_FullMethodName    = "/meridian.identity.v1.IdentityService/RetrieveIdentity"
+	IdentityService_UpdateIdentity_FullMethodName      = "/meridian.identity.v1.IdentityService/UpdateIdentity"
+	IdentityService_ListIdentities_FullMethodName      = "/meridian.identity.v1.IdentityService/ListIdentities"
+	IdentityService_Authenticate_FullMethodName        = "/meridian.identity.v1.IdentityService/Authenticate"
+	IdentityService_SetPassword_FullMethodName         = "/meridian.identity.v1.IdentityService/SetPassword"
+	IdentityService_ChangePassword_FullMethodName      = "/meridian.identity.v1.IdentityService/ChangePassword"
+	IdentityService_GrantRole_FullMethodName           = "/meridian.identity.v1.IdentityService/GrantRole"
+	IdentityService_RevokeRole_FullMethodName          = "/meridian.identity.v1.IdentityService/RevokeRole"
+	IdentityService_ListRoleAssignments_FullMethodName = "/meridian.identity.v1.IdentityService/ListRoleAssignments"
+	IdentityService_InviteUser_FullMethodName          = "/meridian.identity.v1.IdentityService/InviteUser"
+	IdentityService_AcceptInvitation_FullMethodName    = "/meridian.identity.v1.IdentityService/AcceptInvitation"
+	IdentityService_SuspendIdentity_FullMethodName     = "/meridian.identity.v1.IdentityService/SuspendIdentity"
+	IdentityService_ReactivateIdentity_FullMethodName  = "/meridian.identity.v1.IdentityService/ReactivateIdentity"
 )
 
 // IdentityServiceClient is the client API for IdentityService service.
@@ -102,20 +101,6 @@ type IdentityServiceClient interface {
 	//   - INVALID_ARGUMENT: The new password does not meet the password policy.
 	//   - NOT_FOUND: The authenticated identity no longer exists.
 	ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*ChangePasswordResponse, error)
-	// RequestPasswordReset initiates the password reset flow by generating a reset token.
-	// This is a pre-auth endpoint; no Bearer token is required.
-	// Always returns success even if the email is not found to limit enumeration.
-	// Note: the reset_token is currently returned in-band; full anti-enumeration
-	// requires out-of-band token delivery (e.g. email), which is not yet implemented.
-	RequestPasswordReset(ctx context.Context, in *RequestPasswordResetRequest, opts ...grpc.CallOption) (*RequestPasswordResetResponse, error)
-	// CompletePasswordReset finalises the password reset by verifying the token and storing the new password.
-	// This is a pre-auth endpoint; no Bearer token is required.
-	//
-	// Errors:
-	//   - INVALID_ARGUMENT: The new password does not meet the password policy.
-	//   - NOT_FOUND: No invitation matches the provided reset token hash.
-	//   - FAILED_PRECONDITION: The reset token was found but has expired or was already used.
-	CompletePasswordReset(ctx context.Context, in *CompletePasswordResetRequest, opts ...grpc.CallOption) (*CompletePasswordResetResponse, error)
 	// GrantRole assigns a role to an identity.
 	//
 	// Errors:
@@ -247,26 +232,6 @@ func (c *identityServiceClient) ChangePassword(ctx context.Context, in *ChangePa
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ChangePasswordResponse)
 	err := c.cc.Invoke(ctx, IdentityService_ChangePassword_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *identityServiceClient) RequestPasswordReset(ctx context.Context, in *RequestPasswordResetRequest, opts ...grpc.CallOption) (*RequestPasswordResetResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RequestPasswordResetResponse)
-	err := c.cc.Invoke(ctx, IdentityService_RequestPasswordReset_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *identityServiceClient) CompletePasswordReset(ctx context.Context, in *CompletePasswordResetRequest, opts ...grpc.CallOption) (*CompletePasswordResetResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CompletePasswordResetResponse)
-	err := c.cc.Invoke(ctx, IdentityService_CompletePasswordReset_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -408,20 +373,6 @@ type IdentityServiceServer interface {
 	//   - INVALID_ARGUMENT: The new password does not meet the password policy.
 	//   - NOT_FOUND: The authenticated identity no longer exists.
 	ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error)
-	// RequestPasswordReset initiates the password reset flow by generating a reset token.
-	// This is a pre-auth endpoint; no Bearer token is required.
-	// Always returns success even if the email is not found to limit enumeration.
-	// Note: the reset_token is currently returned in-band; full anti-enumeration
-	// requires out-of-band token delivery (e.g. email), which is not yet implemented.
-	RequestPasswordReset(context.Context, *RequestPasswordResetRequest) (*RequestPasswordResetResponse, error)
-	// CompletePasswordReset finalises the password reset by verifying the token and storing the new password.
-	// This is a pre-auth endpoint; no Bearer token is required.
-	//
-	// Errors:
-	//   - INVALID_ARGUMENT: The new password does not meet the password policy.
-	//   - NOT_FOUND: No invitation matches the provided reset token hash.
-	//   - FAILED_PRECONDITION: The reset token was found but has expired or was already used.
-	CompletePasswordReset(context.Context, *CompletePasswordResetRequest) (*CompletePasswordResetResponse, error)
 	// GrantRole assigns a role to an identity.
 	//
 	// Errors:
@@ -492,48 +443,55 @@ type UnimplementedIdentityServiceServer struct{}
 func (UnimplementedIdentityServiceServer) CreateIdentity(context.Context, *CreateIdentityRequest) (*CreateIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateIdentity not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) RetrieveIdentity(context.Context, *RetrieveIdentityRequest) (*RetrieveIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RetrieveIdentity not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) UpdateIdentity(context.Context, *UpdateIdentityRequest) (*UpdateIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateIdentity not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) ListIdentities(context.Context, *ListIdentitiesRequest) (*ListIdentitiesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListIdentities not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) Authenticate(context.Context, *AuthenticateRequest) (*AuthenticateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Authenticate not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) SetPassword(context.Context, *SetPasswordRequest) (*SetPasswordResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetPassword not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ChangePassword not implemented")
 }
-func (UnimplementedIdentityServiceServer) RequestPasswordReset(context.Context, *RequestPasswordResetRequest) (*RequestPasswordResetResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RequestPasswordReset not implemented")
-}
-func (UnimplementedIdentityServiceServer) CompletePasswordReset(context.Context, *CompletePasswordResetRequest) (*CompletePasswordResetResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CompletePasswordReset not implemented")
-}
+
 func (UnimplementedIdentityServiceServer) GrantRole(context.Context, *GrantRoleRequest) (*GrantRoleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GrantRole not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) RevokeRole(context.Context, *RevokeRoleRequest) (*RevokeRoleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RevokeRole not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) ListRoleAssignments(context.Context, *ListRoleAssignmentsRequest) (*ListRoleAssignmentsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRoleAssignments not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) InviteUser(context.Context, *InviteUserRequest) (*InviteUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InviteUser not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AcceptInvitation not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) SuspendIdentity(context.Context, *SuspendIdentityRequest) (*SuspendIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SuspendIdentity not implemented")
 }
+
 func (UnimplementedIdentityServiceServer) ReactivateIdentity(context.Context, *ReactivateIdentityRequest) (*ReactivateIdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReactivateIdentity not implemented")
 }
@@ -680,42 +638,6 @@ func _IdentityService_ChangePassword_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(IdentityServiceServer).ChangePassword(ctx, req.(*ChangePasswordRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _IdentityService_RequestPasswordReset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RequestPasswordResetRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IdentityServiceServer).RequestPasswordReset(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IdentityService_RequestPasswordReset_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IdentityServiceServer).RequestPasswordReset(ctx, req.(*RequestPasswordResetRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _IdentityService_CompletePasswordReset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CompletePasswordResetRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IdentityServiceServer).CompletePasswordReset(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: IdentityService_CompletePasswordReset_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IdentityServiceServer).CompletePasswordReset(ctx, req.(*CompletePasswordResetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -880,14 +802,6 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ChangePassword",
 			Handler:    _IdentityService_ChangePassword_Handler,
-		},
-		{
-			MethodName: "RequestPasswordReset",
-			Handler:    _IdentityService_RequestPasswordReset_Handler,
-		},
-		{
-			MethodName: "CompletePasswordReset",
-			Handler:    _IdentityService_CompletePasswordReset_Handler,
 		},
 		{
 			MethodName: "GrantRole",

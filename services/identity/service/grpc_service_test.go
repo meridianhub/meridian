@@ -609,99 +609,10 @@ func TestChangePassword_NoAuthContext(t *testing.T) {
 	assert.Equal(t, codes.Unauthenticated, status.Code(err))
 }
 
-// --- RequestPasswordReset Tests ---
-
-func TestRequestPasswordReset_Success(t *testing.T) {
-	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-
-	identity := makeActiveIdentity(t, "test@example.com", "SecurePass123!")
-	repo.addIdentity(identity)
-
-	resp, err := svc.RequestPasswordReset(ctx, &pb.RequestPasswordResetRequest{
-		Email: "test@example.com",
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, "test@example.com", resp.Email)
-}
-
-func TestRequestPasswordReset_UnknownEmail(t *testing.T) {
-	svc, _ := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-
-	// Should still return success to prevent email enumeration
-	resp, err := svc.RequestPasswordReset(ctx, &pb.RequestPasswordResetRequest{
-		Email: "unknown@example.com",
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, "unknown@example.com", resp.Email)
-}
-
-// --- CompletePasswordReset Tests ---
-
-func TestCompletePasswordReset_Success(t *testing.T) {
-	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-
-	identity := makeActiveIdentity(t, "test@example.com", "OldPassword123!")
-	repo.addIdentity(identity)
-
-	inv, plaintext, err := domain.NewInvitation(identity.ID(), identity.ID())
-	require.NoError(t, err)
-	repo.addInvitation(inv)
-
-	resp, err := svc.CompletePasswordReset(ctx, &pb.CompletePasswordResetRequest{
-		ResetToken:  plaintext,
-		NewPassword: "NewSecurePass1!",
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, identity.ID().String(), resp.IdentityId)
-}
-
-func TestCompletePasswordReset_InvalidToken(t *testing.T) {
-	svc, _ := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-
-	_, err := svc.CompletePasswordReset(ctx, &pb.CompletePasswordResetRequest{
-		ResetToken:  "bad-token",
-		NewPassword: "NewSecurePass1!",
-	})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.NotFound, status.Code(err))
-}
-
-func TestCompletePasswordReset_ExpiredToken(t *testing.T) {
-	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-
-	identity := makeActiveIdentity(t, "test@example.com", "OldPassword123!")
-	repo.addIdentity(identity)
-
-	// Create an already-expired invitation
-	expiredInv := domain.ReconstructInvitation(
-		uuid.New(),
-		identity.ID(),
-		identity.ID(),
-		tokens.HashToken("expired-token"),
-		time.Now().Add(-1*time.Hour), // expired 1 hour ago
-		domain.InvitationStatusPending,
-		time.Now().Add(-2*time.Hour),
-		time.Now().Add(-2*time.Hour),
-	)
-	repo.addInvitation(expiredInv)
-
-	_, err := svc.CompletePasswordReset(ctx, &pb.CompletePasswordResetRequest{
-		ResetToken:  "expired-token",
-		NewPassword: "NewSecurePass1!",
-	})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
-}
+// Password reset is no longer exposed as a gRPC RPC (it leaked the reset token
+// in the response and reused long-lived invitation tokens). The sanctioned flow
+// lives in the api-gateway HTTP handlers and is covered by
+// services/api-gateway/password_reset_handler_test.go.
 
 // --- GrantRole Tests ---
 
@@ -1595,69 +1506,6 @@ func TestChangePassword_WeakNewPassword(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-func TestRequestPasswordReset_InternalError(t *testing.T) {
-	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-	repo.findByEmailErr = errors.New("db down")
-
-	_, err := svc.RequestPasswordReset(ctx, &pb.RequestPasswordResetRequest{
-		Email: "err@example.com",
-	})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.Internal, status.Code(err))
-}
-
-func TestRequestPasswordReset_SaveInvitationError(t *testing.T) {
-	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-
-	identity := makeActiveIdentity(t, "reset-save-err@example.com", "SecurePass123!")
-	repo.addIdentity(identity)
-	repo.saveInvitationErr = errors.New("db write error")
-
-	_, err := svc.RequestPasswordReset(ctx, &pb.RequestPasswordResetRequest{
-		Email: "reset-save-err@example.com",
-	})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.Internal, status.Code(err))
-}
-
-func TestCompletePasswordReset_WeakPassword(t *testing.T) {
-	svc, _ := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-
-	_, err := svc.CompletePasswordReset(ctx, &pb.CompletePasswordResetRequest{
-		ResetToken:  "any-token",
-		NewPassword: "weak",
-	})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-func TestCompletePasswordReset_AlreadyUsedToken(t *testing.T) {
-	svc, repo := newTestService(t)
-	ctx := tenant.WithTenant(context.Background(), svcTestTID)
-
-	identity := makeActiveIdentity(t, "reset-used@example.com", "OldPassword123!")
-	repo.addIdentity(identity)
-
-	inv, plaintext, err := domain.NewInvitation(identity.ID(), identity.ID())
-	require.NoError(t, err)
-	require.NoError(t, inv.Accept())
-	repo.addInvitation(inv)
-
-	_, err = svc.CompletePasswordReset(ctx, &pb.CompletePasswordResetRequest{
-		ResetToken:  plaintext,
-		NewPassword: "NewSecurePass1!",
-	})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 }
 
 func TestGrantRole_InvalidIdentityID(t *testing.T) {

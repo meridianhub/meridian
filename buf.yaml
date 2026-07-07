@@ -50,4 +50,10 @@ breaking:
     - api/proto/meridian/events/v1/financial_accounting_events.proto
     - api/proto/meridian/events/v1/position_keeping_events.proto
     - api/proto/meridian/financial_accounting/v1/financial_accounting.proto
+    # Intentional breaking change: Security fix (bug-sweep task 1, SEC-1)
+    # Removed the unauthenticated RequestPasswordReset/CompletePasswordReset RPCs
+    # and their messages. They returned the reset token in the RPC response,
+    # enabling account takeover. Password reset now runs exclusively through the
+    # api-gateway HTTP flow. There are no production gRPC consumers of these RPCs.
+    - api/proto/meridian/identity/v1/identity.proto
   ignore_unstable_packages: true

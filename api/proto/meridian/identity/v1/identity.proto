@@ -400,48 +400,10 @@ message ChangePasswordResponse {
   string identity_id = 1;
 }
 
-// RequestPasswordResetRequest is the request to initiate a password reset flow.
-// A reset token is generated and delivered out-of-band to the email address.
-message RequestPasswordResetRequest {
-  // email is the email address of the identity requesting a password reset.
-  string email = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 255
-    email: true
-  }];
-}
-
-// RequestPasswordResetResponse is the response after initiating a password reset.
-message RequestPasswordResetResponse {
-  // email is the email address to which the reset token was sent.
-  string email = 1;
-
-  // reset_token is the plaintext reset token. In production this would be
-  // delivered out-of-band (email); it is included in the response until an
-  // email delivery integration is available.
-  string reset_token = 2;
-}
-
-// CompletePasswordResetRequest is the request to complete a password reset using a reset token.
-message CompletePasswordResetRequest {
-  // reset_token is the one-time token delivered to the identity's email address.
-  string reset_token = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_len: 1000
-  }];
-
-  // new_password is the replacement password to hash and store.
-  string new_password = 2 [(buf.validate.field).string = {
-    min_len: 8
-    max_len: 1000
-  }];
-}
-
-// CompletePasswordResetResponse is the response after completing a password reset.
-message CompletePasswordResetResponse {
-  // identity_id is the identifier of the identity whose password was reset.
-  string identity_id = 1;
-}
+// Password reset is handled out-of-band by the api-gateway HTTP flow
+// (POST /api/v1/forgot-password and POST /api/v1/reset-password), which issues
+// short-lived, rate-limited reset tokens delivered via email and never returns
+// token material to the caller. No gRPC password-reset RPCs are exposed.
 
 // --- Role Management ---
 
@@ -746,39 +708,10 @@ service IdentityService {
     };
   }
 
-  // RequestPasswordReset initiates the password reset flow by generating a reset token.
-  // This is a pre-auth endpoint; no Bearer token is required.
-  // Always returns success even if the email is not found to limit enumeration.
-  // Note: the reset_token is currently returned in-band; full anti-enumeration
-  // requires out-of-band token delivery (e.g. email), which is not yet implemented.
-  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (RequestPasswordResetResponse) {
-    option (google.api.http) = {
-      post: "/v1/identities/password-reset"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      // Pre-auth endpoint: no Bearer token required.
-      security: {}
-    };
-  }
-
-  // CompletePasswordReset finalises the password reset by verifying the token and storing the new password.
-  // This is a pre-auth endpoint; no Bearer token is required.
-  //
-  // Errors:
-  //   - INVALID_ARGUMENT: The new password does not meet the password policy.
-  //   - NOT_FOUND: No invitation matches the provided reset token hash.
-  //   - FAILED_PRECONDITION: The reset token was found but has expired or was already used.
-  rpc CompletePasswordReset(CompletePasswordResetRequest) returns (CompletePasswordResetResponse) {
-    option (google.api.http) = {
-      put: "/v1/identities/password-reset"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      // Pre-auth endpoint: no Bearer token required.
-      security: {}
-    };
-  }
+  // Password reset is intentionally not exposed as a gRPC RPC. It is handled by
+  // the api-gateway HTTP flow (POST /api/v1/forgot-password and
+  // POST /api/v1/reset-password), which issues short-lived, rate-limited reset
+  // tokens delivered out-of-band via email and never returns token material.
 
   // --- Role Management ---
 
