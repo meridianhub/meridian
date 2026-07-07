@@ -339,6 +339,35 @@ func TestRPCAPIKeyValidator_CacheKeyedOnFullKey(t *testing.T) {
 	})
 }
 
+// TestRPCAPIKeyValidator_CacheIndexPerInstance verifies that the cache index is
+// derived under a per-validator-instance secret: it is stable within one
+// validator but differs across instances for the same input, confirming the
+// keyed HMAC (not a bare hash) is actually applied.
+func TestRPCAPIKeyValidator_CacheIndexPerInstance(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	newValidator := func() *RPCAPIKeyValidator {
+		return NewRPCAPIKeyValidator(RPCValidatorConfig{
+			Client:       &mockAuthServiceClient{},
+			SlugResolver: &mockSlugResolver{},
+			Logger:       logger,
+		})
+	}
+
+	v1 := newValidator()
+	defer v1.Close()
+	v2 := newValidator()
+	defer v2.Close()
+
+	const key = "pk_acme_abc12345xyz67890abcdef"
+
+	// Stable within one instance.
+	assert.Equal(t, v1.cacheIndex(key), v1.cacheIndex(key))
+	// Different across instances (per-instance secret applied).
+	assert.NotEqual(t, v1.cacheIndex(key), v2.cacheIndex(key))
+	// The index is not the plaintext key.
+	assert.NotEqual(t, key, v1.cacheIndex(key))
+}
+
 func TestRPCAPIKeyValidator_AllowRequest(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
