@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
+import { getInstrumentPrecision } from '@/shared/instrument-precision'
 import { amountToBigInt } from './account-form-utils'
 
 export interface CreateLienDialogProps {
@@ -21,6 +22,7 @@ export interface CreateLienDialogProps {
   accountId: string
   instrumentCode: string
   accountType: 'current' | 'internal'
+  /** Optional override; defaults to the instrument's display precision. */
   decimalPlaces?: number
 }
 
@@ -68,11 +70,14 @@ export function CreateLienDialog({
   accountId,
   instrumentCode,
   accountType,
-  decimalPlaces = 2,
+  decimalPlaces,
 }: CreateLienDialogProps) {
   const { tenantSlug } = useTenantContext()
   const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
+  // Derive entry precision from the account instrument (same source as
+  // money-display) so entered values round-trip; an explicit prop still wins.
+  const resolvedDecimalPlaces = decimalPlaces ?? getInstrumentPrecision(instrumentCode)
 
   const [amount, setAmount] = React.useState('')
   const [reason, setReason] = React.useState('')
@@ -98,7 +103,7 @@ export function CreateLienDialog({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const minorUnits = amountToBigInt(amount, decimalPlaces).toString()
+      const minorUnits = amountToBigInt(amount, resolvedDecimalPlaces).toString()
       const expiresAtSeconds = expiry
         ? Math.floor(parseDatetimeLocalAsUtc(expiry).getTime() / 1000).toString()
         : undefined
@@ -148,7 +153,7 @@ export function CreateLienDialog({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
-    const amtErr = validateAmount(amount, decimalPlaces)
+    const amtErr = validateAmount(amount, resolvedDecimalPlaces)
     const rsnErr = validateReason(reason)
     const expErr = validateExpiry(expiry)
 

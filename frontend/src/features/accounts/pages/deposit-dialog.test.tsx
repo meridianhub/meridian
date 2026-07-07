@@ -126,6 +126,39 @@ describe('DepositDialog - submission', () => {
     })
   })
 
+  it.each([
+    { currency: 'kWh', input: '1.5', expected: '1500' }, // 3 dp
+    { currency: 'GPU_HOUR', input: '1.234567', expected: '1234567' }, // 6 dp
+    { currency: 'TONNE_CO2E', input: '2.5', expected: '25000' }, // 4 dp
+    { currency: 'JPY', input: '1000', expected: '1000' }, // 0 dp
+    { currency: 'KWD', input: '1.234', expected: '1234' }, // 3 dp
+  ])(
+    'scales amount to instrument precision for $currency',
+    async ({ currency, input, expected }) => {
+      let capturedBody: unknown
+      server.use(
+        http.post(
+          '*/meridian.current_account.v1.CurrentAccountService/DepositFunds',
+          async ({ request }) => {
+            capturedBody = await request.json()
+            return HttpResponse.json({})
+          },
+        ),
+      )
+
+      renderDepositDialog({ currency })
+      await userEvent.type(screen.getByLabelText(/amount/i), input)
+      await userEvent.click(screen.getByRole('button', { name: /deposit/i }))
+
+      await waitFor(() => {
+        expect(capturedBody).toMatchObject({
+          accountId: 'acct-001',
+          amount: { amount: expected },
+        })
+      })
+    },
+  )
+
   it('closes dialog on success', async () => {
     const onOpenChange = vi.fn()
     renderDepositDialog({ onOpenChange })

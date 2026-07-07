@@ -1,21 +1,5 @@
 import { useMemo } from 'react'
-
-// Currencies with non-standard decimal places (ISO 4217)
-const CURRENCY_PRECISION: Record<string, number> = {
-  JPY: 0,
-  KRW: 0,
-  VND: 0,
-  BHD: 3,
-  KWD: 3,
-  OMR: 3,
-}
-
-// Non-fiat instrument types with display configuration
-const NON_FIAT_UNITS: Record<string, { precision: number; suffix: string }> = {
-  kWh: { precision: 3, suffix: ' kWh' },
-  GPU_HOUR: { precision: 6, suffix: ' GPU-hrs' },
-  TONNE_CO2E: { precision: 4, suffix: ' tCO2e' },
-}
+import { NON_FIAT_UNITS, getInstrumentPrecision } from './instrument-precision'
 
 export interface FormatMoneyOptions {
   precision?: number
@@ -38,11 +22,7 @@ export function formatMoney(
   const isNegative = bigAmount < 0n
   const absAmount = isNegative ? -bigAmount : bigAmount
 
-  const prec =
-    options.precision ??
-    NON_FIAT_UNITS[currency]?.precision ??
-    CURRENCY_PRECISION[currency] ??
-    2
+  const prec = options.precision ?? getInstrumentPrecision(currency)
   const divisor = BigInt(10 ** prec)
 
   const intPart = absAmount / divisor
