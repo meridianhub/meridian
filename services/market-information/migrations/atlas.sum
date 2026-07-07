@@ -1,4 +1,4 @@
-h1:f54CM4U8vxBEYxWjEFLNtAyZv8d7+dtg/CWQMFz7q1s=
+h1:iiDHQ4+hl7lk++W7oYj8LsQpnRUBB+65i5SzjJzhnK4=
 20260116000001_initial.sql h1:CzgBK2HKBimqrB1SWGLD2tLaJdypAJ9IQfLqJ44EBu0=
 20260119000002_add_shared_dataset_support.sql h1:iztVWFVc76jnUhqNaNJyE6n51PxTnJsG2D6yjP21L7w=
 20260119000003_add_shared_dataset_index.sql h1:HL5xRFvhhqF5dmptHdppPUadAcpwfDZYDIvazD35KCk=
@@ -14,3 +14,4 @@ h1:f54CM4U8vxBEYxWjEFLNtAyZv8d7+dtg/CWQMFz7q1s=
 20260707000001_add_superseded_at.sql h1:fk3u80tNERR2WRuWwRLJnyVuCMCs/hLj2uD1xc0pM+U=
 20260707000002_backfill_superseded_at.sql h1:RyFtDMaW2ipJXNFCYt+JnvFlTqZ0o2rkS3ZkGjRnJ3Q=
 20260707000003_add_valid_from_cursor_index.sql h1:K587khbIX2ISfHFh7ONf05Jh2ZtHHGtN1cNvNnK48/s=
+20260707000004_add_observation_asof_index.sql h1:0oflXxCtPyd2xSFWKjsaWB2eHsGL2Jo3xQb5THIT2kI=

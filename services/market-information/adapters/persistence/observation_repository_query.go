@@ -155,9 +155,17 @@ func (r *ObservationRepository) scanObservationRows(rows pgx.Rows) ([]observatio
 		if err != nil {
 			return nil, err
 		}
+		// cursorTime tracks valid_from (the ordering key). valid_from is a write-path
+		// invariant (both record paths require it), but fall back to the NOT NULL
+		// created_at if it is ever zero so the token never encodes a pre-epoch value
+		// that parseCursorToken would reject as an opaque invalid page token.
+		cursorTime := obs.ValidFrom()
+		if cursorTime.IsZero() {
+			cursorTime = obs.CreatedAt()
+		}
 		observations = append(observations, observationWithMeta{
 			obs:        obs,
-			cursorTime: obs.ValidFrom(),
+			cursorTime: cursorTime,
 			id:         obs.ID(),
 		})
 	}

@@ -358,6 +358,8 @@ func createSchemaIndexes(ctx context.Context, conn *pgxpool.Conn) error {
 		CREATE INDEX idx_data_source_trust_level ON data_source (trust_level DESC);
 		CREATE INDEX idx_market_price_observation_valid_from_cursor
 			ON market_price_observation (valid_from DESC, id DESC);
+		CREATE INDEX idx_observation_resolution_asof
+			ON market_price_observation (dataset_definition_id, resolution_key, quality DESC, observed_at DESC);
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create indexes: %w", err)

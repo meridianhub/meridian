@@ -98,6 +98,8 @@ CREATE TABLE market_price_observation (
 CREATE INDEX idx_observation_resolution_bitemporal
     ON market_price_observation (resolution_key, quality DESC, observed_at DESC, created_at DESC)
     WHERE superseded_by IS NULL;
+CREATE INDEX idx_observation_resolution_asof
+    ON market_price_observation (dataset_definition_id, resolution_key, quality DESC, observed_at DESC);
 CREATE INDEX idx_observation_dataset
     ON market_price_observation (dataset_definition_id, observed_at DESC);
 CREATE INDEX idx_observation_source
