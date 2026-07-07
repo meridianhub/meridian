@@ -12,15 +12,25 @@ import (
 	"github.com/meridianhub/meridian/services/control-plane/internal/applier"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ"
 	"github.com/meridianhub/meridian/services/control-plane/internal/differ/persistence"
+	"github.com/meridianhub/meridian/services/control-plane/internal/manifest"
 	"github.com/meridianhub/meridian/services/control-plane/internal/planner"
 	"github.com/meridianhub/meridian/services/control-plane/internal/validator"
 	"google.golang.org/grpc"
+	"gorm.io/gorm"
 )
 
 // ApplyManifestServiceConfig holds the configuration for RegisterApplyManifestService.
 type ApplyManifestServiceConfig struct {
 	// Pool is the database connection pool (required).
 	Pool *pgxpool.Pool
+
+	// GormDB is the GORM handle for the control-plane database. When provided,
+	// manifest history is recorded through the versioned HistoryService, giving
+	// each apply a monotonically increasing sequence number with optimistic
+	// concurrency control. When nil, history recording is disabled (suitable for
+	// validate/dry-run-only deployments) and the legacy version store is used
+	// as the single persistence path.
+	GormDB *gorm.DB
 
 	// Logger is the structured logger. Defaults to slog.Default() if nil.
 	Logger *slog.Logger
@@ -57,6 +67,14 @@ func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceC
 
 	versionStore := persistence.NewPostgresManifestVersionStore(cfg.Pool)
 
+	var historyService *manifest.HistoryService
+	if cfg.GormDB != nil {
+		historyService, err = buildManifestHistoryService(cfg.GormDB)
+		if err != nil {
+			return err
+		}
+	}
+
 	var liveState differ.LiveStateProvider
 	if cfg.GRPCConn != nil {
 		var lsErr error
@@ -81,12 +99,13 @@ func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceC
 	}
 
 	handler, err := applier.NewApplyManifestHandler(applier.ApplyManifestHandlerConfig{
-		Validator:    v,
-		Differ:       d,
-		Planner:      p,
-		Executor:     executor,
-		VersionStore: versionStore,
-		Logger:       cfg.Logger,
+		Validator:      v,
+		Differ:         d,
+		Planner:        p,
+		Executor:       executor,
+		VersionStore:   versionStore,
+		HistoryService: historyService,
+		Logger:         cfg.Logger,
 	})
 	if err != nil {
 		return fmt.Errorf("apply manifest handler: %w", err)
@@ -94,6 +113,23 @@ func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceC
 
 	controlplanev1.RegisterApplyManifestServiceServer(server, handler)
 	return nil
+}
+
+// buildManifestHistoryService wires the versioned history service when a GORM
+// handle is available. It is the single source of truth for manifest
+// persistence: sequence numbers are assigned atomically and optimistic-
+// concurrency checks prevent concurrent applies from clobbering each other or
+// producing duplicate sequence-0 rows. Callers guard on a non-nil gormDB.
+func buildManifestHistoryService(gormDB *gorm.DB) (*manifest.HistoryService, error) {
+	repo, err := manifest.NewRepository(gormDB)
+	if err != nil {
+		return nil, fmt.Errorf("manifest repository: %w", err)
+	}
+	historyService, err := manifest.NewHistoryService(repo)
+	if err != nil {
+		return nil, fmt.Errorf("manifest history service: %w", err)
+	}
+	return historyService, nil
 }
 
 // NewHandlerDeps builds HandlerDependencies from a raw gRPC connection that can

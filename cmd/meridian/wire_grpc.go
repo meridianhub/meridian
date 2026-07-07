@@ -434,6 +434,7 @@ func wireControlPlane(ctx context.Context, server *grpc.Server, pool *pgxpool.Po
 
 	if err := controlplaneservice.RegisterApplyManifestService(server, controlplaneservice.ApplyManifestServiceConfig{
 		Pool:        pool,
+		GormDB:      db,
 		Logger:      logger,
 		HandlerDeps: deps,
 		GRPCConn:    loopback.rawConn,
