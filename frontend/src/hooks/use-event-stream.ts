@@ -80,6 +80,20 @@ const MAX_RECONNECT_ATTEMPTS = 5
 const BASE_RECONNECT_DELAY_MS = 1000
 
 /**
+ * Normalizes a tenant identifier for comparison.
+ *
+ * The gateway wire format carries the tenant on `event.tenant_id`, which uses
+ * underscores (e.g. `acme_bank`), while the frontend tenant context may hold a
+ * URL-safe subdomain slug that uses hyphens (e.g. `acme-bank`). Without
+ * normalization the two never compare equal and every event is silently dropped
+ * by the tenant-isolation guard. Lower-casing and unifying the separator makes
+ * the comparison format-agnostic.
+ */
+export function normalizeTenantIdentifier(id: string | null | undefined): string {
+  return (id ?? '').replace(/_/g, '-').toLowerCase()
+}
+
+/**
  * React hook for consuming real-time domain events via WebSocket.
  *
  * Connects to the gateway's /ws/events endpoint and delivers events to
@@ -111,8 +125,10 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
    */
   const handleEvent = useCallback(
     (event: DomainEvent) => {
-      // Enforce tenant isolation - ignore events from other tenants
-      if (event.tenantSlug !== tenantSlug) {
+      // Enforce tenant isolation - ignore events from other tenants.
+      // Compare on a normalized form so a gateway underscore identifier
+      // (acme_bank) still matches a hyphenated context slug (acme-bank).
+      if (normalizeTenantIdentifier(event.tenantSlug) !== normalizeTenantIdentifier(tenantSlug)) {
         return
       }
 
@@ -127,9 +143,13 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
       // Fire user callback if provided
       onEvent?.(event)
 
-      // Auto-invalidate queries based on event type
+      // Auto-invalidate queries based on event type. Build keys from the local
+      // context tenantSlug (the canonical identifier the app's queries are keyed
+      // by) rather than the event's raw tenant field, so invalidation targets
+      // existing caches even when the two identifier formats differ.
       if (autoInvalidate) {
-        const keys = EVENT_QUERY_MAP[event.eventType]?.(event) ?? []
+        const keyEvent = tenantSlug ? { ...event, tenantSlug } : event
+        const keys = EVENT_QUERY_MAP[event.eventType]?.(keyEvent) ?? []
         keys.forEach((key) => {
           queryClient.invalidateQueries({ queryKey: key })
         })

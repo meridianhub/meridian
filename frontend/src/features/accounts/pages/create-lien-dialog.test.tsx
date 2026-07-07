@@ -362,6 +362,40 @@ describe('CreateLienDialog - decimal places', () => {
       })
     })
   })
+
+  it('derives decimal places from the instrument when no override is provided', async () => {
+    let capturedBody: unknown
+    server.use(
+      http.post('*/meridian.current_account.v1.CurrentAccountService/InitiateLien', async ({ request }) => {
+        capturedBody = await request.json()
+        return HttpResponse.json({ lien: { lienId: 'lien-001' } })
+      }),
+    )
+
+    // No decimalPlaces prop: dialog must derive 3 dp from the kWh instrument.
+    renderWithProviders(
+      <MemoryRouter>
+        <CreateLienDialog
+          open
+          onOpenChange={vi.fn()}
+          accountId="acct-001"
+          instrumentCode="kWh"
+          accountType="current"
+        />
+      </MemoryRouter>,
+      { initialToken: tenantToken },
+    )
+
+    await userEvent.type(screen.getByLabelText(/amount/i), '1.5')
+    await userEvent.type(screen.getByLabelText(/reason/i), 'energy-ref-002')
+    await userEvent.click(screen.getByRole('button', { name: /create lien/i }))
+
+    await waitFor(() => {
+      expect(capturedBody).toMatchObject({
+        amount: { amount: '1500' },
+      })
+    })
+  })
 })
 
 describe('CreateLienDialog - cancel', () => {

@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { useTenantContext } from '@/contexts/tenant-context'
 import { tenantKeys } from '@/lib/query-keys'
 import { useAuthenticatedFetch } from '@/hooks/use-authenticated-fetch'
+import { getInstrumentPrecision } from '@/shared/instrument-precision'
 import { amountToBigInt } from './account-form-utils'
 
 interface DepositDialogProps {
@@ -22,11 +23,11 @@ interface DepositDialogProps {
   currency: string
 }
 
-function validateAmount(value: string): string | null {
+function validateAmount(value: string, decimalPlaces: number): string | null {
   const trimmed = value.trim()
   if (!trimmed) return 'Amount is required'
   try {
-    const minorUnits = amountToBigInt(trimmed)
+    const minorUnits = amountToBigInt(trimmed, decimalPlaces)
     if (minorUnits <= 0n) return 'Amount must be greater than zero'
   } catch (err) {
     // amountToBigInt throws 'Amount must be positive' for negative values
@@ -41,6 +42,9 @@ export function DepositDialog({ open, onOpenChange, accountId, currency }: Depos
   const { tenantSlug } = useTenantContext()
   const authFetch = useAuthenticatedFetch()
   const queryClient = useQueryClient()
+  // Derive entry precision from the account instrument so it matches how the
+  // amount is displayed (see money-display / getInstrumentPrecision).
+  const decimalPlaces = getInstrumentPrecision(currency)
   const [amount, setAmount] = React.useState('')
   const [amountError, setAmountError] = React.useState<string | null>(null)
   const [serverError, setServerError] = React.useState<string | null>(null)
@@ -55,7 +59,7 @@ export function DepositDialog({ open, onOpenChange, accountId, currency }: Depos
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const minorUnits = amountToBigInt(amount).toString()
+      const minorUnits = amountToBigInt(amount, decimalPlaces).toString()
       const response = await authFetch(
         `/meridian.current_account.v1.CurrentAccountService/DepositFunds`,
         {
@@ -81,7 +85,7 @@ export function DepositDialog({ open, onOpenChange, accountId, currency }: Depos
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const error = validateAmount(amount)
+    const error = validateAmount(amount, decimalPlaces)
     if (error) {
       setAmountError(error)
       return

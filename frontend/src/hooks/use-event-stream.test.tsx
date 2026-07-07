@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import { EVENT_QUERY_MAP, type DomainEvent, type UseEventStreamOptions } from './use-event-stream'
+import {
+  EVENT_QUERY_MAP,
+  normalizeTenantIdentifier,
+  type DomainEvent,
+  type UseEventStreamOptions,
+} from './use-event-stream'
 
 // --- Mocks ---
 
@@ -104,6 +109,22 @@ afterEach(() => {
 })
 
 // --- Tests ---
+
+describe('normalizeTenantIdentifier', () => {
+  it('unifies underscores and hyphens', () => {
+    expect(normalizeTenantIdentifier('acme_bank')).toBe('acme-bank')
+    expect(normalizeTenantIdentifier('acme-bank')).toBe('acme-bank')
+  })
+
+  it('lower-cases the identifier', () => {
+    expect(normalizeTenantIdentifier('Acme_Bank')).toBe('acme-bank')
+  })
+
+  it('treats null and undefined as empty string', () => {
+    expect(normalizeTenantIdentifier(null)).toBe('')
+    expect(normalizeTenantIdentifier(undefined)).toBe('')
+  })
+})
 
 describe('EVENT_QUERY_MAP', () => {
   it('maps AccountStatusChanged to account query keys', () => {
@@ -248,6 +269,60 @@ describe('useEventStream', () => {
     })
 
     expect(onEvent).not.toHaveBeenCalled()
+  })
+
+  it('matches events when gateway uses underscore tenant_id and context uses a hyphen slug', () => {
+    // Gateway wire format uses underscores (acme_bank); the frontend context
+    // slug is the URL-safe hyphenated form (acme-bank). They must still match.
+    mockTenantSlug.mockReturnValue('acme-bank')
+    const onEvent = vi.fn()
+
+    renderHook(() => useEventStream({ onEvent }), { wrapper: createWrapper() })
+
+    act(() => {
+      mockWsInstances[0].simulateOpen()
+      mockWsInstances[0].simulateMessage(makeServerEvent({ tenantSlug: 'acme_bank' }))
+    })
+
+    expect(onEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('matches events regardless of tenant identifier case', () => {
+    mockTenantSlug.mockReturnValue('Acme')
+    const onEvent = vi.fn()
+
+    renderHook(() => useEventStream({ onEvent }), { wrapper: createWrapper() })
+
+    act(() => {
+      mockWsInstances[0].simulateOpen()
+      mockWsInstances[0].simulateMessage(makeServerEvent({ tenantSlug: 'acme' }))
+    })
+
+    expect(onEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('invalidates queries using the context slug when identifier formats differ', () => {
+    // Context slug is hyphenated; gateway event carries the underscore form.
+    // Invalidation keys must use the context slug so they hit existing caches.
+    mockTenantSlug.mockReturnValue('acme-bank')
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    renderHook(() => useEventStream(), { wrapper: createWrapper(queryClient) })
+
+    act(() => {
+      mockWsInstances[0].simulateOpen()
+      mockWsInstances[0].simulateMessage(makeServerEvent({ tenantSlug: 'acme_bank' }))
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['tenants', 'acme-bank', 'accounts'],
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['tenants', 'acme-bank', 'accounts', 'acc-1'],
+    })
   })
 
   it('invalidates React Query cache when autoInvalidate is true (default)', () => {
