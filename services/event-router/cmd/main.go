@@ -144,81 +144,85 @@ func run(logger *slog.Logger) error {
 	serverErrors, httpCleanup := launchHTTPServer(httpServer, logger)
 	defer httpCleanup()
 
-	// Initialize upstream clients and Kafka consumer
-	pkClient, consumer, mdPublisher, mdsConn, err := initConsumerPipeline(config, logger)
+	// Initialize upstream clients and Kafka consumer. Readiness is driven by the
+	// consumer's OnReady hook so /ready reflects genuine consumer state rather
+	// than being flipped optimistically before the consumer is actually up.
+	onReady := newReadinessCallback(readiness, readinessMu, logger)
+	pipeline, err := initConsumerPipeline(config, onReady, logger)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := pkClient.Close(); err != nil {
-			logger.Error("failed to close position keeping client", "error", err)
-		}
-	}()
-	defer func() {
-		if err := consumer.Close(); err != nil {
-			logger.Error("failed to close audit consumer", "error", err)
-		}
-	}()
+	defer pipeline.closeClients(logger)
 
-	// Start consuming in background
+	// Start consuming in background. Start blocks until shutdown; readiness is
+	// signaled from inside the consume loop via onReady, not here.
 	consumerErrors := make(chan error, 1)
 	go func() {
 		logger.Info("starting audit event consumption")
-		if err := consumer.Start(config.AuditTopics); err != nil {
+		if err := pipeline.consumer.Start(config.AuditTopics); err != nil {
 			logger.Error("consumer error", "error", err)
 			consumerErrors <- fmt.Errorf("consumer error: %w", err)
-			return
 		}
-		readinessMu.Lock()
-		readiness.consumerInitialized = true
-		readinessMu.Unlock()
-		logger.Info("audit consumer ready")
 	}()
 
-	return awaitAndShutdown(httpServer, consumer, mdPublisher, mdsConn, serverErrors, consumerErrors, logger)
+	return awaitAndShutdown(httpServer, pipeline, serverErrors, consumerErrors, logger)
+}
+
+// consumerPipeline bundles the upstream clients and Kafka consumer that make up
+// the event-router processing pipeline, along with the resources released on shutdown.
+type consumerPipeline struct {
+	pkClient    *grpc.PositionKeepingGRPCClient
+	consumer    *messaging.AuditConsumer
+	mdPublisher *mds.MarketDataPublisher
+	mdsConn     *grpclib.ClientConn
+	dlqProducer *kafka.DLQProducer
+}
+
+// closeClients releases the Kafka consumer and position-keeping client.
+func (p *consumerPipeline) closeClients(logger *slog.Logger) {
+	if err := p.consumer.Close(); err != nil {
+		logger.Error("failed to close audit consumer", "error", err)
+	}
+	if err := p.pkClient.Close(); err != nil {
+		logger.Error("failed to close position keeping client", "error", err)
+	}
+}
+
+// newReadinessCallback returns the callback wired into the Kafka consumer's
+// OnReady hook. It marks the consumer ready by writing a bool under the mutex,
+// so it never blocks and can never stall the consume loop.
+func newReadinessCallback(readiness *readinessState, mu *sync.RWMutex, logger *slog.Logger) func() {
+	return func() {
+		mu.Lock()
+		readiness.consumerInitialized = true
+		mu.Unlock()
+		logger.Info("audit consumer ready")
+	}
 }
 
 // initConsumerPipeline creates the Position Keeping client, optional MDS publisher,
-// and Kafka audit consumer.
-func initConsumerPipeline(config *app.Config, logger *slog.Logger) (*grpc.PositionKeepingGRPCClient, *messaging.AuditConsumer, *mds.MarketDataPublisher, *grpclib.ClientConn, error) {
-	// Initialize Position Keeping client
+// dead-letter-queue producer, and Kafka audit consumer. onReady is wired into the
+// consumer so readiness reflects genuine consumer state.
+func initConsumerPipeline(config *app.Config, onReady func(), logger *slog.Logger) (*consumerPipeline, error) {
 	pkClient, err := initPKClient(config, logger)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 
-	// Initialize MDS publisher (optional, controlled by feature flag)
-	var consumerOpts []messaging.AuditConsumerOption
-	var mdPublisher *mds.MarketDataPublisher
-	var mdsConn *grpclib.ClientConn
+	consumerOpts, mdPublisher, mdsConn := buildMDSOutput(config, logger)
 
-	if config.EnableMDSOutput && config.MDSServiceAddr != "" {
-		logger.Info("initializing MDS publisher",
-			"mds_service_addr", config.MDSServiceAddr,
-			"aggregation_window", config.MDSAggregationWindow,
-			"flush_interval", config.MDSFlushInterval)
-
-		mdPublisher, mdsConn, err = initMDSPublisher(config, logger)
-		if err != nil {
-			logger.Error("failed to initialize MDS publisher, continuing without MDS output",
-				"error", err)
-		} else {
-			consumerOpts = append(consumerOpts, messaging.WithMDSPublisher(mdPublisher))
-		}
-	} else {
-		logger.Info("MDS output disabled",
-			"enable_mds_output", config.EnableMDSOutput,
-			"mds_service_addr", config.MDSServiceAddr)
-	}
-
-	// Parse tenant mapping and create transformer
 	transformer, err := createTransformer(config, logger)
 	if err != nil {
 		_ = pkClient.Close()
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 
-	// Initialize Kafka consumer
+	dlqProducer, dlqConfig, err := initDLQProducer(config, logger)
+	if err != nil {
+		_ = pkClient.Close()
+		return nil, err
+	}
+
 	logger.Info("initializing kafka consumer",
 		"topics", config.AuditTopics,
 		"group_id", config.ConsumerGroupID)
@@ -229,15 +233,76 @@ func initConsumerPipeline(config *app.Config, logger *slog.Logger) (*grpc.Positi
 		ClientID:         "event-router",
 		AutoOffsetReset:  "earliest",
 		EnableAutoCommit: false,
+		DLQProducer:      dlqProducer,
+		DLQConfig:        &dlqConfig,
+		OnReady:          onReady,
 	}
 
 	consumer, err := messaging.NewAuditConsumer(kafkaConfig, transformer, pkClient, consumerOpts...)
 	if err != nil {
 		_ = pkClient.Close()
-		return nil, nil, nil, nil, fmt.Errorf("failed to create audit consumer: %w", err)
+		dlqProducer.Close()
+		return nil, fmt.Errorf("failed to create audit consumer: %w", err)
 	}
 
-	return pkClient, consumer, mdPublisher, mdsConn, nil
+	return &consumerPipeline{
+		pkClient:    pkClient,
+		consumer:    consumer,
+		mdPublisher: mdPublisher,
+		mdsConn:     mdsConn,
+		dlqProducer: dlqProducer,
+	}, nil
+}
+
+// buildMDSOutput initializes the optional MDS publisher and returns the consumer
+// options plus the resources released on shutdown. A failed MDS init is logged
+// and the pipeline continues without MDS output (best-effort dual output).
+func buildMDSOutput(config *app.Config, logger *slog.Logger) ([]messaging.AuditConsumerOption, *mds.MarketDataPublisher, *grpclib.ClientConn) {
+	if !config.EnableMDSOutput || config.MDSServiceAddr == "" {
+		logger.Info("MDS output disabled",
+			"enable_mds_output", config.EnableMDSOutput,
+			"mds_service_addr", config.MDSServiceAddr)
+		return nil, nil, nil
+	}
+
+	logger.Info("initializing MDS publisher",
+		"mds_service_addr", config.MDSServiceAddr,
+		"aggregation_window", config.MDSAggregationWindow,
+		"flush_interval", config.MDSFlushInterval)
+
+	mdPublisher, mdsConn, err := initMDSPublisher(config, logger)
+	if err != nil {
+		logger.Error("failed to initialize MDS publisher, continuing without MDS output",
+			"error", err)
+		return nil, nil, nil
+	}
+	return []messaging.AuditConsumerOption{messaging.WithMDSPublisher(mdPublisher)}, mdPublisher, mdsConn
+}
+
+// initDLQProducer creates the Kafka dead-letter-queue producer for poison audit
+// messages. After the configured retries are exhausted, a failing message is
+// routed to a per-topic DLQ ("<topic>-dlq") instead of blocking the consumer or
+// looping indefinitely, and the offset is committed so consumption proceeds.
+func initDLQProducer(config *app.Config, logger *slog.Logger) (*kafka.DLQProducer, kafka.DLQConfig, error) {
+	producer, err := kafka.NewProtoProducer(kafka.ProducerConfig{
+		BootstrapServers: config.KafkaBootstrapServers,
+		ClientID:         "event-router-dlq",
+	})
+	if err != nil {
+		return nil, kafka.DLQConfig{}, fmt.Errorf("failed to create DLQ producer: %w", err)
+	}
+
+	dlqConfig := kafka.DefaultDLQConfig(config.ConsumerGroupID)
+	dlqProducer, err := kafka.NewDLQProducer(producer, dlqConfig)
+	if err != nil {
+		producer.Close()
+		return nil, kafka.DLQConfig{}, fmt.Errorf("failed to create DLQ producer wrapper: %w", err)
+	}
+
+	logger.Info("dead letter queue configured",
+		"topic_suffix", dlqConfig.DLQTopicSuffix,
+		"max_retries", dlqConfig.MaxRetries)
+	return dlqProducer, dlqConfig, nil
 }
 
 // launchHTTPServer starts the HTTP server in a background goroutine and returns
@@ -320,9 +385,7 @@ func initPKClient(config *app.Config, logger *slog.Logger) (*grpc.PositionKeepin
 // awaitAndShutdown waits for a shutdown signal or error, then gracefully stops all components.
 func awaitAndShutdown(
 	httpServer *http.Server,
-	consumer *messaging.AuditConsumer,
-	mdPublisher *mds.MarketDataPublisher,
-	mdsConn *grpclib.ClientConn,
+	pipeline *consumerPipeline,
 	serverErrors, consumerErrors chan error,
 	logger *slog.Logger,
 ) error {
@@ -347,16 +410,26 @@ func awaitAndShutdown(
 	defer cancel()
 
 	logger.Info("stopping kafka consumer...")
-	consumer.Stop()
+	pipeline.consumer.Stop()
 	logger.Info("kafka consumer stopped")
 
-	if mdPublisher != nil {
+	// Flush the consumer (no longer producing) before closing the DLQ producer
+	// so any poison messages captured just before shutdown are delivered.
+	if pipeline.dlqProducer != nil {
+		if err := pipeline.dlqProducer.Flush(shutdownCtx); err != nil {
+			logger.Error("failed to flush DLQ producer", "error", err)
+		}
+		pipeline.dlqProducer.Close()
+		logger.Info("DLQ producer stopped")
+	}
+
+	if pipeline.mdPublisher != nil {
 		logger.Info("flushing MDS publisher...")
-		mdPublisher.Stop()
+		pipeline.mdPublisher.Stop()
 		logger.Info("MDS publisher stopped")
 	}
-	if mdsConn != nil {
-		if err := mdsConn.Close(); err != nil {
+	if pipeline.mdsConn != nil {
+		if err := pipeline.mdsConn.Close(); err != nil {
 			logger.Error("failed to close MDS gRPC connection", "error", err)
 		}
 	}

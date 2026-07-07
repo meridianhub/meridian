@@ -8,6 +8,12 @@ import (
 	"github.com/meridianhub/meridian/shared/platform/quantity"
 )
 
+// MeasurementAttrEventID is the measurement attribute key that carries the
+// source audit event's stable ID. It is populated by the metering handler and
+// read by the Position Keeping client to derive a per-event idempotency key so
+// Kafka redelivery of the same audit event does not double-count utilization.
+const MeasurementAttrEventID = "event_id"
+
 // UtilizationMeasurement represents a single utilization measurement derived from an audit event.
 // This will be sent to Position Keeping service as a position change for tenant-zero billing.
 type UtilizationMeasurement struct {

@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"time"
 
+	commonv1 "github.com/meridianhub/meridian/api/proto/meridian/common/v1"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
 	"github.com/meridianhub/meridian/services/event-router/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	platformgrpc "github.com/meridianhub/meridian/shared/pkg/grpc"
+	"github.com/meridianhub/meridian/shared/platform/quantity"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -212,34 +214,45 @@ func (c *PositionKeepingGRPCClient) buildRecordMeasurementRequest(measurement *a
 	// Timestamp from the period start (audit events are point-in-time)
 	timestamp := timestamppb.New(measurement.Period.Start)
 
-	// Build metadata from measurement attributes
-	metadata := make(map[string]string)
-	for k, v := range measurement.Attributes {
-		metadata[k] = v
-	}
-	// Add source info to metadata
-	metadata["source"] = measurement.Source
-	metadata["quality_score"] = fmt.Sprintf("%d", measurement.QualityScore)
-
-	// Add instrument metadata for typed quantity reconstruction.
-	// Position Keeping can use these fields to create properly typed quantities
-	// using the Universal Asset System's InstrumentAmount proto or domain types.
-	metadata["instrument_code"] = instrument.Code
-	metadata["instrument_version"] = fmt.Sprintf("%d", instrument.Version)
-	metadata["instrument_dimension"] = instrument.Dimension
-	metadata["instrument_precision"] = fmt.Sprintf("%d", instrument.Precision)
-
 	// Position state ID is the AccountID (the billing account for this tenant)
 	positionStateID := measurement.AccountID.String()
 
-	return &positionkeepingv1.RecordMeasurementRequest{
+	req := &positionkeepingv1.RecordMeasurementRequest{
 		MeasurementType: measurementType,
 		Value:           value,
 		Unit:            unit,
 		Timestamp:       timestamp,
-		Metadata:        metadata,
+		Metadata:        buildMeasurementMetadata(measurement, instrument),
 		PositionStateId: positionStateID,
 	}
+
+	// Derive a per-event idempotency key from the stable source audit event ID
+	// so Kafka redelivery of the same event is deduplicated by Position Keeping
+	// instead of double-counting utilization. Absent when the event ID is not
+	// carried on the measurement (e.g. non-audit callers); we omit the key
+	// rather than sending the measurement's random ID, which would not dedupe.
+	if eventID := measurement.Attributes[domain.MeasurementAttrEventID]; eventID != "" {
+		req.IdempotencyKey = &commonv1.IdempotencyKey{Key: eventID}
+	}
+
+	return req
+}
+
+// buildMeasurementMetadata assembles the proto metadata map from the measurement
+// attributes, source/quality info, and instrument fields for typed quantity
+// reconstruction on the Position Keeping side (Universal Asset System).
+func buildMeasurementMetadata(measurement *auditdomain.Measurement, instrument quantity.Instrument) map[string]string {
+	metadata := make(map[string]string, len(measurement.Attributes)+6)
+	for k, v := range measurement.Attributes {
+		metadata[k] = v
+	}
+	metadata["source"] = measurement.Source
+	metadata["quality_score"] = fmt.Sprintf("%d", measurement.QualityScore)
+	metadata["instrument_code"] = instrument.Code
+	metadata["instrument_version"] = fmt.Sprintf("%d", instrument.Version)
+	metadata["instrument_dimension"] = instrument.Dimension
+	metadata["instrument_precision"] = fmt.Sprintf("%d", instrument.Precision)
+	return metadata
 }
 
 // handleRecordMeasurementError logs and records metrics for RecordMeasurement errors.

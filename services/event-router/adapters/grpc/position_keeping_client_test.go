@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	positionkeepingv1 "github.com/meridianhub/meridian/api/proto/meridian/position_keeping/v1"
 	auditdomain "github.com/meridianhub/meridian/services/audit-worker/domain"
+	eventrouterdomain "github.com/meridianhub/meridian/services/event-router/domain"
 	sharedclients "github.com/meridianhub/meridian/shared/pkg/clients"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
@@ -312,6 +313,47 @@ func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest(t *testing.T) {
 	assert.Equal(t, "1", req.Metadata["instrument_version"])
 	assert.Equal(t, "COUNT", req.Metadata["instrument_dimension"])
 	assert.Equal(t, "0", req.Metadata["instrument_precision"])
+}
+
+func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_SetsIdempotencyKeyFromEventID(t *testing.T) {
+	client := &PositionKeepingGRPCClient{}
+	measurement := createTestMeasurement()
+	measurement.Attributes[eventrouterdomain.MeasurementAttrEventID] = "evt-abc-123"
+
+	req := client.buildRecordMeasurementRequest(measurement)
+
+	require.NotNil(t, req.IdempotencyKey)
+	assert.Equal(t, "evt-abc-123", req.IdempotencyKey.Key)
+}
+
+func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_StableIdempotencyKeyAcrossRedelivery(t *testing.T) {
+	client := &PositionKeepingGRPCClient{}
+
+	// Two transforms of the same audit event mint different random measurement
+	// IDs but carry the same event_id, so the idempotency key must be identical.
+	first := createTestMeasurement()
+	first.ID = uuid.New()
+	first.Attributes[eventrouterdomain.MeasurementAttrEventID] = "evt-stable-1"
+	second := createTestMeasurement()
+	second.ID = uuid.New()
+	second.Attributes[eventrouterdomain.MeasurementAttrEventID] = "evt-stable-1"
+
+	reqA := client.buildRecordMeasurementRequest(first)
+	reqB := client.buildRecordMeasurementRequest(second)
+
+	require.NotNil(t, reqA.IdempotencyKey)
+	require.NotNil(t, reqB.IdempotencyKey)
+	assert.Equal(t, reqA.IdempotencyKey.Key, reqB.IdempotencyKey.Key)
+	assert.NotEqual(t, first.ID, second.ID)
+}
+
+func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_NoIdempotencyKeyWhenEventIDAbsent(t *testing.T) {
+	client := &PositionKeepingGRPCClient{}
+	measurement := createTestMeasurement() // no event_id attribute
+
+	req := client.buildRecordMeasurementRequest(measurement)
+
+	assert.Nil(t, req.IdempotencyKey)
 }
 
 func TestPositionKeepingGRPCClient_buildRecordMeasurementRequest_TransactionUnit(t *testing.T) {

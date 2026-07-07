@@ -157,6 +157,54 @@ func TestProcessMessage_HandlerError(t *testing.T) {
 	}
 }
 
+func TestSignalReady_FiresCallbackExactlyOnce(t *testing.T) {
+	var calls int
+	consumer := createTestConsumer(func(_ context.Context, _ []byte, _ proto.Message) error {
+		return nil
+	}, nil, nil)
+	defer consumer.cancel()
+	consumer.onReady = func() { calls++ }
+
+	// Multiple invocations must run the callback at most once.
+	consumer.signalReady()
+	consumer.signalReady()
+	consumer.signalReady()
+
+	if calls != 1 {
+		t.Errorf("expected onReady to fire exactly once, got %d", calls)
+	}
+}
+
+func TestSignalReady_NilCallbackIsSafe(_ *testing.T) {
+	consumer := createTestConsumer(func(_ context.Context, _ []byte, _ proto.Message) error {
+		return nil
+	}, nil, nil)
+	defer consumer.cancel()
+	consumer.onReady = nil
+
+	// Must not panic when no callback is configured.
+	consumer.signalReady()
+}
+
+func TestNewProtoConsumer_WiresOnReadyCallback(t *testing.T) {
+	var fired bool
+	consumer, err := NewProtoConsumer(ConsumerConfig{
+		BootstrapServers: "localhost:9092",
+		GroupID:          "test-group",
+		OnReady:          func() { fired = true },
+	}, func() proto.Message { return &timestamppb.Timestamp{} },
+		func(_ context.Context, _ []byte, _ proto.Message) error { return nil })
+	if err != nil {
+		t.Skip("Kafka client init unavailable, skipping")
+	}
+	defer func() { _ = consumer.Close() }()
+
+	consumer.signalReady()
+	if !fired {
+		t.Error("expected OnReady from config to be wired into the consumer")
+	}
+}
+
 func TestProcessMessageWithRetry_NoDLQ(t *testing.T) {
 	handlerErr := errors.New("processing failed")
 	handler := func(_ context.Context, _ []byte, _ proto.Message) error {
