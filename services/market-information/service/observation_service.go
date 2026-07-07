@@ -156,12 +156,17 @@ func domainObservationToProto(obs domain.MarketPriceObservation, attributes []*q
 		ResolutionKeyValue: obs.ResolutionKey(),
 		ObservedAt:         timestamppb.New(obs.ObservedAt()),
 		ValidFrom:          timestamppb.New(obs.ValidFrom()),
-		ValidTo:            timestamppb.New(obs.ValidTo()),
 		Value:              obs.Value().String(),
 		Quality:            domainQualityLevelToProto(obs.QualityLevel()),
 		SourceId:           obs.SourceID().String(),
 		CreatedAt:          timestamppb.New(obs.CreatedAt()),
 		Attributes:         attributes,
+	}
+
+	// valid_to is optional: a zero value denotes open-ended validity and is emitted
+	// as an unset field rather than a zero-time (year 1) timestamp.
+	if !obs.ValidTo().IsZero() {
+		pbObs.ValidTo = timestamppb.New(obs.ValidTo())
 	}
 
 	// Set optional superseded fields

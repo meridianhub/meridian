@@ -149,7 +149,12 @@ func (s *Server) buildAndPersistObservation(
 	}
 
 	qualityLevel := protoQualityLevelToDomain(req.Quality)
-	validTo := time.Now().Add(100 * 365 * 24 * time.Hour)
+	// An omitted valid_to means open-ended validity. Persist it as the zero value
+	// (stored as NULL) rather than a non-deterministic now+100y, so two open-ended
+	// observations for the same period share an identical (NULL) valid_to and quality
+	// supersession still matches them. A non-deterministic default would give each
+	// record a different valid_to and silently break supersession for open-ended periods.
+	var validTo time.Time
 	if req.ValidTo != nil {
 		validTo = req.ValidTo.AsTime()
 	}
@@ -261,7 +266,10 @@ func (s *Server) validateObservation(dataset domain.DataSetDefinition, req *pb.R
 		return nil
 	}
 
-	// Determine valid_to for validation
+	// Determine valid_to for validation only. Unlike the persisted valid_to (which is
+	// left NULL for open-ended validity so supersession can match on period), the CEL
+	// input uses a far-future sentinel so tenant expressions like `valid_from < valid_to`
+	// still hold for open-ended observations. Do not "align" this with the persisted NULL.
 	validTo := time.Now().Add(100 * 365 * 24 * time.Hour)
 	if req.ValidTo != nil {
 		validTo = req.ValidTo.AsTime()
