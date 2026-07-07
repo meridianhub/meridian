@@ -77,9 +77,46 @@ func GatewayManifestRBACStreamInterceptor(rbac grpc.StreamServerInterceptor) grp
 	}
 }
 
+// gatewayIdentityKeys are the gateway-verified identity metadata keys forwarded
+// onto loopback self-calls. Only these keys are propagated - never arbitrary
+// client metadata - so a loopback call re-derives the exact principal the outer
+// RBAC already authorized, and nothing else.
+var gatewayIdentityKeys = []string{mdKeyUserID, mdKeyAuthRoles, mdKeyTenantID}
+
+// forwardGatewayIdentity copies the gateway-verified identity metadata from the
+// incoming context onto the outgoing context. Loopback handlers (e.g.
+// RollbackManifest re-applying a version through the RBAC-guarded ApplyManifest
+// server) make a real gRPC round-trip back through the same server; without this
+// the inner call carries no principal and RBAC denies it. Because the incoming
+// context already holds the gateway-stripped-and-re-emitted identity, forwarding
+// only these three keys preserves the security property: an inner apply is
+// authorized exactly when the caller's identity was authorized on the outer RPC.
+func forwardGatewayIdentity(ctx context.Context) context.Context {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ctx
+	}
+	var pairs []string
+	for _, key := range gatewayIdentityKeys {
+		for _, v := range md.Get(key) {
+			pairs = append(pairs, key, v)
+		}
+	}
+	if len(pairs) == 0 {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, pairs...)
+}
+
 // claimsFromGatewayMetadata reconstructs auth.Claims from gateway-propagated
 // identity metadata. It returns nil when no authenticated principal is present
 // (no x-user-id), so downstream RBAC denies the request.
+//
+// Note: the reconstructed claims carry no Scopes and no ScopesContextKey is set
+// on this path, so API-key scope enforcement in checkManifestRBAC is skipped on
+// the unified binary - only role checks apply. Roles are the enforcement
+// mechanism here (the gateway validates the JWT and re-emits x-auth-roles). Do
+// not assume scope-based authorization is active on the loopback path.
 func claimsFromGatewayMetadata(ctx context.Context) *auth.Claims {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {

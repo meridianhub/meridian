@@ -64,5 +64,9 @@ type loopbackApplyManifestAdapter struct {
 }
 
 func (a loopbackApplyManifestAdapter) ApplyManifest(ctx context.Context, req *controlplanev1.ApplyManifestRequest) (*controlplanev1.ApplyManifestResponse, error) {
-	return a.c.ApplyManifest(ctx, req)
+	// The loopback ApplyManifest server enforces manifest RBAC, which requires a
+	// principal. Forward the caller's gateway-verified identity so the inner apply
+	// (e.g. from RollbackManifest) is authorized as the same admin who passed the
+	// outer RBAC. Without this the inner call carries no principal and always fails.
+	return a.c.ApplyManifest(forwardGatewayIdentity(ctx), req)
 }
