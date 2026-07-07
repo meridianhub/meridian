@@ -118,6 +118,12 @@ func (h *PlatformMeteringHandler) handleAuditEvent(ctx context.Context, channel 
 		return nil
 	}
 
+	// Carry the stable source event ID on the measurement so the Position
+	// Keeping client can derive a per-event idempotency key. The transformer
+	// mints a fresh random measurement ID on every call, so redelivery must key
+	// off the audit event's own ID to avoid double-counting utilization.
+	stampEventID(measurement, event.EventId)
+
 	if err := h.recordMeasurement(ctx, event, measurement); err != nil {
 		return err
 	}
@@ -171,6 +177,19 @@ func (h *PlatformMeteringHandler) publishToMDS(measurement *auditdomain.Measurem
 	utilMeasurement := domain.MeasurementToUtilization(measurement)
 	h.mdPublisher.Publish(utilMeasurement)
 	domain.RecordMDSPublish("success")
+}
+
+// stampEventID records the source audit event ID on the measurement attributes
+// under domain.MeasurementAttrEventID. Empty IDs are skipped so an absent key
+// simply omits the idempotency key downstream rather than sending a blank one.
+func stampEventID(measurement *auditdomain.Measurement, eventID string) {
+	if eventID == "" {
+		return
+	}
+	if measurement.Attributes == nil {
+		measurement.Attributes = make(map[string]string, 1)
+	}
+	measurement.Attributes[domain.MeasurementAttrEventID] = eventID
 }
 
 // HasMDSPublisher returns whether the handler has an MDS publisher configured.

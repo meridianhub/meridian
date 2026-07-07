@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meridianhub/meridian/services/event-router/app"
 	"github.com/meridianhub/meridian/shared/platform/await"
 )
 
@@ -44,6 +45,59 @@ func TestHealthEndpoint_Liveness(_ *testing.T) {
 	// This is a placeholder test that will be expanded with full integration tests.
 	// The actual service startup is tested in TestHealthEndpoint_Integration.
 	// This test just verifies environment variable handling and basic setup.
+}
+
+func TestInitDLQProducer_ConfiguresDeadLetterQueue(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &app.Config{
+		KafkaBootstrapServers: "localhost:9092",
+		ConsumerGroupID:       "event-router-test",
+	}
+
+	dlqProducer, dlqConfig, err := initDLQProducer(cfg, logger)
+	if err != nil {
+		t.Fatalf("initDLQProducer() error = %v", err)
+	}
+	defer dlqProducer.Close()
+
+	if dlqProducer == nil {
+		t.Fatal("expected non-nil DLQ producer")
+	}
+	if dlqConfig.ConsumerGroupID != "event-router-test" {
+		t.Errorf("consumer group: got %q, want %q", dlqConfig.ConsumerGroupID, "event-router-test")
+	}
+	// Poison messages route to a per-topic DLQ using the configured suffix.
+	if got := dlqConfig.DLQTopicName("audit.events.current-account.v1"); got != "audit.events.current-account.v1-dlq" {
+		t.Errorf("DLQ topic: got %q, want %q", got, "audit.events.current-account.v1-dlq")
+	}
+	if dlqConfig.MaxRetries < 1 {
+		t.Errorf("expected at least one retry before DLQ, got %d", dlqConfig.MaxRetries)
+	}
+}
+
+func TestNewReadinessCallback_MarksConsumerReady(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	readiness := &readinessState{}
+	readinessMu := &sync.RWMutex{}
+
+	callback := newReadinessCallback(readiness, readinessMu, logger)
+
+	// Before the callback fires, the consumer must not be reported ready.
+	readinessMu.RLock()
+	before := readiness.consumerInitialized
+	readinessMu.RUnlock()
+	if before {
+		t.Fatal("expected consumer to start not-ready")
+	}
+
+	callback()
+
+	readinessMu.RLock()
+	after := readiness.consumerInitialized
+	readinessMu.RUnlock()
+	if !after {
+		t.Error("expected callback to mark the consumer ready")
+	}
 }
 
 func TestCreateHTTPServer(t *testing.T) {

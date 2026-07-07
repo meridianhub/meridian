@@ -91,6 +91,24 @@ func TestPlatformMeteringHandler_Handle_Success(t *testing.T) {
 	assert.Equal(t, "INSERT", measurements[0].Attributes["operation"])
 }
 
+// TestPlatformMeteringHandler_Handle_StampsEventIDForIdempotency verifies the
+// stable source event ID is carried on the measurement attributes so downstream
+// idempotency can dedupe Kafka redeliveries.
+func TestPlatformMeteringHandler_Handle_StampsEventIDForIdempotency(t *testing.T) {
+	transformer := newTestTransformer()
+	mockPK := newMockPositionKeepingClient()
+
+	h, err := NewPlatformMeteringHandler(transformer, mockPK)
+	require.NoError(t, err)
+
+	event := newValidAuditEvent()
+	require.NoError(t, h.Handle(context.Background(), "audit.events", event, nil))
+
+	measurements := mockPK.getMeasurements()
+	require.Len(t, measurements, 1)
+	assert.Equal(t, event.EventId, measurements[0].Attributes[domain.MeasurementAttrEventID])
+}
+
 // TestPlatformMeteringHandler_Handle_PKError verifies error propagation when the PK client fails.
 func TestPlatformMeteringHandler_Handle_PKError(t *testing.T) {
 	transformer := newTestTransformer()

@@ -45,6 +45,11 @@ type ProtoConsumer struct {
 	dlqProducer *DLQProducer
 	// dlqConfig contains DLQ behavior configuration
 	dlqConfig *DLQConfig
+	// onReady is an optional callback fired once the consumer is genuinely
+	// subscribed and polling without broker errors (see signalReady).
+	onReady func()
+	// readyOnce guarantees onReady is invoked at most once.
+	readyOnce sync.Once
 	// wg tracks the Subscribe goroutine for graceful shutdown
 	wg sync.WaitGroup
 	// ctx provides cancellation signal for graceful shutdown
@@ -80,6 +85,13 @@ type ConsumerConfig struct {
 	// DLQConfig contains DLQ behavior configuration (retry count, backoff, etc.).
 	// Only used if DLQProducer is not nil.
 	DLQConfig *DLQConfig
+	// OnReady is an optional callback invoked exactly once when the consumer has
+	// genuinely joined the group and completed its first poll cycle without a
+	// broker-level fetch error. Use it to drive readiness probes from actual
+	// consumer state instead of a best-effort guess. The callback MUST NOT block:
+	// it runs inline on the consume loop and is guarded by a sync.Once, so it can
+	// never stall consumption or fire more than once.
+	OnReady func()
 }
 
 var (
@@ -134,9 +146,21 @@ func NewProtoConsumer(config ConsumerConfig, msgFactory func() proto.Message, ha
 		handlerTimeout: config.HandlerTimeout,
 		dlqProducer:    config.DLQProducer,
 		dlqConfig:      config.DLQConfig,
+		onReady:        config.OnReady,
 		ctx:            ctx,
 		cancel:         cancel,
 	}, nil
+}
+
+// signalReady invokes the OnReady callback exactly once. It is safe to call on
+// every poll cycle and from any goroutine; only the first invocation runs the
+// callback. The callback is expected to be non-blocking, so readiness signaling
+// can never stall the consume loop or block forever.
+func (c *ProtoConsumer) signalReady() {
+	if c.onReady == nil {
+		return
+	}
+	c.readyOnce.Do(c.onReady)
 }
 
 // validateConsumerConfig checks required consumer configuration parameters.
@@ -270,16 +294,28 @@ func (c *ProtoConsumer) Subscribe(topics []string) error {
 			fetches := c.client.PollFetches(pollCtx)
 			pollCancel()
 
-			// Check for errors in fetches
+			// Check for errors in fetches. A poll cycle is "clean" when it
+			// completes without a broker-level fetch error (poll-timeout and
+			// shutdown cancellations do not count). The first clean cycle means
+			// the consumer has joined the group and is genuinely polling.
+			cleanPoll := true
 			if errs := fetches.Errors(); len(errs) > 0 {
 				for _, err := range errs {
-					// Context cancellation is expected during shutdown
+					// Context cancellation is expected during shutdown and on
+					// idle poll timeouts - neither indicates a broker failure.
 					if errors.Is(err.Err, context.Canceled) || errors.Is(err.Err, context.DeadlineExceeded) {
 						continue
 					}
+					cleanPoll = false
 					log.Printf("WARN: Fetch error for topic=%s partition=%d: %v",
 						err.Topic, err.Partition, err.Err)
 				}
+			}
+
+			// Signal readiness once the consumer is subscribed and polling
+			// without broker errors, so /ready reflects actual consumer state.
+			if cleanPoll && c.ctx.Err() == nil {
+				c.signalReady()
 			}
 
 			// Track whether any record processing failed (especially DLQ failures)
