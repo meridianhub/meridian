@@ -66,11 +66,15 @@ type JWKSProvider struct {
 	cacheTTL   time.Duration
 	refreshTTL time.Duration
 
-	mu              sync.RWMutex
-	keys            map[string]*rsa.PublicKey
-	lastFetch       time.Time
-	stopRefresh     chan struct{}
-	closeOnce       sync.Once
+	mu        sync.RWMutex
+	keys      map[string]*rsa.PublicKey
+	lastFetch time.Time
+
+	// refreshCtx is a dedicated background context for the auto-refresh goroutine.
+	// It is independent of any request context so the goroutine survives past the
+	// request that triggered the first fetch. refreshCancel stops it on Close.
+	refreshCtx      context.Context
+	refreshCancel   context.CancelFunc
 	autoRefreshOnce sync.Once
 }
 
@@ -99,13 +103,20 @@ func NewJWKSProvider(_ context.Context, cfg *JWKSProviderConfig) (*JWKSProvider,
 		cfg.RefreshTTL = cfg.CacheTTL / 2
 	}
 
+	// Dedicated background context for the auto-refresh goroutine, independent of
+	// any request context. context.Background() (not the passed-in ctx) ensures the
+	// refresh loop is not tied to the lifecycle of the request that constructs the
+	// provider or triggers the first fetch.
+	refreshCtx, refreshCancel := context.WithCancel(context.Background())
+
 	provider := &JWKSProvider{
-		url:         cfg.URL,
-		client:      cfg.Client,
-		cacheTTL:    cfg.CacheTTL,
-		refreshTTL:  cfg.RefreshTTL,
-		keys:        make(map[string]*rsa.PublicKey),
-		stopRefresh: make(chan struct{}),
+		url:           cfg.URL,
+		client:        cfg.Client,
+		cacheTTL:      cfg.CacheTTL,
+		refreshTTL:    cfg.RefreshTTL,
+		keys:          make(map[string]*rsa.PublicKey),
+		refreshCtx:    refreshCtx,
+		refreshCancel: refreshCancel,
 	}
 
 	// No initial fetch — keys are fetched lazily on first GetKey call.
@@ -137,11 +148,12 @@ func (p *JWKSProvider) GetKey(ctx context.Context, kid string) (*rsa.PublicKey, 
 		return nil, fmt.Errorf("failed to refresh JWKS: %w", err)
 	}
 
-	// Start auto-refresh goroutine after first successful fetch
+	// Start auto-refresh goroutine after first successful fetch.
+	// It runs on the provider's dedicated background context, NOT the request
+	// context, so it survives after the triggering request completes.
 	if p.refreshTTL > 0 {
-		refreshCtx := ctx
 		p.autoRefreshOnce.Do(func() {
-			go p.autoRefresh(refreshCtx)
+			go p.autoRefresh(p.refreshCtx)
 		})
 	}
 
@@ -214,25 +226,22 @@ func (p *JWKSProvider) autoRefresh(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			// Use context derived from parent to maintain proper cancellation chain
+			// Derive a per-refresh timeout from the background context.
 			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			// Ignore errors during automatic refresh - the cache will continue to serve old keys
 			_ = p.refresh(refreshCtx)
 			cancel()
-		case <-p.stopRefresh:
-			return
 		case <-ctx.Done():
+			// Provider closed - stop refreshing.
 			return
 		}
 	}
 }
 
-// Close stops the automatic refresh goroutine.
-// This method is idempotent and safe to call multiple times.
+// Close stops the automatic refresh goroutine by cancelling its background context.
+// This method is idempotent and safe to call multiple times (context.CancelFunc is a no-op after the first call).
 func (p *JWKSProvider) Close() error {
-	p.closeOnce.Do(func() {
-		close(p.stopRefresh)
-	})
+	p.refreshCancel()
 	return nil
 }
 
@@ -272,16 +281,19 @@ func parseRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
 // JWTValidatorWithJWKS extends JWTValidator to support JWKS-based key rotation
 type JWTValidatorWithJWKS struct {
 	provider *JWKSProvider
+	opts     []ValidatorOption
 }
 
-// NewJWTValidatorWithJWKS creates a JWT validator that uses JWKS for public key retrieval
-func NewJWTValidatorWithJWKS(provider *JWKSProvider) (*JWTValidatorWithJWKS, error) {
+// NewJWTValidatorWithJWKS creates a JWT validator that uses JWKS for public key retrieval.
+// Optional ValidatorOptions (WithAudience, WithIssuer) are applied to every token validation.
+func NewJWTValidatorWithJWKS(provider *JWKSProvider, opts ...ValidatorOption) (*JWTValidatorWithJWKS, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("failed to create validator: %w", ErrJWKSProviderNil)
 	}
 
 	return &JWTValidatorWithJWKS{
 		provider: provider,
+		opts:     opts,
 	}, nil
 }
 
@@ -312,7 +324,7 @@ func (v *JWTValidatorWithJWKS) ValidateToken(ctx context.Context, tokenString st
 	}
 
 	// Create validator with the retrieved public key
-	validator, err := NewJWTValidator(publicKey)
+	validator, err := NewJWTValidator(publicKey, v.opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create validator: %w", err)
 	}

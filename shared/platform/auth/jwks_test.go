@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/meridianhub/meridian/shared/platform/await"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -468,6 +470,63 @@ func TestNewJWTValidatorWithJWKS(t *testing.T) {
 		assert.ErrorIs(t, err, ErrJWKSProviderNil)
 		assert.Nil(t, validator)
 	})
+}
+
+func TestJWKSProvider_AutoRefreshSurvivesRequestContext(t *testing.T) {
+	// Regression test: the auto-refresh goroutine must NOT be tied to the
+	// request context that triggered the first fetch. Previously the goroutine
+	// captured the request-scoped ctx and died when that request ended.
+	jwks, _ := createTestJWKS(t)
+
+	var mu sync.Mutex
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requestCount++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(jwks))
+	}))
+	defer server.Close()
+
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return requestCount
+	}
+
+	// CacheTTL is kept small so RefreshTTL is not clamped to CacheTTL/2, letting
+	// the auto-refresh ticker fire within the test window.
+	cfg := &JWKSProviderConfig{
+		URL:        server.URL,
+		Client:     server.Client(),
+		CacheTTL:   100 * time.Millisecond,
+		RefreshTTL: 50 * time.Millisecond,
+	}
+
+	provider, err := NewJWKSProvider(context.Background(), cfg)
+	require.NoError(t, err)
+	defer func() { _ = provider.Close() }()
+
+	// Trigger the first fetch (which starts the auto-refresh goroutine) with a
+	// request-scoped context, then cancel it as though the request had ended.
+	reqCtx, cancel := context.WithCancel(context.Background())
+	_, err = provider.GetKey(reqCtx, "test-key-1")
+	require.NoError(t, err)
+	cancel()
+
+	countAtCancel := count()
+
+	// The background goroutine must keep refreshing despite the cancelled
+	// request context. With the old request-scoped context, the count would
+	// never advance past countAtCancel.
+	err = await.New().
+		AtMost(2 * time.Second).
+		PollInterval(20 * time.Millisecond).
+		Until(func() bool {
+			return count() > countAtCancel
+		})
+	require.NoError(t, err, "auto-refresh goroutine stopped after request context was cancelled")
 }
 
 func TestJWKSProvider_Close(t *testing.T) {
