@@ -533,6 +533,43 @@ func TestAPIKeyMiddleware_MultipleAPIKeys(t *testing.T) {
 	}
 }
 
+// TestAPIKeyMiddleware_ConstantTimeLookup verifies that the constant-time key
+// lookup returns the correct identity for exact matches and rejects near-misses
+// such as prefixes and superstrings of configured keys.
+func TestAPIKeyMiddleware_ConstantTimeLookup(t *testing.T) {
+	config := DefaultAPIKeyConfig()
+	config.APIKeys = map[string]string{
+		"svc-payments-prod-abcdef":  "payments-service",
+		"svc-reporting-prod-123456": "reporting-service",
+	}
+
+	m := NewAPIKeyMiddleware(config)
+	defer m.Close()
+
+	tests := []struct {
+		name   string
+		key    string
+		wantID string
+		wantOK bool
+	}{
+		{"exact match first key", "svc-payments-prod-abcdef", "payments-service", true},
+		{"exact match second key", "svc-reporting-prod-123456", "reporting-service", true},
+		{"empty key", "", "", false},
+		{"unknown key", "totally-different", "", false},
+		{"prefix of a valid key", "svc-payments-prod", "", false},
+		{"superstring of a valid key", "svc-payments-prod-abcdefEXTRA", "", false},
+		{"valid key with trailing space", "svc-payments-prod-abcdef ", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, ok := m.lookupAPIKey(tt.key)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantID, id)
+		})
+	}
+}
+
 // TestAPIKeyMiddleware_ZeroConfigValues verifies that zero config values
 // are replaced with defaults.
 func TestAPIKeyMiddleware_ZeroConfigValues(t *testing.T) {
