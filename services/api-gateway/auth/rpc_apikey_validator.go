@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -46,7 +48,7 @@ type RPCAPIKeyValidator struct {
 	cache    sync.Map // map[string]*cachedValidation
 	cacheTTL time.Duration
 
-	// Per-key rate limiters (keyed by API key prefix for RPC-validated keys)
+	// Per-key rate limiters (keyed by the full-key hash for RPC-validated keys)
 	limiters  sync.Map // map[string]*rpcRateLimiterEntry
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
@@ -162,6 +164,18 @@ func ParsePrefixedKey(apiKey string) (tenantSlug, keyPrefix string, ok bool) {
 	return slug, prefix, true
 }
 
+// HashAPIKey returns a hex-encoded SHA-256 digest of the full API key.
+//
+// The validation cache and per-key rate limiters are keyed on this digest so
+// that entries are scoped to the exact key. Keying on the truncated key prefix
+// (pk_{slug}_{first 8 entropy chars}) would let a forged key that shares a
+// legitimate key's prefix read the legitimate key's cached validation result -
+// authenticating on the prefix alone - or poison it with a negative result.
+func HashAPIKey(apiKey string) string {
+	sum := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(sum[:])
+}
+
 // Validate validates an API key via the Control Plane RPC.
 // Returns the validation result if the key is in pk_{slug}_{...} format and valid.
 // Returns ErrNotPrefixedKey if the key format is not recognized (caller should fall back to legacy).
@@ -171,8 +185,13 @@ func (v *RPCAPIKeyValidator) Validate(ctx context.Context, apiKey string) (*APIK
 		return nil, ErrNotPrefixedKey
 	}
 
+	// Cache is keyed on a hash of the full key, not the truncated prefix, so a
+	// forged key that shares a legitimate key's prefix cannot read (or poison)
+	// the legitimate key's cached result.
+	cacheKey := HashAPIKey(apiKey)
+
 	// Check cache first
-	if cached := v.getCached(keyPrefix); cached != nil {
+	if cached := v.getCached(cacheKey); cached != nil {
 		return cached, nil
 	}
 
@@ -203,21 +222,25 @@ func (v *RPCAPIKeyValidator) Validate(ctx context.Context, apiKey string) (*APIK
 		RateLimitRPS: resp.GetRateLimitRps(),
 	}
 
-	// Cache the result (even if invalid, to prevent brute force)
-	v.setCache(keyPrefix, result)
+	// Cache the result (even if invalid, to prevent brute force). The negative
+	// cache entry is scoped to the exact full-key hash, so it cannot affect any
+	// other key that happens to share this key's prefix.
+	v.setCache(cacheKey, result)
 
 	return result, nil
 }
 
-// AllowRequest checks if the given key prefix is within its rate limit.
-func (v *RPCAPIKeyValidator) AllowRequest(keyPrefix string, rateLimitRPS int32) bool {
+// AllowRequest checks if the given rate-limit key is within its rate limit.
+// The rate-limit key should be the full-key hash (see HashAPIKey) so that two
+// distinct keys sharing a truncated prefix do not share a rate-limit bucket.
+func (v *RPCAPIKeyValidator) AllowRequest(rateKey string, rateLimitRPS int32) bool {
 	if rateLimitRPS <= 0 {
 		rateLimitRPS = 100 // default
 	}
 
 	now := time.Now()
 
-	value, loaded := v.limiters.Load(keyPrefix)
+	value, loaded := v.limiters.Load(rateKey)
 	if loaded {
 		entry, ok := value.(*rpcRateLimiterEntry)
 		if !ok {
@@ -235,7 +258,7 @@ func (v *RPCAPIKeyValidator) AllowRequest(keyPrefix string, rateLimitRPS int32) 
 		lastAccess: now,
 	}
 
-	actual, loaded := v.limiters.LoadOrStore(keyPrefix, entry)
+	actual, loaded := v.limiters.LoadOrStore(rateKey, entry)
 	if loaded {
 		existingEntry, ok := actual.(*rpcRateLimiterEntry)
 		if !ok {
