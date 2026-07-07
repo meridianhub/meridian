@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"gorm.io/gorm"
 
 	eventsv1 "github.com/meridianhub/meridian/api/proto/meridian/events/v1"
 	"github.com/meridianhub/meridian/services/financial-accounting/adapters/persistence"
@@ -25,6 +26,9 @@ import (
 const testTenantID = "test_tenant"
 
 // mockIdempotencyService provides a mock implementation of idempotency.Service for testing.
+// The deposit consumer uses it only as a best-effort fast-path cache; correctness
+// is enforced by the database, so these mocks let us simulate Redis being present,
+// stale, or entirely unavailable.
 type mockIdempotencyService struct {
 	checkFunc       func(ctx context.Context, key idempotency.Key) (*idempotency.Result, error)
 	markPendingFunc func(ctx context.Context, key idempotency.Key, ttl time.Duration) error
@@ -97,12 +101,13 @@ func (m *mockIdempotencyService) IsHeld(ctx context.Context, key idempotency.Key
 	return m.isHeldFunc(ctx, key)
 }
 
-func setupTestServices(t *testing.T) (*service.PostingService, context.Context, func()) {
+func setupTestServices(t *testing.T) (*service.PostingService, *gorm.DB, context.Context, func()) {
 	t.Helper()
 
 	db, cleanup := testdb.SetupPostgres(t, []interface{}{
 		&persistence.LedgerPostingEntity{},
 		&persistence.FinancialBookingLogEntity{},
+		&persistence.DepositIdempotencyEntity{},
 		&audit.AuditOutbox{},
 	})
 
@@ -155,10 +160,17 @@ func setupTestServices(t *testing.T) (*service.PostingService, context.Context, 
 	)`, pq.QuoteIdentifier(schemaName))).Error
 	require.NoError(t, err)
 
+	// Per-deposit idempotency marker table (MON-3). The unique primary key on
+	// dedupe_key enforces exactly-once deposit processing at the database layer.
+	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.deposit_idempotency (
+		dedupe_key VARCHAR(64) PRIMARY KEY,
+		account_id VARCHAR(255) NOT NULL,
+		correlation_id VARCHAR(255),
+		created_at TIMESTAMP WITH TIME ZONE NOT NULL
+	)`, pq.QuoteIdentifier(schemaName))).Error
+	require.NoError(t, err)
+
 	// Create audit_outbox table for GORM hooks
-	// Note: Uses TEXT instead of JSONB for old_values/new_values for compatibility with
-	// the shared audit infrastructure which writes empty strings when values are nil.
-	// record_id is VARCHAR(50) to match the shared AuditOutbox which uses string IDs.
 	err = db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.audit_outbox (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 		table_name VARCHAR(100) NOT NULL,
@@ -185,14 +197,52 @@ func setupTestServices(t *testing.T) (*service.PostingService, context.Context, 
 	ctx := tenant.WithTenant(context.Background(), tid)
 
 	repo := persistence.NewLedgerRepository(db)
-	return service.NewPostingServiceWithConfig(service.PostingServiceConfig{
+	svc := service.NewPostingServiceWithConfig(service.PostingServiceConfig{
 		Repo:              repo,
 		BankCashAccountID: "BANK-CASH-001",
-	}), ctx, cleanup
+	})
+	return svc, db, ctx, cleanup
+}
+
+// countPostings returns the total number of ledger postings in the test tenant
+// schema. Each deposit writes two postings (debit + credit), so this is used to
+// assert the exactly-once guarantee. Each test gets its own isolated database.
+func countPostings(t *testing.T, db *gorm.DB) int64 {
+	t.Helper()
+	schema := tenant.TenantID(testTenantID).SchemaName()
+	var count int64
+	err := db.Table(schema + ".ledger_posting").Count(&count).Error
+	require.NoError(t, err)
+	return count
+}
+
+func validDepositEvent(accountID, correlationID string, amountCents int64) *eventsv1.DepositEvent {
+	now := timestamppb.Now()
+	return &eventsv1.DepositEvent{
+		AccountId:      accountID,
+		AmountCents:    amountCents,
+		InstrumentCode: "GBP",
+		CorrelationId:  correlationID,
+		ValueDate:      now,
+		Timestamp:      now,
+	}
+}
+
+func newTestConsumer(t *testing.T, postingService *service.PostingService, idemp idempotency.Service) *DepositConsumer {
+	t.Helper()
+	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
+		BootstrapServers: "localhost:9092",
+		GroupID:          "test-group",
+	}, postingService, idemp)
+	if err != nil {
+		t.Skip("Kafka not available, skipping integration test")
+	}
+	t.Cleanup(func() { _ = consumer.Close() })
+	return consumer
 }
 
 func TestNewDepositConsumer(t *testing.T) {
-	postingService, _, cleanup := setupTestServices(t)
+	postingService, _, _, cleanup := setupTestServices(t)
 	defer cleanup()
 
 	mockIdemp := newMockIdempotencyService()
@@ -263,7 +313,7 @@ func TestNewDepositConsumer(t *testing.T) {
 }
 
 func TestDepositConsumer_NilIdempotencyService(t *testing.T) {
-	postingService, _, cleanup := setupTestServices(t)
+	postingService, _, _, cleanup := setupTestServices(t)
 	defer cleanup()
 
 	_, err := NewDepositConsumer(kafka.ConsumerConfig{
@@ -276,21 +326,10 @@ func TestDepositConsumer_NilIdempotencyService(t *testing.T) {
 }
 
 func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
+	postingService, _, ctx, cleanup := setupTestServices(t)
 	defer cleanup()
 
-	mockIdemp := newMockIdempotencyService()
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
+	consumer := newTestConsumer(t, postingService, newMockIdempotencyService())
 
 	tests := []struct {
 		name    string
@@ -298,15 +337,8 @@ func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid deposit event",
-			event: &eventsv1.DepositEvent{
-				AccountId:      "ACC-123",
-				AmountCents:    10000,
-				InstrumentCode: "GBP",
-				CorrelationId:  "deposit-001",
-				ValueDate:      timestamppb.Now(),
-				Timestamp:      timestamppb.Now(),
-			},
+			name:    "valid deposit event",
+			event:   validDepositEvent("ACC-123", "deposit-001", 10000),
 			wantErr: false,
 		},
 		{
@@ -349,7 +381,7 @@ func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
 			err := consumer.handleDepositEvent(testCtx, tt.event)
@@ -360,460 +392,11 @@ func TestDepositConsumer_HandleDepositEvent(t *testing.T) {
 	}
 }
 
-func TestDepositConsumer_IdempotencyCache(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	// Mock idempotency service that returns already processed
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.checkFunc = func(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
-		return &idempotency.Result{
-			Status: idempotency.StatusCompleted,
-		}, idempotency.ErrOperationAlreadyProcessed
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-DUPLICATE",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-duplicate",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	// Should succeed without error (idempotent success)
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.NoError(t, err, "handleDepositEvent should return nil for already processed events")
-}
-
-func TestDepositConsumer_IdempotencyLockAcquisition(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	var acquireCalled bool
-	var capturedKey idempotency.Key
-	var capturedOpts idempotency.LockOptions
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.acquireFunc = func(_ context.Context, key idempotency.Key, opts idempotency.LockOptions) error {
-		acquireCalled = true
-		capturedKey = key
-		capturedOpts = opts
-		return nil
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-LOCK",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-lock-test",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	_ = consumer.handleDepositEvent(testCtx, event)
-
-	assert.True(t, acquireCalled, "Acquire should be called for lock")
-	assert.Equal(t, "financial-accounting", capturedKey.Namespace)
-	assert.Equal(t, "process-deposit", capturedKey.Operation)
-	assert.Equal(t, "ACC-LOCK", capturedKey.EntityID)
-	assert.Equal(t, "deposit-lock-test", capturedKey.RequestID)
-	assert.Equal(t, lockTTL, capturedOpts.TTL)
-	assert.NotEmpty(t, capturedOpts.Token, "Lock token should be generated")
-	assert.Equal(t, 0, capturedOpts.MaxRetries, "Should not retry lock acquisition")
-}
-
-func TestDepositConsumer_IdempotencyStoreSuccess(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	var storeResultCalled bool
-	var capturedResult idempotency.Result
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.storeResultFunc = func(_ context.Context, result idempotency.Result) error {
-		storeResultCalled = true
-		capturedResult = result
-		return nil
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-SUCCESS",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-success-test",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.NoError(t, err)
-
-	assert.True(t, storeResultCalled, "StoreResult should be called on success")
-	assert.Equal(t, idempotency.StatusCompleted, capturedResult.Status)
-	assert.Equal(t, 24*time.Hour, capturedResult.TTL)
-	assert.Nil(t, capturedResult.Data, "Data should be nil for events")
-}
-
-func TestDepositConsumer_IdempotencyStoreFailure(t *testing.T) {
-	// This test verifies that failure results are stored in the idempotency cache.
-	// Proto validation rejects CURRENCY_UNSPECIFIED (not_in: [0]), so we can't use
-	// that to trigger a currency conversion failure. Instead, we test by observing
-	// the call pattern: if proto validation fails first, no idempotency calls happen.
-	//
-	// To properly test failure storage, we would need to mock the PostingService to
-	// fail ProcessDeposit. For now, we verify the error path through proto validation.
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	var checkCalled bool
-	var acquireCalled bool
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.checkFunc = func(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
-		checkCalled = true
-		return nil, idempotency.ErrResultNotFound
-	}
-	mockIdemp.acquireFunc = func(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
-		acquireCalled = true
-		return nil
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	// Use unspecified currency - proto validation will fail first (not_in: [0])
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-FAILURE",
-		AmountCents:    10000,
-		InstrumentCode: "",
-		CorrelationId:  "deposit-failure-test",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid deposit event", "Error should indicate proto validation failure")
-
-	// Proto validation fails before idempotency check, so no idempotency calls should be made
-	assert.False(t, checkCalled, "Idempotency check should not be called when proto validation fails")
-	assert.False(t, acquireCalled, "Acquire should not be called when proto validation fails")
-}
-
-func TestDepositConsumer_IdempotencyKeyFormat(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	var capturedKey idempotency.Key
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.checkFunc = func(_ context.Context, key idempotency.Key) (*idempotency.Result, error) {
-		capturedKey = key
-		return nil, idempotency.ErrResultNotFound
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-KEY-FORMAT",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "correlation-123",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	_ = consumer.handleDepositEvent(testCtx, event)
-
-	assert.Equal(t, "financial-accounting", capturedKey.Namespace)
-	assert.Equal(t, "process-deposit", capturedKey.Operation)
-	assert.Equal(t, "ACC-KEY-FORMAT", capturedKey.EntityID)
-	assert.Equal(t, "correlation-123", capturedKey.RequestID)
-	assert.Equal(t, testTenantID, capturedKey.TenantID)
-}
-
-// errRedisConnection is a test error for simulating Redis failures
-var errRedisConnection = errors.New("redis connection error")
-
-func TestDepositConsumer_IdempotencyCheckFailed(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.checkFunc = func(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
-		return nil, errRedisConnection
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-CHECK-FAIL",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-check-fail",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "idempotency check failed")
-}
-
-func TestDepositConsumer_ConcurrentProcessingRejected(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	// Mock idempotency service that fails to acquire lock (another consumer holds it)
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.acquireFunc = func(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
-		return idempotency.ErrLockAcquisitionFailed
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-CONCURRENT-REJECT",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-concurrent-reject",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrConcurrentProcessing)
-}
-
-func TestDepositConsumer_StoreFailureResult(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	var storeResultCalled bool
-	var capturedResult idempotency.Result
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.storeResultFunc = func(_ context.Context, result idempotency.Result) error {
-		storeResultCalled = true
-		capturedResult = result
-		return nil
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	// Call storeFailureResult directly
-	key := idempotency.Key{
-		Namespace: "financial-accounting",
-		Operation: "process-deposit",
-		EntityID:  "ACC-FAIL-STORE",
-		RequestID: "req-fail-store",
-	}
-	consumer.storeFailureResult(ctx, key, "test error message")
-
-	assert.True(t, storeResultCalled, "StoreResult should be called")
-	assert.Equal(t, idempotency.StatusFailed, capturedResult.Status)
-	assert.Equal(t, "test error message", capturedResult.Error)
-	assert.Equal(t, failureResultTTL, capturedResult.TTL)
-	assert.Nil(t, capturedResult.Data)
-	assert.False(t, capturedResult.CompletedAt.IsZero())
-}
-
-func TestDepositConsumer_StoreFailureResult_BestEffort(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.storeResultFunc = func(_ context.Context, _ idempotency.Result) error {
-		return errors.New("redis unavailable")
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	// storeFailureResult is best-effort, should not panic
-	key := idempotency.Key{
-		Namespace: "financial-accounting",
-		Operation: "process-deposit",
-		EntityID:  "ACC-FAIL-BEST-EFFORT",
-		RequestID: "req-fail-best-effort",
-	}
-	// Should not panic even when StoreResult fails
-	consumer.storeFailureResult(ctx, key, "some error")
-}
-
-func TestDepositConsumer_HandleDepositEvent_EmptyCurrencyStoresFailure(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	var storeResultCalled bool
-	var capturedResult idempotency.Result
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.storeResultFunc = func(_ context.Context, result idempotency.Result) error {
-		storeResultCalled = true
-		capturedResult = result
-		return nil
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	// Valid event but with empty currency - passes proto validation, fails currency check
-	// which triggers storeFailureResult
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-EMPTY-CURRENCY",
-		AmountCents:    10000,
-		InstrumentCode: "", // empty triggers currency validation failure after proto
-		CorrelationId:  "deposit-empty-currency",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid deposit event")
-
-	// Proto validation catches empty instrument_code before the currency check,
-	// so storeFailureResult is NOT called for this case
-	_ = storeResultCalled
-	_ = capturedResult
-}
-
 func TestDepositConsumer_HandleDepositEvent_NilTimestamp(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
+	postingService, _, ctx, cleanup := setupTestServices(t)
 	defer cleanup()
 
-	mockIdemp := newMockIdempotencyService()
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
+	consumer := newTestConsumer(t, postingService, newMockIdempotencyService())
 
 	event := &eventsv1.DepositEvent{
 		AccountId:      "ACC-NO-TS",
@@ -824,201 +407,228 @@ func TestDepositConsumer_HandleDepositEvent_NilTimestamp(t *testing.T) {
 		Timestamp:      nil,
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	err = consumer.handleDepositEvent(testCtx, event)
+	err := consumer.handleDepositEvent(testCtx, event)
 	require.Error(t, err)
 }
 
-func TestDepositConsumer_IdempotencyRecheckAfterLock(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
+// TestDepositConsumer_RedisFastPath_Skips verifies that when Redis reports a
+// deposit as already processed, the consumer short-circuits and writes no
+// postings to the database.
+func TestDepositConsumer_RedisFastPath_Skips(t *testing.T) {
+	postingService, db, ctx, cleanup := setupTestServices(t)
 	defer cleanup()
 
-	// First Check returns not-found, second Check (re-check) returns already-processed
-	checkCallCount := 0
 	mockIdemp := newMockIdempotencyService()
 	mockIdemp.checkFunc = func(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
-		checkCallCount++
-		if checkCallCount == 1 {
-			return nil, idempotency.ErrResultNotFound
-		}
-		return &idempotency.Result{
-			Status: idempotency.StatusCompleted,
-		}, idempotency.ErrOperationAlreadyProcessed
+		return &idempotency.Result{Status: idempotency.StatusCompleted}, idempotency.ErrOperationAlreadyProcessed
 	}
 
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
+	consumer := newTestConsumer(t, postingService, mockIdemp)
 
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-RECHECK",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-recheck",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
+	event := validDepositEvent("ACC-FASTPATH", "deposit-fastpath", 10000)
 
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.NoError(t, err, "should return nil when re-check finds already processed")
-	assert.Equal(t, 2, checkCallCount, "Check should be called twice (initial + re-check)")
+	require.NoError(t, consumer.handleDepositEvent(testCtx, event))
+	assert.Equal(t, int64(0), countPostings(t, db),
+		"Redis fast path should skip the database write entirely")
 }
 
-func TestDepositConsumer_IdempotencyRecheckFailed(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
+// TestDepositConsumer_RedisDown_StillProcesses proves that idempotency survives
+// Redis being unavailable: even when both Check and StoreResult error, the
+// deposit is processed via the authoritative database path.
+func TestDepositConsumer_RedisDown_StillProcesses(t *testing.T) {
+	postingService, db, ctx, cleanup := setupTestServices(t)
 	defer cleanup()
 
-	checkCallCount := 0
+	redisErr := errors.New("redis connection refused")
 	mockIdemp := newMockIdempotencyService()
 	mockIdemp.checkFunc = func(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
-		checkCallCount++
-		if checkCallCount == 1 {
-			return nil, idempotency.ErrResultNotFound
-		}
-		// Re-check returns a non-standard error
-		return nil, errors.New("redis timeout on re-check")
+		return nil, redisErr
 	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-RECHECK-FAIL",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-recheck-fail",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "idempotency re-check failed")
-}
-
-func TestDepositConsumer_AcquireLockFailed_NonLockError(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	mockIdemp := newMockIdempotencyService()
-	mockIdemp.acquireFunc = func(_ context.Context, _ idempotency.Key, _ idempotency.LockOptions) error {
-		return errors.New("redis connection refused")
-	}
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
-
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-ACQUIRE-ERR",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-acquire-err",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	defer cancel()
-
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to acquire lock")
-	assert.NotErrorIs(t, err, ErrConcurrentProcessing)
-}
-
-func TestDepositConsumer_StoreSuccessResultFailed(t *testing.T) {
-	postingService, ctx, cleanup := setupTestServices(t)
-	defer cleanup()
-
-	mockIdemp := newMockIdempotencyService()
 	mockIdemp.storeResultFunc = func(_ context.Context, _ idempotency.Result) error {
-		return errors.New("redis write failed")
+		return redisErr
 	}
 
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
-	defer func() {
-		_ = consumer.Close()
-	}()
+	consumer := newTestConsumer(t, postingService, mockIdemp)
 
-	event := &eventsv1.DepositEvent{
-		AccountId:      "ACC-STORE-FAIL",
-		AmountCents:    10000,
-		InstrumentCode: "GBP",
-		CorrelationId:  "deposit-store-fail",
-		ValueDate:      timestamppb.Now(),
-		Timestamp:      timestamppb.Now(),
-	}
+	event := validDepositEvent("ACC-REDIS-DOWN", "deposit-redis-down", 10000)
 
-	testCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	err = consumer.handleDepositEvent(testCtx, event)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to store idempotency result")
+	require.NoError(t, consumer.handleDepositEvent(testCtx, event),
+		"deposit must succeed even when Redis is unavailable")
+	assert.Equal(t, int64(2), countPostings(t, db),
+		"deposit should be posted (debit + credit) despite Redis errors")
+}
+
+// TestDepositConsumer_DuplicateRedelivery_NoDoublePosting is the core MON-3
+// guarantee: redelivering the same committed deposit produces no second posting.
+func TestDepositConsumer_DuplicateRedelivery_NoDoublePosting(t *testing.T) {
+	postingService, db, ctx, cleanup := setupTestServices(t)
+	defer cleanup()
+
+	// Redis is deliberately blind (always "not processed") so the database marker
+	// is the only thing preventing a duplicate.
+	mockIdemp := newMockIdempotencyService()
+	mockIdemp.checkFunc = func(_ context.Context, _ idempotency.Key) (*idempotency.Result, error) {
+		return nil, idempotency.ErrResultNotFound
+	}
+
+	consumer := newTestConsumer(t, postingService, mockIdemp)
+
+	event := validDepositEvent("ACC-REDELIVER", "deposit-redeliver", 10000)
+
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// First delivery.
+	require.NoError(t, consumer.handleDepositEvent(testCtx, event))
+	// Redelivery of the identical event (same bytes -> same dedupe key).
+	require.NoError(t, consumer.handleDepositEvent(testCtx, event))
+
+	assert.Equal(t, int64(2), countPostings(t, db),
+		"redelivery must not create a second double-entry posting")
+}
+
+// TestDepositConsumer_DistinctDepositsSameCorrelation_BothPost verifies that two
+// genuinely distinct deposits that happen to share a correlation ID are BOTH
+// processed - i.e. the dedupe key is not the correlation ID.
+func TestDepositConsumer_DistinctDepositsSameCorrelation_BothPost(t *testing.T) {
+	postingService, db, ctx, cleanup := setupTestServices(t)
+	defer cleanup()
+
+	consumer := newTestConsumer(t, postingService, newMockIdempotencyService())
+
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Same account and correlation ID, but different amounts -> distinct deposits.
+	first := validDepositEvent("ACC-SAME-CORR", "shared-correlation", 10000)
+	second := validDepositEvent("ACC-SAME-CORR", "shared-correlation", 25000)
+
+	require.NoError(t, consumer.handleDepositEvent(testCtx, first))
+	require.NoError(t, consumer.handleDepositEvent(testCtx, second))
+
+	assert.Equal(t, int64(4), countPostings(t, db),
+		"distinct deposits sharing a correlation ID must both post")
+}
+
+// TestDepositConsumer_IdempotencyKeyFormat verifies the Redis fast-path key is
+// keyed on the per-deposit dedupe fingerprint, not the correlation ID.
+func TestDepositConsumer_IdempotencyKeyFormat(t *testing.T) {
+	postingService, _, ctx, cleanup := setupTestServices(t)
+	defer cleanup()
+
+	var capturedKey idempotency.Key
+	mockIdemp := newMockIdempotencyService()
+	mockIdemp.checkFunc = func(_ context.Context, key idempotency.Key) (*idempotency.Result, error) {
+		capturedKey = key
+		return nil, idempotency.ErrResultNotFound
+	}
+
+	consumer := newTestConsumer(t, postingService, mockIdemp)
+
+	event := validDepositEvent("ACC-KEY-FORMAT", "correlation-123", 10000)
+
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	_ = consumer.handleDepositEvent(testCtx, event)
+
+	expectedDedupe := buildDepositDedupeKey(testCtx, event)
+	assert.Equal(t, "financial-accounting", capturedKey.Namespace)
+	assert.Equal(t, "process-deposit", capturedKey.Operation)
+	assert.Equal(t, "ACC-KEY-FORMAT", capturedKey.EntityID)
+	assert.Equal(t, testTenantID, capturedKey.TenantID)
+	assert.Equal(t, expectedDedupe, capturedKey.RequestID,
+		"Redis key must use the per-deposit dedupe fingerprint, not the correlation ID")
+	assert.NotEqual(t, "correlation-123", capturedKey.RequestID)
+}
+
+// TestDepositConsumer_MarksRedisOnSuccess verifies that a successful deposit
+// records a completed marker in Redis for the fast path on future deliveries.
+func TestDepositConsumer_MarksRedisOnSuccess(t *testing.T) {
+	postingService, _, ctx, cleanup := setupTestServices(t)
+	defer cleanup()
+
+	var storeResultCalled bool
+	var capturedResult idempotency.Result
+	mockIdemp := newMockIdempotencyService()
+	mockIdemp.storeResultFunc = func(_ context.Context, result idempotency.Result) error {
+		storeResultCalled = true
+		capturedResult = result
+		return nil
+	}
+
+	consumer := newTestConsumer(t, postingService, mockIdemp)
+
+	event := validDepositEvent("ACC-SUCCESS", "deposit-success", 10000)
+
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	require.NoError(t, consumer.handleDepositEvent(testCtx, event))
+
+	assert.True(t, storeResultCalled, "StoreResult should be called on success")
+	assert.Equal(t, idempotency.StatusCompleted, capturedResult.Status)
+	assert.Equal(t, 24*time.Hour, capturedResult.TTL)
+	assert.Nil(t, capturedResult.Data, "Data should be nil for events")
+}
+
+func TestBuildDepositDedupeKey(t *testing.T) {
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantID(testTenantID))
+	now := timestamppb.Now()
+	later := timestamppb.New(now.AsTime().Add(time.Second))
+
+	// newEvent constructs a fresh DepositEvent so we never copy a proto value
+	// (proto messages contain a mutex and must not be copied).
+	newEvent := func(amount int64, ts *timestamppb.Timestamp) *eventsv1.DepositEvent {
+		return &eventsv1.DepositEvent{
+			AccountId:      "ACC-DEDUPE",
+			AmountCents:    amount,
+			InstrumentCode: "GBP",
+			CorrelationId:  "corr-1",
+			ValueDate:      now,
+			Timestamp:      ts,
+		}
+	}
+
+	key1 := buildDepositDedupeKey(ctx, newEvent(10000, now))
+	key2 := buildDepositDedupeKey(ctx, newEvent(10000, now))
+	assert.Equal(t, key1, key2, "identical events must produce identical dedupe keys")
+	assert.Len(t, key1, 64, "dedupe key should be a hex-encoded SHA-256 (64 chars)")
+
+	// Differing amount -> different key.
+	assert.NotEqual(t, key1, buildDepositDedupeKey(ctx, newEvent(20000, now)))
+
+	// Same correlation ID but different timestamp -> different key.
+	assert.NotEqual(t, key1, buildDepositDedupeKey(ctx, newEvent(10000, later)))
+
+	// Different tenant -> different key.
+	otherCtx := tenant.WithTenant(context.Background(), tenant.TenantID("other_tenant"))
+	assert.NotEqual(t, key1, buildDepositDedupeKey(otherCtx, newEvent(10000, now)))
 }
 
 func TestDepositConsumer_LifecycleMethods_Exist(t *testing.T) {
 	// Verify Start, Stop, and Close methods exist and have correct signatures.
 	// Actual lifecycle testing requires a Kafka broker, so we test the
 	// consumer's struct fields are properly initialized instead.
-	postingService, _, cleanup := setupTestServices(t)
+	postingService, _, _, cleanup := setupTestServices(t)
 	defer cleanup()
 
-	mockIdemp := newMockIdempotencyService()
-
-	consumer, err := NewDepositConsumer(kafka.ConsumerConfig{
-		BootstrapServers: "localhost:9092",
-		GroupID:          "test-group",
-	}, postingService, mockIdemp)
-	if err != nil {
-		t.Skip("Kafka not available, skipping integration test")
-	}
+	consumer := newTestConsumer(t, postingService, newMockIdempotencyService())
 
 	// Verify all fields are initialized
 	assert.NotNil(t, consumer.consumer, "ProtoConsumer should be initialized")
 	assert.NotNil(t, consumer.postingService, "PostingService should be set")
 	assert.NotNil(t, consumer.idempotency, "Idempotency service should be set")
 	assert.NotNil(t, consumer.validator, "Validator should be initialized")
-
-	// Close the consumer (does not require Kafka to be running for cleanup)
-	_ = consumer.Close()
 }
 
 func TestExtractTenantID(t *testing.T) {

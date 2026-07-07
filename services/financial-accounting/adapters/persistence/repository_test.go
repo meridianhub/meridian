@@ -181,6 +181,117 @@ func TestSavePostingsInTransaction_RollbackOnError(t *testing.T) {
 	assert.Equal(t, int64(0), count)
 }
 
+func setupDepositIdempotencyTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
+	t.Helper()
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(
+			&FinancialBookingLogEntity{},
+			&LedgerPostingEntity{},
+			&DepositIdempotencyEntity{},
+			&audit.AuditOutbox{},
+		),
+		testdb.WithTenant(testTenantID),
+	)
+}
+
+func TestSaveDepositWithIdempotency_FirstSucceedsDuplicateRejected(t *testing.T) {
+	db, ctx, cleanup := setupDepositIdempotencyTestDB(t)
+	defer cleanup()
+
+	repo := NewLedgerRepository(db)
+
+	bookingLogID := uuid.New()
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
+
+	newPostings := func() []*domain.LedgerPosting {
+		return []*domain.LedgerPosting{
+			{
+				ID:                    uuid.New(),
+				FinancialBookingLogID: bookingLogID,
+				Direction:             domain.PostingDirectionDebit,
+				Amount:                money,
+				AccountID:             "ACC-001",
+				ValueDate:             time.Now(),
+				Status:                domain.TransactionStatusPosted,
+				CorrelationID:         "CORR-DUP",
+				CreatedAt:             time.Now(),
+			},
+			{
+				ID:                    uuid.New(),
+				FinancialBookingLogID: bookingLogID,
+				Direction:             domain.PostingDirectionCredit,
+				Amount:                money,
+				AccountID:             "ACC-002",
+				ValueDate:             time.Now(),
+				Status:                domain.TransactionStatusPosted,
+				CorrelationID:         "CORR-DUP",
+				CreatedAt:             time.Now(),
+			},
+		}
+	}
+
+	marker := DepositIdempotencyEntity{
+		DedupeKey:     "dedupe-abc",
+		AccountID:     "ACC-001",
+		CorrelationID: "CORR-DUP",
+		CreatedAt:     time.Now(),
+	}
+
+	// First deposit persists marker + postings atomically.
+	require.NoError(t, repo.SaveDepositWithIdempotency(ctx, marker, newPostings()))
+
+	var count int64
+	require.NoError(t, db.Model(&LedgerPostingEntity{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count)
+
+	// Duplicate deposit (same dedupe key) is rejected and writes no postings.
+	err := repo.SaveDepositWithIdempotency(ctx, marker, newPostings())
+	assert.ErrorIs(t, err, ErrDepositAlreadyProcessed)
+
+	require.NoError(t, db.Model(&LedgerPostingEntity{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count, "duplicate deposit must not add postings")
+}
+
+func TestSaveDepositWithIdempotency_DistinctKeysBothPersist(t *testing.T) {
+	db, ctx, cleanup := setupDepositIdempotencyTestDB(t)
+	defer cleanup()
+
+	repo := NewLedgerRepository(db)
+
+	bookingLogID := uuid.New()
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
+
+	postingsFor := func() []*domain.LedgerPosting {
+		return []*domain.LedgerPosting{
+			{
+				ID:                    uuid.New(),
+				FinancialBookingLogID: bookingLogID,
+				Direction:             domain.PostingDirectionDebit,
+				Amount:                money,
+				AccountID:             "ACC-001",
+				ValueDate:             time.Now(),
+				Status:                domain.TransactionStatusPosted,
+				CorrelationID:         "CORR-SHARED",
+				CreatedAt:             time.Now(),
+			},
+		}
+	}
+
+	// Two distinct dedupe keys (even sharing a correlation ID) both persist.
+	require.NoError(t, repo.SaveDepositWithIdempotency(ctx,
+		DepositIdempotencyEntity{DedupeKey: "dedupe-1", AccountID: "ACC-001", CorrelationID: "CORR-SHARED", CreatedAt: time.Now()},
+		postingsFor()))
+	require.NoError(t, repo.SaveDepositWithIdempotency(ctx,
+		DepositIdempotencyEntity{DedupeKey: "dedupe-2", AccountID: "ACC-001", CorrelationID: "CORR-SHARED", CreatedAt: time.Now()},
+		postingsFor()))
+
+	var count int64
+	require.NoError(t, db.Model(&LedgerPostingEntity{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count, "distinct dedupe keys should both persist")
+}
+
 func TestGetPosting_NotFound(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()

@@ -137,6 +137,10 @@ func TestMigrationsMatchEntities(t *testing.T) {
 		testLedgerPostingEntity(t, gormDB)
 	})
 
+	t.Run("FinancialAccounting/DepositIdempotencyEntity", func(t *testing.T) {
+		testDepositIdempotencyEntity(t, gormDB)
+	})
+
 	t.Run("ControlPlane/ManifestVersionEntity", func(t *testing.T) {
 		testManifestVersionEntity(t, gormDB)
 	})
@@ -712,6 +716,45 @@ func testLedgerPostingEntity(t *testing.T, db *gorm.DB) {
 	assert.Equal(t, entity.DimensionType, retrieved.DimensionType)
 	assert.Equal(t, entity.InstrumentVersion, retrieved.InstrumentVersion)
 	assert.Equal(t, entity.InstrumentPrecision, retrieved.InstrumentPrecision)
+}
+
+// testDepositIdempotencyEntity tests that DepositIdempotencyEntity works with the
+// migrated schema, including its unique dedupe_key primary key.
+func testDepositIdempotencyEntity(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	entity := &fapersistence.DepositIdempotencyEntity{
+		DedupeKey:     uuid.New().String(),
+		AccountID:     "ACC-DEDUPE-001",
+		CorrelationID: "CORR-DEDUPE-001",
+		CreatedAt:     time.Now(),
+	}
+
+	// Create - will fail if columns don't match
+	err := db.Create(entity).Error
+	if err != nil {
+		t.Fatalf("Failed to create DepositIdempotencyEntity - schema mismatch detected: %v", err)
+	}
+
+	// Read back - will fail if columns don't match
+	var retrieved fapersistence.DepositIdempotencyEntity
+	err = db.First(&retrieved, "dedupe_key = ?", entity.DedupeKey).Error
+	if err != nil {
+		t.Fatalf("Failed to read DepositIdempotencyEntity - schema mismatch detected: %v", err)
+	}
+
+	assert.Equal(t, entity.AccountID, retrieved.AccountID)
+	assert.Equal(t, entity.CorrelationID, retrieved.CorrelationID)
+
+	// Constraint validation: duplicate dedupe_key (primary key) rejected.
+	dup := &fapersistence.DepositIdempotencyEntity{
+		DedupeKey:     entity.DedupeKey,
+		AccountID:     "ACC-OTHER",
+		CorrelationID: "CORR-OTHER",
+		CreatedAt:     time.Now(),
+	}
+	err = db.Create(dup).Error
+	assert.Error(t, err, "Expected error for duplicate dedupe_key")
 }
 
 // testManifestVersionEntity tests that the control-plane manifest_version table

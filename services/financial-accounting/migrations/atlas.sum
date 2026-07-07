@@ -1,4 +1,4 @@
-h1:vDNQBYhTosPAEk6+nl2NkwG2XFpSFe07+kOQcvia3PI=
+h1:BLBWJu7AtbVVT57Rrz5R9FyPIIaZNmusAEf0R+sQSwk=
 20251216000001_initial.sql h1:QyCFEl6iIRccIm/rlDMmm0p0IrN93AlxtaHZHiWWYq0=
 20251217000001_audit_system.sql h1:yyJlrBFDysy+cDtEsb+QePFjXJSFi8OKO+di10S7tYs=
 20251219000001_fix_audit_schema_compatibility.sql h1:kvPAApDaUen53jDQKyCXYWb2031nv1xwYwrPbP2iJVk=
@@ -10,3 +10,4 @@ h1:vDNQBYhTosPAEk6+nl2NkwG2XFpSFe07+kOQcvia3PI=
 20260316000002_add_event_outbox_tenant_id_index.sql h1:EphmMrVOQ2k0wYlsqCQxVFyIl0bBBQE4CCaPhwwP4Ew=
 20260323000001_align_audit_schema.sql h1:TMEpylGBxM2W7kyuNtRigAv5YUoE0GdxelwS9JhLfFk=
 20260323000002_align_audit_schema_data.sql h1:odRmDBvPm03A9WWBXwuVZhhntKsW0cdrYyVM1dMQR3o=
+20260707000001_add_deposit_idempotency.sql h1:WAau1Ffswv/eF5xD+nGu8FN5+Bi+3opzW3dpvd7Ygis=

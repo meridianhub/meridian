@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -13,6 +14,12 @@ import (
 	"github.com/meridianhub/meridian/shared/pkg/refdata"
 	"github.com/shopspring/decimal"
 )
+
+// ErrDepositAlreadyProcessed indicates a deposit with the same dedupe key has
+// already been recorded on the ledger. It is a successful no-op condition for
+// idempotent deposit processing, re-exported from the persistence layer so
+// callers depend only on the service package.
+var ErrDepositAlreadyProcessed = persistence.ErrDepositAlreadyProcessed
 
 // PostingService handles ledger posting operations
 type PostingService struct {
@@ -131,6 +138,68 @@ func (s *PostingService) ProcessDeposit(ctx context.Context, event DepositEvent)
 
 	// Save both postings atomically in a transaction
 	if err := s.repo.SavePostingsInTransaction(ctx, []*domain.LedgerPosting{debitPosting, creditPosting}); err != nil {
+		timer.ObserveError(observability.ErrorCategoryDatabase)
+		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
+		return fmt.Errorf("failed to save postings: %w", err)
+	}
+
+	// Record successful metrics using the resolved amount from the debit posting
+	timer.ObserveSuccess()
+	recordDepositSuccessMetrics(event.InstrumentCode, debitPosting.Amount.Amount)
+
+	return nil
+}
+
+// ProcessDepositWithDedupeKey creates the double-entry postings for a deposit
+// and records a per-deposit idempotency marker in the SAME database transaction,
+// guaranteeing exactly-once processing at the database layer.
+//
+// dedupeKey must be a stable per-deposit fingerprint (NOT the correlation ID,
+// which can be reused across distinct deposits). If the deposit has already been
+// recorded, it returns persistence.ErrDepositAlreadyProcessed and writes no
+// postings; callers should treat that as a successful no-op because the deposit
+// is already on the ledger.
+func (s *PostingService) ProcessDepositWithDedupeKey(ctx context.Context, event DepositEvent, dedupeKey string) error {
+	timer := observability.NewOperationTimer(observability.OperationProcessDeposit)
+
+	bookingLogID := uuid.New()
+
+	debitPosting, creditPosting, err := s.buildDepositPostings(ctx, bookingLogID, event)
+	if err != nil {
+		timer.ObserveError(observability.ErrorCategoryValidation)
+		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
+		return err
+	}
+
+	if err := debitPosting.Post("Deposit processed"); err != nil {
+		timer.ObserveError(observability.ErrorCategoryInternal)
+		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
+		return fmt.Errorf("failed to post debit: %w", err)
+	}
+
+	if err := creditPosting.Post("Deposit processed"); err != nil {
+		timer.ObserveError(observability.ErrorCategoryInternal)
+		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
+		return fmt.Errorf("failed to post credit: %w", err)
+	}
+
+	marker := persistence.DepositIdempotencyEntity{
+		DedupeKey:     dedupeKey,
+		AccountID:     event.AccountID,
+		CorrelationID: event.CorrelationID,
+		CreatedAt:     time.Now(),
+	}
+
+	err = s.repo.SaveDepositWithIdempotency(ctx, marker, []*domain.LedgerPosting{debitPosting, creditPosting})
+	if err != nil {
+		if errors.Is(err, persistence.ErrDepositAlreadyProcessed) {
+			// Duplicate delivery: the deposit is already on the ledger. This is a
+			// successful no-op, not an error - report success and propagate the
+			// sentinel so the caller can skip any post-processing.
+			timer.ObserveSuccess()
+			observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusSuccess)
+			return persistence.ErrDepositAlreadyProcessed
+		}
 		timer.ObserveError(observability.ErrorCategoryDatabase)
 		observability.RecordDepositProcessed(event.InstrumentCode, observability.StatusError)
 		return fmt.Errorf("failed to save postings: %w", err)
