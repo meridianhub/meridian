@@ -134,6 +134,33 @@ func TestGatewayManifestRBAC_AuthorizedRolesSucceed(t *testing.T) {
 	}
 }
 
+// A control-plane method that is NOT listed in the RBAC role map is denied
+// (fail-closed), even for an admin and regardless of whether identity metadata is
+// present or malformed. This guards the fail-closed default: adding a new
+// control-plane RPC without a role entry denies it rather than exposing it.
+func TestGatewayManifestRBAC_UnmappedControlPlaneFailsClosed(t *testing.T) {
+	interceptor := unaryInterceptor()
+	unmapped := "/meridian.control_plane.v1.ApplyManifestService/UnlistedFutureMethod"
+
+	t.Run("admin denied on unmapped method", func(t *testing.T) {
+		ctx := ctxWithGatewayIdentity("user-1", "admin")
+		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: unmapped}, okUnaryHandler)
+		assertPermissionDenied(t, err)
+	})
+
+	t.Run("absent identity denied on unmapped method", func(t *testing.T) {
+		_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: unmapped}, okUnaryHandler)
+		assertPermissionDenied(t, err)
+	})
+
+	t.Run("malformed roles denied on unmapped method", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(),
+			metadata.Pairs(mdKeyUserID, "user-1", mdKeyAuthRoles, ",,,"))
+		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{FullMethod: unmapped}, okUnaryHandler)
+		assertPermissionDenied(t, err)
+	})
+}
+
 // Non-control-plane methods pass through untouched regardless of identity, so the
 // fix does not regress other services on the unified binary.
 func TestGatewayManifestRBAC_NonControlPlanePassthrough(t *testing.T) {
