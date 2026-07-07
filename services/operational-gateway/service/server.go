@@ -196,6 +196,13 @@ func (s *OperationalGatewayService) resolveRouteForDispatch(ctx context.Context,
 		s.logger.Error("failed to resolve route", "instruction_type", instructionType, "error", err)
 		return nil, status.Error(codes.Internal, "failed to resolve dispatch route")
 	}
+	// A route with no connection assigned is a server-side configuration error, not a client
+	// error. Surface it as FailedPrecondition before constructing the instruction so it is not
+	// misreported as an InvalidArgument from domain.NewInstruction's empty-connection check.
+	if route.ConnectionID == "" {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"route for instruction type %q has no provider connection configured", instructionType)
+	}
 	return route, nil
 }
 

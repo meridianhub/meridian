@@ -193,3 +193,32 @@ func TestDispatchInstruction_NoRoute_Rejected(t *testing.T) {
 	// Nothing should have been persisted.
 	assert.Empty(t, instRepo.instructions)
 }
+
+// TestDispatchInstruction_RouteWithEmptyConnectionID_Rejected verifies that a route which resolves
+// but has no provider connection assigned is rejected as FailedPrecondition (a server-side
+// configuration error), not misreported as an InvalidArgument client error, and is not persisted.
+func TestDispatchInstruction_RouteWithEmptyConnectionID_Rejected(t *testing.T) {
+	instRepo := newMockInstructionRepo()
+	connRepo := newMockConnectionRepo()
+	resolver := &mockRouteResolver{
+		resolve: func(_ context.Context, _, instructionType string) (*ports.InstructionRoute, error) {
+			return &ports.InstructionRoute{InstructionType: instructionType, ConnectionID: ""}, nil
+		},
+	}
+	svc, err := NewOperationalGatewayService(instRepo, connRepo, resolver, nil)
+	require.NoError(t, err)
+
+	ctx := tenantContext("test-tenant")
+	payload, _ := structpb.NewStruct(map[string]any{"device_id": "dev-001"})
+
+	_, err = svc.DispatchInstruction(ctx, &opgatewayv1.DispatchInstructionRequest{
+		InstructionType: "device.command",
+		Payload:         payload,
+		IdempotencyKey:  &commonpb.IdempotencyKey{Key: "empty-conn-key"},
+	})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	assert.Empty(t, instRepo.instructions)
+}
