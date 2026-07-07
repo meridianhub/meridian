@@ -150,6 +150,68 @@ func TestRedisService_MarkPending(t *testing.T) {
 	}
 }
 
+// TestRedisService_MarkPending_DuplicateLiveKey verifies that a second
+// MarkPending for a key already marked pending returns ErrOperationAlreadyProcessed
+// (SET NX semantics), rather than silently overwriting.
+func TestRedisService_MarkPending_DuplicateLiveKey(t *testing.T) {
+	service, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	key := testKey()
+
+	if err := service.MarkPending(ctx, key, time.Hour); err != nil {
+		t.Fatalf("first MarkPending failed: %v", err)
+	}
+
+	err := service.MarkPending(ctx, key, time.Hour)
+	if !errors.Is(err, ErrOperationAlreadyProcessed) {
+		t.Errorf("expected ErrOperationAlreadyProcessed for duplicate live key, got %v", err)
+	}
+}
+
+// TestRedisService_MarkPending_Concurrent fires many concurrent MarkPending
+// calls for the same key and asserts that exactly one wins and the rest receive
+// ErrOperationAlreadyProcessed. This is the core atomicity guarantee that
+// prevents duplicate processing under Kafka at-least-once redelivery or racing
+// requests.
+func TestRedisService_MarkPending_Concurrent(t *testing.T) {
+	service, _, cleanup := setupRedisService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	key := testKey()
+
+	const goroutines = 20
+	var successCount atomic.Int32
+	var alreadyCount atomic.Int32
+
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := service.MarkPending(ctx, key, time.Hour)
+			switch {
+			case err == nil:
+				successCount.Add(1)
+			case errors.Is(err, ErrOperationAlreadyProcessed):
+				alreadyCount.Add(1)
+			default:
+				t.Errorf("unexpected MarkPending error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if successCount.Load() != 1 {
+		t.Errorf("expected exactly 1 successful MarkPending, got %d", successCount.Load())
+	}
+	if alreadyCount.Load() != goroutines-1 {
+		t.Errorf("expected %d ErrOperationAlreadyProcessed, got %d", goroutines-1, alreadyCount.Load())
+	}
+}
+
 func TestRedisService_StoreResult(t *testing.T) {
 	service, mr, cleanup := setupRedisService(t)
 	defer cleanup()

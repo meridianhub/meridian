@@ -144,6 +144,88 @@ func TestPostgresService_MarkPending_ThenCheck(t *testing.T) {
 	}
 }
 
+// TestPostgresService_MarkPending_DuplicateLiveKey verifies that a second
+// MarkPending for a live (non-expired) key returns ErrOperationAlreadyProcessed
+// instead of silently succeeding.
+func TestPostgresService_MarkPending_DuplicateLiveKey(t *testing.T) {
+	svc := freshService(t)
+	ctx := context.Background()
+	key := pgTestKey()
+
+	if err := svc.MarkPending(ctx, key, time.Hour); err != nil {
+		t.Fatalf("first MarkPending failed: %v", err)
+	}
+
+	err := svc.MarkPending(ctx, key, time.Hour)
+	if !errors.Is(err, ErrOperationAlreadyProcessed) {
+		t.Errorf("expected ErrOperationAlreadyProcessed for duplicate live key, got %v", err)
+	}
+}
+
+// TestPostgresService_MarkPending_ReclaimsExpired verifies that MarkPending can
+// still atomically reclaim a key whose previous PENDING marker has expired.
+func TestPostgresService_MarkPending_ReclaimsExpired(t *testing.T) {
+	svc := freshService(t)
+	pool := getSharedPool(t)
+	ctx := context.Background()
+	key := pgTestKey()
+
+	if err := svc.MarkPending(ctx, key, time.Hour); err != nil {
+		t.Fatalf("first MarkPending failed: %v", err)
+	}
+
+	// Force the existing marker to be expired.
+	if _, err := pool.Exec(ctx,
+		`UPDATE _idempotency_keys SET expires_at = NOW() - INTERVAL '1 hour' WHERE key = $1`,
+		key.String(),
+	); err != nil {
+		t.Fatalf("failed to expire key: %v", err)
+	}
+
+	// A new MarkPending should reclaim the expired row and succeed.
+	if err := svc.MarkPending(ctx, key, time.Hour); err != nil {
+		t.Errorf("expected reclaim of expired key to succeed, got %v", err)
+	}
+}
+
+// TestPostgresService_MarkPending_Concurrent fires many concurrent MarkPending
+// calls for the same key and asserts exactly one wins; the rest receive
+// ErrOperationAlreadyProcessed.
+func TestPostgresService_MarkPending_Concurrent(t *testing.T) {
+	svc := freshService(t)
+	ctx := context.Background()
+	key := pgTestKey()
+
+	const goroutines = 50
+	var successCount atomic.Int32
+	var alreadyCount atomic.Int32
+
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := svc.MarkPending(ctx, key, time.Hour)
+			switch {
+			case err == nil:
+				successCount.Add(1)
+			case errors.Is(err, ErrOperationAlreadyProcessed):
+				alreadyCount.Add(1)
+			default:
+				t.Errorf("unexpected MarkPending error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if successCount.Load() != 1 {
+		t.Errorf("expected exactly 1 successful MarkPending, got %d", successCount.Load())
+	}
+	if alreadyCount.Load() != goroutines-1 {
+		t.Errorf("expected %d ErrOperationAlreadyProcessed, got %d", goroutines-1, alreadyCount.Load())
+	}
+}
+
 func TestPostgresService_StoreResult_ThenCheck(t *testing.T) {
 	svc := freshService(t)
 	ctx := context.Background()

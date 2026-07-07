@@ -147,16 +147,22 @@ func (s *PostgresService) MarkPending(ctx context.Context, key Key, ttl time.Dur
 	}
 
 	if tag.RowsAffected() == 0 {
-		// Key already existed - atomically replace it only if it's expired.
-		// The WHERE clause guards against race conditions where another writer
-		// refreshes the row between our INSERT and this UPDATE.
-		_, err = s.pool.Exec(ctx,
+		// Key already existed. Atomically reclaim it only if it has expired.
+		// The WHERE clause guards against a race where another writer refreshes
+		// the row between our INSERT and this UPDATE.
+		updateTag, err := s.pool.Exec(ctx,
 			`UPDATE _idempotency_keys SET status = $1, expires_at = $2, result = NULL, token = NULL, created_at = CURRENT_TIMESTAMP
 			 WHERE key = $3 AND expires_at IS NOT NULL AND expires_at < NOW()`,
 			string(StatusPending), expiresAt, dbKey,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to replace expired key: %w", err)
+		}
+		if updateTag.RowsAffected() == 0 {
+			// A live (non-expired) row already owns this key - another request is
+			// processing it or has already completed it. Report as already
+			// processed so concurrent callers do not both proceed and duplicate.
+			return ErrOperationAlreadyProcessed
 		}
 	}
 
