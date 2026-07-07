@@ -104,6 +104,40 @@ func TestCELEvaluator_Eval_CompilationErrors(t *testing.T) {
 	}
 }
 
+func TestCELEvaluator_Eval_CostLimitExceeded(t *testing.T) {
+	// A tiny cost limit must reject an expression that would otherwise run
+	// unbounded work, upholding the bounded-execution guarantee.
+	evaluator, err := newCELEvaluator(1)
+	require.NoError(t, err)
+
+	// A comprehension over a large range is cheap to write but expensive to run,
+	// so its accumulated cost blows past the 1-unit budget.
+	_, err = evaluator.Eval(
+		"[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(x, x * x).size()",
+		map[string]interface{}{},
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCELCostLimitExceeded)
+	assert.NotErrorIs(t, err, ErrCELEvaluationFailed)
+}
+
+func TestCELEvaluator_Eval_WithinCostLimitPasses(t *testing.T) {
+	// The default limit is generous enough for ordinary pricing/validation logic.
+	evaluator, err := NewCELEvaluator()
+	require.NoError(t, err)
+
+	result, err := evaluator.Eval("input.amount * 2", map[string]interface{}{
+		"input": map[string]interface{}{"amount": int64(21)},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(42), result)
+}
+
+func TestDefaultCELCostLimit_IsPositive(t *testing.T) {
+	// A zero default would silently disable cost tracking.
+	assert.Positive(t, DefaultCELCostLimit)
+}
+
 func TestCELEvaluator_Eval_EvaluationErrors(t *testing.T) {
 	evaluator, err := NewCELEvaluator()
 	require.NoError(t, err)
