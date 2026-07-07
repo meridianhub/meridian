@@ -214,6 +214,10 @@ func (s *Service) ReversePaymentOrder(ctx context.Context, req *pb.ReversePaymen
 
 	// Mark operation as pending (distributed lock)
 	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			// Concurrent duplicate: another request already claimed this key.
+			return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
 		s.logger.Error("failed to mark reversal operation pending", "error", err)
 		return nil, status.Error(codes.Internal, "failed to acquire reversal idempotency lock")
 	}

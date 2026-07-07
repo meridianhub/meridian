@@ -67,6 +67,11 @@ func (s *Service) UpdatePaymentOrder(ctx context.Context, req *pb.UpdatePaymentO
 	}
 
 	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			// Concurrent duplicate: another request already claimed this key.
+			operationStatus = opStatusIdempotent
+			return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
 		s.logger.Error("failed to mark webhook operation pending", "error", err)
 		operationStatus = opStatusError
 		return nil, status.Error(codes.Internal, "failed to acquire webhook idempotency lock")

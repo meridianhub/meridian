@@ -204,6 +204,10 @@ func (s *PositionKeepingService) checkUpdateIdempotencyAndAcquireLock(
 
 	// Mark operation as pending
 	if err := s.idempotency.MarkPending(ctx, key, 5*time.Minute); err != nil {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			// Concurrent duplicate: another request already claimed this key.
+			return nil, nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
 		return nil, nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
 	}
 

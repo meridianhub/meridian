@@ -111,6 +111,10 @@ func (s *FinancialAccountingService) checkAndMarkPendingSimple(ctx context.Conte
 	}
 
 	if err := s.idempotency.MarkPending(ctx, key, defaultIdempotencyTTL); err != nil {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			// Concurrent duplicate: another request already claimed this key.
+			return status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
 		return status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
 	}
 	return nil
