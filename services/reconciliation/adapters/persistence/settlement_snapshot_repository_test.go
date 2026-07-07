@@ -24,11 +24,12 @@ type seedRunIDs struct {
 	BusinessID uuid.UUID
 }
 
-// seedSettlementRun creates a settlement_run record and returns the surrogate ID (settlement_run.id).
-// For tests that also need the business run_id, use seedSettlementRunFull.
+// seedSettlementRun creates a settlement_run record and returns the business run_id
+// (settlement_run.run_id), which is the identifier the repositories accept and return.
+// For tests that also need the surrogate PK, use seedSettlementRunFull.
 func seedSettlementRun(t *testing.T, ctx context.Context, db *gorm.DB) uuid.UUID {
 	t.Helper()
-	return seedSettlementRunFull(t, ctx, db).SurrogateID
+	return seedSettlementRunFull(t, ctx, db).BusinessID
 }
 
 // seedSettlementRunFull creates a settlement_run record and returns both the surrogate ID and the business run_id.
@@ -87,6 +88,35 @@ func TestSettlementSnapshotRepository_Create(t *testing.T) {
 	assert.Equal(t, "position-keeping", found.SourceSystem)
 	assert.Equal(t, "default", found.Attributes["bucket"])
 	assert.WithinDuration(t, snapshot.CapturedAt, found.CapturedAt, time.Second)
+}
+
+func TestSettlementSnapshotRepository_Create_StoresSurrogateFK(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo := persistence.NewSettlementSnapshotRepository(db)
+	ctx := tenantCtx()
+
+	run := seedSettlementRunFull(t, ctx, db)
+	snapshot := newTestSnapshot(t, run.BusinessID) // domain carries the business run_id
+	require.NoError(t, repo.Create(ctx, snapshot))
+
+	// The domain round-trips the business run_id.
+	found, err := repo.FindByID(ctx, snapshot.SnapshotID)
+	require.NoError(t, err)
+	assert.Equal(t, run.BusinessID, found.RunID, "domain RunID must be the business identifier")
+
+	// The stored FK column holds the surrogate PK, not the business id, so the FK to
+	// settlement_run.id resolves and joins succeed.
+	tid := tenant.TenantID("test-tenant-01")
+	quoted := fmt.Sprintf("%q", tid.SchemaName())
+	var storedRunID string
+	require.NoError(t, db.WithContext(ctx).Raw(
+		fmt.Sprintf(`SELECT run_id::text FROM %s."settlement_snapshot" WHERE snapshot_id = ?`, quoted),
+		snapshot.SnapshotID,
+	).Scan(&storedRunID).Error)
+	assert.Equal(t, run.SurrogateID.String(), storedRunID, "run_id FK column must store the surrogate PK")
+	assert.NotEqual(t, run.BusinessID.String(), storedRunID, "run_id FK column must not store the business id")
 }
 
 func TestSettlementSnapshotRepository_CreateBatch(t *testing.T) {
@@ -251,20 +281,21 @@ func TestSettlementSnapshotRepository_MarkRunSnapshotsFinal(t *testing.T) {
 
 	// Use seedSettlementRunFull so we have both IDs:
 	//   SurrogateID → stored in settlement_snapshot.run_id (FK target)
-	//   BusinessID  → passed to MarkRunSnapshotsFinal (business identifier)
+	//   BusinessID  → the identifier the repository accepts and returns
 	run := seedSettlementRunFull(t, ctx, db)
 
-	// Create snapshots with the surrogate ID so the FK constraint is satisfied.
-	s1 := newTestSnapshot(t, run.SurrogateID)
+	// Create snapshots with the business run_id; the repository resolves it to the
+	// surrogate PK before writing the FK column.
+	s1 := newTestSnapshot(t, run.BusinessID)
 	s1.Attributes = map[string]string{"bucket": "default"}
 	require.NoError(t, repo.Create(ctx, s1))
 
-	s2 := newTestSnapshot(t, run.SurrogateID)
+	s2 := newTestSnapshot(t, run.BusinessID)
 	s2.AccountID = "ACC-002"
 	s2.Attributes = nil // Test nil attributes case
 	require.NoError(t, repo.Create(ctx, s2))
 
-	s3 := newTestSnapshot(t, run.SurrogateID)
+	s3 := newTestSnapshot(t, run.BusinessID)
 	s3.AccountID = "ACC-003"
 	s3.Attributes = map[string]string{"region": "eu-west-1"}
 	require.NoError(t, repo.Create(ctx, s3))
@@ -275,7 +306,7 @@ func TestSettlementSnapshotRepository_MarkRunSnapshotsFinal(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify all snapshots have settlement_type=FINAL
-	found, err := repo.FindByRunID(ctx, run.SurrogateID)
+	found, err := repo.FindByRunID(ctx, run.BusinessID)
 	require.NoError(t, err)
 	assert.Len(t, found, 3)
 	for _, snap := range found {

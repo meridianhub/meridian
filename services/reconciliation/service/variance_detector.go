@@ -90,14 +90,22 @@ func (vd *VarianceDetector) DetectVariances(ctx context.Context, runID uuid.UUID
 }
 
 // findPreviousSnapshots finds the snapshots from the most recent completed run
-// for the same account. Returns nil (no error) if no previous run exists,
+// for the same settlement period. Returns nil (no error) if no previous run exists,
 // meaning this is a D+1 run comparing against initial booking.
+//
+// The baseline is selected by valid time (the settlement period), not by the physical
+// CreatedAt (transaction time). The reconciliation ladder (D+1, D+5, M+3, M+14) produces
+// several runs for the SAME period, so the comparator must share the current run's
+// period. Filtering on period bounds excludes backfill runs for other periods that may
+// carry a newer CreatedAt. The completed-status filter excludes the current (running)
+// run, and ordering by CreatedAt DESC then selects the latest prior run for the period.
 func (vd *VarianceDetector) findPreviousSnapshots(ctx context.Context, run *domain.SettlementRun) ([]*domain.SettlementSnapshot, error) {
 	completedStatus := domain.RunStatusCompleted
 	runs, err := vd.runRepo.List(ctx, domain.RunFilter{
 		AccountID: &run.AccountID,
 		Status:    &completedStatus,
-		ToDate:    &run.CreatedAt,
+		FromDate:  &run.PeriodStart,
+		ToDate:    &run.PeriodEnd,
 		Limit:     1,
 	})
 	if err != nil {

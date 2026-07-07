@@ -3,7 +3,6 @@ package persistence
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +29,12 @@ type SettlementSnapshotEntity struct {
 	SourceSystem    string          `gorm:"column:source_system;size:100;not null"`
 	Attributes      JSONMap         `gorm:"column:attributes;type:jsonb"`
 	CapturedAt      time.Time       `gorm:"column:captured_at;not null"`
+
+	// BusinessRunID is populated read-only on retrieval via a join to
+	// settlement_run.run_id. It is not a stored column: settlement_snapshot.run_id
+	// holds the settlement_run surrogate PK (FK target), while the domain layer works
+	// in business run identifiers.
+	BusinessRunID uuid.UUID `gorm:"->;column:business_run_id"`
 }
 
 // TableName returns the table name for the settlement snapshot entity.
@@ -68,15 +73,23 @@ func (r *SettlementSnapshotRepository) isInTransaction() bool {
 	return ok && committer != nil
 }
 
-// Create persists a new SettlementSnapshot.
+// Create persists a new SettlementSnapshot. The snapshot's domain RunID is the
+// business run identifier; it is resolved to the settlement_run surrogate PK before
+// being written to the run_id FK column.
 func (r *SettlementSnapshotRepository) Create(ctx context.Context, snapshot *domain.SettlementSnapshot) error {
 	entity := toSnapshotEntity(snapshot)
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		surrogate, err := resolveRunSurrogate(tx, snapshot.RunID)
+		if err != nil {
+			return err
+		}
+		entity.RunID = surrogate
 		return tx.Create(entity).Error
 	})
 }
 
-// CreateBatch persists multiple snapshots atomically.
+// CreateBatch persists multiple snapshots atomically. Each snapshot's business RunID
+// is resolved to the settlement_run surrogate PK for the run_id FK column.
 func (r *SettlementSnapshotRepository) CreateBatch(ctx context.Context, snapshots []*domain.SettlementSnapshot) error {
 	if len(snapshots) == 0 {
 		return nil
@@ -88,8 +101,39 @@ func (r *SettlementSnapshotRepository) CreateBatch(ctx context.Context, snapshot
 	}
 
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
+		if err := assignSnapshotRunSurrogates(tx, entities, snapshots); err != nil {
+			return err
+		}
 		return tx.CreateInBatches(entities, 100).Error
 	})
+}
+
+// assignSnapshotRunSurrogates resolves each snapshot's business RunID to the
+// settlement_run surrogate PK and writes it into the entity's run_id FK column,
+// caching resolutions so a batch sharing one run issues a single lookup.
+func assignSnapshotRunSurrogates(tx *gorm.DB, entities []SettlementSnapshotEntity, snapshots []*domain.SettlementSnapshot) error {
+	cache := make(map[uuid.UUID]uuid.UUID)
+	for i := range entities {
+		businessRunID := snapshots[i].RunID
+		surrogate, ok := cache[businessRunID]
+		if !ok {
+			var err error
+			if surrogate, err = resolveRunSurrogate(tx, businessRunID); err != nil {
+				return err
+			}
+			cache[businessRunID] = surrogate
+		}
+		entities[i].RunID = surrogate
+	}
+	return nil
+}
+
+// snapshotReadQuery builds a query that joins settlement_run so the business run_id
+// is projected into BusinessRunID, keeping the domain model in business identifiers.
+func snapshotReadQuery(tx *gorm.DB) *gorm.DB {
+	return tx.Model(&SettlementSnapshotEntity{}).
+		Select(`"settlement_snapshot".*, "settlement_run"."run_id" AS business_run_id`).
+		Joins(`JOIN "settlement_run" ON "settlement_run"."id" = "settlement_snapshot"."run_id"`)
 }
 
 // FindByID retrieves a SettlementSnapshot by its SnapshotID.
@@ -98,7 +142,7 @@ func (r *SettlementSnapshotRepository) FindByID(ctx context.Context, snapshotID 
 	var queryErr error
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		result := tx.Where("snapshot_id = ?", snapshotID).First(&entity)
+		result := snapshotReadQuery(tx).Where(`"settlement_snapshot"."snapshot_id" = ?`, snapshotID).First(&entity)
 		if result.Error != nil {
 			queryErr = result.Error
 			return result.Error
@@ -115,13 +159,16 @@ func (r *SettlementSnapshotRepository) FindByID(ctx context.Context, snapshotID 
 	return toSnapshotDomain(&entity), nil
 }
 
-// FindByRunID retrieves all snapshots for a settlement run.
+// FindByRunID retrieves all snapshots for a settlement run, keyed by the business
+// run identifier. The join filters on settlement_run.run_id, so an unknown run yields
+// an empty slice.
 func (r *SettlementSnapshotRepository) FindByRunID(ctx context.Context, runID uuid.UUID) ([]*domain.SettlementSnapshot, error) {
 	var entities []SettlementSnapshotEntity
 
 	err := r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Where("run_id = ?", runID).
-			Order("created_at ASC").
+		return snapshotReadQuery(tx).
+			Where(`"settlement_run"."run_id" = ?`, runID).
+			Order(`"settlement_snapshot"."created_at" ASC`).
 			Find(&entities).Error
 	})
 	if err != nil {
@@ -131,10 +178,18 @@ func (r *SettlementSnapshotRepository) FindByRunID(ctx context.Context, runID uu
 	return toSnapshotDomainSlice(entities), nil
 }
 
-// DeleteByRunID removes all snapshots for a given settlement run.
+// DeleteByRunID removes all snapshots for a given settlement run, keyed by the
+// business run identifier. An unknown run is a no-op.
 func (r *SettlementSnapshotRepository) DeleteByRunID(ctx context.Context, runID uuid.UUID) error {
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		return tx.Where("run_id = ?", runID).Delete(&SettlementSnapshotEntity{}).Error
+		surrogate, err := resolveRunSurrogate(tx, runID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		return tx.Where("run_id = ?", surrogate).Delete(&SettlementSnapshotEntity{}).Error
 	})
 }
 
@@ -143,16 +198,16 @@ func (r *SettlementSnapshotRepository) DeleteByRunID(ctx context.Context, runID 
 // (settlement_run.id) before updating, since settlement_snapshot.run_id is a FK to settlement_run.id.
 func (r *SettlementSnapshotRepository) MarkRunSnapshotsFinal(ctx context.Context, runID uuid.UUID) error {
 	return r.withTenantTransaction(ctx, func(tx *gorm.DB) error {
-		var runEntity SettlementRunEntity
-		if err := tx.Select("id").Where("run_id = ?", runID).First(&runEntity).Error; err != nil {
-			return fmt.Errorf("resolving surrogate ID for run %s: %w", runID, err)
+		surrogate, err := resolveRunSurrogate(tx, runID)
+		if err != nil {
+			return err
 		}
 		// Use CASE to handle NULL/JSON-null attributes vs existing JSONB objects.
 		// CockroachDB's || operator requires both operands to be JSONB objects,
 		// so we must replace NULL/json-null with an empty object before merging.
 		return tx.Exec(
 			`UPDATE "settlement_snapshot" SET "attributes" = CASE WHEN "attributes" IS NULL OR "attributes"::text = 'null' THEN '{"settlement_type":"FINAL"}'::jsonb ELSE "attributes" || '{"settlement_type":"FINAL"}'::jsonb END WHERE "run_id" = ?`,
-			runEntity.ID,
+			surrogate,
 		).Error
 	})
 }
@@ -180,10 +235,12 @@ func toSnapshotEntity(s *domain.SettlementSnapshot) *SettlementSnapshotEntity {
 }
 
 // toSnapshotDomain converts a persistence entity to a domain SettlementSnapshot.
+// RunID is taken from BusinessRunID (projected via the read-path join to
+// settlement_run.run_id), not the surrogate FK stored in the run_id column.
 func toSnapshotDomain(e *SettlementSnapshotEntity) *domain.SettlementSnapshot {
 	s := &domain.SettlementSnapshot{
 		SnapshotID:      e.SnapshotID,
-		RunID:           e.RunID,
+		RunID:           e.BusinessRunID,
 		AccountID:       e.AccountID,
 		InstrumentCode:  e.InstrumentCode,
 		ExpectedBalance: e.ExpectedBalance,
