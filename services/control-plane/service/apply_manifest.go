@@ -67,19 +67,11 @@ func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceC
 
 	versionStore := persistence.NewPostgresManifestVersionStore(cfg.Pool)
 
-	// Wire the versioned history service when a GORM handle is available. This is
-	// the single source of truth for manifest persistence: it assigns sequence
-	// numbers atomically and enforces optimistic-concurrency checks, so concurrent
-	// applies cannot clobber each other or produce duplicate sequence-0 rows.
 	var historyService *manifest.HistoryService
 	if cfg.GormDB != nil {
-		repo, repoErr := manifest.NewRepository(cfg.GormDB)
-		if repoErr != nil {
-			return fmt.Errorf("manifest repository: %w", repoErr)
-		}
-		historyService, err = manifest.NewHistoryService(repo)
+		historyService, err = buildManifestHistoryService(cfg.GormDB)
 		if err != nil {
-			return fmt.Errorf("manifest history service: %w", err)
+			return err
 		}
 	}
 
@@ -121,6 +113,23 @@ func RegisterApplyManifestService(server *grpc.Server, cfg ApplyManifestServiceC
 
 	controlplanev1.RegisterApplyManifestServiceServer(server, handler)
 	return nil
+}
+
+// buildManifestHistoryService wires the versioned history service when a GORM
+// handle is available. It is the single source of truth for manifest
+// persistence: sequence numbers are assigned atomically and optimistic-
+// concurrency checks prevent concurrent applies from clobbering each other or
+// producing duplicate sequence-0 rows. Callers guard on a non-nil gormDB.
+func buildManifestHistoryService(gormDB *gorm.DB) (*manifest.HistoryService, error) {
+	repo, err := manifest.NewRepository(gormDB)
+	if err != nil {
+		return nil, fmt.Errorf("manifest repository: %w", err)
+	}
+	historyService, err := manifest.NewHistoryService(repo)
+	if err != nil {
+		return nil, fmt.Errorf("manifest history service: %w", err)
+	}
+	return historyService, nil
 }
 
 // NewHandlerDeps builds HandlerDependencies from a raw gRPC connection that can
