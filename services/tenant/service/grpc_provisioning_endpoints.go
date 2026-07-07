@@ -6,12 +6,11 @@ import (
 
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/adapters/persistence"
-	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"github.com/meridianhub/meridian/shared/platform/auth"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ReconcileMigrations applies new migrations to existing tenant schemas.
@@ -136,7 +135,7 @@ func (s *Service) GetTenantProvisioningStatus(ctx context.Context, req *pb.GetTe
 	}
 
 	// Build per-service status response
-	serviceStatuses, err := s.buildServiceProvisioningStatuses(ctx, req.TenantId)
+	serviceStatuses, err := s.buildServiceProvisioningStatuses(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -181,38 +180,33 @@ func (s *Service) authorizeProvisioningStatusQuery(ctx context.Context, requeste
 	return nil
 }
 
-// buildServiceProvisioningStatuses queries and maps per-service provisioning records to proto.
-func (s *Service) buildServiceProvisioningStatuses(ctx context.Context, tenantID string) ([]*pb.ServiceProvisioningStatus, error) {
-	provisioningStatuses, err := s.repo.FindProvisioningStatusByTenantID(ctx, tenantID)
+// buildServiceProvisioningStatuses returns per-service provisioning status sourced
+// from the provisioner's persisted state (the tenant_provisioning.service_schemas
+// JSONB blob written by the provisioner during provisioning). Reading from the
+// provisioner's own store - rather than the normalized tenant_provisioning_status
+// table - ensures the status the worker actually recorded is what callers observe.
+//
+// Returns an empty slice (not an error) when schema provisioning is disabled
+// (no provisioner) or no provisioning record exists yet for the tenant.
+func (s *Service) buildServiceProvisioningStatuses(ctx context.Context, tenantID tenant.TenantID) ([]*pb.ServiceProvisioningStatus, error) {
+	if s.provisioner == nil {
+		return []*pb.ServiceProvisioningStatus{}, nil
+	}
+
+	provStatus, err := s.provisioner.GetProvisioningStatus(ctx, tenantID)
 	if err != nil {
+		if errors.Is(err, provisioner.ErrProvisioningStatusNotFound) {
+			return []*pb.ServiceProvisioningStatus{}, nil
+		}
 		s.logger.Error("failed to retrieve provisioning status records",
-			"tenant_id", tenantID,
+			"tenant_id", tenantID.String(),
 			"error", err)
 		return nil, status.Errorf(codes.Internal, "failed to retrieve provisioning status")
 	}
 
-	serviceStatuses := make([]*pb.ServiceProvisioningStatus, 0, len(provisioningStatuses))
-	for _, ps := range provisioningStatuses {
-		serviceStatuses = append(serviceStatuses, s.mapProvisioningStatusToProto(ps))
+	serviceStatuses := make([]*pb.ServiceProvisioningStatus, 0, len(provStatus.Services))
+	for _, svc := range provStatus.Services {
+		serviceStatuses = append(serviceStatuses, s.mapServiceSchemaStatusToProto(svc))
 	}
 	return serviceStatuses, nil
-}
-
-// mapProvisioningStatusToProto converts a domain provisioning status to its proto representation.
-func (s *Service) mapProvisioningStatusToProto(ps domain.ProvisioningStatus) *pb.ServiceProvisioningStatus {
-	sps := &pb.ServiceProvisioningStatus{
-		ServiceName:      ps.ServiceName,
-		Status:           s.toProtoServiceStatus(ps.Status),
-		MigrationVersion: ps.MigrationVersion,
-	}
-	if ps.ErrorMessage != nil {
-		sps.ErrorMessage = *ps.ErrorMessage
-	}
-	if ps.StartedAt != nil {
-		sps.StartedAt = timestamppb.New(*ps.StartedAt)
-	}
-	if ps.CompletedAt != nil {
-		sps.CompletedAt = timestamppb.New(*ps.CompletedAt)
-	}
-	return sps
 }

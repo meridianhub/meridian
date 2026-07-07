@@ -3,6 +3,7 @@ package service
 import (
 	pb "github.com/meridianhub/meridian/api/proto/meridian/tenant/v1"
 	"github.com/meridianhub/meridian/services/tenant/domain"
+	"github.com/meridianhub/meridian/services/tenant/provisioner"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -74,6 +75,37 @@ func (s *Service) toDomainStatus(status pb.TenantStatus) (domain.Status, error) 
 		return "", ErrUnknownStatus
 	default:
 		return "", ErrUnknownStatus
+	}
+}
+
+// mapServiceSchemaStatusToProto converts a provisioner per-service schema status
+// (as persisted in the tenant_provisioning.service_schemas JSONB blob) to its
+// proto representation. The blob does not track per-service started/completed
+// timestamps, so those proto fields are left unset.
+func (s *Service) mapServiceSchemaStatusToProto(svc provisioner.ServiceSchemaStatus) *pb.ServiceProvisioningStatus {
+	return &pb.ServiceProvisioningStatus{
+		ServiceName:      svc.ServiceName,
+		Status:           toProtoServiceSchemaState(svc.State),
+		MigrationVersion: svc.MigrationVersion,
+		ErrorMessage:     svc.ErrorMessage,
+	}
+}
+
+// toProtoServiceSchemaState maps a provisioner ServiceProvisioningState to the
+// proto service status enum. A tripped circuit breaker (circuit_open) is reported
+// as FAILED since the service did not complete provisioning; the worker retries it.
+func toProtoServiceSchemaState(state provisioner.ServiceProvisioningState) pb.ServiceProvisioningStatus_Status {
+	switch state {
+	case provisioner.ServiceStatePending:
+		return pb.ServiceProvisioningStatus_STATUS_PENDING
+	case provisioner.ServiceStateCreated:
+		return pb.ServiceProvisioningStatus_STATUS_IN_PROGRESS
+	case provisioner.ServiceStateMigrated:
+		return pb.ServiceProvisioningStatus_STATUS_COMPLETED
+	case provisioner.ServiceStateFailed, provisioner.ServiceStateCircuitOpen:
+		return pb.ServiceProvisioningStatus_STATUS_FAILED
+	default:
+		return pb.ServiceProvisioningStatus_STATUS_UNSPECIFIED
 	}
 }
 
