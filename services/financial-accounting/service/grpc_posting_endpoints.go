@@ -181,6 +181,10 @@ func (s *FinancialAccountingService) checkCapturePostingIdempotency(
 	}
 
 	if err := s.idempotency.MarkPending(ctx, key, defaultIdempotencyTTL); err != nil {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			// Concurrent duplicate: another request already claimed this key.
+			return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
 		return nil, status.Errorf(codes.Internal, "failed to mark operation as pending: %v", err)
 	}
 	return nil, nil //nolint:nilnil // intentional: nil,nil signals "no cached result, proceed with operation"

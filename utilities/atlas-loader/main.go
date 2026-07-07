@@ -64,6 +64,7 @@ func main() {
 		modelList = []interface{}{
 			&fapersistence.FinancialBookingLogEntity{},
 			&fapersistence.LedgerPostingEntity{},
+			&fapersistence.DepositIdempotencyEntity{},
 		}
 	case schemaIdentity:
 		// Identity service for platform user accounts, roles, and invitations

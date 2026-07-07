@@ -62,10 +62,19 @@ func (r *RedisService) Check(ctx context.Context, key Key) (*Result, error) {
 	return result, nil
 }
 
-// MarkPending marks an operation as in-progress
+// MarkPending marks an operation as in-progress.
+//
+// It uses Redis SET NX (set-if-not-exists) so that concurrent MarkPending calls
+// for the same key are mutually exclusive: exactly one caller sets the key and
+// the rest receive ErrOperationAlreadyProcessed. This closes the race where a
+// plain SET let two callers both "win" MarkPending and duplicate-process a
+// message (e.g. Kafka at-least-once redelivery, or concurrent requests).
 func (r *RedisService) MarkPending(ctx context.Context, key Key, ttl time.Duration) error {
 	if err := key.Validate(); err != nil {
 		return err
+	}
+	if ttl <= 0 {
+		return ErrInvalidTTL
 	}
 
 	result := Result{
@@ -78,7 +87,26 @@ func (r *RedisService) MarkPending(ctx context.Context, key Key, ttl time.Durati
 		TTL:         ttl,
 	}
 
-	return r.StoreResult(ctx, result)
+	// Serialize the pending marker using the same protobuf format as StoreResult
+	// so cleanup workers and Check can deserialize it uniformly.
+	pbResult := toProto(result)
+	data, err := proto.Marshal(pbResult)
+	if err != nil {
+		return fmt.Errorf("failed to serialize pending marker: %w", err)
+	}
+
+	redisKey := r.resultKey(key)
+	created, err := r.client.SetNX(ctx, redisKey, data, ttl).Result()
+	if err != nil {
+		return fmt.Errorf("failed to mark pending: %w", err)
+	}
+	if !created {
+		// Key already exists - another request is processing it or has already
+		// completed it. Report as already-processed so callers do not duplicate.
+		return ErrOperationAlreadyProcessed
+	}
+
+	return nil
 }
 
 // StoreResult saves the operation result for future idempotency checks

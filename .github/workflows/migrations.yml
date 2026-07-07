@@ -165,7 +165,7 @@ jobs:
           # Define expected tables per service (all use unqualified/singular names)
           declare -A SERVICE_TABLES
           SERVICE_TABLES[current_account]="account lien audit_log audit_outbox"
-          SERVICE_TABLES[financial_accounting]="financial_booking_log ledger_posting audit_log audit_outbox"
+          SERVICE_TABLES[financial_accounting]="financial_booking_log ledger_posting deposit_idempotency audit_log audit_outbox"
           SERVICE_TABLES[party]="party party_association party_demographic party_reference party_bank_relation audit_log audit_outbox"
           SERVICE_TABLES[payment_order]="payment_order audit_log audit_outbox"
           SERVICE_TABLES[position_keeping]="financial_position_log audit_trail_entry transaction_lineage transaction_log_entry audit_log audit_outbox"

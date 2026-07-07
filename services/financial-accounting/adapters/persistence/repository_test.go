@@ -181,6 +181,207 @@ func TestSavePostingsInTransaction_RollbackOnError(t *testing.T) {
 	assert.Equal(t, int64(0), count)
 }
 
+func setupDepositIdempotencyTestDB(t *testing.T) (*gorm.DB, context.Context, func()) {
+	t.Helper()
+	return testdb.SetupTestDB(t,
+		testdb.WithModels(
+			&FinancialBookingLogEntity{},
+			&LedgerPostingEntity{},
+			&DepositIdempotencyEntity{},
+			&audit.AuditOutbox{},
+		),
+		testdb.WithTenant(testTenantID),
+	)
+}
+
+func TestSaveDepositWithIdempotency_FirstSucceedsDuplicateRejected(t *testing.T) {
+	db, ctx, cleanup := setupDepositIdempotencyTestDB(t)
+	defer cleanup()
+
+	repo := NewLedgerRepository(db)
+
+	bookingLogID := uuid.New()
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
+
+	newPostings := func() []*domain.LedgerPosting {
+		return []*domain.LedgerPosting{
+			{
+				ID:                    uuid.New(),
+				FinancialBookingLogID: bookingLogID,
+				Direction:             domain.PostingDirectionDebit,
+				Amount:                money,
+				AccountID:             "ACC-001",
+				ValueDate:             time.Now(),
+				Status:                domain.TransactionStatusPosted,
+				CorrelationID:         "CORR-DUP",
+				CreatedAt:             time.Now(),
+			},
+			{
+				ID:                    uuid.New(),
+				FinancialBookingLogID: bookingLogID,
+				Direction:             domain.PostingDirectionCredit,
+				Amount:                money,
+				AccountID:             "ACC-002",
+				ValueDate:             time.Now(),
+				Status:                domain.TransactionStatusPosted,
+				CorrelationID:         "CORR-DUP",
+				CreatedAt:             time.Now(),
+			},
+		}
+	}
+
+	marker := DepositIdempotencyEntity{
+		DedupeKey:     "dedupe-abc",
+		AccountID:     "ACC-001",
+		CorrelationID: "CORR-DUP",
+		CreatedAt:     time.Now(),
+	}
+
+	// First deposit persists marker + postings atomically.
+	require.NoError(t, repo.SaveDepositWithIdempotency(ctx, marker, newPostings()))
+
+	var count int64
+	require.NoError(t, db.Model(&LedgerPostingEntity{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count)
+
+	// Duplicate deposit (same dedupe key) is rejected and writes no postings.
+	err := repo.SaveDepositWithIdempotency(ctx, marker, newPostings())
+	assert.ErrorIs(t, err, ErrDepositAlreadyProcessed)
+
+	require.NoError(t, db.Model(&LedgerPostingEntity{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count, "duplicate deposit must not add postings")
+}
+
+func TestSaveDepositWithIdempotency_DistinctKeysBothPersist(t *testing.T) {
+	db, ctx, cleanup := setupDepositIdempotencyTestDB(t)
+	defer cleanup()
+
+	repo := NewLedgerRepository(db)
+
+	bookingLogID := uuid.New()
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
+
+	postingsFor := func() []*domain.LedgerPosting {
+		return []*domain.LedgerPosting{
+			{
+				ID:                    uuid.New(),
+				FinancialBookingLogID: bookingLogID,
+				Direction:             domain.PostingDirectionDebit,
+				Amount:                money,
+				AccountID:             "ACC-001",
+				ValueDate:             time.Now(),
+				Status:                domain.TransactionStatusPosted,
+				CorrelationID:         "CORR-SHARED",
+				CreatedAt:             time.Now(),
+			},
+		}
+	}
+
+	// Two distinct dedupe keys (even sharing a correlation ID) both persist.
+	require.NoError(t, repo.SaveDepositWithIdempotency(ctx,
+		DepositIdempotencyEntity{DedupeKey: "dedupe-1", AccountID: "ACC-001", CorrelationID: "CORR-SHARED", CreatedAt: time.Now()},
+		postingsFor()))
+	require.NoError(t, repo.SaveDepositWithIdempotency(ctx,
+		DepositIdempotencyEntity{DedupeKey: "dedupe-2", AccountID: "ACC-001", CorrelationID: "CORR-SHARED", CreatedAt: time.Now()},
+		postingsFor()))
+
+	var count int64
+	require.NoError(t, db.Model(&LedgerPostingEntity{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count, "distinct dedupe keys should both persist")
+}
+
+// TestSaveDepositWithIdempotency_RollsBackMarkerOnPostingFailure proves the
+// exactly-once property at the heart of MON-3: because the idempotency marker
+// and the ledger postings are written in one transaction, a posting insert
+// failure rolls back the marker too. A failed deposit is therefore NOT silently
+// suppressed - a later redelivery reprocesses it instead of seeing a stale
+// marker and skipping.
+func TestSaveDepositWithIdempotency_RollsBackMarkerOnPostingFailure(t *testing.T) {
+	db, ctx, cleanup := setupDepositIdempotencyTestDB(t)
+	defer cleanup()
+
+	repo := NewLedgerRepository(db)
+
+	gbpInstrument := domain.MustCurrencyToInstrument(domain.CurrencyGBP)
+	money := domain.NewMoney(decimal.NewFromInt(100), gbpInstrument)
+	bookingLogID := uuid.New()
+
+	// Pre-insert a committed posting so that a later insert reusing the same
+	// primary key fails with a unique violation - a genuine DB posting-insert
+	// failure inside the deposit transaction.
+	conflictID := uuid.New()
+	require.NoError(t, repo.SavePosting(ctx, &domain.LedgerPosting{
+		ID:                    conflictID,
+		FinancialBookingLogID: bookingLogID,
+		Direction:             domain.PostingDirectionDebit,
+		Amount:                money,
+		AccountID:             "ACC-PRE",
+		ValueDate:             time.Now(),
+		Status:                domain.TransactionStatusPosted,
+		CorrelationID:         "CORR-PRE",
+		CreatedAt:             time.Now(),
+	}))
+
+	dedupeKey := "dedupe-rollback"
+	marker := DepositIdempotencyEntity{
+		DedupeKey:     dedupeKey,
+		AccountID:     "ACC-ROLLBACK",
+		CorrelationID: "CORR-ROLLBACK",
+		CreatedAt:     time.Now(),
+	}
+
+	// This deposit's posting reuses conflictID, so its insert fails inside the tx.
+	failingPostings := []*domain.LedgerPosting{
+		{
+			ID:                    conflictID, // duplicate primary key -> insert fails
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                money,
+			AccountID:             "ACC-ROLLBACK",
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPosted,
+			CorrelationID:         "CORR-ROLLBACK",
+			CreatedAt:             time.Now(),
+		},
+	}
+
+	err := repo.SaveDepositWithIdempotency(ctx, marker, failingPostings)
+	require.Error(t, err, "posting insert failure must propagate")
+	assert.NotErrorIs(t, err, ErrDepositAlreadyProcessed,
+		"a posting failure is not an already-processed condition")
+
+	// (a) The idempotency marker must have been rolled back with the postings.
+	var markerCount int64
+	require.NoError(t, db.Model(&DepositIdempotencyEntity{}).
+		Where("dedupe_key = ?", dedupeKey).Count(&markerCount).Error)
+	assert.Equal(t, int64(0), markerCount,
+		"marker must roll back when the postings fail (same transaction)")
+
+	// (b) Redelivery of the same deposit (with a fresh posting id) reprocesses
+	// successfully - it is NOT silently suppressed by a stale marker.
+	redelivered := []*domain.LedgerPosting{
+		{
+			ID:                    uuid.New(),
+			FinancialBookingLogID: bookingLogID,
+			Direction:             domain.PostingDirectionDebit,
+			Amount:                money,
+			AccountID:             "ACC-ROLLBACK",
+			ValueDate:             time.Now(),
+			Status:                domain.TransactionStatusPosted,
+			CorrelationID:         "CORR-ROLLBACK",
+			CreatedAt:             time.Now(),
+		},
+	}
+	require.NoError(t, repo.SaveDepositWithIdempotency(ctx, marker, redelivered),
+		"redelivery must reprocess a previously-failed deposit")
+
+	require.NoError(t, db.Model(&DepositIdempotencyEntity{}).
+		Where("dedupe_key = ?", dedupeKey).Count(&markerCount).Error)
+	assert.Equal(t, int64(1), markerCount, "marker present after successful redelivery")
+}
+
 func TestGetPosting_NotFound(t *testing.T) {
 	db, ctx, cleanup := setupTestDB(t)
 	defer cleanup()

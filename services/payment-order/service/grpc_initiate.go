@@ -145,6 +145,10 @@ func (s *Service) checkInitiateRedisIdempotency(ctx context.Context, idempKey id
 	// the pending lock remains until TTL expires (5 minutes). This is intentional - it prevents
 	// concurrent retry attempts from creating duplicates. The client should retry after TTL expiry.
 	if err := s.idempotencyService.MarkPending(ctx, idempKey, idempotencyPendingTTL); err != nil {
+		if errors.Is(err, idempotency.ErrOperationAlreadyProcessed) {
+			// Concurrent duplicate: another request already claimed this key.
+			return nil, status.Error(codes.Aborted, "operation already in progress, please retry")
+		}
 		s.logger.Error("failed to mark operation pending", "error", err)
 		return nil, status.Error(codes.Internal, "failed to acquire idempotency lock")
 	}

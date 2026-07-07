@@ -31,6 +31,9 @@ var (
 	ErrFractionalCents = errors.New("amount has fractional cents that cannot be represented")
 	// ErrDuplicateIdempotencyKey is returned when a booking log with the same idempotency key already exists
 	ErrDuplicateIdempotencyKey = errors.New("booking log with this idempotency key already exists")
+	// ErrDepositAlreadyProcessed is returned when a deposit with the same dedupe key
+	// has already been recorded (its idempotency marker already exists).
+	ErrDepositAlreadyProcessed = errors.New("deposit already processed")
 	// ErrInvalidPageToken is returned when the pagination token has an invalid format
 	ErrInvalidPageToken = errors.New("invalid page token format")
 )
@@ -163,6 +166,58 @@ func (r *LedgerRepository) SavePostingsInTransaction(ctx context.Context, postin
 		return nil
 	})
 	if err != nil {
+		return fmt.Errorf("transaction failed: %w", err)
+	}
+	return nil
+}
+
+// SaveDepositWithIdempotency persists deposit postings together with a
+// per-deposit idempotency marker in a single atomic transaction.
+//
+// The marker is inserted first; its unique primary key (DedupeKey) enforces
+// exactly-once processing at the database layer. If a marker with the same
+// DedupeKey already exists, the whole transaction is rolled back (no postings
+// are written) and ErrDepositAlreadyProcessed is returned. This makes duplicate
+// suppression a database invariant that does not depend on Redis timing.
+//
+// The context must contain the tenant ID for schema routing.
+func (r *LedgerRepository) SaveDepositWithIdempotency(
+	ctx context.Context,
+	marker DepositIdempotencyEntity,
+	postings []*domain.LedgerPosting,
+) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		scopedTx, scopeErr := r.withTenantScope(ctx, tx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+
+		// Insert the idempotency marker first. A unique-violation here means the
+		// deposit was already recorded, so we abort the transaction (rolling back
+		// any postings) and surface ErrDepositAlreadyProcessed.
+		if err := scopedTx.Create(&marker).Error; err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return ErrDepositAlreadyProcessed
+			}
+			return err
+		}
+
+		for _, posting := range postings {
+			entity, err := toPostingEntity(posting)
+			if err != nil {
+				return err
+			}
+			if err := scopedTx.Create(&entity).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, ErrDepositAlreadyProcessed) {
+			return ErrDepositAlreadyProcessed
+		}
 		return fmt.Errorf("transaction failed: %w", err)
 	}
 	return nil
