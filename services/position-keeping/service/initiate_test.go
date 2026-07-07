@@ -75,6 +75,15 @@ func (m *MockRepository) FindByAccountID(ctx context.Context, accountID string) 
 	return args.Get(0).([]*domain.FinancialPositionLog), args.Error(1)
 }
 
+func (m *MockRepository) SumAccountBalances(ctx context.Context, accountID string) ([]domain.AccountInstrumentBalance, bool, error) {
+	args := m.Called(ctx, accountID)
+	var balances []domain.AccountInstrumentBalance
+	if args.Get(0) != nil {
+		balances = args.Get(0).([]domain.AccountInstrumentBalance)
+	}
+	return balances, args.Bool(1), args.Error(2)
+}
+
 func (m *MockRepository) Update(ctx context.Context, log *domain.FinancialPositionLog) error {
 	args := m.Called(ctx, log)
 	return args.Error(0)

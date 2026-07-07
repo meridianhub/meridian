@@ -149,6 +149,90 @@ func (r *PostgresRepository) FindByAccountID(ctx context.Context, accountID stri
 	return result, nil
 }
 
+// SumAccountBalances aggregates the net transaction movement across ALL
+// FinancialPositionLogs for an account using a single SQL aggregate query,
+// grouped by instrument. This avoids loading every log (with its entries,
+// lineage, and audit trail) into memory on the balance read hot path.
+//
+// Net movement per instrument is Σ(DEBIT amount_cents) − Σ(CREDIT amount_cents)
+// summed at the database. The bool return reports whether the account has any
+// (non-deleted) position log, so callers can distinguish a missing account from
+// an account with logs but no entries (a zero balance).
+//
+// In multi-tenant mode, the context must contain the tenant ID for schema routing.
+func (r *PostgresRepository) SumAccountBalances(ctx context.Context, accountID string) ([]domain.AccountInstrumentBalance, bool, error) {
+	var balances []domain.AccountInstrumentBalance
+	var hasLogs bool
+
+	err := r.withReadTransaction(ctx, func(tx pgx.Tx) error {
+		// Determine whether the account has any position logs at all. This is
+		// what distinguishes "account not found" from "account with a zero
+		// balance" (a log may exist with no entries, e.g. a zero opening balance).
+		existsQuery := `
+			SELECT EXISTS (
+				SELECT 1 FROM financial_position_log
+				WHERE account_id = $1 AND deleted_at IS NULL
+			)`
+		if err := tx.QueryRow(ctx, existsQuery, accountID).Scan(&hasLogs); err != nil {
+			return fmt.Errorf("failed to check account log existence: %w", err)
+		}
+		if !hasLogs {
+			return nil
+		}
+
+		// Aggregate the signed net movement per instrument across every entry of
+		// every log belonging to the account. DEBIT increases the balance,
+		// CREDIT decreases it (matching domain.BalanceComputer.sumEntries).
+		sumQuery := `
+			SELECT e.currency,
+				COALESCE(SUM(
+					CASE
+						WHEN e.direction = 'DEBIT' THEN e.amount_cents
+						WHEN e.direction = 'CREDIT' THEN -e.amount_cents
+						ELSE 0
+					END
+				), 0) AS net_cents
+			FROM transaction_log_entry e
+			JOIN financial_position_log l ON l.id = e.financial_position_log_id
+			WHERE l.account_id = $1
+				AND l.deleted_at IS NULL
+				AND e.deleted_at IS NULL
+			GROUP BY e.currency
+			ORDER BY e.currency`
+
+		rows, err := tx.Query(ctx, sumQuery, accountID)
+		if err != nil {
+			return fmt.Errorf("failed to aggregate account balances: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var currency string
+			var netCents int64
+			if err := rows.Scan(&currency, &netCents); err != nil {
+				return fmt.Errorf("failed to scan account balance aggregate: %w", err)
+			}
+
+			netMovement, err := domain.NewMoneyFromInstrumentCode(centsToDecimal(netCents), currency)
+			if err != nil {
+				return fmt.Errorf("failed to build aggregated money for instrument %q: %w", currency, err)
+			}
+
+			balances = append(balances, domain.AccountInstrumentBalance{
+				Instrument:  netMovement.Instrument,
+				NetMovement: netMovement,
+			})
+		}
+
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
+	return balances, hasLogs, nil
+}
+
 // List retrieves FinancialPositionLogs matching the given filter with pagination.
 // In multi-tenant mode, the context must contain the tenant ID for schema routing.
 func (r *PostgresRepository) List(ctx context.Context, filter domain.PositionLogFilter) ([]*domain.FinancialPositionLog, error) {

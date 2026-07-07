@@ -43,6 +43,23 @@ type FinancialPositionLogRepository interface {
 	// Returns an empty slice if no logs exist for the account.
 	FindByAccountID(ctx context.Context, accountID string) ([]*FinancialPositionLog, error)
 
+	// SumAccountBalances aggregates the net transaction movement across ALL
+	// FinancialPositionLogs for an account, computed in a single database
+	// aggregate query rather than by loading every log into memory.
+	//
+	// For each instrument held by the account it returns the net movement,
+	// defined as the sum of DEBIT entry amounts minus the sum of CREDIT entry
+	// amounts across every (non-deleted) entry in every (non-deleted) log. This
+	// is the authoritative account balance because opening balances are stored
+	// as transaction entries and are therefore already included in the sum.
+	//
+	// The returned slice contains one entry per instrument that has transaction
+	// entries. The bool return value reports whether the account has at least
+	// one position log at all, allowing callers to distinguish "account not
+	// found" (no logs) from "account exists with a zero balance" (logs but no
+	// entries).
+	SumAccountBalances(ctx context.Context, accountID string) ([]AccountInstrumentBalance, bool, error)
+
 	// Update updates an existing FinancialPositionLog.
 	// Uses optimistic locking via the Version field.
 	// Returns ErrNotFound if the log doesn't exist.
@@ -69,6 +86,17 @@ type FinancialPositionLogRepository interface {
 	// This is a specialized query for batch reconciliation processes.
 	// The limit parameter controls the maximum number of logs returned (0 = no limit).
 	FindPendingForReconciliation(ctx context.Context, limit int) ([]*FinancialPositionLog, error)
+}
+
+// AccountInstrumentBalance is the net transaction movement for a single
+// instrument, aggregated across all of an account's FinancialPositionLogs.
+//
+// NetMovement is Σ(DEBIT) − Σ(CREDIT) over every transaction entry recorded
+// for the account in the given instrument. It is a signed value: positive when
+// debits exceed credits, negative otherwise.
+type AccountInstrumentBalance struct {
+	Instrument  Instrument
+	NetMovement Money
 }
 
 // PositionLogFilter defines filtering and pagination options for listing financial position logs.
