@@ -617,6 +617,13 @@ func (m *mockEventPublisher) Publish(_ context.Context, topic string, event inte
 	return m.err
 }
 
+func (m *mockEventPublisher) PublishTx(_ context.Context, _ *gorm.DB, topic string, event interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, publishedEvent{Topic: topic, Event: event})
+	return m.err
+}
+
 func (m *mockEventPublisher) PublishBalanceImbalanceDetected(_ context.Context, event *domain.BalanceImbalanceDetectedEvent) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
