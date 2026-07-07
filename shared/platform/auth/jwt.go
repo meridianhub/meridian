@@ -23,6 +23,10 @@ var (
 	ErrTokenStringEmpty = errors.New("token string cannot be empty")
 	// ErrTenantClaimMissing is returned when the tenant ID claim is missing from the token
 	ErrTenantClaimMissing = errors.New("x-tenant-id claim missing")
+	// ErrInvalidAudience is returned when the token audience does not match the expected value
+	ErrInvalidAudience = errors.New("invalid audience")
+	// ErrInvalidIssuer is returned when the token issuer does not match the expected value
+	ErrInvalidIssuer = errors.New("invalid issuer")
 )
 
 // Claims represents the JWT claims extracted from a validated token.
@@ -48,19 +52,43 @@ type Claims struct {
 // JWTValidator validates JWT tokens using RS256 algorithm.
 // It provides thread-safe token validation and claims extraction.
 type JWTValidator struct {
-	publicKey *rsa.PublicKey
+	publicKey     *rsa.PublicKey
+	parserOptions []jwt.ParserOption
+}
+
+// ValidatorOption configures optional JWT validation behavior.
+type ValidatorOption func(*JWTValidator)
+
+// WithAudience rejects tokens whose "aud" claim does not contain the expected
+// audience. Passing multiple audiences accepts a token matching any one of them.
+func WithAudience(audience ...string) ValidatorOption {
+	return func(v *JWTValidator) {
+		v.parserOptions = append(v.parserOptions, jwt.WithAudience(audience...))
+	}
+}
+
+// WithIssuer rejects tokens whose "iss" claim does not match the expected issuer.
+func WithIssuer(issuer string) ValidatorOption {
+	return func(v *JWTValidator) {
+		v.parserOptions = append(v.parserOptions, jwt.WithIssuer(issuer))
+	}
 }
 
 // NewJWTValidator creates a new JWT validator with the specified RSA public key.
 // The public key is used to verify token signatures using RS256 algorithm.
-func NewJWTValidator(publicKey *rsa.PublicKey) (*JWTValidator, error) {
+// Optional ValidatorOptions (WithAudience, WithIssuer) add claim validation.
+func NewJWTValidator(publicKey *rsa.PublicKey, opts ...ValidatorOption) (*JWTValidator, error) {
 	if publicKey == nil {
 		return nil, fmt.Errorf("failed to create JWT validator: %w", ErrPublicKeyNil)
 	}
 
-	return &JWTValidator{
+	v := &JWTValidator{
 		publicKey: publicKey,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v, nil
 }
 
 // ValidateToken validates a JWT token string and returns the extracted claims.
@@ -78,13 +106,19 @@ func (v *JWTValidator) ValidateToken(tokenString string) (*Claims, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v: %w", token.Header["alg"], ErrInvalidSignature)
 		}
 		return v.publicKey, nil
-	})
+	}, v.parserOptions...)
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return nil, fmt.Errorf("failed to validate token: %w", ErrTokenExpired)
 		}
 		if errors.Is(err, jwt.ErrSignatureInvalid) {
 			return nil, fmt.Errorf("failed to validate token: %w", ErrInvalidSignature)
+		}
+		if errors.Is(err, jwt.ErrTokenInvalidAudience) {
+			return nil, fmt.Errorf("failed to validate token: %w", ErrInvalidAudience)
+		}
+		if errors.Is(err, jwt.ErrTokenInvalidIssuer) {
+			return nil, fmt.Errorf("failed to validate token: %w", ErrInvalidIssuer)
 		}
 		return nil, fmt.Errorf("failed to parse token: %w: %w", err, ErrInvalidToken)
 	}

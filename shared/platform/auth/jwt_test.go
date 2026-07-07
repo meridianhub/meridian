@@ -619,3 +619,146 @@ func TestValidateToken_WithOrganizationClaim(t *testing.T) {
 		assert.ErrorIs(t, err, ErrTenantClaimMissing)
 	})
 }
+
+func TestJWTValidator_AudienceValidation(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	makeToken := func(aud jwt.ClaimStrings) string {
+		claims := &Claims{
+			UserID: "user-123",
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+				Audience:  aud,
+			},
+		}
+		tokenString, tokenErr := createTestToken(privateKey, claims)
+		require.NoError(t, tokenErr)
+		return tokenString
+	}
+
+	t.Run("accepts token with matching audience", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey, WithAudience("meridian-api"))
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken(jwt.ClaimStrings{"meridian-api"}))
+		require.NoError(t, valErr)
+		assert.Equal(t, "user-123", claims.UserID)
+	})
+
+	t.Run("accepts token when any expected audience matches", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey, WithAudience("other", "meridian-api"))
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken(jwt.ClaimStrings{"meridian-api"}))
+		require.NoError(t, valErr)
+		assert.Equal(t, "user-123", claims.UserID)
+	})
+
+	t.Run("rejects token with wrong audience", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey, WithAudience("meridian-api"))
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken(jwt.ClaimStrings{"other-service"}))
+		require.Error(t, valErr)
+		assert.ErrorIs(t, valErr, ErrInvalidAudience)
+		assert.Nil(t, claims)
+	})
+
+	t.Run("rejects token missing audience when audience expected", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey, WithAudience("meridian-api"))
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken(nil))
+		require.Error(t, valErr)
+		assert.Nil(t, claims)
+	})
+
+	t.Run("accepts any audience when no audience option is set", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey)
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken(jwt.ClaimStrings{"anything"}))
+		require.NoError(t, valErr)
+		assert.Equal(t, "user-123", claims.UserID)
+	})
+}
+
+func TestJWTValidator_IssuerValidation(t *testing.T) {
+	privateKey, publicKey, err := generateTestRSAKeys()
+	require.NoError(t, err)
+
+	makeToken := func(issuer string) string {
+		claims := &Claims{
+			UserID: "user-123",
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+				Issuer:    issuer,
+			},
+		}
+		tokenString, tokenErr := createTestToken(privateKey, claims)
+		require.NoError(t, tokenErr)
+		return tokenString
+	}
+
+	t.Run("accepts token with matching issuer", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey, WithIssuer("meridian"))
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken("meridian"))
+		require.NoError(t, valErr)
+		assert.Equal(t, "user-123", claims.UserID)
+	})
+
+	t.Run("rejects token with wrong issuer", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey, WithIssuer("meridian"))
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken("evil-issuer"))
+		require.Error(t, valErr)
+		assert.ErrorIs(t, valErr, ErrInvalidIssuer)
+		assert.Nil(t, claims)
+	})
+
+	t.Run("rejects token missing issuer when issuer expected", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey, WithIssuer("meridian"))
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken(""))
+		require.Error(t, valErr)
+		assert.Nil(t, claims)
+	})
+
+	t.Run("accepts any issuer when no issuer option is set", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey)
+		require.NoError(t, vErr)
+
+		claims, valErr := validator.ValidateToken(makeToken("anyone"))
+		require.NoError(t, valErr)
+		assert.Equal(t, "user-123", claims.UserID)
+	})
+
+	t.Run("rejects token when both audience and issuer are enforced and issuer is wrong", func(t *testing.T) {
+		validator, vErr := NewJWTValidator(publicKey, WithAudience("meridian-api"), WithIssuer("meridian"))
+		require.NoError(t, vErr)
+
+		claims := &Claims{
+			UserID: "user-123",
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+				Audience:  jwt.ClaimStrings{"meridian-api"},
+				Issuer:    "evil-issuer",
+			},
+		}
+		tokenString, tokenErr := createTestToken(privateKey, claims)
+		require.NoError(t, tokenErr)
+
+		extracted, valErr := validator.ValidateToken(tokenString)
+		require.Error(t, valErr)
+		assert.ErrorIs(t, valErr, ErrInvalidIssuer)
+		assert.Nil(t, extracted)
+	})
+}
