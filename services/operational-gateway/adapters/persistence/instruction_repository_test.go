@@ -428,6 +428,81 @@ func TestInstructionRepository_FindExpired_ReturnsNilWhenEmpty(t *testing.T) {
 	assert.Nil(t, results)
 }
 
+// insertDispatching inserts a DISPATCHING instruction with an explicit updated_at, used to
+// simulate rows whose dispatch lease has (or has not) expired.
+func insertDispatching(t *testing.T, db *gorm.DB, tenantID, connID uuid.UUID, updatedAt time.Time, amount string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	require.NoError(t, db.Exec(`
+		INSERT INTO instructions
+			(id, tenant_id, instruction_type, provider_connection_id, payload, priority, status, attempt_count, max_attempts, idempotency_key, version, dispatched_at, updated_at)
+		VALUES (?, ?, 'kyc.verify', ?, ?, 2, 'DISPATCHING', 1, 3, ?, 1, ?, ?)
+	`, id, tenantID, connID, fmt.Sprintf(`{"amount":"%s"}`, amount), fmt.Sprintf("idem-disp-%s", id), updatedAt, updatedAt).Error)
+	return id
+}
+
+// TestInstructionRepository_FindStuckDispatching verifies that only DISPATCHING rows whose
+// lease has expired (updated_at older than the lease timeout) are returned; fresh DISPATCHING
+// rows and non-DISPATCHING rows are excluded.
+func TestInstructionRepository_FindStuckDispatching(t *testing.T) {
+	db, ctx := setupTestDB(t)
+
+	tenantID := uuid.New()
+	connID := uuid.New()
+	insertTestConnection(t, db, tenantID, connID)
+
+	repo := NewInstructionRepository(db)
+
+	staleUpdate := time.Now().Add(-30 * time.Minute)
+	freshUpdate := time.Now().Add(-1 * time.Minute)
+
+	// Stuck DISPATCHING - lease expired. Should be returned.
+	stuckID := insertDispatching(t, db, tenantID, connID, staleUpdate, "10")
+
+	// Fresh DISPATCHING - still within lease. Should NOT be returned.
+	insertDispatching(t, db, tenantID, connID, freshUpdate, "20")
+
+	// PENDING - not DISPATCHING at all. Should NOT be returned.
+	pending := makeInstruction(t, tenantID, connID.String(), domain.PriorityNormal)
+	require.NoError(t, repo.Save(ctx, pending, fmt.Sprintf("idem-pending-%s", pending.ID)))
+
+	results, err := repo.FindStuckDispatching(ctx, 5*time.Minute, 100)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, stuckID, results[0].ID)
+	assert.Equal(t, domain.InstructionStatusDispatching, results[0].Status)
+}
+
+// TestInstructionRepository_FindStuckDispatching_LimitEnforced verifies the batchSize parameter.
+func TestInstructionRepository_FindStuckDispatching_LimitEnforced(t *testing.T) {
+	db, ctx := setupTestDB(t)
+
+	tenantID := uuid.New()
+	connID := uuid.New()
+	insertTestConnection(t, db, tenantID, connID)
+
+	repo := NewInstructionRepository(db)
+
+	stale := time.Now().Add(-30 * time.Minute)
+	for i := 0; i < 5; i++ {
+		insertDispatching(t, db, tenantID, connID, stale, fmt.Sprintf("%d", i))
+	}
+
+	results, err := repo.FindStuckDispatching(ctx, 5*time.Minute, 3)
+	require.NoError(t, err)
+	assert.Len(t, results, 3)
+}
+
+// TestInstructionRepository_FindStuckDispatching_ReturnsNilWhenEmpty verifies empty handling.
+func TestInstructionRepository_FindStuckDispatching_ReturnsNilWhenEmpty(t *testing.T) {
+	db, ctx := setupTestDB(t)
+	repo := NewInstructionRepository(db)
+
+	results, err := repo.FindStuckDispatching(ctx, 5*time.Minute, 100)
+	require.NoError(t, err)
+	assert.Nil(t, results)
+}
+
 // TestInstructionRepository_FetchDispatchable_RespectsNextRetryAt verifies that
 // RETRYING instructions with a future next_retry_at are not fetched until the backoff expires.
 func TestInstructionRepository_FetchDispatchable_RespectsNextRetryAt(t *testing.T) {

@@ -60,6 +60,10 @@ func (m *mockInstructionRepo) FindExpired(_ context.Context, _ int) ([]*domain.I
 	return nil, nil
 }
 
+func (m *mockInstructionRepo) FindStuckDispatching(_ context.Context, _ time.Duration, _ int) ([]*domain.Instruction, error) {
+	return nil, nil
+}
+
 func (m *mockInstructionRepo) getSavedInstructions() []*domain.Instruction {
 	m.mu.Lock()
 	defer m.mu.Unlock()

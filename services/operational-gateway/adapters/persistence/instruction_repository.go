@@ -332,6 +332,29 @@ func (r *InstructionRepository) FindExpired(ctx context.Context, batchSize int) 
 	return results, nil
 }
 
+// FindStuckDispatching returns up to batchSize instructions stuck in DISPATCHING whose
+// lease has expired: their updated_at is older than leaseTimeout before now. Such rows
+// indicate that the worker which claimed them crashed or stalled before completing the
+// dispatch. Results are ordered by updated_at ASC so the most-stuck instructions are
+// reclaimed first.
+func (r *InstructionRepository) FindStuckDispatching(ctx context.Context, leaseTimeout time.Duration, batchSize int) ([]*domain.Instruction, error) {
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+	cutoff := time.Now().Add(-leaseTimeout)
+
+	var entities []InstructionEntity
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND updated_at < ?", string(domain.InstructionStatusDispatching), cutoff).
+		Order("updated_at ASC").
+		Limit(batchSize).
+		Find(&entities).Error
+	if err != nil {
+		return nil, err
+	}
+	return r.entitiesToInstructions(ctx, entities)
+}
+
 // fetchAttempts loads instruction_attempts for a given instruction ID.
 func (r *InstructionRepository) fetchAttempts(ctx context.Context, instructionID uuid.UUID) ([]InstructionAttemptEntity, error) {
 	var attempts []InstructionAttemptEntity

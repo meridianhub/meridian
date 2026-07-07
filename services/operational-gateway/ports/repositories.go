@@ -77,6 +77,12 @@ type InstructionRepository interface {
 	// FindExpired returns up to batchSize instructions whose expires_at has passed and
 	// whose status is PENDING or RETRYING (non-terminal, expirable states).
 	FindExpired(ctx context.Context, batchSize int) ([]*domain.Instruction, error)
+
+	// FindStuckDispatching returns up to batchSize instructions stuck in DISPATCHING whose
+	// lease has expired (updated_at older than leaseTimeout), indicating the worker that
+	// claimed them crashed or stalled before completing dispatch. Results are ordered by
+	// updated_at ASC so the most-stuck instructions are reclaimed first.
+	FindStuckDispatching(ctx context.Context, leaseTimeout time.Duration, batchSize int) ([]*domain.Instruction, error)
 }
 
 // RouteRepository defines persistence operations for instruction routes.
