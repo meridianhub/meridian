@@ -892,6 +892,8 @@ func TestProcessInstruction_UsesRouteConnectionID(t *testing.T) {
 	saved := instrRepo.getSavedInstructions()
 	require.Len(t, saved, 1)
 	assert.Equal(t, domain.InstructionStatusDelivered, saved[0].Status)
+	assert.Equal(t, "route-conn-abc", saved[0].ProviderConnectionID,
+		"instruction should be attributed to the route's connection, not the stale instruction field")
 }
 
 // TestProcessInstruction_FallbackConnection_UsedWhenPrimaryUnhealthy verifies that when the
@@ -949,6 +951,10 @@ func TestProcessInstruction_FallbackConnection_UsedWhenPrimaryUnhealthy(t *testi
 	saved := instrRepo.getSavedInstructions()
 	require.Len(t, saved, 1)
 	assert.Equal(t, domain.InstructionStatusDelivered, saved[0].Status)
+	// Attribution: the persisted instruction must record the fallback connection actually used,
+	// not the primary id set at ingest.
+	assert.Equal(t, "fallback-conn", saved[0].ProviderConnectionID,
+		"delivered instruction should be attributed to the fallback connection")
 }
 
 // TestProcessInstruction_BothConnectionsUnavailable_FailsGracefully verifies that when both the
@@ -1054,6 +1060,8 @@ func TestProcessInstruction_FallbackConnection_UsedWhenPrimaryMissing(t *testing
 	saved := instrRepo.getSavedInstructions()
 	require.Len(t, saved, 1)
 	assert.Equal(t, domain.InstructionStatusDelivered, saved[0].Status)
+	assert.Equal(t, "fallback-conn", saved[0].ProviderConnectionID,
+		"delivered instruction should be attributed to the fallback connection")
 }
 
 func TestProcessInstruction_HalfOpenCircuit_AllowsDispatch(t *testing.T) {

@@ -554,6 +554,11 @@ func TestDispatch_FallbackConnection_WhenPrimaryUnavailable(t *testing.T) {
 
 	delivered := h.waitForStatus(t, instr.ID, domain.InstructionStatusDelivered, 10*time.Second)
 	assert.Equal(t, domain.InstructionStatusDelivered, delivered.Status)
+	// Attribution: the persisted instruction must record the fallback connection actually used,
+	// not the primary id set at ingest.
+	assert.Equal(t, fallback.ConnectionID, delivered.ProviderConnectionID,
+		"delivered instruction should be attributed to the fallback connection")
+	assert.NotEqual(t, primary.ConnectionID, delivered.ProviderConnectionID)
 }
 
 // TestDispatch_FailsWhenNoConnectionAvailable verifies graceful failure when neither the primary

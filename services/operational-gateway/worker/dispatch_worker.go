@@ -276,6 +276,10 @@ func (w *DispatchWorker) selectConnection(ctx context.Context, instr *domain.Ins
 					"fallback_connection_id", route.FallbackConnectionID,
 				)
 			}
+			// Record the connection actually used so downstream attribution (list filters, the
+			// gRPC response, and lifecycle event payloads) reflects the fallback rather than the
+			// primary id set at ingest. Persisted by the subsequent Save in the dispatch outcome.
+			instr.ProviderConnectionID = conn.ConnectionID
 			return conn, nil
 		}
 		if firstUnavailable == nil {
