@@ -233,7 +233,7 @@ func (w *ExpiryWorker) reapStuckDispatching(ctx context.Context) {
 
 	w.logger.InfoContext(ctx, "processing stuck dispatch batch", "count", len(instructions))
 
-	var retrying, failed, errored int
+	var retrying, expired, failed, errored int
 	for _, instr := range instructions {
 		if ctx.Err() != nil {
 			w.logger.InfoContext(ctx, "stuck dispatch batch interrupted by context cancellation")
@@ -242,6 +242,8 @@ func (w *ExpiryWorker) reapStuckDispatching(ctx context.Context) {
 		switch w.reclaimInstruction(ctx, instr) {
 		case reclaimRetrying:
 			retrying++
+		case reclaimExpired:
+			expired++
 		case reclaimExhausted:
 			failed++
 		case reclaimError:
@@ -253,6 +255,7 @@ func (w *ExpiryWorker) reapStuckDispatching(ctx context.Context) {
 
 	w.logger.InfoContext(ctx, "stuck dispatch batch completed",
 		"retrying", retrying,
+		"expired", expired,
 		"failed", failed,
 		"errored", errored,
 		"total", len(instructions),
@@ -264,16 +267,24 @@ type reclaimOutcome int
 
 const (
 	reclaimRetrying  reclaimOutcome = iota // reclaimed to RETRYING for another attempt
+	reclaimExpired                         // TTL already passed; marked EXPIRED
 	reclaimExhausted                       // retry budget exhausted; marked FAILED
 	reclaimError                           // transition or save failed
 	reclaimSkipped                         // no longer DISPATCHING; nothing to do
 )
 
 // reclaimInstruction transitions a single stuck DISPATCHING instruction back to RETRYING
-// (eligible for immediate re-dispatch) or to FAILED when no retry attempts remain.
+// (eligible for immediate re-dispatch) or to FAILED when no retry attempts remain. An
+// instruction whose TTL has already passed is expired instead of resurrected: the 1s
+// dispatch worker would otherwise re-dispatch a reclaimed row before the next expiry scan,
+// delivering to the provider after its deadline.
 func (w *ExpiryWorker) reclaimInstruction(ctx context.Context, instr *domain.Instruction) reclaimOutcome {
 	if instr.Status != domain.InstructionStatusDispatching {
 		return reclaimSkipped
+	}
+
+	if instr.ExpiresAt != nil && instr.ExpiresAt.Before(time.Now()) {
+		return w.expireStuck(ctx, instr)
 	}
 
 	outcome := reclaimRetrying
@@ -305,4 +316,25 @@ func (w *ExpiryWorker) reclaimInstruction(ctx context.Context, instr *domain.Ins
 		"attempt_count", instr.AttemptCount,
 	)
 	return outcome
+}
+
+// expireStuck transitions a stuck DISPATCHING instruction whose TTL has passed straight to
+// EXPIRED, so it is never re-dispatched after its deadline.
+func (w *ExpiryWorker) expireStuck(ctx context.Context, instr *domain.Instruction) reclaimOutcome {
+	if err := instr.MarkExpired(); err != nil {
+		w.logger.ErrorContext(ctx, "failed to expire stuck instruction",
+			"instruction_id", instr.ID, "error", err)
+		return reclaimError
+	}
+	if err := w.instructionRepo.Save(ctx, instr, ""); err != nil {
+		w.logger.ErrorContext(ctx, "failed to save expired stuck instruction",
+			"instruction_id", instr.ID, "error", err)
+		return reclaimError
+	}
+
+	w.logger.InfoContext(ctx, "expired stuck dispatching instruction past TTL",
+		"instruction_id", instr.ID,
+		"expires_at", instr.ExpiresAt,
+	)
+	return reclaimExpired
 }

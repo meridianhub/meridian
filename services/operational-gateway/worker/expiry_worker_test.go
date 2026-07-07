@@ -166,6 +166,31 @@ func TestExpiryWorker_ReapStuckDispatching_ExhaustedMarksFailed(t *testing.T) {
 	assert.Equal(t, leaseExpiredReason, saved[0].FailureReason)
 }
 
+// TestExpiryWorker_ReapStuckDispatching_PastTTLMarksExpired verifies a stuck DISPATCHING
+// instruction whose TTL has already passed is expired rather than resurrected, so the fast
+// dispatch worker cannot re-deliver it after its deadline.
+func TestExpiryWorker_ReapStuckDispatching_PastTTLMarksExpired(t *testing.T) {
+	stuck := stuckDispatchingInstruction()
+	stuck.AttemptCount = 1
+	stuck.MaxAttempts = 3
+	past := time.Now().Add(-1 * time.Minute)
+	stuck.ExpiresAt = &past
+
+	repo := &mockExpiryRepo{
+		findStuck: func(_ context.Context, _ time.Duration, _ int) ([]*domain.Instruction, error) {
+			return []*domain.Instruction{stuck}, nil
+		},
+	}
+	w := NewExpiryWorker(repo, ExpiryWorkerConfig{}, nil)
+
+	w.reapStuckDispatching(context.Background())
+
+	saved := repo.getSavedInstructions()
+	require.Len(t, saved, 1)
+	assert.Equal(t, domain.InstructionStatusExpired, saved[0].Status,
+		"instruction past its TTL must be expired, not reclaimed to RETRYING")
+}
+
 // TestExpiryWorker_ReapStuckDispatching_NoStuckRowsNoSave verifies the reaper does not persist
 // anything when there are no stuck DISPATCHING instructions.
 func TestExpiryWorker_ReapStuckDispatching_NoStuckRowsNoSave(t *testing.T) {
