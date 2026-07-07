@@ -271,11 +271,10 @@ func (h *VerificationWebhookHandler) checkTimestampFreshness(w http.ResponseWrit
 }
 
 // processVerificationUpdate builds the update request and calls the verification service.
+// webhookReq.Timestamp is guaranteed non-zero here: checkTimestampFreshness rejects a
+// missing timestamp before this method is called.
 func (h *VerificationWebhookHandler) processVerificationUpdate(ctx context.Context, w http.ResponseWriter, provider string, webhookReq *VerificationWebhookRequest, status verification.Status) {
 	completedAt := webhookReq.Timestamp
-	if completedAt.IsZero() {
-		completedAt = time.Now()
-	}
 
 	var reason *string
 	if webhookReq.Reason != "" {
