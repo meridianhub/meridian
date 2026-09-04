@@ -27,6 +27,7 @@ GOLANGCI_LINT=golangci-lint
 BUF ?= $(shell if command -v buf >/dev/null 2>&1; then command -v buf; \
 	elif command -v go >/dev/null 2>&1; then echo "$$(go env GOPATH)/bin/buf"; \
 	else echo buf; fi)
+BUF_INSTALL_HINT=buf not installed. See https://buf.build/docs/installation (or run 'go install github.com/bufbuild/buf/cmd/buf@latest' if you have Go)
 TILT=tilt
 
 # Go parameters
@@ -214,7 +215,7 @@ proto: proto-v1 proto-descriptors
 ## proto-v1: Generate code from v1 protobuf definitions
 proto-v1: proto-validate
 	@echo "Generating code from v1 protobuf definitions..."
-	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
+	@which $(BUF) > /dev/null || (echo "$(BUF_INSTALL_HINT)"; exit 1)
 	@$(BUF) generate
 	@echo "v1 protobuf generation complete"
 	@echo "Generated files in: api/proto/meridian/*/v1/"
@@ -222,7 +223,7 @@ proto-v1: proto-validate
 ## proto-descriptors: Build compiled FileDescriptorSet for the Vanguard HTTP/JSON transcoder
 proto-descriptors: proto-validate
 	@echo "Building proto FileDescriptorSet..."
-	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
+	@which $(BUF) > /dev/null || (echo "$(BUF_INSTALL_HINT)"; exit 1)
 	@$(BUF) build api/proto -o cmd/meridian/descriptor.binpb
 	@echo "Proto descriptor written to cmd/meridian/descriptor.binpb"
 
@@ -282,14 +283,14 @@ proto-validate:
 ## proto-lint: Lint protobuf files with buf
 proto-lint:
 	@echo "Linting protobuf files..."
-	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
+	@which $(BUF) > /dev/null || (echo "$(BUF_INSTALL_HINT)"; exit 1)
 	@$(BUF) lint
 	@echo "Protobuf lint complete"
 
 ## proto-breaking: Check for breaking proto changes
 proto-breaking:
 	@echo "Checking for breaking protobuf changes..."
-	@which $(BUF) > /dev/null || (echo "buf not installed. Run 'go install github.com/bufbuild/buf/cmd/buf@latest'"; exit 1)
+	@which $(BUF) > /dev/null || (echo "$(BUF_INSTALL_HINT)"; exit 1)
 	@$(BUF) breaking --against '.git#branch=develop'
 	@echo "No breaking changes detected"
 
