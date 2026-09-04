@@ -41,6 +41,32 @@ else
     echo "WARNING: ${exclude_script} not found, running without exclusions"
 fi
 
+# Packages whose tests are gated behind INTEGRATION_TEST skip everything under
+# -short, so every statement in them counts as uncovered here while being fully
+# exercised by the integration job. Counting them measures the gate's own -short
+# flag rather than the service's unit coverage, so they are excluded from this
+# check only. They stay in codecov.yml, where the integration run covers them.
+INTEGRATION_ONLY_PATTERN=""
+while IFS= read -r pkg_dir; do
+    [ -n "${pkg_dir}" ] || continue
+    rel="${pkg_dir#"${REPO_ROOT}/"}"
+    if [ -n "${INTEGRATION_ONLY_PATTERN}" ]; then
+        INTEGRATION_ONLY_PATTERN="${INTEGRATION_ONLY_PATTERN}|${rel}/"
+    else
+        INTEGRATION_ONLY_PATTERN="${rel}/"
+    fi
+done < <(grep -rl 'INTEGRATION_TEST' --include='*_test.go' "${REPO_ROOT}/services" "${REPO_ROOT}/shared" 2>/dev/null \
+    | xargs -n1 dirname 2>/dev/null | sort -u)
+
+if [ -n "${INTEGRATION_ONLY_PATTERN}" ]; then
+    echo "Integration-gated packages excluded from the -short measurement: ${INTEGRATION_ONLY_PATTERN}"
+    if [ -n "${EXCLUDE_PATTERN}" ]; then
+        EXCLUDE_PATTERN="${EXCLUDE_PATTERN}|${INTEGRATION_ONLY_PATTERN}"
+    else
+        EXCLUDE_PATTERN="${INTEGRATION_ONLY_PATTERN}"
+    fi
+fi
+
 FAILED=0
 PASSED=0
 SKIPPED=0
@@ -58,15 +84,20 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
         continue
     fi
 
-    # Skip if no Go source files
-    if ! find "${service_dir}" -name "*.go" -not -name "*_test.go" -maxdepth 5 | grep -q .; then
+    # Skip if no Go source files.
+    # find is not piped into grep here: grep -q exits at the first match, find
+    # then dies on SIGPIPE, and under `set -o pipefail` that non-zero status made
+    # the guard report "no Go source files" for a service that has them. The
+    # result was a gate that silently skipped a different subset of services on
+    # every run. -print -quit stops find at the first hit with no pipe involved.
+    if [ -z "$(find "${service_dir}" -maxdepth 5 -name "*.go" -not -name "*_test.go" -print -quit)" ]; then
         echo "  SKIP ${service} (no Go source files)"
         SKIPPED=$((SKIPPED + 1))
         continue
     fi
 
     # Skip if no test files
-    if ! find "${service_dir}" -name "*_test.go" -maxdepth 5 | grep -q .; then
+    if [ -z "$(find "${service_dir}" -maxdepth 5 -name "*_test.go" -print -quit)" ]; then
         echo "  SKIP ${service} (no test files)"
         SKIPPED=$((SKIPPED + 1))
         continue
