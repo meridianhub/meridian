@@ -30,7 +30,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.26.4'
+        go-version: '1.26.8'
         cache: true
 
     - name: Set up buf
@@ -46,14 +46,13 @@ jobs:
       run: |
         set -euo pipefail
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        # Known false positives - see ADR-0036 for context.
+        # Known false positive - see ADR-0036 for context.
         # GO-2024-2476: Dex TLS config discarding. Not applicable because
         # embedded Dex serves HTTP behind the gateway (Caddy terminates TLS).
-        # GO-2026-4883: Docker/Moby plugin privilege off-by-one. No fix available.
-        # Only reachable via testcontainers in tests, not production code paths.
-        # GO-2026-4887: Docker/Moby AuthZ plugin bypass with oversized request bodies.
-        # No fix available. Only reachable via testcontainers in tests, not production.
-        GOVULN_ALLOWLIST="$(printf '%s\n' GO-2024-2476 GO-2026-4883 GO-2026-4887)"
+        # The Docker/Moby entries (GO-2026-4883, GO-2026-4887) were removed: the
+        # advisories were superseded by GO-2026-6253, which is fixed in
+        # github.com/moby/go-archive v0.3.0 and is now pulled in transitively.
+        GOVULN_ALLOWLIST="$(printf '%s\n' GO-2024-2476)"
 
         govulncheck ./... 2>&1 | tee /tmp/govulncheck.out || true
         GOVULN_RC=${PIPESTATUS[0]:-$?}
@@ -71,7 +70,7 @@ jobs:
             echo "::error::Non-allowlisted vulnerabilities detected: $NON_ALLOWLISTED"
             exit 1
           fi
-          echo "::warning::Suppressed allowlisted false positive(s) (Dex, Docker/Moby) — see ADR-0036"
+          echo "::warning::Suppressed allowlisted false positive (Dex) — see ADR-0036"
         fi
 
   gosec:
@@ -85,7 +84,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.26.4'
+        go-version: '1.26.8'
         cache: true
 
     - name: Set up buf
