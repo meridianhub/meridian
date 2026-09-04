@@ -7,7 +7,6 @@
 [![Code Quality](https://github.com/meridianhub/meridian/actions/workflows/quality.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/quality.yml?query=branch%3Adevelop)
 [![Security Scanning](https://github.com/meridianhub/meridian/actions/workflows/security.yml/badge.svg?branch=develop)](https://github.com/meridianhub/meridian/actions/workflows/security.yml?query=branch%3Adevelop)
 [![codecov](https://codecov.io/gh/meridianhub/meridian/branch/develop/graph/badge.svg)](https://codecov.io/gh/meridianhub/meridian)
-[![Go Report Card](https://goreportcard.com/badge/github.com/meridianhub/meridian)](https://goreportcard.com/report/github.com/meridianhub/meridian)
 [![Go Reference](https://pkg.go.dev/badge/github.com/meridianhub/meridian.svg)](https://pkg.go.dev/github.com/meridianhub/meridian)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/meridianhub/meridian)](https://go.dev/)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
@@ -166,7 +165,7 @@ Release history and notable changes are recorded in [CHANGELOG.md](CHANGELOG.md)
 |-------|-------|
 | Language | Go |
 | API | Protocol Buffers, gRPC, REST (transcoded) |
-| Database | PostgreSQL / CockroachDB |
+| Database | CockroachDB (PostgreSQL wire protocol) |
 | Messaging | Apache Kafka |
 | Orchestration | Kubernetes, Tilt (local dev) |
 | Scripting | Starlark (sagas), CEL (validation/routing) |
@@ -176,7 +175,8 @@ Release history and notable changes are recorded in [CHANGELOG.md](CHANGELOG.md)
 
 ## Try It
 
-**Prerequisites**: Docker and Docker Compose
+**Prerequisites**: Docker, Docker Compose, Go, and [buf](https://buf.build/docs/installation)
+(`make dev-up` regenerates protobuf code before starting the stack)
 
 ```bash
 git clone https://github.com/meridianhub/meridian.git
