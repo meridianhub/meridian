@@ -500,14 +500,14 @@ See [services/reconciliation/README.md](reconciliation/README.md) for full docum
 
 ### Market Information Service
 
-The Market Information service records bi-temporal market observations and applies the quality
-ladder (Estimate -> Coefficient -> Actual -> Revised), supplying market data to forecasting,
-valuation, and settlement.
+The Market Information service records bi-temporal market observations and applies the
+confidence grades (Estimate -> Provisional -> Actual -> Verified), supplying market data to
+forecasting, valuation, and settlement.
 
 **Responsibilities:**
 
 - **Bi-Temporal Observations**: Track what was known and when it was known
-- **Quality Ladder**: Promote observations from estimate through to revised actuals
+- **Confidence Grades**: Promote observations from estimate through to verified actuals
 - **Delta Engine**: Wash-and-reload corrections without locking the database
 
 See [services/market-information/README.md](market-information/README.md) for full documentation.

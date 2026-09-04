@@ -71,9 +71,9 @@ No migrations.
 ### Data that knows its own quality
 
 Measurements carry what was known, how it was known, and when it was known.
-The quality ladder (Estimate -> Coefficient -> Actual -> Revised) handles
-late-arriving data, out-of-order meter reads, and delayed settlement without
-locking the database.
+Confidence grades (Estimate -> Provisional -> Actual -> Verified), paired with a
+separate revision history, handle late-arriving data, out-of-order meter reads,
+and delayed settlement without locking the database.
 
 ### AI-configurable
 
