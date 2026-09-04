@@ -39,7 +39,7 @@ func EventToInputData(event proto.Message, metadata map[string]string) (map[stri
 	}
 	// Guard against typed-nil: a (*T)(nil) passed as proto.Message satisfies
 	// event != nil (non-nil interface) but holds a nil pointer that Marshal panics on.
-	if v := reflect.ValueOf(event); v.Kind() == reflect.Ptr && v.IsNil() {
+	if v := reflect.ValueOf(event); v.Kind() == reflect.Pointer && v.IsNil() {
 		return nil, ErrNilEvent
 	}
 

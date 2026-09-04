@@ -386,7 +386,7 @@ The MCP server is included in the Tilt local development stack.
 ### Prerequisites
 
 - A running Meridian local cluster (see root `Tiltfile`)
-- Go 1.26+ for building locally outside of Tilt
+- Go 1.27+ for building locally outside of Tilt
 
 ### Running with Tilt
 

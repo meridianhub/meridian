@@ -36,7 +36,7 @@ trust that a wrong-direction balance computation would break a test."
 
 We use [gremlins](https://github.com/go-gremlins/gremlins) (`go-gremlins/gremlins`),
 pinned to `v0.6.0`. It is the most actively maintained Go mutation tester and runs against
-the repo's Go toolchain (1.26.x). Configuration lives in `.gremlins.yaml` at the repo root.
+the repo's Go toolchain (1.27.x). Configuration lives in `.gremlins.yaml` at the repo root.
 
 ```bash
 go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0

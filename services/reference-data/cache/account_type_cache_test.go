@@ -142,6 +142,12 @@ func (s *stubCELProgram) ContextEval(_ context.Context, _ any) (ref.Val, *cel.Ev
 	return nil, nil, nil
 }
 
+func (s *stubCELProgram) ConcurrentEval(_ context.Context, _ any) <-chan cel.EvalResult {
+	ch := make(chan cel.EvalResult, 1)
+	close(ch)
+	return ch
+}
+
 func newTestAccountTypeContext(tenantID string) context.Context {
 	return tenant.WithTenant(context.Background(), tenant.MustNewTenantID(tenantID))
 }

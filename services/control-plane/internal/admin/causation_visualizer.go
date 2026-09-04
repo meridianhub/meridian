@@ -80,14 +80,17 @@ func (v *CausationVisualizer) GetCausationTreeForPosition(ctx context.Context, p
 		return nil, nil, err
 	}
 
-	return &CausationTreeResult{
-			Tree:   tree,
-			Depth:  depth,
-			SagaID: sagaID,
-		}, &PositionInfo{
-			PositionID: positionID,
-			AccountID:  accountID,
-		}, nil
+	result := &CausationTreeResult{
+		Tree:   tree,
+		Depth:  depth,
+		SagaID: sagaID,
+	}
+	info := &PositionInfo{
+		PositionID: positionID,
+		AccountID:  accountID,
+	}
+
+	return result, info, nil
 }
 
 // GetCausationTreeForTransaction traces a transaction back to the saga that
