@@ -49,9 +49,6 @@ jobs:
         # Known false positive - see ADR-0036 for context.
         # GO-2024-2476: Dex TLS config discarding. Not applicable because
         # embedded Dex serves HTTP behind the gateway (Caddy terminates TLS).
-        # The Docker/Moby entries (GO-2026-4883, GO-2026-4887) were removed: the
-        # advisories were superseded by GO-2026-6253, which is fixed in
-        # github.com/moby/go-archive v0.3.0 and is now pulled in transitively.
         GOVULN_ALLOWLIST="$(printf '%s\n' GO-2024-2476)"
 
         govulncheck ./... 2>&1 | tee /tmp/govulncheck.out || true
