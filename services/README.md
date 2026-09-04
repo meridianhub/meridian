@@ -507,7 +507,7 @@ forecasting, valuation, and settlement.
 **Responsibilities:**
 
 - **Bi-Temporal Observations**: Track what was known and when it was known
-- **Quality Ladder**: Promote observations from estimate through to revised actuals
+- **Confidence Grades**: Promote observations from estimate through to verified actuals
 - **Delta Engine**: Wash-and-reload corrections without locking the database
 
 See [services/market-information/README.md](market-information/README.md) for full documentation.

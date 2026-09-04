@@ -4,7 +4,7 @@ description: BIAN Market Information Management - bi-temporal price observations
 triggers:
   - Recording price observations or market data feeds
   - Implementing bi-temporal queries (event time vs knowledge time)
-  - Configuring the quality ladder (ESTIMATE to REVISED)
+  - Configuring confidence grades (ESTIMATE to VERIFIED)
   - Integrating ECB FX rate ingestion
   - Forecasting service needing historical price data
   - Control-plane manifest applying market data set definitions
@@ -12,8 +12,11 @@ instructions: |
   Market Information owns time-series observations, not instrument definitions.
   Reference Data owns what can be observed; Market Information owns the observations.
 
-  Quality ladder: ESTIMATE(1) < PROVISIONAL(2) < ACTUAL(3) < REVISED(4).
-  Higher quality supersedes lower. superseded_by links form an immutable chain.
+  Confidence grades (Axis A): ESTIMATE(1) < PROVISIONAL(2) < ACTUAL(3) < VERIFIED(4).
+  Higher grade supersedes lower. superseded_by links form an immutable chain.
+  The proto enum still spells slot 4 QUALITY_LEVEL_REVISED (deprecated,
+  semantically VERIFIED); the Go domain enum has QualityLevelVerified.
+  REVISED is a revision event on Axis B, not a grade. See ADR-0017.
 
   ECB worker runs as a background goroutine in the same process. Enable via
   ECB_ENABLED=true. Default interval is 24h; dataset code ECB_FX.
@@ -165,7 +168,8 @@ Higher-quality observations supersede lower-quality ones for the same dataset an
 `resolution_key`. Supersession is non-destructive: older observations remain queryable.
 
 ```text
-ESTIMATE(1) -> PROVISIONAL(2) -> ACTUAL(3) -> REVISED(4)
+ESTIMATE(1) -> PROVISIONAL(2) -> ACTUAL(3) -> VERIFIED(4)
+(proto slot 4 is still spelled QUALITY_LEVEL_REVISED; the rename is deferred)
 ```
 
 ## Dependencies
