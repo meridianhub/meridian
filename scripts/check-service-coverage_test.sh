@@ -120,7 +120,7 @@ echo "Per-service floors"
 echo ""
 
 assert_equals "80" "$(service_floor some-service)" "a service with no entry uses the threshold"
-assert_equals "71" "$(service_floor position-keeping)" "position-keeping carries its recorded floor"
+assert_equals "71.2" "$(service_floor position-keeping)" "position-keeping carries its recorded floor"
 
 echo ""
 echo "Results: ${TESTS_PASSED} passed, ${TESTS_FAILED} failed"

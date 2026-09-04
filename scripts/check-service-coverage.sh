@@ -70,7 +70,7 @@ skip_only_packages() {
         | map(select(all(.[]; .Action == "skip")))
         | map(.[0].Package)
         | .[]
-    ' "${events_file}" 2>/dev/null | sort -u
+    ' "${events_file}" | sort -u
 }
 
 # Turn a Go import path into the repo-relative directory the coverprofile uses.
@@ -88,12 +88,13 @@ package_to_path() {
 # of services was skipped on every run, so these were not reliably measured at
 # all - recording where one actually stands is stricter than what preceded it.
 #
-# position-keeping: 71.2%. Its adapters/persistence repository methods are
+# position-keeping: 71.2%, recorded to the measured decimal so a drop to 71.1%
+# is a regression rather than a pass.  Its adapters/persistence repository methods are
 # exercised only by the DB-backed tests that -short skips, while the rest of the
 # package runs, so the package cannot be excluded as measurement noise.
 service_floor() {
     case "$1" in
-        position-keeping) echo "71" ;;
+        position-keeping) echo "71.2" ;;
         *)                echo "${THRESHOLD}" ;;
     esac
 }
@@ -136,24 +137,42 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
 
     coverage_file="${TMPDIR}/meridian_coverage_${service}.out"
     events_file="${TMPDIR}/meridian_events_${service}.json"
-    rm -f "${coverage_file}" "${events_file}"
+    stderr_file="${TMPDIR}/meridian_stderr_${service}.txt"
+    rm -f "${coverage_file}" "${events_file}" "${stderr_file}"
 
     # Run unit tests with coverage; continue even if tests fail so we report all
     # services. -json is captured so the skip-only packages can be derived from
     # the same run rather than a second one.
+    #
+    # stderr goes to its own file: merging it into stdout interleaves build
+    # errors with the JSON stream, and every reader of a corrupted stream then
+    # fails silently.
     if ! go test -short -covermode=atomic -coverprofile="${coverage_file}" \
-        -json "./services/${service}/..." > "${events_file}" 2>&1; then
-        jq -r 'select(.Output != null) | .Output' "${events_file}" 2>/dev/null | tail -40
+        -json "./services/${service}/..." > "${events_file}" 2>"${stderr_file}"; then
+        jq -j 'select(.Output != null) | .Output' "${events_file}" 2>/dev/null | tail -40
+        tail -20 "${stderr_file}"
         echo "  FAIL ${service} (test execution failed)"
         FAILED=$((FAILED + 1))
-        rm -f "${events_file}"
+        rm -f "${events_file}" "${stderr_file}"
         continue
     fi
 
+    # A stream that does not parse would otherwise read as "no packages to
+    # exclude", quietly measuring against the wrong denominator.
+    if ! jq -se . "${events_file}" > /dev/null 2>&1; then
+        echo "  FAIL ${service} (go test -json output did not parse)"
+        FAILED=$((FAILED + 1))
+        rm -f "${events_file}" "${stderr_file}"
+        continue
+    fi
+    rm -f "${stderr_file}"
+
     # Package summary lines only. A failing run takes the branch above, which
     # dumps the tail of the output, so `--- PASS` subtest lines would be pure
-    # noise here - there were 18k of them across a full run.
-    jq -r 'select(.Output != null) | .Output' "${events_file}" 2>/dev/null \
+    # noise here - there were 18k of them across a full run. -j rather than -r:
+    # each .Output already ends in a newline, so -r double-spaces the stream and
+    # halves what a tail -40 shows.
+    jq -j 'select(.Output != null) | .Output' "${events_file}" \
         | grep -E '^(ok|FAIL)[[:space:]]' || true
 
     service_exclude="${EXCLUDE_PATTERN}"
@@ -190,6 +209,15 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
             >> "${filtered_file}" || true
         rm -f "${coverage_file}"
         target_file="${filtered_file}"
+    fi
+
+    # Exclusions can in principle remove every line of a profile. Coverage is
+    # then unmeasurable rather than zero, so say so instead of reporting 0%.
+    if [ "$(wc -l < "${target_file}")" -le 1 ]; then
+        echo "  SKIP ${service} (every package excluded from the measurement)"
+        SKIPPED=$((SKIPPED + 1))
+        rm -f "${target_file}"
+        continue
     fi
 
     if ! coverage="$(go tool cover -func="${target_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"; then
