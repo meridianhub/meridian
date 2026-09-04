@@ -22,9 +22,10 @@ import (
 //
 // This test ensures dependency versions remain compatible during upgrades.
 func TestTracer_ResourceCreation_NoSchemaConflict(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test")
-	}
+	// Deliberately not skipped under -short. otlptracegrpc.New wraps grpc.NewClient,
+	// which is lazy and never dials, so this costs one resource merge. Running it on
+	// every PR is what catches an SDK/semconv schema-URL split in the same CI run as
+	// the go.mod change that causes it.
 
 	cfg := TracerConfig{
 		ServiceName:    "test-service",

@@ -31,9 +31,9 @@ func newTestTracerWithExporter(t *testing.T) (*Tracer, *tracetest.InMemoryExport
 	}, exporter
 }
 
-// TestSemconvV1_37_DatabaseAttributes verifies that database spans use the correct
-// semantic convention attributes from v1.37.0
-func TestSemconvV1_37_DatabaseAttributes(t *testing.T) {
+// TestSemconvV1_43_DatabaseAttributes verifies that database spans use the correct
+// semantic convention attributes from v1.43.0
+func TestSemconvV1_43_DatabaseAttributes(t *testing.T) {
 	ctx := context.Background()
 	tracer, exporter := newTestTracerWithExporter(t)
 	defer func() { _ = tracer.Shutdown(ctx) }()
@@ -52,7 +52,7 @@ func TestSemconvV1_37_DatabaseAttributes(t *testing.T) {
 	spans := exporter.GetSpans()
 	require.Len(t, spans, 1, "Expected exactly one span to be exported")
 
-	// Verify semconv v1.37.0 attributes are present
+	// Verify semconv v1.43.0 attributes are present
 	attrs := spans[0].Attributes
 	assertHasAttribute(t, attrs, semconv.DBSystemNameKey, "postgresql")
 	assertHasAttribute(t, attrs, semconv.DBOperationNameKey, "SELECT")
@@ -61,9 +61,9 @@ func TestSemconvV1_37_DatabaseAttributes(t *testing.T) {
 	assertHasAttribute(t, attrs, semconv.DBCollectionNameKey, "accounts")
 }
 
-// TestSemconvV1_37_KafkaProducerAttributes verifies that Kafka producer spans use
-// the correct semantic convention attributes from v1.37.0
-func TestSemconvV1_37_KafkaProducerAttributes(t *testing.T) {
+// TestSemconvV1_43_KafkaProducerAttributes verifies that Kafka producer spans use
+// the correct semantic convention attributes from v1.43.0
+func TestSemconvV1_43_KafkaProducerAttributes(t *testing.T) {
 	ctx := context.Background()
 	tracer, exporter := newTestTracerWithExporter(t)
 	defer func() { _ = tracer.Shutdown(ctx) }()
@@ -79,9 +79,9 @@ func TestSemconvV1_37_KafkaProducerAttributes(t *testing.T) {
 	spans := exporter.GetSpans()
 	require.Len(t, spans, 1)
 
-	// Verify semconv v1.37.0 attributes are present with correct values
+	// Verify semconv v1.43.0 attributes are present with correct values
 	// Note: MessagingSystemKey.String("kafka") produces attribute "messaging.system" = "kafka"
-	// This is the correct v1.37.0 API even though the attribute name is the same
+	// This is the correct v1.43.0 API even though the attribute name is the same
 	attrs := spans[0].Attributes
 	assertHasAttribute(t, attrs, semconv.MessagingSystemKey, "kafka")
 	assertHasAttribute(t, attrs, semconv.MessagingOperationTypeKey, "publish")
@@ -89,13 +89,13 @@ func TestSemconvV1_37_KafkaProducerAttributes(t *testing.T) {
 	assertHasAttribute(t, attrs, semconv.MessagingDestinationPartitionIDKey, "3")
 	assertHasAttribute(t, attrs, semconv.MessagingKafkaMessageKeyKey, "account-123")
 
-	// In v1.37.0, MessagingDestinationPartitionIDKey replaced custom "kafka.partition" attribute
+	// In v1.43.0, MessagingDestinationPartitionIDKey replaced custom "kafka.partition" attribute
 	assertNotHasAttributeKey(t, attrs, "kafka.partition")
 }
 
-// TestSemconvV1_37_KafkaConsumerAttributes verifies that Kafka consumer spans use
-// the correct semantic convention attributes from v1.37.0
-func TestSemconvV1_37_KafkaConsumerAttributes(t *testing.T) {
+// TestSemconvV1_43_KafkaConsumerAttributes verifies that Kafka consumer spans use
+// the correct semantic convention attributes from v1.43.0
+func TestSemconvV1_43_KafkaConsumerAttributes(t *testing.T) {
 	ctx := context.Background()
 	tracer, exporter := newTestTracerWithExporter(t)
 	defer func() { _ = tracer.Shutdown(ctx) }()
@@ -112,8 +112,8 @@ func TestSemconvV1_37_KafkaConsumerAttributes(t *testing.T) {
 	spans := exporter.GetSpans()
 	require.Len(t, spans, 1)
 
-	// Verify semconv v1.37.0 attributes - CRITICAL: consumer must use Key-based approach
-	// The Key-based approach (MessagingSystemKey.String("kafka")) is v1.37.0 compliant
+	// Verify semconv v1.43.0 attributes - CRITICAL: consumer must use Key-based approach
+	// The Key-based approach (MessagingSystemKey.String("kafka")) is v1.43.0 compliant
 	// vs using deprecated constants (MessagingSystemKafka, MessagingOperationTypeReceive)
 	attrs := spans[0].Attributes
 	assertHasAttribute(t, attrs, semconv.MessagingSystemKey, "kafka")
@@ -127,9 +127,9 @@ func TestSemconvV1_37_KafkaConsumerAttributes(t *testing.T) {
 	assertNotHasAttributeKey(t, attrs, "kafka.partition")
 }
 
-// TestSemconvV1_37_HTTPClientAttributes verifies that HTTP client spans use
-// the correct semantic convention attributes from v1.37.0
-func TestSemconvV1_37_HTTPClientAttributes(t *testing.T) {
+// TestSemconvV1_43_HTTPClientAttributes verifies that HTTP client spans use
+// the correct semantic convention attributes from v1.43.0
+func TestSemconvV1_43_HTTPClientAttributes(t *testing.T) {
 	ctx := context.Background()
 	tracer, exporter := newTestTracerWithExporter(t)
 	defer func() { _ = tracer.Shutdown(ctx) }()
@@ -146,7 +146,7 @@ func TestSemconvV1_37_HTTPClientAttributes(t *testing.T) {
 	spans := exporter.GetSpans()
 	require.Len(t, spans, 1)
 
-	// Verify semconv v1.37.0 attributes are present
+	// Verify semconv v1.43.0 attributes are present
 	attrs := spans[0].Attributes
 	assertHasAttribute(t, attrs, semconv.HTTPRequestMethodKey, "POST")
 	assertHasAttribute(t, attrs, semconv.URLFullKey, "https://api.example.com/accounts/123")
