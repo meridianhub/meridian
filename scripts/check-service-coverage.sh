@@ -41,25 +41,39 @@ else
     echo "WARNING: ${exclude_script} not found, running without exclusions"
 fi
 
-# Packages whose tests are gated behind INTEGRATION_TEST skip everything under
-# -short, so every statement in them counts as uncovered here while being fully
-# exercised by the integration job. Counting them measures the gate's own -short
-# flag rather than the service's unit coverage, so they are excluded from this
-# check only. They stay in codecov.yml, where the integration run covers them.
+# A package whose TestMain short-circuits under -short never runs any of its
+# tests, so every statement in it counts as uncovered here while the integration
+# job exercises it fully. Counting those measures this gate's own -short flag
+# rather than the service's unit coverage, so such packages are excluded from
+# this check only. They stay in codecov.yml, where the integration run covers
+# them.
+#
+# The guard must be in TestMain: a per-test `t.Skip` leaves the rest of the
+# package running, and excluding that package would hide genuinely unit-tested
+# code from the gate.
 INTEGRATION_ONLY_PATTERN=""
-while IFS= read -r pkg_dir; do
-    [ -n "${pkg_dir}" ] || continue
-    rel="${pkg_dir#"${REPO_ROOT}/"}"
+while IFS= read -r test_file; do
+    [ -n "${test_file}" ] || continue
+    grep -q 'func TestMain(' "${test_file}" || continue
+    awk '/func TestMain\(/ { in_main = 1 }
+         in_main && /testing\.Short\(\)/ { found = 1; exit }
+         in_main && /^}/ { exit }
+         END { exit !found }' "${test_file}" || continue
+
+    rel="$(dirname "${test_file}")"
+    rel="${rel#"${REPO_ROOT}/"}"
+    case "|${INTEGRATION_ONLY_PATTERN}|" in
+        *"|${rel}/|"*) continue ;;
+    esac
     if [ -n "${INTEGRATION_ONLY_PATTERN}" ]; then
         INTEGRATION_ONLY_PATTERN="${INTEGRATION_ONLY_PATTERN}|${rel}/"
     else
         INTEGRATION_ONLY_PATTERN="${rel}/"
     fi
-done < <(grep -rl 'INTEGRATION_TEST' --include='*_test.go' "${REPO_ROOT}/services" "${REPO_ROOT}/shared" 2>/dev/null \
-    | xargs -n1 dirname 2>/dev/null | sort -u)
+done < <(find "${REPO_ROOT}/services" "${REPO_ROOT}/shared" -name '*_test.go' -type f 2>/dev/null | sort)
 
 if [ -n "${INTEGRATION_ONLY_PATTERN}" ]; then
-    echo "Integration-gated packages excluded from the -short measurement: ${INTEGRATION_ONLY_PATTERN}"
+    echo "Packages skipped wholesale by -short, excluded from the measurement: ${INTEGRATION_ONLY_PATTERN}"
     if [ -n "${EXCLUDE_PATTERN}" ]; then
         EXCLUDE_PATTERN="${EXCLUDE_PATTERN}|${INTEGRATION_ONLY_PATTERN}"
     else
