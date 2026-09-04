@@ -240,6 +240,31 @@ install_tool() {
     fi
 }
 
+# Compare an installed version against a required minimum.
+# Only concrete minimums are enforced ("1.26.8+"); family patterns ("2.x+", "3.x+")
+# name a major line rather than a floor, so they are accepted as-is.
+# Returns 0 when the requirement is met or is not comparable.
+version_meets_minimum() {
+    local have=$1
+    local want=$2
+
+    [ -n "$have" ] && [ -n "$want" ] || return 0
+    case "$want" in
+        *x*) return 0 ;;
+    esac
+    want=${want%+}
+
+    # Normalise a leading "v". kubectl reports gitVersion as "v1.32.3", and
+    # sort -V orders "1.28" before "v1.32.3" on the prefix alone, so without
+    # this the comparison succeeds for every version and the check never fires.
+    have=${have#v}
+    want=${want#v}
+
+    # sort -V -C succeeds when the input is already in version order,
+    # i.e. when want <= have.
+    printf '%s\n%s\n' "$want" "$have" | sort -V -C
+}
+
 # Check command and optionally fix
 check_tool() {
     local cmd=$1
@@ -248,6 +273,12 @@ check_tool() {
     if command -v "$cmd" &> /dev/null; then
         local version
         version=$(get_version "$cmd")
+        if ! version_meets_minimum "$version" "$required_version"; then
+            echo -e "${RED}✗${NC} $cmd ${RED}($version is below the required $required_version)${NC}"
+            echo -e "  ${YELLOW}Fix:${NC} upgrade $cmd to $required_version"
+            ALL_CHECKS_PASSED=false
+            return 1
+        fi
         echo -e "${GREEN}✓${NC} $cmd"
         if [ "$VERBOSE" = true ]; then
             echo -e "  Version: $version"
@@ -612,7 +643,7 @@ echo " Core Development Tools"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "go" "1.23+" || true
+check_tool "go" "1.26.8+" || true
 check_go_environment || true
 echo ""
 

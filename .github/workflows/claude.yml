@@ -50,8 +50,11 @@ jobs:
             IMPORTANT: Today's date is ${{ steps.date.outputs.current_date }}.
 
             Key project facts:
-            - This project uses Go 1.26.4 (latest stable release)
-            - Go 1.26.4 is a valid version - do not question or flag it
+            - Go 1.26.8 is the supported baseline, pinned consistently across
+              go.mod, the Dockerfiles and the workflows. It is a real release -
+              do not claim otherwise. A considered case for moving the baseline
+              to a newer minor is welcome; a bare observation that one exists
+              is not.
             - Architecture: BIAN-compliant microservices
             - Stack: Go, Protocol Buffers, gRPC, Kubernetes
             - Security: All security scans must remain BLOCKING (never suggest making them non-blocking)

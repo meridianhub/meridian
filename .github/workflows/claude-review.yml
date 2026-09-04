@@ -59,7 +59,10 @@ jobs:
             - CURRENT_DATE: ${{ steps.date.outputs.current_date }}
 
             Context:
-            - Go 1.25+ is the current stable release - don't flag version references
+            - Go 1.26.8 is the pinned baseline across go.mod, the Dockerfiles and
+              the workflows. It is a real release - do not claim otherwise. A
+              considered case for moving the baseline is welcome; a bare
+              observation that a newer minor exists is not.
             - CI may still be running - check with `gh pr checks ${{ github.event.pull_request.number }}`
 
           # Using the latest Opus for highest quality code reviews (alias tracks newest snapshot)
