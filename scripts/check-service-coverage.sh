@@ -4,9 +4,13 @@
 # Runs unit tests (with -short to skip integration tests) for each Go service
 # and fails if any service falls below the minimum coverage threshold.
 #
-# Exclusions are read from codecov.yml (single source of truth).
-# This script converts codecov glob patterns to grep filters applied to
-# Go coverprofiles, so both Codecov and this script enforce the same rules.
+# Exclusions come from two sources:
+#   1. codecov.yml, the single source of truth for what coverage ignores
+#      anywhere. Its globs are converted to grep filters applied to Go
+#      coverprofiles, so Codecov and this script enforce the same rules.
+#   2. Packages this gate cannot measure, because their TestMain
+#      short-circuits under -short and no test in them runs. These are excluded
+#      here only, never in codecov.yml, where the integration run covers them.
 #
 # Usage:
 #   ./scripts/check-service-coverage.sh
@@ -17,6 +21,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! command -v jq &>/dev/null; then
+    echo "ERROR: jq is required but not found" >&2
+    exit 1
+fi
 THRESHOLD="${COVERAGE_THRESHOLD:-80}"
 TMPDIR="${TMPDIR:-/tmp}"
 
@@ -41,6 +50,55 @@ else
     echo "WARNING: ${exclude_script} not found, running without exclusions"
 fi
 
+# Packages in which every test skipped under -short contribute no covered
+# statements while still contributing to the denominator, so counting them
+# measures this gate's own -short flag rather than the service's unit coverage.
+# They are excluded from this check only, never from codecov.yml, where the
+# integration run covers them.
+#
+# The set is measured from `go test -json` rather than pattern-matched, because
+# packages gate themselves in several ways: a TestMain that returns early, a
+# shared setup helper calling t.Skip, or per-test guards. Only the outcome
+# matters - no test in the package ran - and a package where some tests run and
+# others skip is kept, since its covered code belongs in the gate.
+skip_only_packages() {
+    local events_file=$1
+
+    jq -rs '
+        map(select(.Test != null and (.Action == "pass" or .Action == "skip" or .Action == "fail")))
+        | group_by(.Package)
+        | map(select(all(.[]; .Action == "skip")))
+        | map(.[0].Package)
+        | .[]
+    ' "${events_file}" | sort -u
+}
+
+# Turn a Go import path into the repo-relative directory the coverprofile uses.
+package_to_path() {
+    local module
+    module="$(awk '/^module / { print $2; exit }' "${REPO_ROOT}/go.mod")"
+    sed "s|^${module}/||"
+}
+
+# Services that sit below THRESHOLD once the gate measures them reliably.
+#
+# Each entry is a floor, not an exemption: the service must not regress,
+# THRESHOLD stays the target, and the entry is deleted when the service reaches
+# it. Before the SIGPIPE race in the detection guards was fixed, a random subset
+# of services was skipped on every run, so these were not reliably measured at
+# all - recording where one actually stands is stricter than what preceded it.
+#
+# position-keeping: 71.2%, recorded to the measured decimal so a drop to 71.1%
+# is a regression rather than a pass.  Its adapters/persistence repository methods are
+# exercised only by the DB-backed tests that -short skips, while the rest of the
+# package runs, so the package cannot be excluded as measurement noise.
+service_floor() {
+    case "$1" in
+        position-keeping) echo "71.2" ;;
+        *)                echo "${THRESHOLD}" ;;
+    esac
+}
+
 FAILED=0
 PASSED=0
 SKIPPED=0
@@ -58,30 +116,81 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
         continue
     fi
 
-    # Skip if no Go source files
-    if ! find "${service_dir}" -name "*.go" -not -name "*_test.go" -maxdepth 5 | grep -q .; then
+    # Skip if no Go source files.
+    # find is not piped into grep here: grep -q exits at the first match, find
+    # then dies on SIGPIPE, and under `set -o pipefail` that non-zero status made
+    # the guard report "no Go source files" for a service that has them. The
+    # result was a gate that silently skipped a different subset of services on
+    # every run. -print -quit stops find at the first hit with no pipe involved.
+    if [ -z "$(find "${service_dir}" -maxdepth 5 -name "*.go" -not -name "*_test.go" -print -quit)" ]; then
         echo "  SKIP ${service} (no Go source files)"
         SKIPPED=$((SKIPPED + 1))
         continue
     fi
 
     # Skip if no test files
-    if ! find "${service_dir}" -name "*_test.go" -maxdepth 5 | grep -q .; then
+    if [ -z "$(find "${service_dir}" -maxdepth 5 -name "*_test.go" -print -quit)" ]; then
         echo "  SKIP ${service} (no test files)"
         SKIPPED=$((SKIPPED + 1))
         continue
     fi
 
     coverage_file="${TMPDIR}/meridian_coverage_${service}.out"
-    rm -f "${coverage_file}"
+    events_file="${TMPDIR}/meridian_events_${service}.json"
+    stderr_file="${TMPDIR}/meridian_stderr_${service}.txt"
+    rm -f "${coverage_file}" "${events_file}" "${stderr_file}"
 
-    # Run unit tests with coverage; continue even if tests fail so we report all services
+    # Run unit tests with coverage; continue even if tests fail so we report all
+    # services. -json is captured so the skip-only packages can be derived from
+    # the same run rather than a second one.
+    #
+    # stderr goes to its own file: merging it into stdout interleaves build
+    # errors with the JSON stream, and every reader of a corrupted stream then
+    # fails silently.
     if ! go test -short -covermode=atomic -coverprofile="${coverage_file}" \
-        "./services/${service}/..." 2>&1; then
+        -json "./services/${service}/..." > "${events_file}" 2>"${stderr_file}"; then
+        jq -j 'select(.Output != null) | .Output' "${events_file}" 2>/dev/null | tail -40
+        tail -20 "${stderr_file}"
         echo "  FAIL ${service} (test execution failed)"
         FAILED=$((FAILED + 1))
+        rm -f "${events_file}" "${stderr_file}"
         continue
     fi
+
+    # A stream that does not parse would otherwise read as "no packages to
+    # exclude", quietly measuring against the wrong denominator.
+    if ! jq -se . "${events_file}" > /dev/null 2>&1; then
+        echo "  FAIL ${service} (go test -json output did not parse)"
+        FAILED=$((FAILED + 1))
+        rm -f "${events_file}" "${stderr_file}"
+        continue
+    fi
+    rm -f "${stderr_file}"
+
+    # Package summary lines only. A failing run takes the branch above, which
+    # dumps the tail of the output, so `--- PASS` subtest lines would be pure
+    # noise here - there were 18k of them across a full run. -j rather than -r:
+    # each .Output already ends in a newline, so -r double-spaces the stream and
+    # halves what a tail -40 shows.
+    jq -j 'select(.Output != null) | .Output' "${events_file}" \
+        | grep -E '^(ok|FAIL)[[:space:]]' || true
+
+    service_exclude="${EXCLUDE_PATTERN}"
+    while IFS= read -r pkg; do
+        [ -n "${pkg}" ] || continue
+        rel="$(printf '%s\n' "${pkg}" | package_to_path)"
+        # Anchored to files directly in the package: a coverprofile line reads
+        # "<path>.go:<line>.<col>,...", so this matches the package's own files
+        # and not a subpackage underneath it.
+        entry="${rel}/[^/]*\.go:"
+        if [ -n "${service_exclude}" ]; then
+            service_exclude="${service_exclude}|${entry}"
+        else
+            service_exclude="${entry}"
+        fi
+        echo "  (every test in ${rel} skipped under -short; excluded from the measurement)"
+    done < <(skip_only_packages "${events_file}")
+    rm -f "${events_file}"
 
     if [ ! -s "${coverage_file}" ]; then
         echo "  SKIP ${service} (no coverage output produced)"
@@ -92,14 +201,23 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
 
     # Filter coverprofile using exclusions derived from codecov.yml
     target_file="${coverage_file}"
-    if [ -n "${EXCLUDE_PATTERN}" ]; then
+    if [ -n "${service_exclude}" ]; then
         filtered_file="${TMPDIR}/meridian_coverage_${service}_filtered.out"
         head -1 "${coverage_file}" > "${filtered_file}"
         tail -n +2 "${coverage_file}" \
-            | grep -v -E "${EXCLUDE_PATTERN}" \
+            | grep -v -E "${service_exclude}" \
             >> "${filtered_file}" || true
         rm -f "${coverage_file}"
         target_file="${filtered_file}"
+    fi
+
+    # Exclusions can in principle remove every line of a profile. Coverage is
+    # then unmeasurable rather than zero, so say so instead of reporting 0%.
+    if [ "$(wc -l < "${target_file}")" -le 1 ]; then
+        echo "  SKIP ${service} (every package excluded from the measurement)"
+        SKIPPED=$((SKIPPED + 1))
+        rm -f "${target_file}"
+        continue
     fi
 
     if ! coverage="$(go tool cover -func="${target_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"; then
@@ -116,11 +234,24 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
         continue
     fi
 
-    if awk -v threshold="${THRESHOLD}" -v cov="${coverage}" 'BEGIN { exit !(cov + 0 < threshold + 0) }'; then
-        echo "  FAIL ${service}: ${coverage}% < ${THRESHOLD}%"
+    floor="$(service_floor "${service}")"
+
+    if awk -v threshold="${floor}" -v cov="${coverage}" 'BEGIN { exit !(cov + 0 < threshold + 0) }'; then
+        if [ "${floor}" = "${THRESHOLD}" ]; then
+            echo "  FAIL ${service}: ${coverage}% < ${THRESHOLD}%"
+        else
+            echo "  FAIL ${service}: ${coverage}% < recorded floor ${floor}% (target ${THRESHOLD}%)"
+        fi
         FAILED=$((FAILED + 1))
     else
-        echo "  PASS ${service}: ${coverage}%"
+        if [ "${floor}" = "${THRESHOLD}" ]; then
+            echo "  PASS ${service}: ${coverage}%"
+        else
+            echo "  PASS ${service}: ${coverage}% (floor ${floor}%, target ${THRESHOLD}%)"
+            if awk -v threshold="${THRESHOLD}" -v cov="${coverage}" 'BEGIN { exit !(cov + 0 >= threshold + 0) }'; then
+                echo "    ${service} now meets ${THRESHOLD}% - remove its service_floor entry to lock that in"
+            fi
+        fi
         PASSED=$((PASSED + 1))
     fi
 done
