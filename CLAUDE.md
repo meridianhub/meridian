@@ -95,10 +95,13 @@ Confidence grades are `ESTIMATE -> PROVISIONAL -> ACTUAL -> VERIFIED` (Axis A).
 - **`COEFFICIENT` is a data source, not a level.** Profile-coefficient calculation
   (`ESTIMATED_PROFILE`) is recorded in the Source Authority Registry and maps to the
   `ESTIMATE` grade. It is a provenance attribute, not a rung on the ladder.
-- **`REVISED` is a lifecycle event, not a confidence grade.** It is removed from the
-  Axis A enum; corrections are expressed on Axis B via the `revision` counter,
-  the `SupersededBy` pointer, and bitemporal validity. Proto slot 4, formerly
-  `REVISED`, is now `VERIFIED`.
+- **`REVISED` is a lifecycle event, not a confidence grade.** Corrections are
+  expressed on Axis B via the `revision` counter, the `SupersededBy` pointer, and
+  bitemporal validity.
+- **The Go domain enum and the proto enum differ at slot 4.** The Go domain has
+  `QualityLevelVerified`; the proto slot is still spelled `QUALITY_LEVEL_REVISED`,
+  deprecated and semantically VERIFIED. The symbol rename is deferred, so there is
+  no `QUALITY_LEVEL_VERIFIED` to reach for in generated proto code.
 
 See [docs/adr/0017-temporal-quality-ladder.md](docs/adr/0017-temporal-quality-ladder.md).
 
