@@ -175,7 +175,7 @@ Release history and notable changes are recorded in [CHANGELOG.md](CHANGELOG.md)
 
 ## Try It
 
-**Prerequisites**: Docker, Docker Compose, Go, and [buf](https://buf.build/docs/installation)
+**Prerequisites**: Docker, Docker Compose, and [buf](https://buf.build/docs/installation)
 (`make dev-up` regenerates protobuf code before starting the stack)
 
 ```bash

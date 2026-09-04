@@ -20,7 +20,9 @@ DEV_COMPOSE=deploy/dev/docker-compose.yml
 
 # Tools
 GOLANGCI_LINT=golangci-lint
-BUF=$(shell go env GOPATH)/bin/buf
+# Prefer buf from PATH (Homebrew, as CONTRIBUTING.md and scripts/doctor.sh recommend),
+# falling back to the go install location.
+BUF ?= $(shell command -v buf 2>/dev/null || echo $(shell go env GOPATH)/bin/buf)
 TILT=tilt
 
 # Go parameters
