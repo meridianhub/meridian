@@ -88,6 +88,22 @@ Defaults: 10s timeout, 100ms poll interval. For advanced matchers, consider `gom
 
 ---
 
+## Temporal Quality Ladder
+
+Confidence grades are `ESTIMATE -> PROVISIONAL -> ACTUAL -> VERIFIED` (Axis A).
+
+- **`COEFFICIENT` is a data source, not a level.** Profile-coefficient calculation
+  (`ESTIMATED_PROFILE`) is recorded in the Source Authority Registry and maps to the
+  `ESTIMATE` grade. It is a provenance attribute, not a rung on the ladder.
+- **`REVISED` is a lifecycle event, not a confidence grade.** It is removed from the
+  Axis A enum; corrections are expressed on Axis B via the `revision` counter,
+  the `SupersededBy` pointer, and bitemporal validity. Proto slot 4, formerly
+  `REVISED`, is now `VERIFIED`.
+
+See [docs/adr/0017-temporal-quality-ladder.md](docs/adr/0017-temporal-quality-ladder.md).
+
+---
+
 ## Database: CockroachDB
 
 **Meridian uses CockroachDB as its production database**, not PostgreSQL. While CockroachDB is PostgreSQL wire-compatible, there are important differences that affect code design:

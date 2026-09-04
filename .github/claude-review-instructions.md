@@ -117,9 +117,10 @@ requires understanding the SYSTEM:
 
 - **Saga correctness**: Do compensation steps reverse in correct LIFO
   order? Can partial failure leave inconsistent state?
-- **Temporal data integrity**: Does code respect the quality ladder
-  (ESTIMATE -> COEFFICIENT -> ACTUAL -> REVISED)? Are bi-temporal queries
-  correct?
+- **Temporal data integrity**: Does code respect the confidence grades
+  (ESTIMATE -> PROVISIONAL -> ACTUAL -> VERIFIED)? COEFFICIENT is a data
+  source and REVISED a revision event, not grades - see ADR-0017. Are
+  bi-temporal queries correct?
 - **Multi-tenant isolation**: Can tenant A's data leak to tenant B? Are
   all queries scoped via WithGormTenantScope?
 - **CockroachDB migration safety**: Does the migration violate CockroachDB
