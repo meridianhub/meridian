@@ -375,7 +375,7 @@ func (c *Container) initReferenceDataClient(ctx context.Context) {
 	}
 
 	refClient, refCleanup, refErr := refclient.New(ctx, refclient.Config{
-		Target: referenceDataURL,
+		Target: referenceDataURL, //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 	})
 	if refErr != nil {
 		c.Logger.Warn("failed to create reference-data client, fungibility validation disabled",

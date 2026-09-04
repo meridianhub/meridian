@@ -142,7 +142,7 @@ func setupHarness(t *testing.T, creator *stubPaymentIntentCreator, configProvide
 
 	// Create client connected to in-process server
 	fgClient, cleanup, err := client.New(client.Config{
-		Target: lis.Addr().String(),
+		Target: lis.Addr().String(), //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 		DialOptions: []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},

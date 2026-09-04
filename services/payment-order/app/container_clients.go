@@ -188,7 +188,7 @@ func createBaseGateway(svcConfig config.ServiceConfig, logger *slog.Logger) (gat
 
 	case gateway.ProviderFinancialGateway:
 		fgClient, fgCleanup, err := financialgatewayclient.New(financialgatewayclient.Config{
-			Target: svcConfig.FinancialGatewayAddr,
+			Target: svcConfig.FinancialGatewayAddr, //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create financial-gateway gRPC client: %w", err)

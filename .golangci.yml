@@ -278,13 +278,6 @@ linters:
         linters:
           - staticcheck
 
-      # Suppress SA1019 for client Config.Target / ConnConfig.Target. These are
-      # deprecated in favour of ServiceName/Namespace/Port DNS-based load balancing
-      # but remain in use while call sites migrate.
-      - text: "SA1019:.*Target is deprecated"
-        linters:
-          - staticcheck
-
   settings:
     govet:
       enable-all: true

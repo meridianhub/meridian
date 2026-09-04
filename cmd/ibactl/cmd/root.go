@@ -64,7 +64,7 @@ func getEnvOrDefault(key, defaultValue string) string {
 // newClient creates a new InternalAccount client using global flags.
 func newClient() (*client.Client, func(), error) {
 	cfg := client.Config{
-		Target:  serviceURL,
+		Target:  serviceURL, //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 		Timeout: timeout,
 	}
 	return client.New(cfg)

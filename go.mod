@@ -72,7 +72,7 @@ require (
 	// Atlas pseudo-version v0.36.2-0.20250806044935-5bb51a0a956e is intentionally pinned.
 	// This is required by atlas-provider-gorm v0.6.0 and includes critical fixes for GORM integration.
 	// Do not upgrade to v0.38.0 until atlas-provider-gorm releases a compatible version.
-	ariga.io/atlas v1.3.0 // indirect
+	ariga.io/atlas v0.36.2-0.20250806044935-5bb51a0a956e // indirect
 	cel.dev/cel-go v0.32.0 // indirect
 	cel.dev/expr v0.25.3 // indirect
 	cloud.google.com/go v0.123.0 // indirect
