@@ -254,6 +254,12 @@ version_meets_minimum() {
     esac
     want=${want%+}
 
+    # Normalise a leading "v". kubectl reports gitVersion as "v1.32.3", and
+    # sort -V orders "1.28" before "v1.32.3" on the prefix alone, so without
+    # this the comparison succeeds for every version and the check never fires.
+    have=${have#v}
+    want=${want#v}
+
     # sort -V -C succeeds when the input is already in version order,
     # i.e. when want <= have.
     printf '%s\n%s\n' "$want" "$have" | sort -V -C
