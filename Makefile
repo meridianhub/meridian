@@ -21,8 +21,12 @@ DEV_COMPOSE=deploy/dev/docker-compose.yml
 # Tools
 GOLANGCI_LINT=golangci-lint
 # Prefer buf from PATH (Homebrew, as CONTRIBUTING.md and scripts/doctor.sh recommend),
-# falling back to the go install location.
-BUF ?= $(shell command -v buf 2>/dev/null || echo $(shell go env GOPATH)/bin/buf)
+# falling back to the go install location. The GOPATH lookup lives inside the shell
+# script so Make never invokes `go` when buf is already on PATH; the bare `buf` at the
+# end keeps the `which $(BUF)` guard producing the install hint when neither is present.
+BUF ?= $(shell if command -v buf >/dev/null 2>&1; then command -v buf; \
+	elif command -v go >/dev/null 2>&1; then echo "$$(go env GOPATH)/bin/buf"; \
+	else echo buf; fi)
 TILT=tilt
 
 # Go parameters
