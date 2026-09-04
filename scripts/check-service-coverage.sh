@@ -150,7 +150,11 @@ for service_dir in "${REPO_ROOT}"/services/*/; do
         continue
     fi
 
-    jq -r 'select(.Output != null) | .Output' "${events_file}" 2>/dev/null | grep -E '^(ok|---|FAIL)' || true
+    # Package summary lines only. A failing run takes the branch above, which
+    # dumps the tail of the output, so `--- PASS` subtest lines would be pure
+    # noise here - there were 18k of them across a full run.
+    jq -r 'select(.Output != null) | .Output' "${events_file}" 2>/dev/null \
+        | grep -E '^(ok|FAIL)[[:space:]]' || true
 
     service_exclude="${EXCLUDE_PATTERN}"
     while IFS= read -r pkg; do
