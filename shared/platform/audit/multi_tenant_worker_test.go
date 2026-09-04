@@ -12,6 +12,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// newTestMultiTenantWorker builds a MultiTenantWorker with both intervals set
+// to d: the discovery ticker in run(), and the poll interval of each per-schema
+// child Worker.
+//
+// NewMultiTenantWorker takes WorkerOptions and forwards them to the child
+// Workers only. None of them reach MultiTenantWorker.pollInterval, which drives
+// the discovery ticker and stays at its 30s default however the worker is
+// constructed. A test that needs the ticker to fire has to set that field.
+func newTestMultiTenantWorker(t *testing.T, db *gorm.DB, pattern string, d time.Duration) *MultiTenantWorker {
+	t.Helper()
+	m := NewMultiTenantWorker(db, pattern, nil, WithPollInterval(d))
+	m.pollInterval = d
+	return m
+}
+
 // createTenantSchema creates a PostgreSQL schema containing an audit_outbox
 // table, mirroring how a provisioned tenant looks to the discovery query.
 func createTenantSchema(t *testing.T, db *gorm.DB, schema string) {
@@ -116,7 +131,7 @@ func TestMultiTenantWorker_DiscoverAndStartWorkers_StartsPerSchema(t *testing.T)
 	createTenantSchema(t, db, "org_one")
 	createTenantSchema(t, db, "org_two")
 
-	m := NewMultiTenantWorker(db, "org_%", nil, WithPollInterval(time.Hour))
+	m := newTestMultiTenantWorker(t, db, "org_%", time.Hour)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -139,7 +154,7 @@ func TestMultiTenantWorker_DiscoverAndStartWorkers_SkipsExisting(t *testing.T) {
 
 	createTenantSchema(t, db, "org_dup")
 
-	m := NewMultiTenantWorker(db, "org_%", nil, WithPollInterval(time.Hour))
+	m := newTestMultiTenantWorker(t, db, "org_%", time.Hour)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -191,7 +206,7 @@ func TestMultiTenantWorker_StartStop_DiscoversAndShutsDown(t *testing.T) {
 
 	createTenantSchema(t, db, "org_live")
 
-	m := NewMultiTenantWorker(db, "org_%", nil, WithPollInterval(time.Hour))
+	m := newTestMultiTenantWorker(t, db, "org_%", time.Hour)
 
 	m.Start(context.Background())
 
@@ -215,7 +230,7 @@ func TestMultiTenantWorker_StartStop_DiscoversAndShutsDown(t *testing.T) {
 func TestMultiTenantWorker_Stop_Idempotent(t *testing.T) {
 	db := setupTestDB(t)
 
-	m := NewMultiTenantWorker(db, "nomatch_%", nil, WithPollInterval(time.Hour))
+	m := newTestMultiTenantWorker(t, db, "nomatch_%", time.Hour)
 	m.Start(context.Background())
 
 	// Two Stop calls must not panic (shutdownOnce guards the close).
@@ -226,7 +241,7 @@ func TestMultiTenantWorker_Stop_Idempotent(t *testing.T) {
 func TestMultiTenantWorker_Stop_ParentContextCancelled(t *testing.T) {
 	db := setupTestDB(t)
 
-	m := NewMultiTenantWorker(db, "nomatch_%", nil, WithPollInterval(time.Hour))
+	m := newTestMultiTenantWorker(t, db, "nomatch_%", time.Hour)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.Start(ctx)
@@ -259,7 +274,7 @@ func TestMultiTenantWorker_Stop_ParentContextCancelled(t *testing.T) {
 func TestMultiTenantWorker_RunLoop_RediscoversOnTick(t *testing.T) {
 	db := setupTestDB(t)
 
-	m := NewMultiTenantWorker(db, "org_%", nil, WithPollInterval(100*time.Millisecond))
+	m := newTestMultiTenantWorker(t, db, "org_%", 100*time.Millisecond)
 	m.Start(context.Background())
 	defer m.Stop()
 
