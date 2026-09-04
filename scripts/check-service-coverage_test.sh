@@ -37,11 +37,15 @@ assert_equals() {
         echo "  Actual:   $actual"
         TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
+    return 0
 }
 
-# Source only the classifier, not the whole script, which runs the test suite.
+# Source only the helpers under test, not the whole script, which runs the suite.
 # shellcheck disable=SC1090  # the sourced text is extracted from $TARGET at runtime
-source <(sed -n '/^integration_only_packages()/,/^}/p' "$TARGET")
+source <(sed -n '/^skip_only_packages()/,/^}/p;/^package_to_path()/,/^}/p;/^service_floor()/,/^}/p' "$TARGET")
+
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+THRESHOLD=80
 
 echo ""
 echo "Service detection (the guards that used to race on SIGPIPE)"
@@ -74,54 +78,49 @@ fi
 assert_equals "none" "$result" "a service with no Go sources reports none"
 
 echo ""
-echo "Integration-only package classification"
+echo "Skip-only package classification (measured from go test -json)"
 echo ""
 
-mkdir -p "$TEST_DIR/services/gated/adapters/persistence"
-cat > "$TEST_DIR/services/gated/adapters/persistence/main_test.go" <<'EOF'
-package persistence_test
+M="github.com/meridianhub/meridian"
+events="$TEST_DIR/events.json"
+{
+    # Every test skipped: the package contributes no covered statements.
+    printf '{"Action":"skip","Package":"%s/services/a/gated","Test":"TestOne"}\n' "$M"
+    printf '{"Action":"skip","Package":"%s/services/a/gated","Test":"TestTwo"}\n' "$M"
+    # Some skip, some run: its covered code belongs in the gate.
+    printf '{"Action":"skip","Package":"%s/services/a/mixed","Test":"TestGated"}\n' "$M"
+    printf '{"Action":"pass","Package":"%s/services/a/mixed","Test":"TestUnit"}\n' "$M"
+    # Ordinary package.
+    printf '{"Action":"pass","Package":"%s/services/a/plain","Test":"TestUnit"}\n' "$M"
+    # Package-level events carry no .Test and must not be classified.
+    printf '{"Action":"pass","Package":"%s/services/a/plain"}\n' "$M"
+    # Output events are noise and must be ignored by the classifier.
+    printf '{"Action":"output","Package":"%s/services/a/gated","Test":"TestOne","Output":"skip"}\n' "$M"
+} > "$events"
 
-func TestMain(m *testing.M) {
-	flag.Parse()
-	if os.Getenv("INTEGRATION_TEST") == "" && testing.Short() {
-		os.Exit(m.Run())
-	}
-	startContainer()
-}
-EOF
-
-mkdir -p "$TEST_DIR/services/pertest/app"
-cat > "$TEST_DIR/services/pertest/app/container_test.go" <<'EOF'
-package app_test
-
-func TestContainer(t *testing.T) {
-	if os.Getenv("INTEGRATION_TESTS") != "1" {
-		t.Skip("INTEGRATION_TESTS=1 not set, skipping integration test")
-	}
-}
-EOF
-cat > "$TEST_DIR/services/pertest/app/config_test.go" <<'EOF'
-package app_test
-
-func TestConfig(t *testing.T) {}
-EOF
-
-mkdir -p "$TEST_DIR/services/plain/domain"
-cat > "$TEST_DIR/services/plain/domain/domain_test.go" <<'EOF'
-package domain_test
-
-func TestThing(t *testing.T) {}
-EOF
-
-classified="$(integration_only_packages "$TEST_DIR" | tr '\n' ' ' | sed 's/ $//')"
-assert_equals "services/gated/adapters/persistence" "$classified" \
-    "only a package whose TestMain short-circuits under -short is excluded"
+classified="$(skip_only_packages "$events" | package_to_path | tr '\n' ' ' | sed 's/ $//')"
+assert_equals "services/a/gated" "$classified" \
+    "only a package where every test skipped is excluded"
 
 case " ${classified} " in
-    *"services/pertest/app"*) per_test="excluded" ;;
-    *) per_test="kept" ;;
+    *"services/a/mixed"*) mixed="excluded" ;;
+    *) mixed="kept" ;;
 esac
-assert_equals "kept" "$per_test" "a package that gates individual tests with t.Skip is kept"
+assert_equals "kept" "$mixed" "a package where some tests run is kept"
+
+# A failing test must not read as skip-only, or a broken package would vanish
+# from the gate rather than failing it.
+printf '{"Action":"fail","Package":"%s/services/a/broken","Test":"TestX"}\n' "$M" > "$TEST_DIR/fail.json"
+printf '{"Action":"skip","Package":"%s/services/a/broken","Test":"TestY"}\n' "$M" >> "$TEST_DIR/fail.json"
+assert_equals "" "$(skip_only_packages "$TEST_DIR/fail.json")" \
+    "a package with a failing test is not treated as skip-only"
+
+echo ""
+echo "Per-service floors"
+echo ""
+
+assert_equals "80" "$(service_floor some-service)" "a service with no entry uses the threshold"
+assert_equals "71" "$(service_floor position-keeping)" "position-keeping carries its recorded floor"
 
 echo ""
 echo "Results: ${TESTS_PASSED} passed, ${TESTS_FAILED} failed"
