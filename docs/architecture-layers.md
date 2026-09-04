@@ -331,8 +331,8 @@ compensation.
 ### Boundary Rules
 
 - Sagas are bounded. The Starlark execution environment forbids `while` loops and
-  recursion, guaranteeing termination. See the project CLAUDE.md for the full
-  rationale.
+  recursion, guaranteeing termination. See
+  [ADR-0028](adr/0028-starlark-saga-cel-valuation.md) for the full rationale.
 - Compensation is declarative. Every step declares its inverse so the saga engine can
   unwind on failure.
 
