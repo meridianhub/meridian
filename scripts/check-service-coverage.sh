@@ -4,9 +4,13 @@
 # Runs unit tests (with -short to skip integration tests) for each Go service
 # and fails if any service falls below the minimum coverage threshold.
 #
-# Exclusions are read from codecov.yml (single source of truth).
-# This script converts codecov glob patterns to grep filters applied to
-# Go coverprofiles, so both Codecov and this script enforce the same rules.
+# Exclusions come from two sources:
+#   1. codecov.yml, the single source of truth for what coverage ignores
+#      anywhere. Its globs are converted to grep filters applied to Go
+#      coverprofiles, so Codecov and this script enforce the same rules.
+#   2. Packages this gate cannot measure, because their TestMain
+#      short-circuits under -short and no test in them runs. These are excluded
+#      here only, never in codecov.yml, where the integration run covers them.
 #
 # Usage:
 #   ./scripts/check-service-coverage.sh
@@ -44,36 +48,46 @@ fi
 # A package whose TestMain short-circuits under -short never runs any of its
 # tests, so every statement in it counts as uncovered here while the integration
 # job exercises it fully. Counting those measures this gate's own -short flag
-# rather than the service's unit coverage, so such packages are excluded from
-# this check only. They stay in codecov.yml, where the integration run covers
-# them.
+# rather than the service's unit coverage.
 #
 # The guard must be in TestMain: a per-test `t.Skip` leaves the rest of the
 # package running, and excluding that package would hide genuinely unit-tested
 # code from the gate.
-INTEGRATION_ONLY_PATTERN=""
-while IFS= read -r test_file; do
-    [ -n "${test_file}" ] || continue
-    grep -q 'func TestMain(' "${test_file}" || continue
-    awk '/func TestMain\(/ { in_main = 1 }
-         in_main && /testing\.Short\(\)/ { found = 1; exit }
-         in_main && /^}/ { exit }
-         END { exit !found }' "${test_file}" || continue
+#
+# Only services/ is scanned: the loop below measures ./services/<name>/... and,
+# without -coverpkg, those profiles never contain shared/ paths.
+integration_only_packages() {
+    local root=$1
+    local test_file
+    local dir
 
-    rel="$(dirname "${test_file}")"
-    rel="${rel#"${REPO_ROOT}/"}"
-    case "|${INTEGRATION_ONLY_PATTERN}|" in
-        *"|${rel}/|"*) continue ;;
-    esac
+    while IFS= read -r test_file; do
+        [ -n "${test_file}" ] || continue
+        awk '/func TestMain\(/ { in_main = 1 }
+             in_main && /testing\.Short\(\)/ { found = 1; exit }
+             in_main && /^}/ { exit }
+             END { exit !found }' "${test_file}" || continue
+        dir="$(dirname "${test_file}")"
+        printf '%s\n' "${dir#"${root}/"}"
+    done < <(find "${root}/services" -name '*_test.go' -type f 2>/dev/null | sort) | sort -u
+}
+
+INTEGRATION_ONLY_PATTERN=""
+while IFS= read -r pkg; do
+    [ -n "${pkg}" ] || continue
+    # Anchored to files directly in the package: a coverprofile line reads
+    # "<path>.go:<line>.<col>,...", so this matches the package's own files and
+    # not a future subpackage underneath it.
+    entry="${pkg}/[^/]*\.go:"
     if [ -n "${INTEGRATION_ONLY_PATTERN}" ]; then
-        INTEGRATION_ONLY_PATTERN="${INTEGRATION_ONLY_PATTERN}|${rel}/"
+        INTEGRATION_ONLY_PATTERN="${INTEGRATION_ONLY_PATTERN}|${entry}"
     else
-        INTEGRATION_ONLY_PATTERN="${rel}/"
+        INTEGRATION_ONLY_PATTERN="${entry}"
     fi
-done < <(find "${REPO_ROOT}/services" "${REPO_ROOT}/shared" -name '*_test.go' -type f 2>/dev/null | sort)
+    echo "Excluded from the -short measurement (TestMain skips the package): ${pkg}"
+done < <(integration_only_packages "${REPO_ROOT}")
 
 if [ -n "${INTEGRATION_ONLY_PATTERN}" ]; then
-    echo "Packages skipped wholesale by -short, excluded from the measurement: ${INTEGRATION_ONLY_PATTERN}"
     if [ -n "${EXCLUDE_PATTERN}" ]; then
         EXCLUDE_PATTERN="${EXCLUDE_PATTERN}|${INTEGRATION_ONLY_PATTERN}"
     else
