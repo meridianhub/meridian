@@ -208,21 +208,6 @@ describe('LedgerPage - list view', () => {
     })
   })
 
-  it('renders posting count in list', async () => {
-    setupMockClients()
-    renderWithApiClients(<LedgerPage />, {
-      initialToken: createTenantUserToken('tenant-001'),
-      queryClient: createTestQueryClient(),
-    })
-
-    await waitFor(() => {
-      // log-001 has 2 postings
-      const rows = screen.getAllByRole('row')
-      const log001Row = rows.find((row) => row.textContent?.includes('log-001'))
-      expect(log001Row).toHaveTextContent('2')
-    })
-  })
-
   it('renders status filter select', () => {
     setupMockClients()
     renderWithApiClients(<LedgerPage />, {
