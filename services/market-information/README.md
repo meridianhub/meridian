@@ -118,7 +118,7 @@ classDiagram
         ESTIMATE
         PROVISIONAL
         ACTUAL
-        REVISED
+        VERIFIED
     }
 
     class DataSetStatus {
