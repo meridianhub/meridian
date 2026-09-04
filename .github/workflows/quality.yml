@@ -56,6 +56,11 @@ jobs:
           ignore_paths: 'node_modules .git'
           severity: warning  # Only fail on warnings and errors, not info
 
+      - name: Test coverage-gate script
+        run: |
+          chmod +x scripts/check-service-coverage_test.sh
+          ./scripts/check-service-coverage_test.sh
+
   golangci-lint:
     name: golangci-lint
     runs-on: ubuntu-latest
