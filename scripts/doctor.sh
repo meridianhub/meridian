@@ -612,7 +612,7 @@ echo " Core Development Tools"
 echo "═══════════════════════════════════════"
 echo ""
 
-check_tool "go" "1.23+" || true
+check_tool "go" "1.26.8+" || true
 check_go_environment || true
 echo ""
 
