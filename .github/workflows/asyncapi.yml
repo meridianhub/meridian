@@ -40,13 +40,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.4'
+          go-version: '1.27.1'
           cache: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install AsyncAPI CLI
         run: npm install -g @asyncapi/cli@latest

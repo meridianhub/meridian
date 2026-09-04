@@ -13,6 +13,7 @@ import (
 type stubPolicyRuntime struct{}
 
 func (stubPolicyRuntime) CompilePolicy(_ string) (valuation.CompiledPolicy, error) { return nil, nil }
+
 func (stubPolicyRuntime) EvaluatePolicy(_ context.Context, _ valuation.CompiledPolicy, _ map[string]interface{}) (interface{}, uint64, error) {
 	return nil, 0, nil
 }
@@ -30,6 +31,7 @@ func (stubValuationCache) SetMethod(_ *valuation.Method) error                  
 func (stubValuationCache) GetPolicy(_ string, _ *int) (valuation.CompiledPolicy, error) {
 	return nil, nil
 }
+
 func (stubValuationCache) SetPolicy(_ string, _ int, _ valuation.CompiledPolicy) error { return nil }
 func (stubValuationCache) Clear()                                                      {}
 

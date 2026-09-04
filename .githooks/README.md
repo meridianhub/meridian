@@ -43,7 +43,7 @@ The pre-commit hook will automatically install missing tools:
 - `buf` - via `go install` (for proto validation)
 - `markdownlint-cli2` - via `npx` (for markdown linting)
 - `gofumpt` - via `go install` (for Go formatting)
-- `golangci-lint v2.5.0` - via official install script (for Go linting)
+- `golangci-lint v2.13.2` - via official install script (for Go linting)
 
 **Note**: Markdown linting requires Node.js and npm to be installed.
 
@@ -83,7 +83,7 @@ The hook should auto-install, but you can manually install:
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-  | sh -s -- -b $(go env GOPATH)/bin v2.5.0
+  | sh -s -- -b $(go env GOPATH)/bin v2.13.2
 ```
 
 ## CI Integration

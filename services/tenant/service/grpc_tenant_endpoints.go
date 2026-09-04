@@ -59,7 +59,7 @@ func (s *Service) InitiateTenant(ctx context.Context, req *pb.InitiateTenantRequ
 
 	return &pb.InitiateTenantResponse{
 		Tenant:           s.toProto(tenant),
-		ProvisioningHint: provisioningHintFromStatus(tenant.Status),
+		ProvisioningHint: provisioningHintFromStatus(tenant.Status), //nolint:staticcheck // populated for backwards compatibility until clients move to GetTenantProvisioningStatus
 	}, nil
 }
 

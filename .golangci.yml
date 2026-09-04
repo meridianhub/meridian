@@ -304,6 +304,13 @@ linters:
     goconst:
       min-len: 3
       min-occurrences: 3
+      # golangci-lint v2.13 started reporting strings inside composite literals.
+      # Lookup tables, Starlark result dicts and metric label sets repeat short
+      # literals by design; extracting them into constants hurts readability.
+      # Call was the default before the bump and is kept.
+      exclude-types:
+        - Call
+        - CompositeLit
 
     misspell:
       locale: US

@@ -116,7 +116,7 @@ func setupTestMDSSource(t *testing.T, srv *testMIServer, datasetCode, unit strin
 	}
 
 	client, cleanup, err := miclient.New(context.Background(), miclient.Config{
-		Target: "passthrough:///bufnet",
+		Target: "passthrough:///bufnet", //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 		DialOptions: []grpc.DialOption{
 			grpc.WithContextDialer(bufDialer),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),

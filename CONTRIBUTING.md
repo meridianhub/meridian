@@ -60,7 +60,7 @@ needed for custom setups or unsupported platforms.
 
 #### 1. Core Tools
 
-#### Go 1.25+
+#### Go 1.27+
 
 ```bash
 

@@ -63,7 +63,7 @@ func setupFakeServer(t *testing.T, srv *fakeMISServer) (*misclient.Client, func(
 	}
 
 	client, cleanup, err := misclient.New(context.Background(), misclient.Config{
-		Target:  "passthrough:///bufnet",
+		Target:  "passthrough:///bufnet", //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 		Timeout: 5 * time.Second,
 		DialOptions: []grpc.DialOption{
 			grpc.WithContextDialer(bufDialer),

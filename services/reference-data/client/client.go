@@ -212,7 +212,7 @@ func New(ctx context.Context, cfg Config) (*Client, func() error, error) {
 	cfg.applyDefaults()
 
 	conn, _, err := clients.NewConn(ctx, clients.ConnConfig{
-		Target:      cfg.Target,
+		Target:      cfg.Target, //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 		ServiceName: cfg.ServiceName,
 		Namespace:   cfg.Namespace,
 		Port:        cfg.Port,

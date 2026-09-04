@@ -121,7 +121,7 @@ func initDependencies(ctx context.Context, logger *slog.Logger) (*forecastingDep
 	logger.Info("strategy repository initialized")
 
 	mdsTarget := env.GetEnvOrDefault("MDS_TARGET", "market-information:50051")
-	mdsClient, mdsCleanup, err := misclient.New(ctx, misclient.Config{Target: mdsTarget})
+	mdsClient, mdsCleanup, err := misclient.New(ctx, misclient.Config{Target: mdsTarget}) //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 	if err != nil {
 		dbPool.Close()
 		return nil, fmt.Errorf("failed to create MDS client: %w", err)

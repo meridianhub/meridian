@@ -50,7 +50,7 @@ func setupTestGRPC(t *testing.T, fake *fakeFinancialGatewayServer) *client.Clien
 	t.Cleanup(srv.GracefulStop)
 
 	fgClient, cleanup, err := client.New(client.Config{
-		Target: lis.Addr().String(),
+		Target: lis.Addr().String(), //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 		DialOptions: []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},

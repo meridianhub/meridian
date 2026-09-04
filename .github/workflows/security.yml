@@ -30,7 +30,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v7
       with:
-        go-version: '1.26.4'
+        go-version: '1.27.1'
         cache: true
 
     - name: Set up buf
@@ -85,7 +85,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v7
       with:
-        go-version: '1.26.4'
+        go-version: '1.27.1'
         cache: true
 
     - name: Set up buf
@@ -248,7 +248,7 @@ jobs:
           .
 
     - name: Generate SBOM with Syft
-      uses: anchore/sbom-action@v0.24.0
+      uses: anchore/sbom-action@v0.24.2
       with:
         image: meridian:sbom
         format: spdx-json

@@ -216,25 +216,25 @@ func newLoopbackClients(ctx context.Context, grpcPort int, svcCreds *platformaut
 		opts = append(opts, authOpt)
 	}
 
-	mds, mdsClose, err := misclient.New(ctx, misclient.Config{Target: target, DialOptions: opts})
+	mds, mdsClose, err := misclient.New(ctx, misclient.Config{Target: target, DialOptions: opts}) //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 	if err != nil {
 		return nil, fmt.Errorf("mds loopback: %w", err)
 	}
 
-	pk, pkClose, err := pkclient.New(ctx, pkclient.Config{Target: target, DialOptions: opts})
+	pk, pkClose, err := pkclient.New(ctx, pkclient.Config{Target: target, DialOptions: opts}) //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 	if err != nil {
 		_ = mdsClose()
 		return nil, fmt.Errorf("pk loopback: %w", err)
 	}
 
-	fa, faClose, err := faclient.New(ctx, faclient.Config{Target: target, DialOptions: opts})
+	fa, faClose, err := faclient.New(ctx, faclient.Config{Target: target, DialOptions: opts}) //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 	if err != nil {
 		_ = mdsClose()
 		pkClose()
 		return nil, fmt.Errorf("fa loopback: %w", err)
 	}
 
-	party, partyClose, err := partyclient.New(ctx, partyclient.Config{Target: target, DialOptions: opts})
+	party, partyClose, err := partyclient.New(ctx, partyclient.Config{Target: target, DialOptions: opts}) //nolint:staticcheck // direct-dial Target retained until this call site moves to ServiceName/Namespace/Port
 	if err != nil {
 		_ = mdsClose()
 		pkClose()

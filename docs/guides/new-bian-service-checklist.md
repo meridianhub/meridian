@@ -31,7 +31,7 @@ Before starting, ensure you have:
 
 - Understanding of the BIAN service domain you're implementing
 - Access to existing services for reference patterns (party, current-account, financial-accounting)
-- Development environment configured (Go 1.25, Tilt, Atlas, Buf, Docker)
+- Development environment configured (Go 1.27, Tilt, Atlas, Buf, Docker)
 - Testcontainers working for integration tests
 
 ## Reference Services
@@ -604,7 +604,7 @@ Create a multi-stage Docker build.
 
 ```dockerfile
 # Stage 1: Build
-FROM golang:1.26.2-bookworm AS builder
+FROM golang:1.27.1-bookworm AS builder
 
 ARG VERSION=dev
 ARG COMMIT=unknown
