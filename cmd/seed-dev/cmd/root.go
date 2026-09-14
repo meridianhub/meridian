@@ -41,17 +41,18 @@ var ErrProvisioningFailed = errors.New("tenant provisioning failed")
 var ErrDatabaseURLRequired = errors.New("DATABASE_URL required for demo user seeding")
 
 var (
-	gatewayURL   string
-	grpcAddr     string
-	manifestPath string
-	tenantID     string
-	tenantSlug   string
-	timeout      time.Duration
-	skipManifest bool
-	withFixtures bool
-	forceApply   bool
-	displayName  string
-	subdomain    string
+	gatewayURL       string
+	grpcAddr         string
+	controlPlaneAddr string
+	manifestPath     string
+	tenantID         string
+	tenantSlug       string
+	timeout          time.Duration
+	skipManifest     bool
+	withFixtures     bool
+	forceApply       bool
+	displayName      string
+	subdomain        string
 )
 
 var rootCmd = &cobra.Command{
@@ -76,8 +77,8 @@ Examples:
   # Custom gateway and gRPC addresses
   seed-dev --gateway-url=http://meridian:8090 --grpc-addr=meridian:50051
 
-  # Tilt mode: tenant service on its own port, manifest applied via the gateway
-  seed-dev --grpc-addr=localhost:50056 --gateway-url=http://localhost:8090`,
+  # Tilt mode: standalone services, manifest applied directly to control-plane
+  seed-dev --grpc-addr=localhost:50056 --control-plane-addr=localhost:50062`,
 	RunE: runSeed,
 }
 
@@ -95,6 +96,11 @@ func init() {
 	rootCmd.Flags().StringVar(&grpcAddr, "grpc-addr",
 		getEnvOrDefault("GRPC_ADDR", "localhost:50051"),
 		"gRPC server address for tenant service (host:port)")
+	rootCmd.Flags().StringVar(&controlPlaneAddr, "control-plane-addr",
+		getEnvOrDefault("CONTROL_PLANE_ADDR", ""),
+		"Apply the manifest directly to this control-plane gRPC address instead of "+
+			"through the gateway. Required where the gateway runs standalone and "+
+			"exposes no transcoded REST route (Tilt).")
 	rootCmd.Flags().StringVar(&manifestPath, "manifest",
 		getEnvOrDefault("MANIFEST_PATH", "examples/manifests/energy.json"),
 		"Path to manifest JSON file")
@@ -170,11 +176,13 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		}
 
 		httpClient := newSeedHTTPClient(timeout)
+		tenantHost := resolveTenantHost()
 
 		var token string
 		if seedCreds.configured() {
+			warnOnCleartextCredentials(gatewayURL)
 			fmt.Println("Authenticating with the gateway ...")
-			token, err = login(ctx, httpClient, gatewayURL, seedCreds, tenantSlug)
+			token, err = login(ctx, httpClient, gatewayURL, seedCreds, tenantSlug, tenantHost)
 			if err != nil {
 				return fmt.Errorf("gateway login: %w", err)
 			}
@@ -186,8 +194,19 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		}
 
 		fmt.Printf("Applying manifest from %s ...\n", manifestPath)
-		if err := applyManifestHTTP(
-			ctx, httpClient, gatewayURL, tenantID, tenantSlug, token, manifestPath, forceApply,
+		if controlPlaneAddr != "" {
+			// Standalone topology: no transcoded route on the gateway.
+			cpConn, dialErr := grpc.NewClient(controlPlaneAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if dialErr != nil {
+				return fmt.Errorf("connect to control-plane gRPC server %s: %w", controlPlaneAddr, dialErr)
+			}
+			defer func() { _ = cpConn.Close() }()
+
+			if err := applyManifestGRPC(ctx, cpConn, tenantID, token, manifestPath, forceApply); err != nil {
+				return fmt.Errorf("apply manifest: %w", err)
+			}
+		} else if err := applyManifestHTTP(
+			ctx, httpClient, gatewayURL, tenantSlug, tenantHost, token, manifestPath, forceApply,
 		); err != nil {
 			return fmt.Errorf("apply manifest: %w", err)
 		}
@@ -388,4 +407,17 @@ func replaceDatabase(baseDSN, database string) (string, error) {
 	}
 	parsed.Path = "/" + database
 	return parsed.String(), nil
+}
+
+// resolveTenantHost returns the Host the gateway's tenant resolver should see.
+// It mirrors the subdomain derivation used when the tenant is created, so the
+// manifest apply resolves to the same tenant the rest of the run targets.
+func resolveTenantHost() string {
+	if subdomain != "" {
+		return subdomain
+	}
+	if tenantSlug == "" {
+		return ""
+	}
+	return tenantSlug + ".localhost"
 }

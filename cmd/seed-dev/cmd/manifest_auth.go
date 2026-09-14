@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ import (
 	identitybootstrap "github.com/meridianhub/meridian/services/identity/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/bootstrap"
 	"github.com/meridianhub/meridian/shared/platform/tenant"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -78,7 +81,13 @@ func ensureTenantAdmin(ctx context.Context, auth seedAuth, tid string) error {
 
 	baseDSN := os.Getenv("DATABASE_URL")
 	if baseDSN == "" {
-		return ErrDatabaseURLRequired
+		// Direct database reachability is a convenience, not a requirement: the
+		// same admin is provisioned into every tenant schema by the
+		// post-provisioning hook (wire_services.go), and runSeed waits for the
+		// tenant to reach ACTIVE before this runs. Failing here would block
+		// seed-dev anywhere it can reach the gateway but not the database.
+		fmt.Println("  DATABASE_URL not set; relying on the post-provisioning hook for the tenant admin.")
+		return nil
 	}
 
 	// The identity repo lives in meridian_identity, while DATABASE_URL points at
@@ -116,6 +125,47 @@ func ensureTenantAdmin(ctx context.Context, auth seedAuth, tid string) error {
 	return nil
 }
 
+// setTenantRouting makes the request resolvable by the gateway's tenant resolver
+// in both of its modes.
+//
+// The resolver accepts X-Tenant-Slug only when LOCAL_DEV_MODE is set
+// (tenant_resolver.go extractSlugFromRequest); otherwise it falls back to
+// extractSlug(r.Host), which requires a host ending in ".<BASE_DOMAIN>". Deployed
+// environments run LOCAL_DEV_MODE=false while seed-dev still dials the gateway on
+// localhost, so sending only the header resolves nothing and the request is
+// rejected with 404 "Invalid subdomain".
+//
+// Setting req.Host overrides the Host header independently of the dial address,
+// so the connection still goes to --gateway-url while the resolver sees the
+// tenant's subdomain. The header is kept for LOCAL_DEV_MODE, where the derived
+// host may not match the configured base domain.
+func setTenantRouting(req *http.Request, slug, host string) {
+	if slug != "" {
+		req.Header.Set("X-Tenant-Slug", slug)
+	}
+	if host != "" {
+		req.Host = host
+	}
+}
+
+// warnOnCleartextCredentials warns when credentials would cross a plaintext
+// connection to a non-loopback host. seed-dev normally runs against the gateway
+// on localhost inside the same container or pod, where plaintext is expected;
+// anything else is worth surfacing rather than silently sending a platform admin
+// password in the clear.
+func warnOnCleartextCredentials(gateway string) {
+	parsed, err := url.Parse(gateway)
+	if err != nil || parsed.Scheme == "https" {
+		return
+	}
+	hostname := parsed.Hostname()
+	if hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1" {
+		return
+	}
+	fmt.Printf("  WARNING: %s is not HTTPS and not loopback; credentials and the\n", gateway)
+	fmt.Println("  bearer token will cross the network in cleartext.")
+}
+
 // loginResponse mirrors the gateway's BFF login response body.
 type loginResponse struct {
 	AccessToken string `json:"access_token"`
@@ -130,7 +180,7 @@ type loginResponse struct {
 // x-tenant-id gRPC metadata, which the unified binary reconstructs into claims
 // for manifest RBAC. Presenting a token here is therefore what makes the apply
 // authorized - the token itself is never seen by the gRPC server.
-func login(ctx context.Context, client *http.Client, gateway string, auth seedAuth, slug string) (string, error) {
+func login(ctx context.Context, client *http.Client, gateway string, auth seedAuth, slug, host string) (string, error) {
 	body, err := json.Marshal(map[string]string{
 		"email":    auth.email,
 		"password": auth.password,
@@ -145,9 +195,7 @@ func login(ctx context.Context, client *http.Client, gateway string, auth seedAu
 		return "", fmt.Errorf("build login request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// Tenant is resolved from the subdomain in deployed environments; the header
-	// is the LOCAL_DEV_MODE equivalent and is what seed-dev can rely on.
-	req.Header.Set("X-Tenant-Slug", slug)
+	setTenantRouting(req, slug, host)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -189,7 +237,7 @@ func login(ctx context.Context, client *http.Client, gateway string, auth seedAu
 func applyManifestHTTP(
 	ctx context.Context,
 	client *http.Client,
-	gateway, tid, slug, token, path string,
+	gateway, slug, host, token, path string,
 	force bool,
 ) error {
 	data, err := os.ReadFile(path)
@@ -220,8 +268,7 @@ func applyManifestHTTP(
 		return fmt.Errorf("build apply request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-Slug", slug)
-	req.Header.Set("X-Tenant-ID", tid)
+	setTenantRouting(req, slug, host)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -307,4 +354,45 @@ func reportApplyResult(resp *controlplanev1.ApplyManifestResponse) error {
 // newSeedHTTPClient returns the HTTP client used for gateway calls.
 func newSeedHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout}
+}
+
+// applyManifestGRPC applies the manifest by dialing the control-plane directly.
+//
+// This is the Tilt topology: services run standalone, so the gateway is
+// services/api-gateway/cmd, which constructs its server with a nil tenant
+// resolver and wires no Vanguard transcoder - /v1/manifests/apply does not exist
+// there. The standalone control-plane instead runs the usual JWT auth
+// interceptor alongside manifest RBAC (services/control-plane/cmd/main.go), so a
+// token belongs in gRPC metadata where that interceptor can validate it.
+//
+// Selected by --control-plane-addr. Everything else goes through the gateway.
+func applyManifestGRPC(ctx context.Context, conn *grpc.ClientConn, tid, token, path string, force bool) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read manifest file: %w", err)
+	}
+
+	var manifest controlplanev1.Manifest
+	if err := protojson.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("parse manifest JSON: %w", err)
+	}
+
+	pairs := []string{"x-tenant-id", tid}
+	if token != "" {
+		pairs = append(pairs, "authorization", "Bearer "+token)
+	}
+	callCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs(pairs...))
+
+	client := controlplanev1.NewApplyManifestServiceClient(conn)
+	resp, err := client.ApplyManifest(callCtx, &controlplanev1.ApplyManifestRequest{
+		Manifest:  &manifest,
+		DryRun:    false,
+		AppliedBy: "seed-dev",
+		Force:     force,
+	})
+	if err != nil {
+		return fmt.Errorf("ApplyManifest RPC: %w", err)
+	}
+
+	return reportApplyResult(resp)
 }

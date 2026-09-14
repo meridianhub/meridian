@@ -13,6 +13,12 @@ on:
       - 'cmd/**'
       - 'shared/**'
       - 'examples/manifests/**'
+      # buf generate runs before the build, so the proto descriptors - including
+      # the google.api.http annotations the transcoded routes depend on - are
+      # compiled into the binary under test.
+      - 'api/proto/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/e2e.yml'
   pull_request:
     branches: [develop, main]
@@ -25,6 +31,12 @@ on:
       - 'cmd/**'
       - 'shared/**'
       - 'examples/manifests/**'
+      # buf generate runs before the build, so the proto descriptors - including
+      # the google.api.http annotations the transcoded routes depend on - are
+      # compiled into the binary under test.
+      - 'api/proto/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/e2e.yml'
 
 permissions:

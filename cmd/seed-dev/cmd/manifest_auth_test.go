@@ -59,7 +59,7 @@ func TestLogin_ReturnsAccessTokenAndSendsTenantSlug(t *testing.T) {
 	defer srv.Close()
 
 	token, err := login(t.Context(), srv.Client(), srv.URL,
-		seedAuth{email: "admin@example.com", password: "secret"}, "dev-tenant")
+		seedAuth{email: "admin@example.com", password: "secret"}, "dev-tenant", "dev-tenant.localhost")
 
 	require.NoError(t, err)
 	assert.Equal(t, "test-token", token)
@@ -77,7 +77,7 @@ func TestLogin_ErrorsOnRejectedCredentials(t *testing.T) {
 	defer srv.Close()
 
 	_, err := login(t.Context(), srv.Client(), srv.URL,
-		seedAuth{email: "admin@example.com", password: "wrong"}, "dev-tenant")
+		seedAuth{email: "admin@example.com", password: "wrong"}, "dev-tenant", "dev-tenant.localhost")
 
 	require.ErrorIs(t, err, ErrLoginFailed)
 	assert.Contains(t, err.Error(), "invalid credentials")
@@ -90,7 +90,7 @@ func TestLogin_ErrorsWhenTokenAbsent(t *testing.T) {
 	defer srv.Close()
 
 	_, err := login(t.Context(), srv.Client(), srv.URL,
-		seedAuth{email: "admin@example.com", password: "secret"}, "dev-tenant")
+		seedAuth{email: "admin@example.com", password: "secret"}, "dev-tenant", "dev-tenant.localhost")
 
 	require.ErrorIs(t, err, ErrLoginFailed)
 	assert.Contains(t, err.Error(), "no access token")
@@ -105,13 +105,13 @@ func writeMinimalManifest(t *testing.T) string {
 }
 
 func TestApplyManifestHTTP_SendsBearerTokenToTranscodedRoute(t *testing.T) {
-	var gotAuth, gotPath, gotSlug, gotTenant string
+	var gotAuth, gotPath, gotSlug, gotHost string
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotPath = r.URL.Path
 		gotSlug = r.Header.Get("X-Tenant-Slug")
-		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotHost = r.Host
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"jobId":"job-1","status":"APPLY_MANIFEST_STATUS_APPLIED"}`))
@@ -119,14 +119,41 @@ func TestApplyManifestHTTP_SendsBearerTokenToTranscodedRoute(t *testing.T) {
 	defer srv.Close()
 
 	err := applyManifestHTTP(t.Context(), srv.Client(), srv.URL,
-		"dev_tenant", "dev-tenant", "test-token", writeMinimalManifest(t), false)
+		"dev-tenant", "dev-tenant.localhost", "test-token", writeMinimalManifest(t), false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Bearer test-token", gotAuth,
 		"the gateway is the only place the token is verified, so it must be sent there")
 	assert.Equal(t, manifestApplyPath, gotPath)
 	assert.Equal(t, "dev-tenant", gotSlug)
-	assert.Equal(t, "dev_tenant", gotTenant)
+	// Deployed gateways run LOCAL_DEV_MODE=false and ignore X-Tenant-Slug, so the
+	// Host is what actually resolves the tenant there. Asserting it is the point:
+	// sending only the header is what made this fail with 404 on develop.
+	assert.Equal(t, "dev-tenant.localhost", gotHost)
+}
+
+func TestSetTenantRouting_OverridesHostIndependentlyOfDialAddress(t *testing.T) {
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost:8090/x", nil)
+	require.NoError(t, err)
+
+	setTenantRouting(req, "volterra-energy", "volterra-energy.develop.meridianhub.cloud")
+
+	assert.Equal(t, "volterra-energy.develop.meridianhub.cloud", req.Host,
+		"the resolver must see the tenant subdomain while the connection stays on localhost")
+	assert.Equal(t, "localhost:8090", req.URL.Host, "the dial address must be unchanged")
+	assert.Equal(t, "volterra-energy", req.Header.Get("X-Tenant-Slug"))
+}
+
+func TestSetTenantRouting_LeavesHostAloneWhenUnknown(t *testing.T) {
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost:8090/x", nil)
+	require.NoError(t, err)
+
+	before := req.Host
+
+	setTenantRouting(req, "dev-tenant", "")
+
+	assert.Equal(t, before, req.Host, "an unknown subdomain must not rewrite the Host")
+	assert.Equal(t, "dev-tenant", req.Header.Get("X-Tenant-Slug"))
 }
 
 func TestApplyManifestHTTP_OmitsAuthorizationWhenTokenEmpty(t *testing.T) {
@@ -139,7 +166,7 @@ func TestApplyManifestHTTP_OmitsAuthorizationWhenTokenEmpty(t *testing.T) {
 	defer srv.Close()
 
 	err := applyManifestHTTP(t.Context(), srv.Client(), srv.URL,
-		"dev_tenant", "dev-tenant", "", writeMinimalManifest(t), false)
+		"dev-tenant", "dev-tenant.localhost", "", writeMinimalManifest(t), false)
 
 	require.NoError(t, err)
 	assert.False(t, hadAuthHeader, "no token means no header, not an empty bearer")
@@ -155,7 +182,7 @@ func TestApplyManifestHTTP_SurfacesUnauthenticated(t *testing.T) {
 	defer srv.Close()
 
 	err := applyManifestHTTP(t.Context(), srv.Client(), srv.URL,
-		"dev_tenant", "dev-tenant", "", writeMinimalManifest(t), false)
+		"dev-tenant", "dev-tenant.localhost", "", writeMinimalManifest(t), false)
 
 	require.ErrorIs(t, err, ErrApplyManifestHTTP)
 	assert.Contains(t, err.Error(), "authentication required")
@@ -173,7 +200,7 @@ func TestApplyManifestHTTP_DeniedWithTokenOmitsCredentialHint(t *testing.T) {
 	defer srv.Close()
 
 	err := applyManifestHTTP(t.Context(), srv.Client(), srv.URL,
-		"dev_tenant", "dev-tenant", "tok", writeMinimalManifest(t), false)
+		"dev-tenant", "dev-tenant.localhost", "tok", writeMinimalManifest(t), false)
 
 	require.ErrorIs(t, err, ErrApplyManifestHTTP)
 	assert.NotContains(t, err.Error(), "PLATFORM_ADMIN_EMAIL")
@@ -186,7 +213,7 @@ func TestApplyManifestHTTP_ErrorsOnNonSuccessStatus(t *testing.T) {
 	defer srv.Close()
 
 	err := applyManifestHTTP(t.Context(), srv.Client(), srv.URL,
-		"dev_tenant", "dev-tenant", "tok", writeMinimalManifest(t), false)
+		"dev-tenant", "dev-tenant.localhost", "tok", writeMinimalManifest(t), false)
 
 	require.ErrorIs(t, err, ErrManifestApplyFailed)
 }
@@ -199,7 +226,7 @@ func TestApplyManifestHTTP_ErrorsOnValidationErrors(t *testing.T) {
 	defer srv.Close()
 
 	err := applyManifestHTTP(t.Context(), srv.Client(), srv.URL,
-		"dev_tenant", "dev-tenant", "tok", writeMinimalManifest(t), false)
+		"dev-tenant", "dev-tenant.localhost", "tok", writeMinimalManifest(t), false)
 
 	require.ErrorIs(t, err, ErrManifestValidation)
 }
@@ -212,7 +239,7 @@ func TestApplyManifestHTTP_ToleratesUnknownResponseFields(t *testing.T) {
 	defer srv.Close()
 
 	err := applyManifestHTTP(t.Context(), srv.Client(), srv.URL,
-		"dev_tenant", "dev-tenant", "tok", writeMinimalManifest(t), false)
+		"dev-tenant", "dev-tenant.localhost", "tok", writeMinimalManifest(t), false)
 
 	require.NoError(t, err)
 }
