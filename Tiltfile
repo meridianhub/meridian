@@ -899,7 +899,7 @@ local_resource(
 # Idempotent: safe to re-run (exits 0 if tenant already exists)
 local_resource(
   'seed-dev-tenant',
-  cmd='./scripts/seed-dev-tenant.sh --grpc-addr=localhost:50056 --control-plane-addr=localhost:50062',
+  cmd='./scripts/seed-dev-tenant.sh --grpc-addr=localhost:50056',
   resource_deps=['tenant', 'control-plane'],
   labels=['setup'],
   auto_init=True,

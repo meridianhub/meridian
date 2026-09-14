@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/meridianhub/meridian/shared/platform/auth"
+	"github.com/meridianhub/meridian/shared/platform/env"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -170,3 +171,17 @@ type identityServerStream struct {
 }
 
 func (s *identityServerStream) Context() context.Context { return s.ctx }
+
+// manifestRBACEnforced reports whether manifest RBAC should be installed on the
+// loopback gRPC server.
+//
+// The gate is bound to AUTH_ENABLED because it depends on it: the claims RBAC
+// enforces against are reconstructed from identity metadata that only the
+// gateway's auth middleware emits, and that middleware is wired only when auth
+// is enabled. With auth disabled no caller can present an identity, so the
+// interceptor would deny every control-plane RPC permanently while protecting
+// nothing - every other RPC on the same server is already unauthenticated in
+// that mode. AUTH_ENABLED defaults to true, so deployed environments enforce.
+func manifestRBACEnforced() bool {
+	return env.GetEnvAsBool("AUTH_ENABLED", true)
+}
