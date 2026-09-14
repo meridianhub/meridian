@@ -7,12 +7,36 @@ on:
     paths:
       - 'frontend/**'
       - 'services/**'
+      # The suite builds ./cmd/meridian and ./cmd/seed-dev and runs them. Without
+      # these, a change to the binary under test does not trigger the test - which
+      # is how the seeding path stayed broken from 2026-07-07 unnoticed.
+      - 'cmd/**'
+      - 'shared/**'
+      - 'examples/manifests/**'
+      # buf generate runs before the build, so the proto descriptors - including
+      # the google.api.http annotations the transcoded routes depend on - are
+      # compiled into the binary under test.
+      - 'api/proto/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/e2e.yml'
   pull_request:
     branches: [develop, main]
     paths:
       - 'frontend/**'
       - 'services/**'
+      # The suite builds ./cmd/meridian and ./cmd/seed-dev and runs them. Without
+      # these, a change to the binary under test does not trigger the test - which
+      # is how the seeding path stayed broken from 2026-07-07 unnoticed.
+      - 'cmd/**'
+      - 'shared/**'
+      - 'examples/manifests/**'
+      # buf generate runs before the build, so the proto descriptors - including
+      # the google.api.http annotations the transcoded routes depend on - are
+      # compiled into the binary under test.
+      - 'api/proto/**'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/e2e.yml'
 
 permissions:
@@ -248,6 +272,17 @@ jobs:
           name: playwright-traces-${{ matrix.shardIndex }}
           path: frontend/test-results/
           retention-days: 30
+
+      # Last step in the job so it fires for any earlier failure, not just
+      # seeding. The backend runs detached with output redirected to a file that
+      # nothing otherwise reads, and it is where asynchronous failures land:
+      # tenant provisioning fails inside the backend for both the seed step and
+      # the later create_tenant calls, which print only an HTTP status.
+      - name: Dump backend log on failure
+        if: failure()
+        run: |
+          echo "=== meridian backend log (last 400 lines) ==="
+          tail -n 400 /tmp/meridian.log || echo "no backend log present"
 
   # ===========================================================================
   # Merge: combine shard reports into a single HTML report

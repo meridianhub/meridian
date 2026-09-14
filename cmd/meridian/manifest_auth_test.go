@@ -248,3 +248,22 @@ type fakeServerStream struct {
 }
 
 func (s *fakeServerStream) Context() context.Context { return s.ctx }
+
+func TestManifestRBACEnforced_DefaultsToEnforcing(t *testing.T) {
+	// The default matters more than the flag: an environment that forgets to set
+	// AUTH_ENABLED must enforce, not silently open the control plane.
+	t.Setenv("AUTH_ENABLED", "")
+	assert.True(t, manifestRBACEnforced())
+}
+
+func TestManifestRBACEnforced_TrueWhenAuthEnabled(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "true")
+	assert.True(t, manifestRBACEnforced())
+}
+
+func TestManifestRBACEnforced_FalseWhenAuthDisabled(t *testing.T) {
+	// With auth off the gateway emits no verified identity, so enforcing would
+	// deny every control-plane RPC while protecting nothing.
+	t.Setenv("AUTH_ENABLED", "false")
+	assert.False(t, manifestRBACEnforced())
+}

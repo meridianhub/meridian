@@ -21,7 +21,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -42,18 +41,19 @@ var ErrProvisioningFailed = errors.New("tenant provisioning failed")
 var ErrDatabaseURLRequired = errors.New("DATABASE_URL required for demo user seeding")
 
 var (
-	gatewayURL       string
-	grpcAddr         string
-	controlPlaneAddr string
-	manifestPath     string
-	tenantID         string
-	tenantSlug       string
-	timeout          time.Duration
-	skipManifest     bool
-	withFixtures     bool
-	forceApply       bool
-	displayName      string
-	subdomain        string
+	gatewayURL           string
+	grpcAddr             string
+	controlPlaneAddr     string
+	manifestPath         string
+	tenantID             string
+	tenantSlug           string
+	timeout              time.Duration
+	skipManifest         bool
+	withFixtures         bool
+	forceApply           bool
+	allowInsecureGateway bool
+	displayName          string
+	subdomain            string
 )
 
 var rootCmd = &cobra.Command{
@@ -78,7 +78,7 @@ Examples:
   # Custom gateway and gRPC addresses
   seed-dev --gateway-url=http://meridian:8090 --grpc-addr=meridian:50051
 
-  # Tilt mode: separate service addresses
+  # Tilt mode: standalone services, manifest applied directly to control-plane
   seed-dev --grpc-addr=localhost:50056 --control-plane-addr=localhost:50062`,
 	RunE: runSeed,
 }
@@ -93,13 +93,21 @@ func Execute() {
 func init() {
 	rootCmd.Flags().StringVar(&gatewayURL, "gateway-url",
 		getEnvOrDefault("GATEWAY_URL", "http://localhost:8090"),
-		"Gateway HTTP URL (used for health check)")
+		"Gateway HTTP URL (health check, login, and manifest apply)")
 	rootCmd.Flags().StringVar(&grpcAddr, "grpc-addr",
 		getEnvOrDefault("GRPC_ADDR", "localhost:50051"),
 		"gRPC server address for tenant service (host:port)")
-	rootCmd.Flags().StringVar(&controlPlaneAddr, "control-plane-addr",
-		getEnvOrDefault("CONTROL_PLANE_ADDR", ""),
-		"gRPC address for control-plane service (defaults to --grpc-addr)")
+	// Flag-only, deliberately. CONTROL_PLANE_ADDR is also read by
+	// financial-gateway, which runs inside the unified binary, and the deploy
+	// seeds via `docker exec` - which inherits the container environment. Taking
+	// a default from it would mean that setting it for financial-gateway
+	// silently switches seed-dev onto the direct gRPC path, into the loopback
+	// server built WithoutAuth() where the token is ignored and RBAC denies the
+	// call: the exact Unauthenticated failure this command exists to fix.
+	rootCmd.Flags().StringVar(&controlPlaneAddr, "control-plane-addr", "",
+		"Apply the manifest directly to this control-plane gRPC address instead of "+
+			"through the gateway. Required where the gateway runs standalone and "+
+			"exposes no transcoded REST route (Tilt).")
 	rootCmd.Flags().StringVar(&manifestPath, "manifest",
 		getEnvOrDefault("MANIFEST_PATH", "examples/manifests/energy.json"),
 		"Path to manifest JSON file")
@@ -117,6 +125,9 @@ func init() {
 		"Seed demo fixture data (customers, accounts, balances, market data) after manifest application")
 	rootCmd.Flags().BoolVar(&forceApply, "force", false,
 		"Force manifest apply, converting destructive change errors into warnings")
+	rootCmd.Flags().BoolVar(&allowInsecureGateway, "allow-insecure-gateway", false,
+		"Permit sending credentials over plaintext HTTP to a non-loopback host. "+
+			"Only for a trusted private network, such as a container-network hostname.")
 	rootCmd.Flags().StringVar(&displayName, "display-name", "",
 		"Tenant display name (default: derived from tenant slug)")
 	rootCmd.Flags().StringVar(&subdomain, "subdomain", "",
@@ -163,22 +174,55 @@ func runSeed(_ *cobra.Command, _ []string) error {
 	if skipManifest {
 		fmt.Println("Skipping manifest application (--skip-manifest set).")
 	} else {
-		// Use separate connection for control-plane if address differs from tenant service
-		cpAddr := controlPlaneAddr
-		if cpAddr == "" {
-			cpAddr = grpcAddr
+		// ApplyManifest is guarded by manifest RBAC and requires an admin
+		// principal. The loopback gRPC server runs WithoutAuth(), so identity can
+		// only arrive via the gateway, which verifies the JWT and forwards the
+		// claims as metadata. Provision the admin, log in, then apply over HTTP.
+		seedCreds := loadSeedAuth()
+
+		fmt.Println("Ensuring tenant admin identity ...")
+		if err := ensureTenantAdmin(ctx, seedCreds, tenantID); err != nil {
+			return fmt.Errorf("ensure tenant admin: %w", err)
 		}
-		manifestConn := conn
-		if cpAddr != grpcAddr {
-			manifestConn, err = grpc.NewClient(cpAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-			if err != nil {
-				return fmt.Errorf("connect to control-plane gRPC server %s: %w", cpAddr, err)
+
+		httpClient := newSeedHTTPClient(timeout)
+		tenantHost := resolveTenantHost()
+
+		var token string
+		if seedCreds.configured() {
+			if err := checkGatewayTransport(gatewayURL, allowInsecureGateway); err != nil {
+				return err
 			}
-			defer func() { _ = manifestConn.Close() }()
+			fmt.Println("Authenticating with the gateway ...")
+			token, err = login(ctx, httpClient, gatewayURL, seedCreds, tenantSlug, tenantHost)
+			if err != nil {
+				return fmt.Errorf("gateway login: %w", err)
+			}
+		} else {
+			// No credentials configured. This is only viable against a server
+			// running AUTH_ENABLED=false, where the gateway installs no auth
+			// middleware and manifest RBAC is correspondingly not enforced.
+			fmt.Println("No platform admin credentials set; applying manifest unauthenticated.")
 		}
 
 		fmt.Printf("Applying manifest from %s ...\n", manifestPath)
-		if err := applyManifest(ctx, manifestConn, tenantID, manifestPath, forceApply); err != nil {
+		if controlPlaneAddr != "" {
+			// Standalone topology: no transcoded route on the gateway.
+			if err := checkControlPlaneTransport(controlPlaneAddr, token, allowInsecureGateway); err != nil {
+				return err
+			}
+			cpConn, dialErr := grpc.NewClient(controlPlaneAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if dialErr != nil {
+				return fmt.Errorf("connect to control-plane gRPC server %s: %w", controlPlaneAddr, dialErr)
+			}
+			defer func() { _ = cpConn.Close() }()
+
+			if err := applyManifestGRPC(ctx, cpConn, tenantID, token, manifestPath, forceApply); err != nil {
+				return fmt.Errorf("apply manifest: %w", err)
+			}
+		} else if err := applyManifestHTTP(
+			ctx, httpClient, gatewayURL, tenantSlug, tenantHost, token, manifestPath, forceApply,
+		); err != nil {
 			return fmt.Errorf("apply manifest: %w", err)
 		}
 	}
@@ -272,73 +316,6 @@ func unmarshalManifestFile(path string) error {
 	if err := protojson.Unmarshal(data, &manifest); err != nil {
 		return fmt.Errorf("parse manifest JSON: %w", err)
 	}
-	return nil
-}
-
-// applyManifest reads a manifest JSON file and calls ApplyManifest.
-func applyManifest(ctx context.Context, conn *grpc.ClientConn, tid, path string, force bool) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read manifest file: %w", err)
-	}
-
-	var manifest controlplanev1.Manifest
-	if err := protojson.Unmarshal(data, &manifest); err != nil {
-		return fmt.Errorf("parse manifest JSON: %w", err)
-	}
-
-	client := controlplanev1.NewApplyManifestServiceClient(conn)
-
-	// Pass tenant ID as gRPC metadata (x-tenant-id header).
-	md := metadata.Pairs("x-tenant-id", tid)
-	callCtx := metadata.NewOutgoingContext(ctx, md)
-
-	req := &controlplanev1.ApplyManifestRequest{
-		Manifest:  &manifest,
-		DryRun:    false,
-		AppliedBy: "seed-dev",
-		Force:     force,
-	}
-
-	resp, err := client.ApplyManifest(callCtx, req)
-	if err != nil {
-		return fmt.Errorf("ApplyManifest RPC: %w", err)
-	}
-
-	fmt.Printf("  Job ID: %s\n", resp.GetJobId())
-	fmt.Printf("  Status: %s\n", resp.GetStatus().String())
-	if diff := resp.GetDiffSummary(); diff != "" {
-		fmt.Printf("  Changes: %s\n", diff)
-	}
-	if len(resp.GetValidationErrors()) > 0 {
-		fmt.Printf("  Validation errors: %d\n", len(resp.GetValidationErrors()))
-		for _, ve := range resp.GetValidationErrors() {
-			fmt.Printf("    [%s] %s: %s\n", ve.GetSeverity(), ve.GetPath(), ve.GetMessage())
-		}
-		return fmt.Errorf("%w: %d error(s)", ErrManifestValidation, len(resp.GetValidationErrors()))
-	}
-
-	// Print step results for debugging (visible in CI logs).
-	for _, sr := range resp.GetStepResults() {
-		fmt.Printf("  Step [%s]: %s — %s\n", sr.GetStepName(), sr.GetStatus().String(), sr.GetMessage())
-		for k, v := range sr.GetDetails() {
-			fmt.Printf("    %s: %s\n", k, v)
-		}
-	}
-	for phase, detail := range resp.GetPhaseStatus() {
-		fmt.Printf("  Phase [%s]: %s %s\n", phase, detail.GetStatus(), detail.GetError())
-	}
-
-	// Check response status — a nil-executor or saga failure returns a non-success status.
-	switch resp.GetStatus() { //nolint:exhaustive // default catches future enum additions
-	case controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_APPLIED,
-		controlplanev1.ApplyManifestStatus_APPLY_MANIFEST_STATUS_DRY_RUN:
-		// success
-	default:
-		return fmt.Errorf("%w: %s", ErrManifestApplyFailed, resp.GetStatus().String())
-	}
-
-	fmt.Println("Manifest applied successfully.")
 	return nil
 }
 
@@ -445,4 +422,17 @@ func replaceDatabase(baseDSN, database string) (string, error) {
 	}
 	parsed.Path = "/" + database
 	return parsed.String(), nil
+}
+
+// resolveTenantHost returns the Host the gateway's tenant resolver should see.
+// It mirrors the subdomain derivation used when the tenant is created, so the
+// manifest apply resolves to the same tenant the rest of the run targets.
+func resolveTenantHost() string {
+	if subdomain != "" {
+		return subdomain
+	}
+	if tenantSlug == "" {
+		return ""
+	}
+	return tenantSlug + ".localhost"
 }

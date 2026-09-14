@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	controlplanev1 "github.com/meridianhub/meridian/api/proto/meridian/control_plane/v1"
 	"github.com/stretchr/testify/assert"
@@ -49,7 +50,8 @@ func TestGetEnvOrDefault_ReturnsEnvValue(t *testing.T) {
 }
 
 func TestApplyManifest_InvalidFile(t *testing.T) {
-	err := applyManifest(t.Context(), nil, "dev_tenant", "/nonexistent/path/manifest.json", false)
+	err := applyManifestHTTP(t.Context(), newSeedHTTPClient(time.Second), "http://127.0.0.1:1",
+		"dev_tenant", "dev-tenant", "", "/nonexistent/path/manifest.json", false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read manifest file")
 }
@@ -58,7 +60,8 @@ func TestApplyManifest_InvalidJSON(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "bad.json")
 	require.NoError(t, os.WriteFile(tmp, []byte("not valid json {{"), 0o600))
 
-	err := applyManifest(t.Context(), nil, "dev_tenant", tmp, false)
+	err := applyManifestHTTP(t.Context(), newSeedHTTPClient(time.Second), "http://127.0.0.1:1",
+		"dev_tenant", "dev-tenant", "", tmp, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse manifest JSON")
 }
@@ -79,8 +82,7 @@ func TestApplyManifest_ParsesEnergyManifest(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "energy.json")
 	require.NoError(t, os.WriteFile(tmp, data, 0o600))
 
-	// applyManifest with nil conn will panic on the gRPC call; only test parse path.
-	// We test parse separately via a helper to avoid a nil-conn panic.
+	// Only the parse path is under test here; applying would need a live gateway.
 	err = unmarshalManifestFile(tmp)
 	assert.NoError(t, err)
 }

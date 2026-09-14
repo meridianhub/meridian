@@ -587,8 +587,12 @@ func (s *Server) Start(ctx context.Context) error {
 		Handler:           s.mux,
 		ReadHeaderTimeout: defaults.DefaultHTTPReadHeaderTimeout,
 		ReadTimeout:       defaults.DefaultHTTPReadTimeout,
-		WriteTimeout:      defaults.DefaultHTTPWriteTimeout,
-		IdleTimeout:       2 * defaults.DefaultHTTPIdleTimeout, // Extended for gateway proxying
+		// Env-overridable via TIMEOUT_HTTP_WRITE. Synchronous transcoded RPCs can
+		// legitimately exceed the 30s default - a manifest apply runs sagas - and
+		// a severed connection surfaces to the client as a truncated response
+		// rather than a timeout, which is markedly harder to diagnose.
+		WriteTimeout: defaults.GetHTTPWriteTimeout(),
+		IdleTimeout:  2 * defaults.DefaultHTTPIdleTimeout, // Extended for gateway proxying
 	}
 
 	// Store httpServer with mutex protection

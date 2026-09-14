@@ -258,12 +258,27 @@ func initInfrastructure(ctx context.Context, grpcPort int, logger *slog.Logger) 
 	// RBAC is layered on top: for control-plane RPCs the gateway-propagated identity
 	// is reconstructed into claims and the shared control-plane RBAC interceptor
 	// enforces role requirements (fail-closed for unauthenticated callers).
-	grpcServer, err := bootstrap.NewGrpcServerBuilder(tracer, logger).
-		WithoutAuth().
-		WithUnaryInterceptor(GatewayManifestRBACUnaryInterceptor(controlplaneservice.ManifestRBACUnaryInterceptor())).
-		//nolint:contextcheck // stream interceptor propagates the enriched context via the wrapped ServerStream
-		WithStreamInterceptor(GatewayManifestRBACStreamInterceptor(controlplaneservice.ManifestRBACStreamInterceptor())).
-		Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
+	//
+	// Manifest RBAC is bound to AUTH_ENABLED because it depends on it. The claims
+	// it enforces against come from identity headers only the gateway's auth
+	// middleware emits, and that middleware is wired only when auth is enabled
+	// (see wireGateway). With AUTH_ENABLED=false no caller can ever present an
+	// identity, so keeping the interceptor installed would not protect the RPCs -
+	// every other RPC on this server is already unauthenticated in that mode - it
+	// would only make control-plane RPCs permanently unreachable. AUTH_ENABLED
+	// defaults to true, so deployed environments always enforce.
+	serverBuilder := bootstrap.NewGrpcServerBuilder(tracer, logger).WithoutAuth()
+	if manifestRBACEnforced() {
+		serverBuilder = serverBuilder.
+			WithUnaryInterceptor(GatewayManifestRBACUnaryInterceptor(controlplaneservice.ManifestRBACUnaryInterceptor())).
+			//nolint:contextcheck // stream interceptor propagates the enriched context via the wrapped ServerStream
+			WithStreamInterceptor(GatewayManifestRBACStreamInterceptor(controlplaneservice.ManifestRBACStreamInterceptor()))
+	} else {
+		logger.Warn("AUTH_ENABLED=false: manifest RBAC is not enforced on control-plane RPCs; " +
+			"the gateway emits no verified identity in this mode. Local development and E2E only.")
+	}
+
+	grpcServer, err := serverBuilder.Build() //nolint:contextcheck // gRPC interceptors manage their own contexts
 	if err != nil {
 		conns.closeAll(logger)
 		return nil, fmt.Errorf("failed to build grpc server: %w", err)
