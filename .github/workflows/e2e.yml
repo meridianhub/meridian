@@ -213,6 +213,16 @@ jobs:
             --tenant-id=dev_tenant \
             --tenant-slug=dev-tenant
 
+      # The backend runs detached with its output redirected to a file, so a
+      # seeding failure reports only seed-dev's side of it. Tenant provisioning
+      # is asynchronous and fails inside the backend, which is why
+      # TENANT_STATUS_PROVISIONING_FAILED has been undiagnosable from CI.
+      - name: Dump backend log on seeding failure
+        if: failure()
+        run: |
+          echo "=== meridian backend log ==="
+          tail -n 400 /tmp/meridian.log || echo "no backend log present"
+
       - name: Create additional test tenants
         run: |
           GATEWAY_URL="http://localhost:8090"
