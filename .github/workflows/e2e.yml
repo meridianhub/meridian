@@ -213,16 +213,6 @@ jobs:
             --tenant-id=dev_tenant \
             --tenant-slug=dev-tenant
 
-      # The backend runs detached with its output redirected to a file, so a
-      # seeding failure reports only seed-dev's side of it. Tenant provisioning
-      # is asynchronous and fails inside the backend, which is why
-      # TENANT_STATUS_PROVISIONING_FAILED has been undiagnosable from CI.
-      - name: Dump backend log on seeding failure
-        if: failure()
-        run: |
-          echo "=== meridian backend log ==="
-          tail -n 400 /tmp/meridian.log || echo "no backend log present"
-
       - name: Create additional test tenants
         run: |
           GATEWAY_URL="http://localhost:8090"
@@ -282,6 +272,17 @@ jobs:
           name: playwright-traces-${{ matrix.shardIndex }}
           path: frontend/test-results/
           retention-days: 30
+
+      # Last step in the job so it fires for any earlier failure, not just
+      # seeding. The backend runs detached with output redirected to a file that
+      # nothing otherwise reads, and it is where asynchronous failures land:
+      # tenant provisioning fails inside the backend for both the seed step and
+      # the later create_tenant calls, which print only an HTTP status.
+      - name: Dump backend log on failure
+        if: failure()
+        run: |
+          echo "=== meridian backend log (last 400 lines) ==="
+          tail -n 400 /tmp/meridian.log || echo "no backend log present"
 
   # ===========================================================================
   # Merge: combine shard reports into a single HTML report

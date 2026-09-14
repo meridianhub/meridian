@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -148,22 +149,67 @@ func setTenantRouting(req *http.Request, slug, host string) {
 	}
 }
 
-// warnOnCleartextCredentials warns when credentials would cross a plaintext
-// connection to a non-loopback host. seed-dev normally runs against the gateway
-// on localhost inside the same container or pod, where plaintext is expected;
-// anything else is worth surfacing rather than silently sending a platform admin
-// password in the clear.
-func warnOnCleartextCredentials(gateway string) {
+// ErrInsecureGatewayTransport is returned when credentials would cross a
+// plaintext connection to a non-loopback host.
+var ErrInsecureGatewayTransport = errors.New("refusing to send credentials over plaintext to a non-loopback host")
+
+// isLoopbackHost reports whether host refers to this machine.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// checkGatewayTransport rejects sending credentials in the clear to anything
+// that is not loopback.
+//
+// seed-dev carries a platform-admin password to the login endpoint and a bearer
+// token to the apply endpoint. Running against the gateway on localhost - inside
+// the same container, which is how both the deploy and E2E invoke it - is
+// plaintext by design and fine. Anything else means those secrets cross a
+// network hop unencrypted, so it fails closed rather than warning and
+// proceeding. allowInsecure is the explicit opt-out for a trusted private
+// network, such as a container-network hostname.
+func checkGatewayTransport(gateway string, allowInsecure bool) error {
 	parsed, err := url.Parse(gateway)
-	if err != nil || parsed.Scheme == "https" {
-		return
+	if err != nil {
+		return fmt.Errorf("parse gateway URL: %w", err)
 	}
-	hostname := parsed.Hostname()
-	if hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1" {
-		return
+	if parsed.Scheme == "https" || isLoopbackHost(parsed.Hostname()) {
+		return nil
 	}
-	fmt.Printf("  WARNING: %s is not HTTPS and not loopback; credentials and the\n", gateway)
-	fmt.Println("  bearer token will cross the network in cleartext.")
+	if allowInsecure {
+		fmt.Printf("  WARNING: sending credentials in cleartext to %s (--allow-insecure-gateway).\n", gateway)
+		return nil
+	}
+	return fmt.Errorf("%w: %s (use https, or --allow-insecure-gateway on a trusted private network)",
+		ErrInsecureGatewayTransport, gateway)
+}
+
+// checkControlPlaneTransport applies the same rule to the direct gRPC path,
+// which dials with insecure credentials and would otherwise put the bearer token
+// on the wire in the clear.
+func checkControlPlaneTransport(addr string, token string, allowInsecure bool) error {
+	if token == "" {
+		return nil // nothing secret to protect
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if isLoopbackHost(host) {
+		return nil
+	}
+	if allowInsecure {
+		fmt.Printf("  WARNING: sending a bearer token in cleartext to %s (--allow-insecure-gateway).\n", addr)
+		return nil
+	}
+	return fmt.Errorf("%w: %s (use --allow-insecure-gateway on a trusted private network)",
+		ErrInsecureGatewayTransport, addr)
 }
 
 // loginResponse mirrors the gateway's BFF login response body.

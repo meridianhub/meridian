@@ -247,3 +247,44 @@ func TestApplyManifestHTTP_ToleratesUnknownResponseFields(t *testing.T) {
 func TestNewSeedHTTPClient_AppliesTimeout(t *testing.T) {
 	assert.Equal(t, 5*time.Second, newSeedHTTPClient(5*time.Second).Timeout)
 }
+
+func TestCheckGatewayTransport_AllowsLoopbackAndHTTPS(t *testing.T) {
+	// How the deploy and E2E actually invoke seed-dev: plaintext to localhost,
+	// inside the same container. That must keep working.
+	for _, gateway := range []string{
+		"http://localhost:8090",
+		"http://127.0.0.1:8090",
+		"https://develop.meridianhub.cloud",
+	} {
+		assert.NoError(t, checkGatewayTransport(gateway, false), gateway)
+	}
+}
+
+func TestCheckGatewayTransport_RejectsPlaintextToNonLoopback(t *testing.T) {
+	err := checkGatewayTransport("http://meridian:8090", false)
+
+	require.ErrorIs(t, err, ErrInsecureGatewayTransport)
+	assert.Contains(t, err.Error(), "allow-insecure-gateway",
+		"the error must name the opt-out, since a private container network is a legitimate case")
+}
+
+func TestCheckGatewayTransport_OptOutPermitsPrivateNetwork(t *testing.T) {
+	assert.NoError(t, checkGatewayTransport("http://meridian:8090", true))
+}
+
+func TestCheckControlPlaneTransport_IgnoresAbsentToken(t *testing.T) {
+	// Without a token there is no secret on the wire, so the direct gRPC path
+	// stays usable against a remote control-plane.
+	assert.NoError(t, checkControlPlaneTransport("control-plane:50062", "", false))
+}
+
+func TestCheckControlPlaneTransport_RejectsTokenToNonLoopback(t *testing.T) {
+	err := checkControlPlaneTransport("control-plane:50062", "tok", false)
+
+	require.ErrorIs(t, err, ErrInsecureGatewayTransport)
+}
+
+func TestCheckControlPlaneTransport_AllowsLoopback(t *testing.T) {
+	assert.NoError(t, checkControlPlaneTransport("localhost:50062", "tok", false))
+	assert.NoError(t, checkControlPlaneTransport("127.0.0.1:50062", "tok", false))
+}

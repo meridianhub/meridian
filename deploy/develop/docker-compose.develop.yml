@@ -85,6 +85,9 @@ services:
       API_KEYS: ${API_KEYS:-}
       BASE_DOMAIN: ${BASE_DOMAIN:-develop.meridianhub.cloud}
       LOCAL_DEV_MODE: ${LOCAL_DEV_MODE:-false}
+      # Lifts the 30s default write timeout: a manifest apply is synchronous
+      # and runs sagas, so the deploy seed can exceed it on a cold database.
+      TIMEOUT_HTTP_WRITE: ${TIMEOUT_HTTP_WRITE:-5m}
 
       # --- Demo users (identity bootstrap) ---
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}

@@ -41,18 +41,19 @@ var ErrProvisioningFailed = errors.New("tenant provisioning failed")
 var ErrDatabaseURLRequired = errors.New("DATABASE_URL required for demo user seeding")
 
 var (
-	gatewayURL       string
-	grpcAddr         string
-	controlPlaneAddr string
-	manifestPath     string
-	tenantID         string
-	tenantSlug       string
-	timeout          time.Duration
-	skipManifest     bool
-	withFixtures     bool
-	forceApply       bool
-	displayName      string
-	subdomain        string
+	gatewayURL           string
+	grpcAddr             string
+	controlPlaneAddr     string
+	manifestPath         string
+	tenantID             string
+	tenantSlug           string
+	timeout              time.Duration
+	skipManifest         bool
+	withFixtures         bool
+	forceApply           bool
+	allowInsecureGateway bool
+	displayName          string
+	subdomain            string
 )
 
 var rootCmd = &cobra.Command{
@@ -96,8 +97,14 @@ func init() {
 	rootCmd.Flags().StringVar(&grpcAddr, "grpc-addr",
 		getEnvOrDefault("GRPC_ADDR", "localhost:50051"),
 		"gRPC server address for tenant service (host:port)")
-	rootCmd.Flags().StringVar(&controlPlaneAddr, "control-plane-addr",
-		getEnvOrDefault("CONTROL_PLANE_ADDR", ""),
+	// Flag-only, deliberately. CONTROL_PLANE_ADDR is also read by
+	// financial-gateway, which runs inside the unified binary, and the deploy
+	// seeds via `docker exec` - which inherits the container environment. Taking
+	// a default from it would mean that setting it for financial-gateway
+	// silently switches seed-dev onto the direct gRPC path, into the loopback
+	// server built WithoutAuth() where the token is ignored and RBAC denies the
+	// call: the exact Unauthenticated failure this command exists to fix.
+	rootCmd.Flags().StringVar(&controlPlaneAddr, "control-plane-addr", "",
 		"Apply the manifest directly to this control-plane gRPC address instead of "+
 			"through the gateway. Required where the gateway runs standalone and "+
 			"exposes no transcoded REST route (Tilt).")
@@ -118,6 +125,9 @@ func init() {
 		"Seed demo fixture data (customers, accounts, balances, market data) after manifest application")
 	rootCmd.Flags().BoolVar(&forceApply, "force", false,
 		"Force manifest apply, converting destructive change errors into warnings")
+	rootCmd.Flags().BoolVar(&allowInsecureGateway, "allow-insecure-gateway", false,
+		"Permit sending credentials over plaintext HTTP to a non-loopback host. "+
+			"Only for a trusted private network, such as a container-network hostname.")
 	rootCmd.Flags().StringVar(&displayName, "display-name", "",
 		"Tenant display name (default: derived from tenant slug)")
 	rootCmd.Flags().StringVar(&subdomain, "subdomain", "",
@@ -180,7 +190,9 @@ func runSeed(_ *cobra.Command, _ []string) error {
 
 		var token string
 		if seedCreds.configured() {
-			warnOnCleartextCredentials(gatewayURL)
+			if err := checkGatewayTransport(gatewayURL, allowInsecureGateway); err != nil {
+				return err
+			}
 			fmt.Println("Authenticating with the gateway ...")
 			token, err = login(ctx, httpClient, gatewayURL, seedCreds, tenantSlug, tenantHost)
 			if err != nil {
@@ -196,6 +208,9 @@ func runSeed(_ *cobra.Command, _ []string) error {
 		fmt.Printf("Applying manifest from %s ...\n", manifestPath)
 		if controlPlaneAddr != "" {
 			// Standalone topology: no transcoded route on the gateway.
+			if err := checkControlPlaneTransport(controlPlaneAddr, token, allowInsecureGateway); err != nil {
+				return err
+			}
 			cpConn, dialErr := grpc.NewClient(controlPlaneAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 			if dialErr != nil {
 				return fmt.Errorf("connect to control-plane gRPC server %s: %w", controlPlaneAddr, dialErr)
