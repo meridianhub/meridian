@@ -7,12 +7,24 @@ on:
     paths:
       - 'frontend/**'
       - 'services/**'
+      # The suite builds ./cmd/meridian and ./cmd/seed-dev and runs them. Without
+      # these, a change to the binary under test does not trigger the test - which
+      # is how the seeding path stayed broken from 2026-07-07 unnoticed.
+      - 'cmd/**'
+      - 'shared/**'
+      - 'examples/manifests/**'
       - '.github/workflows/e2e.yml'
   pull_request:
     branches: [develop, main]
     paths:
       - 'frontend/**'
       - 'services/**'
+      # The suite builds ./cmd/meridian and ./cmd/seed-dev and runs them. Without
+      # these, a change to the binary under test does not trigger the test - which
+      # is how the seeding path stayed broken from 2026-07-07 unnoticed.
+      - 'cmd/**'
+      - 'shared/**'
+      - 'examples/manifests/**'
       - '.github/workflows/e2e.yml'
 
 permissions:
